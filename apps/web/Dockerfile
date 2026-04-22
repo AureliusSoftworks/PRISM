@@ -1,6 +1,12 @@
 FROM node:24-slim AS builder
 
 WORKDIR /app/apps/web
+
+# Honor the LOCAL-first privacy posture: disable Next.js anonymous
+# telemetry at both build and runtime so nothing phones home to
+# telemetry.nextjs.org.
+ENV NEXT_TELEMETRY_DISABLED=1
+
 COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci
 COPY apps/web/ .
@@ -14,6 +20,7 @@ FROM node:24-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./.next/static
 COPY --from=builder /app/apps/web/public ./public

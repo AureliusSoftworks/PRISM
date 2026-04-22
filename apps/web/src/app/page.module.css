@@ -1,28 +1,49 @@
 /* ── Theme tokens ──
-   Command-center visual system: layered surfaces, restrained accent,
-   tactile interactive states, and a small shadow/radius scale. */
+   Grayscale base: no chromatic color lives in this file. The only
+   "color" that appears in the UI is supplied by `--accent`, which
+   defaults to a neutral gray (light in dark theme, dark in light
+   theme). When a bot is selected, `--accent` and `--accent-text`
+   are overridden inline on the app shell to the bot's color —
+   every derived token below (hover, soft, glow, user bubble,
+   ambient gradient) is built with `color-mix()` so they all
+   recompute automatically without any JS coordination.
+
+   Status indicators that mean the same thing regardless of which
+   bot is active (ONLINE green LED, danger red, etc.) stay outside
+   the --accent pipeline. Per-bot identity dots on messages and the
+   card accent bar use each bot's own `--bot-color`, independent of
+   whichever bot happens to be in focus right now. */
 .themeDark {
-  --bg: #0a0c12;
-  --bg-deep: #06080e;
-  --bg-surface: #10131c;
-  --bg-elevated: #161a26;
-  --bg-hover: #1b2030;
-  --bg-active: #242a3f;
+  --bg: #0a0a0b;
+  --bg-deep: #050506;
+  --bg-surface: #121214;
+  --bg-elevated: #17171a;
+  --bg-hover: #1d1d20;
+  --bg-active: #26262a;
 
-  --fg: #e8ecf5;
-  --fg-muted: #8892a8;
-  --fg-subtle: #5c6579;
+  --fg: #e8e9ec;
+  --fg-muted: #8a8b91;
+  --fg-subtle: #595a5f;
 
-  --line: #1d2332;
-  --line-strong: #2a3147;
+  --line: #1e1e22;
+  --line-strong: #2b2b30;
 
-  --accent: #6ea8ff;
-  --accent-hover: #89bbff;
-  --accent-soft: #16284a;
-  --accent-glow: rgba(110, 168, 255, 0.18);
+  /* Grayscale default; overridden inline when a bot is selected. */
+  --accent: #c9cdd6;
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff 12%);
+  --accent-soft: color-mix(in srgb, var(--accent) 18%, var(--bg) 82%);
+  --accent-glow: color-mix(in srgb, var(--accent) 22%, transparent);
+  --accent-text: #0b0b0d;
 
-  --user-bubble: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
-  --user-bubble-fg: #f8fafc;
+  /* User bubble rides whatever accent is active (gray by default,
+     bot color when a bot is selected). Darkens toward one end for
+     the slight gradient we already had visually. */
+  --user-bubble: linear-gradient(
+    135deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 68%, #000000 32%)
+  );
+  --user-bubble-fg: var(--accent-text);
 
   --danger: #f57a8b;
   --danger-soft: #3a1821;
@@ -31,34 +52,44 @@
   --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55);
 
-  /* Subtle ambient glow gives the shell a sense of depth. */
+  /* Ambient glow is just accent-glow at two corners, so it subtly
+     picks up whatever bot color is active. */
   --app-gradient:
-    radial-gradient(ellipse at top left, rgba(110, 168, 255, 0.07), transparent 55%),
-    radial-gradient(ellipse at bottom right, rgba(99, 102, 241, 0.05), transparent 55%);
+    radial-gradient(ellipse at top left, var(--accent-glow), transparent 55%),
+    radial-gradient(
+      ellipse at bottom right,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 55%
+    );
 }
 
 .themeLight {
-  --bg: #f4f6fb;
-  --bg-deep: #eaedf4;
+  --bg: #f5f5f7;
+  --bg-deep: #eaeaed;
   --bg-surface: #ffffff;
   --bg-elevated: #ffffff;
-  --bg-hover: #eef2f8;
-  --bg-active: #dde8ff;
+  --bg-hover: #ededf0;
+  --bg-active: #dfdfe4;
 
-  --fg: #0f172a;
-  --fg-muted: #556581;
-  --fg-subtle: #8a95ab;
+  --fg: #0e0e10;
+  --fg-muted: #5c5d63;
+  --fg-subtle: #8a8b91;
 
-  --line: #e2e8f1;
-  --line-strong: #cfd7e3;
+  --line: #e0e0e4;
+  --line-strong: #c8c8ce;
 
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-soft: #dbe8ff;
-  --accent-glow: rgba(37, 99, 235, 0.18);
+  --accent: #2b2b30;
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000 15%);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--bg) 88%);
+  --accent-glow: color-mix(in srgb, var(--accent) 22%, transparent);
+  --accent-text: #ffffff;
 
-  --user-bubble: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
-  --user-bubble-fg: #ffffff;
+  --user-bubble: linear-gradient(
+    135deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 72%, #000000 28%)
+  );
+  --user-bubble-fg: var(--accent-text);
 
   --danger: #dc2626;
   --danger-soft: #fde4e6;
@@ -68,8 +99,12 @@
   --shadow-lg: 0 24px 48px rgba(17, 24, 39, 0.12);
 
   --app-gradient:
-    radial-gradient(ellipse at top left, rgba(37, 99, 235, 0.05), transparent 55%),
-    radial-gradient(ellipse at bottom right, rgba(79, 70, 229, 0.04), transparent 55%);
+    radial-gradient(ellipse at top left, var(--accent-glow), transparent 55%),
+    radial-gradient(
+      ellipse at bottom right,
+      color-mix(in srgb, var(--accent) 8%, transparent),
+      transparent 55%
+    );
 }
 
 /* ── Shared primitives ── */
@@ -164,7 +199,8 @@
 .authToggle .selected,
 .authToggle a.selected {
   background: var(--accent);
-  color: #ffffff;
+  color: var(--accent-text);
+  transition: background 0.2s, color 0.2s;
 }
 
 .authHeading {
@@ -206,13 +242,13 @@
 .btnPrimary {
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #ffffff;
+  color: var(--accent-text);
   cursor: pointer;
   border-radius: 10px;
   padding: 11px 14px;
   font: inherit;
   font-weight: 600;
-  transition: background 0.15s, transform 0.05s;
+  transition: background 0.25s, border-color 0.25s, color 0.25s, transform 0.05s;
 }
 
 .form button:hover:not(:disabled),
@@ -268,8 +304,14 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent), #6366f1);
-  color: #ffffff;
+  /* Same two-stop gradient shape as before, now driven by --accent so it
+     stays grayscale by default and follows the bot color when one is set. */
+  background: linear-gradient(
+    135deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 65%, #000000 35%)
+  );
+  color: var(--accent-text);
   display: grid;
   place-items: center;
   font-size: 14px;
@@ -277,6 +319,7 @@
   letter-spacing: 0.02em;
   box-shadow: var(--shadow-sm);
   flex-shrink: 0;
+  transition: background 0.25s, color 0.25s;
 }
 
 .profileInfo {
@@ -305,7 +348,7 @@
 .newChatButton {
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #ffffff;
+  color: var(--accent-text);
   border-radius: 10px;
   padding: 10px 12px;
   cursor: pointer;
@@ -317,7 +360,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: background 0.15s, transform 0.05s;
+  transition: background 0.25s, border-color 0.25s, color 0.25s, transform 0.05s;
   box-shadow: var(--shadow-sm);
 }
 
@@ -366,6 +409,29 @@
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+.sidebarSelect:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  color: var(--fg-muted);
+}
+
+.sidebarSelect:disabled:hover {
+  border-color: var(--line);
+}
+
+/* Read-only info tile used for surface-level fields like the Ollama model. */
+.sidebarReadout {
+  border-radius: 10px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--fg);
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13px;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.01em;
+}
+
 .conversationList {
   list-style: none;
   overflow-y: auto;
@@ -386,7 +452,20 @@
   border-radius: 3px;
 }
 
-.conversationList button {
+/* Each row is title-button + (optional) delete button. The delete hotzone
+   lives in its own grid cell on the right so hovering it is an explicit,
+   deliberate gesture — not triggered by sweeping across the title.
+   position:relative is the anchor the armed "Are you sure? ✓" pill uses
+   to grow leftward from the × spot without disturbing the row's height. */
+.conversationRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  gap: 2px;
+  position: relative;
+}
+
+.conversationTitleButton {
   width: 100%;
   text-align: left;
   border: 1px solid transparent;
@@ -403,16 +482,98 @@
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.conversationList button:hover {
+.conversationTitleButton:hover {
   background: var(--bg-hover);
   color: var(--fg);
 }
 
-.conversationList button.selected {
+.conversationTitleButton.selected {
   background: var(--bg-active);
   color: var(--fg);
   border-color: var(--line-strong);
   font-weight: 500;
+}
+
+/* Delete hotzone on the right edge of each non-active row.
+   Invisible at rest so the sidebar reads as a clean list of titles; it
+   fades in the moment the cursor enters its own hit area (or it takes
+   keyboard focus, or it's armed for confirmation). The × itself carries
+   all the visual feedback — no background tint, just the glyph. */
+.conversationDelete {
+  width: auto;
+  min-width: 32px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--danger);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.12s;
+}
+
+.conversationDelete:hover,
+.conversationDelete:focus-visible {
+  opacity: 1;
+  background: transparent;
+  color: var(--danger);
+  outline: none;
+}
+
+.conversationDeleteGlyph {
+  display: inline-grid;
+  place-items: center;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1;
+  transform: translateY(-2px);
+}
+
+/* Armed state: the button becomes a single pill anchored to the × spot
+   and grows leftward to reveal "Are you sure?". The ✓ stays pinned to
+   the right edge (under the cursor the user just clicked from); the
+   prompt text fills in on the left so the whole thing reads as one
+   cohesive confirm affordance. */
+.conversationDeleteArmed,
+.conversationDeleteArmed:hover,
+.conversationDeleteArmed:focus-visible {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: auto;
+  min-width: 0;
+  padding: 0 12px;
+  opacity: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-elevated);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
+  outline: none;
+}
+
+.conversationDeleteArmed .conversationDeleteGlyph {
+  /* Green check to pair with the red × — affirmative/success hue on the
+     confirm gesture regardless of theme. */
+  color: #34d399;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.conversationDeletePrompt {
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: 0.005em;
 }
 
 .sidebarFooter {
@@ -493,6 +654,36 @@
   background: var(--bg-hover);
   color: var(--fg);
   border-color: var(--line-strong);
+}
+
+/* Header-level delete uses the same shape as Fork/Export but tints on hover
+   so the destructive action reads differently at a glance. The armed state
+   is solid danger so the confirm click is unmistakable. */
+.headerDelete,
+.headerDeleteArmed {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg-muted);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.headerDelete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.headerDeleteArmed,
+.headerDeleteArmed:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .badge {
@@ -595,10 +786,86 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--fg-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Wraps the role / bot-name text so its own bot-color dot sits inline
+   alongside it without disturbing the providerTag sibling. */
+.messageRoleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.messageBotColorDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  /* Soft outline so very dark bot colors still register on dark surfaces
+     and very light ones still register on light surfaces. */
+  box-shadow: 0 0 0 1px rgba(128, 128, 128, 0.3);
 }
 
 .messageUser h4 {
-  color: rgba(255, 255, 255, 0.78);
+  /* accent-text is chosen to contrast the bubble fill; fading it 78% keeps
+     the role label subdued without flipping to the wrong contrast direction
+     when the bubble goes from a dark accent to a light one. */
+  color: color-mix(in srgb, var(--accent-text) 78%, transparent);
+}
+
+/* Subtle "who generated this" tag shown next to the role label.
+   The dot is always on (at-a-glance status); the text label stays hidden
+   until the message is hovered so the thread doesn't feel noisy. */
+.providerTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+.providerLabel {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.message:hover .providerLabel,
+.message:focus-within .providerLabel {
+  opacity: 0.7;
+}
+
+.providerDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+/* Transparent ring: suggests "nothing is leaving your machine". Reads on
+   both light and dark themes since the border follows fg-muted. */
+.providerDotLocal {
+  background: transparent;
+  border: 1px solid var(--fg-muted);
+}
+
+/* Green: something is going out over the network. */
+.providerDotOnline {
+  background: #34d399;
+}
+
+/* The human dot sits on the user-message bubble, which is itself painted
+   from --user-bubble (i.e., from --accent). Follow --accent-text so the
+   dot always contrasts whatever fill the bubble currently carries. */
+.providerDotHuman {
+  background: var(--accent-text);
 }
 
 .message p {
@@ -638,13 +905,13 @@
 }
 
 .messageUser .messageActions button {
-  border-color: rgba(255, 255, 255, 0.28);
-  color: rgba(255, 255, 255, 0.82);
+  border-color: color-mix(in srgb, var(--accent-text) 28%, transparent);
+  color: color-mix(in srgb, var(--accent-text) 82%, transparent);
 }
 
 .messageUser .messageActions button:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
+  background: color-mix(in srgb, var(--accent-text) 12%, transparent);
+  color: var(--accent-text);
 }
 
 .typingIndicator {
@@ -701,6 +968,119 @@
   display: block;
 }
 
+/* Thin utility row above the textarea for the LOCAL/ONLINE mode toggle and
+   any future compose-adjacent controls. */
+.composeTools {
+  max-width: 860px;
+  margin: 0 auto 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* Sleek pill switch: a single button that flips between LOCAL and ONLINE.
+   The two inner .modeChip spans act as two equal-width "slots"; only the
+   active slot carries visible content (dot + label). */
+.modeToggle {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg-deep);
+  border-radius: 999px;
+  padding: 3px;
+  margin: 0;
+  display: inline-flex;
+  align-items: stretch;
+  line-height: 1;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.modeToggle:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.modeToggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.modeToggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modeChip {
+  /* Fixed slot width so neither chip grows past its content and the total
+     rail stays compact + stable across flips. 64px fits the longer label
+     ("ONLINE") + dot + margin + padding at 9px / 0.06em tracking. */
+  flex: 0 0 64px;
+  padding: 5px 8px;
+  color: var(--fg-subtle);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* The label lives inside every chip so the layout slots stay stable,
+   but visually collapses when the chip is inactive. */
+.modeChipLabel {
+  display: inline-block;
+  max-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    max-width 0.35s ease,
+    margin-left 0.35s ease,
+    opacity 0.3s ease;
+}
+
+/* Inactive dot: fully hidden. The user asked for no dot on the inactive
+   side; we keep it in the DOM and collapse with max-width + margin so the
+   transitions stay smooth. */
+.modeChip .providerDot {
+  max-width: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-width 0.3s ease,
+    margin-right 0.3s ease,
+    opacity 0.3s ease;
+}
+
+.modeChipActive {
+  background: var(--bg-surface);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.modeChipActive .providerDot {
+  max-width: 7px;
+  margin-right: 6px;
+  opacity: 1;
+}
+
+.modeChipActive .modeChipLabel {
+  max-width: 8em;
+  opacity: 1;
+}
+
+.themeLight .modeChipActive {
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.08);
+}
+
 .composeInner {
   max-width: 860px;
   margin: 0 auto;
@@ -731,30 +1111,32 @@
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
-.compose button {
+/* Scoped to composeInner so the mode-toggle chips above the textarea don't
+   inherit the primary-button (accent fill) styling intended for Send. */
+.composeInner button {
   border-radius: 12px;
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #ffffff;
+  color: var(--accent-text);
   min-width: 88px;
   padding: 14px 18px;
   cursor: pointer;
   font: inherit;
   font-size: 14px;
   font-weight: 600;
-  transition: background 0.15s, transform 0.05s;
+  transition: background 0.25s, border-color 0.25s, color 0.25s, transform 0.05s;
   box-shadow: var(--shadow-sm);
 }
 
-.compose button:hover:not(:disabled) {
+.composeInner button:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
-.compose button:active:not(:disabled) {
+.composeInner button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
-.compose button:disabled {
+.composeInner button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -941,19 +1323,187 @@
 }
 
 /* ── Bot cards ── */
+/* Bot card lays out its name+prompt body on the left and a fade-in delete
+   affordance on the right. position:relative anchors the armed "Are you
+   sure? ✓" pill, matching the conversation row pattern.
+   The left edge ::before draws a colored accent bar for each bot using
+   --bot-color (set as an inline CSS custom property on the card). When a
+   bot has no color, the variable falls back to transparent and the bar
+   disappears. */
 .botCard {
   border: 1px solid var(--line);
   background: var(--bg);
   border-radius: 12px;
   padding: 12px;
-  display: grid;
-  gap: 6px;
+  padding-left: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
   transition: border-color 0.15s, background 0.15s;
+}
+
+.botCard::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--bot-color, transparent);
+  border-radius: 12px 0 0 12px;
 }
 
 .botCard:hover {
   border-color: var(--line-strong);
   background: var(--bg-hover);
+}
+
+.botCardBody {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+/* Row in the create-bot form: color swatch picker + name input side by side. */
+.botNameRow {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.botNameRow > input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Swatch trigger: a solid colored button that opens the wheel popover.
+   Replaces the native <input type="color"> so the OS slider UI never
+   appears; we ship our own minimal wheel below. */
+.colorPickerWrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.colorSwatchButton {
+  width: 44px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  /* Subtle inner ring so dark picks still register against a dark card. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s;
+}
+
+.colorSwatchButton:hover {
+  border-color: var(--line-strong);
+}
+
+.colorSwatchButton:active {
+  transform: translateY(1px);
+}
+
+.colorSwatchButton:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 0 0 3px var(--accent-glow);
+}
+
+/* Wheel popover drops from the swatch. Uses CSS conic-gradient for hue and
+   a radial-gradient over the top for saturation falloff toward white at
+   the center. No sliders — the picker IS the wheel. */
+.colorWheelPopover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 120;
+  background: var(--bg-surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: var(--shadow-md);
+  animation: popIn 0.18s ease-out;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.colorWheel {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  cursor: crosshair;
+  /* The radial layer sits on top for the saturation falloff; the conic
+     layer beneath supplies the hue ring. `from 90deg` aligns hue 0 (red)
+     with the 3 o'clock position so atan2(y, x) maps cleanly to hue. */
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(255, 255, 255, 0.95) 0%,
+      rgba(255, 255, 255, 0.55) 18%,
+      rgba(255, 255, 255, 0) 72%
+    ),
+    conic-gradient(
+      from 90deg,
+      hsl(0, 100%, 50%),
+      hsl(30, 100%, 50%),
+      hsl(60, 100%, 50%),
+      hsl(90, 100%, 50%),
+      hsl(120, 100%, 50%),
+      hsl(150, 100%, 50%),
+      hsl(180, 100%, 50%),
+      hsl(210, 100%, 50%),
+      hsl(240, 100%, 50%),
+      hsl(270, 100%, 50%),
+      hsl(300, 100%, 50%),
+      hsl(330, 100%, 50%),
+      hsl(360, 100%, 50%)
+    );
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+/* Tiny ring that marks the currently picked hue+saturation on the wheel.
+   Stays in the layout above the wheel via transform; pointer-events:none
+   lets clicks pass through to the wheel so the user can always reposition. */
+.colorWheelIndicator {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: transparent;
+  border: 2px solid #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 6px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  transition: left 0.08s ease, top 0.08s ease;
+}
+
+.colorWheelHint {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
 }
 
 .botCard strong {
@@ -965,6 +1515,120 @@
   color: var(--fg-muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+/* Permanent "Default" bot tile. Styled to look distinct from user-created
+   cards (dashed border, no hover treatment) so it reads as a fixed fallback
+   rather than another deletable bot. */
+.botCardDefault,
+.botCardDefault:hover {
+  border-style: dashed;
+  background: transparent;
+  border-color: var(--line);
+  cursor: default;
+}
+
+/* Hide the color accent for the built-in Default card since it has no
+   associated color and always shows as a dashed tile. */
+.botCardDefault::before {
+  display: none;
+}
+
+.botCardDefaultHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.botCardBadge {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  line-height: 1.2;
+}
+
+/* Hidden at rest so bot cards read as clean content tiles; fades in on
+   card hover or keyboard focus. Mirrors .conversationDelete visually. */
+.botCardDelete {
+  width: auto;
+  min-width: 28px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--danger);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.botCard:hover .botCardDelete,
+.botCardDelete:focus-visible {
+  opacity: 1;
+  outline: none;
+}
+
+/* Armed pill anchored inside the card, mirroring the conversation-row
+   confirm affordance so the interaction feels identical across surfaces. */
+.botCardDeleteArmed,
+.botCard:hover .botCardDeleteArmed,
+.botCardDeleteArmed:hover,
+.botCardDeleteArmed:focus-visible {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  bottom: 6px;
+  width: auto;
+  min-width: 0;
+  padding: 0 12px;
+  opacity: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-elevated);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
+  outline: none;
+}
+
+.botCardDeleteArmed .conversationDeleteGlyph {
+  color: #34d399;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* Replaces the generate form when LOCAL mode is selected. Neutral (not an
+   error), just explains why the form isn't available and points at the
+   toggle that unlocks it. */
+.imagesGate {
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 6px;
+  background: var(--bg);
+}
+
+.imagesGateTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.005em;
 }
 
 /* ── Image gallery ── */
@@ -1063,6 +1727,13 @@
 
   .messages {
     padding: 18px 14px;
+  }
+
+  /* Touch devices have no hover state, so reveal the delete control at a
+     quiet opacity — visible enough to be discoverable, dim enough to stay
+     out of the way while scanning titles. */
+  .conversationDelete {
+    opacity: 0.4;
   }
 
   .message {

@@ -74,7 +74,13 @@ export class LocalOllamaProvider implements LlmProvider {
     const payload = (await response.json()) as {
       message?: { content?: string };
     };
-    return payload.message?.content?.trim() || "I could not generate a response.";
+    const content = payload.message?.content?.trim();
+    if (!content) {
+      // Surface empty responses as an error so the UI does not display a
+      // placeholder "assistant" message and no empty row is persisted.
+      throw new Error("Local model returned an empty response.");
+    }
+    return content;
   }
 
   public async embedText(text: string): Promise<number[]> {
@@ -135,10 +141,11 @@ export class OpenAiProvider implements LlmProvider {
     const payload = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
-    return (
-      payload.choices?.[0]?.message?.content?.trim() ||
-      "OpenAI returned an empty response."
-    );
+    const content = payload.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      throw new Error("OpenAI returned an empty response.");
+    }
+    return content;
   }
 
   public async embedText(text: string): Promise<number[]> {
@@ -163,19 +170,29 @@ export class OpenAiProvider implements LlmProvider {
   }
 }
 
+/**
+ * Pick the LLM provider for a chat turn.
+ *
+ * LOCAL mode is a strict privacy invariant: the user's toggle is honored
+ * unconditionally. No heuristic or hidden setting can escalate a LOCAL turn
+ * to an external provider; that is what makes the LOCAL indicator
+ * trustworthy.
+ *
+ * OPENAI mode requires a real API key — we throw rather than silently fall
+ * back to LOCAL so the UI can surface the misconfiguration instead of
+ * mislabelling the reply.
+ */
 export function selectProvider(
   preferredProvider: "local" | "openai",
-  autoSwitchModel: boolean,
-  message: string,
   openAiApiKey?: string
 ): LlmProvider {
-  const localProvider = new LocalOllamaProvider();
-  const shouldAutoUseOpenAi =
-    autoSwitchModel && message.length > 350 && Boolean(openAiApiKey);
-  const shouldUseOpenAi =
-    (preferredProvider === "openai" || shouldAutoUseOpenAi) && openAiApiKey;
-  if (shouldUseOpenAi) {
+  if (preferredProvider === "openai") {
+    if (!openAiApiKey) {
+      throw new Error(
+        "OpenAI is selected but no API key is available. Save a key in Settings or set OPENAI_API_KEY in the server environment."
+      );
+    }
     return new OpenAiProvider({ apiKey: openAiApiKey });
   }
-  return localProvider;
+  return new LocalOllamaProvider();
 }

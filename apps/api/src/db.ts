@@ -92,6 +92,8 @@ export function createDatabase(): DatabaseSync {
       user_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      provider TEXT,
+      bot_id TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -127,6 +129,7 @@ export function createDatabase(): DatabaseSync {
       model TEXT,
       temperature REAL DEFAULT 0.7,
       max_tokens INTEGER DEFAULT 2048,
+      color TEXT,
       visibility TEXT NOT NULL DEFAULT 'private',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -163,6 +166,36 @@ export function createDatabase(): DatabaseSync {
     SET last_active_at = COALESCE(last_active_at, created_at)
     WHERE last_active_at IS NULL OR last_active_at = '';
   `);
+
+  // Migrate existing DBs that predate the per-message provider / bot columns.
+  const messageColumns = db
+    .prepare("PRAGMA table_info(messages)")
+    .all() as Array<{ name: string }>;
+  const hasProviderColumn = messageColumns.some(
+    (column) => column.name === "provider"
+  );
+  if (!hasProviderColumn) {
+    db.exec("ALTER TABLE messages ADD COLUMN provider TEXT;");
+  }
+  const hasBotIdColumn = messageColumns.some(
+    (column) => column.name === "bot_id"
+  );
+  if (!hasBotIdColumn) {
+    db.exec("ALTER TABLE messages ADD COLUMN bot_id TEXT;");
+  }
+
+  // Migrate existing DBs to the bots.color column used for the visual
+  // identifier that appears on the bot card and on messages.
+  const botColumns = db
+    .prepare("PRAGMA table_info(bots)")
+    .all() as Array<{ name: string }>;
+  const hasBotColorColumn = botColumns.some(
+    (column) => column.name === "color"
+  );
+  if (!hasBotColorColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN color TEXT;");
+  }
+
   return db;
 }
 

@@ -1,8 +1,66 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState, useCallback } from "react";
+import { Suspense, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import styles from "./page.module.css";
+
+// How long the two-stage delete (× → ✓) stays armed before auto-disarming.
+// Long enough for a deliberate confirmation click, short enough that the armed
+// state doesn't linger and cause accidents on a later sidebar return visit.
+const DELETE_CONFIRM_WINDOW_MS = 3500;
+
+// Sentinel for the chat-header delete button, which has no chat id of its own
+// (it always targets the currently open chat).
+const HEADER_DELETE_KEY = "__header__";
+
+// Namespace bot-delete keys so they can share the same single "armed" state
+// slot used for conversation deletion without id collisions.
+const BOT_DELETE_KEY_PREFIX = "bot:";
+
+// ── Color math for the bot color wheel ────────────────────────────────
+// The wheel paints a HSL hue ring via conic-gradient with a white-centered
+// radial for saturation; these helpers map clicks on the wheel to/from hex.
+
+function randomHex(): string {
+  const n = Math.floor(Math.random() * 0x1000000);
+  return `#${n.toString(16).padStart(6, "0")}`;
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const sNorm = s / 100;
+  const lNorm = l / 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = sNorm * Math.min(lNorm, 1 - lNorm);
+  const f = (n: number) =>
+    lNorm - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const toHex = (v: number) =>
+    Math.round(v * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+}
+
+function hexToHsl(hex: string): { h: number; s: number; l: number } {
+  const clean = hex.replace(/^#/, "");
+  if (clean.length !== 6) return { h: 0, s: 0, l: 50 };
+  const r = parseInt(clean.substring(0, 2), 16) / 255;
+  const g = parseInt(clean.substring(2, 4), 16) / 255;
+  const b = parseInt(clean.substring(4, 6), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let s = 0;
+  let h = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return { h, s: s * 100, l: l * 100 };
+}
 
 type Provider = "local" | "openai";
 type Theme = "dark" | "light";
@@ -10,11 +68,53 @@ type PanelView = null | "settings" | "bots" | "images";
 
 interface SessionUser { id: string; email: string; displayName: string; theme: Theme; preferredProvider: Provider; }
 interface ConversationSummary { id: string; title: string; updatedAt: string; }
-interface Message { id: string; role: "user" | "assistant"; content: string; createdAt: string; }
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  provider?: Provider;
+  botName?: string;
+  botColor?: string;
+}
+
+type StatusTag = "human" | "local" | "online";
+
+const STATUS_LABEL: Record<StatusTag, string> = {
+  human: "HUMAN",
+  local: "LOCAL ASSISTANT",
+  online: "ONLINE ASSISTANT",
+};
+
+function getMessageStatus(msg: Message): StatusTag | null {
+  if (msg.role === "user") return "human";
+  if (msg.provider === "openai") return "online";
+  if (msg.provider === "local") return "local";
+  // Pre-existing assistant messages without a provider record: no indicator.
+  return null;
+}
 interface ConversationDetail { id: string; title: string; messages: Message[]; }
-interface UserSettings { theme: Theme; preferredProvider: Provider; autoMemory: boolean; autoSwitchModel: boolean; hasOpenAiApiKey: boolean; }
+interface UserSettings {
+  theme: Theme;
+  preferredProvider: Provider;
+  autoMemory: boolean;
+  hasOpenAiApiKey: boolean;
+  ollamaModel: string;
+}
 interface UserMemory { id: string; confidence: number; text: string; }
-interface Bot { id: string; name: string; system_prompt: string; model: string | null; temperature: number; max_tokens: number; }
+interface Bot {
+  id: string;
+  name: string;
+  system_prompt: string;
+  model: string | null;
+  temperature: number;
+  max_tokens: number;
+  color: string | null;
+}
+
+// Accent color pre-selected in the bot creation picker. Users can change it
+// before clicking Create; existing bots with no color just render no accent.
+const DEFAULT_BOT_COLOR = "#6ea8ff";
 interface ImageRecord { id: string; prompt: string; url: string; created_at: string; }
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
@@ -51,8 +151,38 @@ function HomeContent(): React.JSX.Element {
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [imagePrompt, setImagePrompt] = useState("");
   const [newBotName, setNewBotName] = useState(""); const [newBotPrompt, setNewBotPrompt] = useState("");
+  const [newBotColor, setNewBotColor] = useState(DEFAULT_BOT_COLOR);
+  const [colorWheelOpen, setColorWheelOpen] = useState(false);
+  // Two-stage delete confirmation. `pendingDeleteKey` holds either a
+  // conversation id (sidebar ×) or HEADER_DELETE_KEY (header button).
+  // Only one target can be armed at a time, and it auto-disarms after
+  // DELETE_CONFIRM_WINDOW_MS so the ✓ doesn't linger unexpectedly.
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
+  const pendingDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Sentinel at the tail of the message stream. The scroll effect brings it
+  // into view so the latest message is always visible without manual scrolling.
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const themeClass = useMemo(() => settings?.theme === "light" ? styles.themeLight : styles.themeDark, [settings?.theme]);
+
+  // When a bot is selected, push its color into the app shell as `--accent`
+  // so every --accent-derived token in the CSS (hover, soft, glow, user
+  // bubble, ambient gradient, CTA fills) recomputes. No bot selected →
+  // undefined style, and the grayscale defaults from the theme block apply.
+  const shellStyle = useMemo<React.CSSProperties | undefined>(() => {
+    const selectedBot = bots.find(b => b.id === selectedBotId);
+    const color = selectedBot?.color?.trim();
+    if (!color) return undefined;
+    // Pair --accent with an --accent-text that stays legible on it: if the
+    // chosen color is a light pastel, CTAs flip their text to near-black so
+    // the "white-on-color" pattern doesn't wash out.
+    const { l } = hexToHsl(color);
+    const accentText = l > 65 ? "#0b0b0d" : "#ffffff";
+    return {
+      ["--accent" as string]: color,
+      ["--accent-text" as string]: accentText,
+    } as React.CSSProperties;
+  }, [bots, selectedBotId]);
 
   const bootstrap = useCallback(async () => {
     const controller = new AbortController();
@@ -71,6 +201,14 @@ function HomeContent(): React.JSX.Element {
     void bootstrap();
   }, [bootstrap]);
   useEffect(() => { if (!user) return; void refreshAll(); }, [user]);
+
+  // Keep the latest message pinned to the bottom of the stream. Fires when:
+  //   - a new conversation is loaded (detail?.id change)
+  //   - a message is added, optimistically or from the server (length change)
+  //   - the typing indicator toggles on/off (pendingReply change)
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [detail?.id, detail?.messages.length, pendingReply]);
 
   async function refreshAll() { await Promise.all([refreshConversations(), refreshSettings(), refreshMemories(), refreshBots(), refreshImages()]); }
   async function refreshConversations() { const d = await api<{ conversations: ConversationSummary[] }>("/api/conversations"); setConversations(d.conversations); }
@@ -150,6 +288,9 @@ function HomeContent(): React.JSX.Element {
           message: trimmed,
           botId: selectedBotId ?? undefined,
           incognito,
+          // Sent explicitly so switching providers in the sidebar takes effect
+          // on the very next message, without waiting on the settings PATCH.
+          preferredProvider: settings?.preferredProvider,
         }),
       });
       setDetail(d.conversation);
@@ -245,10 +386,159 @@ function HomeContent(): React.JSX.Element {
     const a = document.createElement("a"); a.href = url; a.download = `chat-${selectedId}.md`; a.click(); URL.revokeObjectURL(url);
   }
 
+  const disarmDelete = useCallback(() => {
+    if (pendingDeleteTimerRef.current) {
+      clearTimeout(pendingDeleteTimerRef.current);
+      pendingDeleteTimerRef.current = null;
+    }
+    setPendingDeleteKey(null);
+  }, []);
+
+  const armDelete = useCallback((key: string) => {
+    if (pendingDeleteTimerRef.current) {
+      clearTimeout(pendingDeleteTimerRef.current);
+    }
+    setPendingDeleteKey(key);
+    pendingDeleteTimerRef.current = setTimeout(() => {
+      setPendingDeleteKey(null);
+      pendingDeleteTimerRef.current = null;
+    }, DELETE_CONFIRM_WINDOW_MS);
+  }, []);
+
+  // Clean up the pending-delete timer on unmount so an in-flight auto-disarm
+  // doesn't call setState on a torn-down component.
+  useEffect(() => () => {
+    if (pendingDeleteTimerRef.current) {
+      clearTimeout(pendingDeleteTimerRef.current);
+    }
+  }, []);
+
+  // Clicking anywhere outside the delete / confirm affordance should disarm it.
+  // This prevents the confirm pill from lingering in an awkward in-between
+  // state after focus moves elsewhere in the sidebar.
+  useEffect(() => {
+    if (!pendingDeleteKey) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("[data-delete-affordance='true']")) {
+        return;
+      }
+      disarmDelete();
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [pendingDeleteKey, disarmDelete]);
+
+  // Close the color wheel popover on any outside click or Escape.
+  useEffect(() => {
+    if (!colorWheelOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest("[data-color-affordance='true']")
+      ) {
+        return;
+      }
+      setColorWheelOpen(false);
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setColorWheelOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [colorWheelOpen]);
+
+  // Click-to-pick from the color wheel: map click offset to HSL, store as hex.
+  const handleColorWheelClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      const x = event.clientX - rect.left - cx;
+      const y = event.clientY - rect.top - cy;
+      const radius = Math.min(rect.width, rect.height) / 2;
+      const distance = Math.sqrt(x * x + y * y);
+      if (distance > radius) return; // outside the painted disc
+      const hue = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+      const saturation = Math.min(100, (distance / radius) * 100);
+      setNewBotColor(hslToHex(hue, saturation, 50));
+    },
+    []
+  );
+
+  async function deleteConversation(id: string) {
+    setError(null);
+    disarmDelete();
+    // Optimistic update: drop the chat from the sidebar immediately and, if
+    // it was open, clear the main pane. Roll everything back on failure.
+    const previousConversations = conversations;
+    const previousSelectedId = selectedId;
+    const previousDetail = detail;
+    setConversations(list => list.filter(c => c.id !== id));
+    if (selectedId === id) {
+      setSelectedId(null);
+      setDetail(null);
+    }
+    try {
+      await api(`/api/conversations/${id}`, { method: "DELETE" });
+      // Resync from the server so updatedAt order / any server-side fixups
+      // (e.g. race with another tab) are reflected.
+      await refreshConversations();
+    } catch (err) {
+      setConversations(previousConversations);
+      setSelectedId(previousSelectedId);
+      setDetail(previousDetail);
+      setError(err instanceof Error ? err.message : "Delete failed.");
+    }
+  }
+
   async function createBot(e: React.FormEvent) {
     e.preventDefault(); if (!newBotName.trim()) return;
-    await api("/api/bots", { method: "POST", body: JSON.stringify({ name: newBotName, systemPrompt: newBotPrompt }) });
-    setNewBotName(""); setNewBotPrompt(""); await refreshBots();
+    await api("/api/bots", {
+      method: "POST",
+      body: JSON.stringify({
+        name: newBotName,
+        systemPrompt: newBotPrompt,
+        color: newBotColor,
+      }),
+    });
+    setNewBotName("");
+    setNewBotPrompt("");
+    setNewBotColor(DEFAULT_BOT_COLOR);
+    await refreshBots();
+  }
+
+  async function deleteBot(id: string) {
+    setError(null);
+    disarmDelete();
+    // Optimistic update: drop the bot from the panel immediately, and if the
+    // user had it selected in the sidebar clear that too so subsequent chats
+    // don't try to reference a bot that's already gone. Roll back on failure.
+    const previousBots = bots;
+    const previousSelectedBotId = selectedBotId;
+    setBots(list => list.filter(b => b.id !== id));
+    if (selectedBotId === id) {
+      setSelectedBotId(null);
+    }
+    try {
+      await api(`/api/bots/${id}`, { method: "DELETE" });
+      await refreshBots();
+    } catch (err) {
+      setBots(previousBots);
+      setSelectedBotId(previousSelectedBotId);
+      setError(err instanceof Error ? err.message : "Delete failed.");
+    }
   }
 
   async function generateImg(e: React.FormEvent) {
@@ -294,7 +584,7 @@ function HomeContent(): React.JSX.Element {
 
   // ── App shell ──
   return (
-    <main className={`${styles.appLayout} ${themeClass}`}>
+    <main className={`${styles.appLayout} ${themeClass}`} style={shellStyle}>
       {/* Mobile menu toggle */}
       <button type="button" className={styles.menuToggle} onClick={() => setSidebarOpen(o => !o)}>☰</button>
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
@@ -314,21 +604,38 @@ function HomeContent(): React.JSX.Element {
         <button type="button" className={styles.newChatButton} onClick={() => { setSelectedId(null); setDetail(null); setSidebarOpen(false); }}>New chat</button>
 
         <div className={styles.sidebarField}>
-          <span className={styles.sectionLabel}>Provider</span>
+          <span className={styles.sectionLabel}>Online provider</span>
+          {/* Single option today; more online providers (Claude, Gemini, ...) will appear here over time. */}
           <select
             className={styles.sidebarSelect}
-            value={settings?.preferredProvider ?? "local"}
-            onChange={e => void switchProvider(e.target.value as Provider)}
+            value="openai"
+            onChange={() => { /* only one option for now */ }}
             disabled={!settings}
           >
-            <option value="local">Ollama (local)</option>
-            <option value="openai">OpenAI</option>
+            <option value="openai">ChatGPT</option>
           </select>
         </div>
 
         <div className={styles.sidebarField}>
+          <span className={styles.sectionLabel}>Local model</span>
+          <div className={styles.sidebarReadout}>
+            {settings?.ollamaModel ?? "Ollama"}
+          </div>
+        </div>
+
+        <div className={styles.sidebarField}>
           <span className={styles.sectionLabel}>Bot</span>
-          <select className={styles.sidebarSelect} value={selectedBotId ?? ""} onChange={e => setSelectedBotId(e.target.value || null)}>
+          <select
+            className={styles.sidebarSelect}
+            value={selectedBotId ?? ""}
+            onChange={e => setSelectedBotId(e.target.value || null)}
+            disabled={bots.length === 0}
+            title={
+              bots.length === 0
+                ? "Default is the only option until you create a custom bot."
+                : undefined
+            }
+          >
             <option value="">Default</option>
             {bots.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
@@ -341,9 +648,46 @@ function HomeContent(): React.JSX.Element {
 
         <span className={styles.sectionLabel}>Conversations</span>
         <ul className={styles.conversationList}>
-          {conversations.map(c => (
-            <li key={c.id}><button type="button" className={c.id === selectedId ? styles.selected : ""} onClick={() => { void refreshConversation(c.id); setSidebarOpen(false); }}>{c.title}</button></li>
-          ))}
+          {conversations.map(c => {
+            const isSelected = c.id === selectedId;
+            const isArmed = pendingDeleteKey === c.id;
+            return (
+              <li key={c.id} className={styles.conversationRow}>
+                <button
+                  type="button"
+                  className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
+                  onClick={() => { disarmDelete(); void refreshConversation(c.id); setSidebarOpen(false); }}
+                >
+                  {c.title}
+                </button>
+                {/* The active chat uses the header-level Delete button instead, so
+                    the sidebar × is suppressed for it to avoid two controls for
+                    the same action. */}
+                {!isSelected && (
+                  <button
+                    type="button"
+                    className={`${styles.conversationDelete} ${isArmed ? styles.conversationDeleteArmed : ""}`}
+                    data-delete-affordance="true"
+                    aria-label={isArmed ? `Confirm delete ${c.title}` : `Delete ${c.title}`}
+                    title={isArmed ? undefined : "Delete chat"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isArmed) {
+                        void deleteConversation(c.id);
+                      } else {
+                        armDelete(c.id);
+                      }
+                    }}
+                  >
+                    {isArmed && (
+                      <span className={styles.conversationDeletePrompt}>Are you sure?</span>
+                    )}
+                    <span className={styles.conversationDeleteGlyph}>{isArmed ? "✓" : "×"}</span>
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
 
         <div className={styles.sidebarFooter}>
@@ -363,6 +707,25 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.headerActions}>
             {detail && <button type="button" onClick={() => void forkChat()}>Fork</button>}
             {detail && <button type="button" onClick={() => void exportChat()}>Export .md</button>}
+            {detail && selectedId && (() => {
+              const armed = pendingDeleteKey === HEADER_DELETE_KEY;
+              return (
+                <button
+                  type="button"
+                  className={armed ? styles.headerDeleteArmed : styles.headerDelete}
+                  data-delete-affordance="true"
+                  onClick={() => {
+                    if (armed) {
+                      void deleteConversation(selectedId);
+                    } else {
+                      armDelete(HEADER_DELETE_KEY);
+                    }
+                  }}
+                >
+                  {armed ? "✓ Confirm" : "Delete"}
+                </button>
+              );
+            })()}
           </div>
         </header>
 
@@ -380,15 +743,49 @@ function HomeContent(): React.JSX.Element {
               </p>
             </div>
           )}
-          {detail?.messages.map(msg => (
-            <article key={msg.id} className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}>
-              <h4>{msg.role === "assistant" ? "Assistant" : "You"}</h4>
-              <p>{msg.content}</p>
-              <div className={styles.messageActions}>
-                <button type="button" onClick={() => void forkChat(msg.id)}>Fork here</button>
-              </div>
-            </article>
-          ))}
+          {detail?.messages.map(msg => {
+            const status = getMessageStatus(msg);
+            return (
+              <article key={msg.id} className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}>
+                <h4>
+                  <span className={styles.messageRoleLabel}>
+                    {msg.role === "assistant" && msg.botColor && (
+                      <span
+                        className={styles.messageBotColorDot}
+                        style={{ background: msg.botColor }}
+                        aria-hidden="true"
+                      />
+                    )}
+                    {msg.role === "assistant"
+                      ? (msg.botName?.trim() || "Assistant")
+                      : "You"}
+                  </span>
+                  {status && (
+                    <span
+                      className={styles.providerTag}
+                      title={STATUS_LABEL[status]}
+                    >
+                      <span
+                        className={`${styles.providerDot} ${
+                          status === "human"
+                            ? styles.providerDotHuman
+                            : status === "online"
+                              ? styles.providerDotOnline
+                              : styles.providerDotLocal
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <span className={styles.providerLabel}>{STATUS_LABEL[status]}</span>
+                    </span>
+                  )}
+                </h4>
+                <p>{msg.content}</p>
+                <div className={styles.messageActions}>
+                  <button type="button" onClick={() => void forkChat(msg.id)}>Fork here</button>
+                </div>
+              </article>
+            );
+          })}
           {pendingReply && (
             <div className={styles.typingIndicator} role="status" aria-live="polite">
               <span>Generating response</span>
@@ -399,12 +796,57 @@ function HomeContent(): React.JSX.Element {
               </span>
             </div>
           )}
+          {/* Scroll sentinel: kept at the very end so the scroll effect can
+              always bring the latest content into view. */}
+          <div ref={messagesEndRef} aria-hidden="true" />
         </div>
 
         <form className={styles.compose} onSubmit={sendMessage}>
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
+          <div className={styles.composeTools}>
+            {(() => {
+              const isLocal = settings?.preferredProvider === "local";
+              return (
+                <button
+                  type="button"
+                  className={styles.modeToggle}
+                  onClick={() => {
+                    if (!settings) return;
+                    void switchProvider(isLocal ? "openai" : "local");
+                  }}
+                  aria-label={
+                    isLocal
+                      ? "Response mode: Local. Click to switch to Online."
+                      : "Response mode: Online. Click to switch to Local."
+                  }
+                  aria-pressed={!isLocal}
+                  title={isLocal ? "Switch to Online" : "Switch to Local"}
+                  disabled={!settings}
+                >
+                  <span className={`${styles.modeChip} ${isLocal ? styles.modeChipActive : ""}`}>
+                    <span className={`${styles.providerDot} ${styles.providerDotLocal}`} aria-hidden="true" />
+                    <span className={styles.modeChipLabel}>LOCAL</span>
+                  </span>
+                  <span className={`${styles.modeChip} ${!isLocal ? styles.modeChipActive : ""}`}>
+                    <span className={`${styles.providerDot} ${styles.providerDotOnline}`} aria-hidden="true" />
+                    <span className={styles.modeChipLabel}>ONLINE</span>
+                  </span>
+                </button>
+              );
+            })()}
+          </div>
           <div className={styles.composeInner}>
-            <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder="Ask anything..." onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(e); } }} />
+            <textarea
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              placeholder="Ask anything..."
+              spellCheck
+              autoCorrect="on"
+              autoCapitalize="sentences"
+              enterKeyHint="send"
+              lang="en"
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(e); } }}
+            />
             <button type="submit" disabled={pendingReply || !draft.trim()}>Send</button>
           </div>
         </form>
@@ -417,7 +859,6 @@ function HomeContent(): React.JSX.Element {
           {settings && (
             <form className={styles.form} onSubmit={saveSettings}>
               <label>Theme<select value={settings.theme} onChange={e => setSettings(p => p ? { ...p, theme: e.target.value as Theme } : p)}><option value="dark">Dark</option><option value="light">Light</option></select></label>
-              <label>Provider<select value={settings.preferredProvider} onChange={e => setSettings(p => p ? { ...p, preferredProvider: e.target.value as Provider } : p)}><option value="local">Local</option><option value="openai">OpenAI</option></select></label>
               <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
               {settings.hasOpenAiApiKey && (
                 <button
@@ -430,7 +871,6 @@ function HomeContent(): React.JSX.Element {
                 </button>
               )}
               <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
-              <label className={styles.checkbox}><input type="checkbox" checked={settings.autoSwitchModel} onChange={e => setSettings(p => p ? { ...p, autoSwitchModel: e.target.checked } : p)} />Auto model switch</label>
               <button type="submit" disabled={busy}>Save</button>
             </form>
           )}
@@ -461,37 +901,153 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.panel}>
           <div className={styles.panelHeader}><h3>Bots</h3><button type="button" className={styles.panelClose} onClick={() => setPanel(null)}>×</button></div>
           <form className={styles.form} onSubmit={createBot}>
-            <input required placeholder="Bot name" value={newBotName} onChange={e => setNewBotName(e.target.value)} />
+            <div className={styles.botNameRow}>
+              <div className={styles.colorPickerWrapper} data-color-affordance="true">
+                <button
+                  type="button"
+                  className={styles.colorSwatchButton}
+                  style={{ background: newBotColor }}
+                  onClick={() => setColorWheelOpen(o => !o)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setNewBotColor(randomHex());
+                  }}
+                  aria-label="Bot color. Click to open the wheel, right-click for random."
+                  aria-haspopup="dialog"
+                  aria-expanded={colorWheelOpen}
+                  title="Click to pick a color · right-click: random"
+                />
+                {colorWheelOpen && (() => {
+                  // Indicator position tracks the current color so the user
+                  // sees where on the wheel they are without a sliders UI.
+                  const { h, s } = hexToHsl(newBotColor);
+                  const rad = (h * Math.PI) / 180;
+                  const r = s / 100;
+                  const left = 50 + r * 50 * Math.cos(rad);
+                  const top = 50 + r * 50 * Math.sin(rad);
+                  return (
+                    <div
+                      className={styles.colorWheelPopover}
+                      role="dialog"
+                      aria-label="Bot color wheel"
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setNewBotColor(randomHex());
+                      }}
+                    >
+                      <div
+                        className={styles.colorWheel}
+                        onClick={handleColorWheelClick}
+                      >
+                        <div
+                          className={styles.colorWheelIndicator}
+                          style={{ left: `${left}%`, top: `${top}%` }}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <p className={styles.colorWheelHint}>Click: pick · Right-click: random</p>
+                    </div>
+                  );
+                })()}
+              </div>
+              <input required placeholder="Bot name" value={newBotName} onChange={e => setNewBotName(e.target.value)} />
+            </div>
             <textarea placeholder="System prompt" value={newBotPrompt} onChange={e => setNewBotPrompt(e.target.value)} />
             <button type="submit">Create bot</button>
           </form>
-          {bots.length > 0 && <h4 className={styles.sectionLabel}>Your bots</h4>}
-          {bots.map(b => (
-            <div key={b.id} className={styles.botCard}>
-              <strong>{b.name}</strong>
-              <small>{b.system_prompt ? b.system_prompt.slice(0, 80) + "..." : "No system prompt"}</small>
+
+          <h4 className={styles.sectionLabel}>Built-in</h4>
+          <div
+            className={`${styles.botCard} ${styles.botCardDefault}`}
+            aria-label="Default bot: always available, cannot be deleted"
+          >
+            <div className={styles.botCardBody}>
+              <div className={styles.botCardDefaultHeader}>
+                <strong>Default</strong>
+                <span className={styles.botCardBadge}>Always on</span>
+              </div>
+              <small>
+                Plain chat with no custom system prompt. Kept as a permanent fallback so you can always talk to your model, even if every other bot is deleted.
+              </small>
             </div>
-          ))}
+          </div>
+
+          {bots.length > 0 && <h4 className={styles.sectionLabel}>Your bots</h4>}
+          {bots.map(b => {
+            const botKey = `${BOT_DELETE_KEY_PREFIX}${b.id}`;
+            const isArmed = pendingDeleteKey === botKey;
+            // Pass the bot's color through a CSS custom property so the
+            // ::before accent bar on .botCard picks it up without inline
+            // styling on the pseudo-element.
+            const cardStyle = b.color
+              ? ({ "--bot-color": b.color } as React.CSSProperties)
+              : undefined;
+            return (
+              <div key={b.id} className={styles.botCard} style={cardStyle}>
+                <div className={styles.botCardBody}>
+                  <strong>{b.name}</strong>
+                  <small>{b.system_prompt ? b.system_prompt.slice(0, 80) + "..." : "No system prompt"}</small>
+                </div>
+                <button
+                  type="button"
+                  className={`${styles.botCardDelete} ${isArmed ? styles.botCardDeleteArmed : ""}`}
+                  data-delete-affordance="true"
+                  aria-label={isArmed ? `Confirm delete ${b.name}` : `Delete ${b.name}`}
+                  title={isArmed ? undefined : "Delete bot"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isArmed) {
+                      void deleteBot(b.id);
+                    } else {
+                      armDelete(botKey);
+                    }
+                  }}
+                >
+                  {isArmed && (
+                    <span className={styles.conversationDeletePrompt}>Are you sure?</span>
+                  )}
+                  <span className={styles.conversationDeleteGlyph}>{isArmed ? "✓" : "×"}</span>
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
       {/* ── Images panel ── */}
-      {panel === "images" && (
-        <div className={styles.panel}>
-          <div className={styles.panelHeader}><h3>Images</h3><button type="button" className={styles.panelClose} onClick={() => setPanel(null)}>×</button></div>
-          <form className={styles.form} onSubmit={generateImg}>
-            <input required placeholder="Describe an image..." value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} />
-            <button type="submit" disabled={busy}>{busy ? "Generating..." : "Generate"}</button>
-          </form>
-          {images.length > 0 && <h4 className={styles.sectionLabel}>Recent</h4>}
-          <div className={styles.imageGrid}>
-            {images.map(img => (
-              <a key={img.id} href={img.url} target="_blank" rel="noreferrer"><img src={img.url} alt={img.prompt} /></a>
-            ))}
+      {panel === "images" && (() => {
+        // Image generation always calls OpenAI DALL-E. Honor the LOCAL
+        // invariant by hiding the form when LOCAL is selected; past images
+        // stay visible so the gallery remains useful.
+        const canGenerate = settings?.preferredProvider === "openai";
+        return (
+          <div className={styles.panel}>
+            <div className={styles.panelHeader}><h3>Images</h3><button type="button" className={styles.panelClose} onClick={() => setPanel(null)}>×</button></div>
+            {canGenerate ? (
+              <form className={styles.form} onSubmit={generateImg}>
+                <input required placeholder="Describe an image..." value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} />
+                <button type="submit" disabled={busy}>{busy ? "Generating..." : "Generate"}</button>
+              </form>
+            ) : (
+              <div className={styles.imagesGate} role="note">
+                <div className={styles.imagesGateTitle}>Online mode required</div>
+                <p className={styles.muted}>
+                  Image generation uses OpenAI DALL-E, so it only runs when the response
+                  mode is set to <strong>ONLINE</strong>. Flip the toggle above the composer
+                  (or in the sidebar) to enable it.
+                </p>
+              </div>
+            )}
+            {images.length > 0 && <h4 className={styles.sectionLabel}>Recent</h4>}
+            <div className={styles.imageGrid}>
+              {images.map(img => (
+                <a key={img.id} href={img.url} target="_blank" rel="noreferrer"><img src={img.url} alt={img.prompt} /></a>
+              ))}
+            </div>
+            {error && <p className={styles.error}>{error}</p>}
           </div>
-          {error && <p className={styles.error}>{error}</p>}
-        </div>
-      )}
+        );
+      })()}
     </main>
   );
 }

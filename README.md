@@ -62,6 +62,7 @@ npm run dev
 - **Strict data isolation** — every query is tenant-scoped by `user_id`
 - **Customizable chatbots** with system prompts, temperature, and model overrides
 - **Forkable chats** — branch from any message in a conversation
+- **Per-chat deletion** — remove individual chats from the sidebar (hover-reveal × with click-to-confirm) or the chat header; messages and exports are purged, generated images and extracted memories are preserved
 - **Incognito mode** — no memories saved for the session
 - **Automatic memory** — extracts user preferences and stores them encrypted
 - **Qdrant vector retrieval** — semantic memory search across summarized conversations
@@ -100,6 +101,15 @@ docker compose restart api
 # Qdrant data lives in the `qdrant_data` Docker volume
 docker run --rm -v localai-local_qdrant_data:/data -v $(pwd):/backup alpine tar czf /backup/qdrant-backup.tar.gz /data
 ```
+
+## Privacy posture
+
+LocalAI ChatGov is built so that the `LOCAL` mode toggle is a real invariant, not a suggestion:
+
+- **LOCAL mode is strict**: chat routes exclusively through Ollama at `OLLAMA_HOST`. No heuristic can escalate a LOCAL turn to an external provider. Enforced by the unit test in `apps/api/src/__tests__/providers.test.ts`.
+- **OpenAI-only features are gated**: image generation calls OpenAI DALL-E, so it is refused server-side (and hidden client-side) whenever the effective mode is LOCAL.
+- **No outbound telemetry**: Next.js anonymous telemetry is disabled via `NEXT_TELEMETRY_DISABLED=1` (set in the web Dockerfile and `.env.example`). If you run `npm run dev` directly on your shell instead of via Docker, export the same variable or run `npx next telemetry disable` once. The API process makes no telemetry calls.
+- **Outbound surface** (exhaustive): Ollama at `OLLAMA_HOST`, Qdrant at `QDRANT_URL`, and — only in ONLINE mode — `api.openai.com`. Any reviewer adding a new `fetch(` to a non-config host needs an explicit mode gate. See `DESIGN.md` for details.
 
 ## Troubleshooting
 

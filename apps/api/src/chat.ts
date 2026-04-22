@@ -20,7 +20,6 @@ import type { ChatMessage, Conversation } from "@localai/shared";
 export interface UserChatSettings {
   preferredProvider: "local" | "openai";
   autoMemory: boolean;
-  autoSwitchModel: boolean;
   openAiApiKey?: string;
   botId?: string;
   incognito?: boolean;
@@ -40,19 +39,28 @@ function generateConversationTitle(message: string): string {
   return trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed;
 }
 
-function hydrateMessages(
-  rows: Array<{
-    id: string;
-    role: "user" | "assistant" | "system";
-    content: string;
-    created_at: string;
-  }>
-): ChatMessage[] {
+type MessageRow = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  provider: string | null;
+  bot_name: string | null;
+  bot_color: string | null;
+  created_at: string;
+};
+
+function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
   return rows.map((row) => ({
     id: row.id,
     role: row.role,
     content: row.content,
     createdAt: row.created_at,
+    provider:
+      row.provider === "local" || row.provider === "openai"
+        ? row.provider
+        : undefined,
+    botName: row.bot_name ? row.bot_name : undefined,
+    botColor: row.bot_color ? row.bot_color : undefined,
   }));
 }
 
@@ -146,8 +154,6 @@ export async function processChatMessage(
   const now = new Date().toISOString();
   const provider = selectProvider(
     settings.preferredProvider,
-    settings.autoSwitchModel,
-    message,
     settings.openAiApiKey
   );
 
@@ -176,14 +182,15 @@ export async function processChatMessage(
 
   const historyRows = db
     .prepare(
-      "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC LIMIT 30"
+      `SELECT m.id, m.role, m.content, m.provider, m.created_at,
+              b.name AS bot_name, b.color AS bot_color
+       FROM messages m
+       LEFT JOIN bots b ON b.id = m.bot_id
+       WHERE m.conversation_id = ? AND m.user_id = ?
+       ORDER BY m.created_at ASC
+       LIMIT 30`
     )
-    .all(activeConversationId, userId) as Array<{
-    id: string;
-    role: "user" | "assistant" | "system";
-    content: string;
-    created_at: string;
-  }>;
+    .all(activeConversationId, userId) as MessageRow[];
   const history = hydrateMessages(historyRows);
 
   const memoryLines = settings.incognito
@@ -199,7 +206,7 @@ export async function processChatMessage(
 
   const userMessageId = randomId(12);
   db.prepare(
-    "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, 'user', ?, ?)"
+    "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?)"
   ).run(userMessageId, activeConversationId, userId, message, now);
 
   const assistantReply = await provider.generateResponse(
@@ -208,12 +215,14 @@ export async function processChatMessage(
   );
   const assistantCreatedAt = new Date().toISOString();
   db.prepare(
-    "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, 'assistant', ?, ?)"
+    "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)"
   ).run(
     randomId(12),
     activeConversationId,
     userId,
     assistantReply,
+    provider.name,
+    settings.botId ?? null,
     assistantCreatedAt
   );
 
@@ -253,14 +262,14 @@ export async function processChatMessage(
 
   const messageRows = db
     .prepare(
-      "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
+      `SELECT m.id, m.role, m.content, m.provider, m.created_at,
+              b.name AS bot_name, b.color AS bot_color
+       FROM messages m
+       LEFT JOIN bots b ON b.id = m.bot_id
+       WHERE m.conversation_id = ? AND m.user_id = ?
+       ORDER BY m.created_at ASC`
     )
-    .all(activeConversationId, userId) as Array<{
-    id: string;
-    role: "user" | "assistant" | "system";
-    content: string;
-    created_at: string;
-  }>;
+    .all(activeConversationId, userId) as MessageRow[];
 
   return {
     id: conversationRow.id,

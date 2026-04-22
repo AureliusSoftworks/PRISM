@@ -50,13 +50,59 @@ When incognito mode is active, no memories are read or written.
 ## Provider Architecture
 
 ```
-selectProvider(preference, autoSwitch, message, apiKey)
-  ├─ LocalOllamaProvider  → Ollama /api/chat
-  └─ OpenAiProvider       → OpenAI /v1/chat/completions
+selectProvider(preferredProvider, apiKey?)
+  ├─ "local"   → LocalOllamaProvider  → Ollama /api/chat
+  └─ "openai"  → OpenAiProvider       → OpenAI /v1/chat/completions
+                                        (throws if apiKey is missing)
 
 generateImage(prompt, apiKey, size, quality)
   └─ OpenAI /v1/images/generations (DALL-E 3)
 ```
+
+## Privacy posture
+
+The LOCAL / ONLINE toggle in the UI is a real invariant, not a hint. The
+product guarantees that a LOCAL turn never results in a packet leaving the
+user's network.
+
+### Complete outbound surface (runtime)
+
+| File | Host | When does it fire? |
+| --- | --- | --- |
+| `apps/api/src/providers.ts` (`LocalOllamaProvider`) | `OLLAMA_HOST` | Every LOCAL chat turn and every embedding call that routes through a LOCAL provider. Local by config. |
+| `apps/api/src/providers.ts` (`OpenAiProvider`) | `api.openai.com` | Only when the effective mode is ONLINE. |
+| `apps/api/src/qdrant.ts` | `QDRANT_URL` | Memory summary vector read/write. Local by config. |
+| `apps/api/src/image-provider.ts` | `api.openai.com` | Only when the effective mode is ONLINE (gated in `/api/images/generate`). |
+
+The web app only issues relative `/api/*` fetches; those are rewritten to
+the backend on the same origin by `apps/web/next.config.ts`.
+
+### Enforcement
+
+- `selectProvider("local", …)` unconditionally returns `LocalOllamaProvider`.
+  The old `autoSwitchModel` argument that could escalate a LOCAL turn has
+  been removed from the signature. Retained under test in
+  `apps/api/src/__tests__/providers.test.ts` — that test file is the canary
+  for this invariant.
+- `/api/images/generate` reads the user's stored mode and the request's
+  optional `preferredProvider` override (mirroring the chat route) and
+  refuses with a clear 4xx error if the effective mode is LOCAL. The web
+  Images panel hides the generate form in LOCAL mode and shows a short
+  "Online mode required" explainer instead.
+- Next.js anonymous telemetry is disabled via `NEXT_TELEMETRY_DISABLED=1`
+  in the web Dockerfile and `.env.example`.
+
+### Reviewer checklist for new outbound calls
+
+When adding a new `fetch(` (or any network client) in the API:
+
+1. Is the target host configured via env (like `OLLAMA_HOST` / `QDRANT_URL`)
+   so the operator can keep it on-network? If yes, no gate needed.
+2. Otherwise, add a server-side gate that returns an error when the
+   effective `preferredProvider === "local"`, and reflect the gate in the
+   UI so the user is never surprised.
+3. Extend `apps/api/src/__tests__/providers.test.ts` (or add a sibling
+   test) to pin the new call's mode gate.
 
 ## Chat Forking
 

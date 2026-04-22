@@ -14,6 +14,10 @@ export interface BackupSnapshot {
       role: string;
       content: string;
       createdAt: string;
+      /** Optional; older v1 snapshots (pre-provider tracking) omit this. */
+      provider?: "local" | "openai";
+      /** Optional; older v1 snapshots (pre-per-message bot tracking) omit this. */
+      botId?: string;
     }>;
   }>;
   memories: Array<{
@@ -66,12 +70,14 @@ export function exportUserSnapshot(
   const conversationPayload = conversations.map((conversation) => {
     const messages = db
       .prepare(
-        "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
+        "SELECT id, role, content, provider, bot_id, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
       )
       .all(conversation.id, userId) as Array<{
       id: string;
       role: string;
       content: string;
+      provider: string | null;
+      bot_id: string | null;
       created_at: string;
     }>;
     return {
@@ -79,12 +85,21 @@ export function exportUserSnapshot(
       title: conversation.title,
       createdAt: conversation.created_at,
       updatedAt: conversation.updated_at,
-      messages: messages.map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        createdAt: message.created_at
-      }))
+      messages: messages.map((message) => {
+        const provider: "local" | "openai" | undefined =
+          message.provider === "local" || message.provider === "openai"
+            ? message.provider
+            : undefined;
+        const botId: string | undefined = message.bot_id ?? undefined;
+        return {
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          createdAt: message.created_at,
+          provider,
+          botId,
+        };
+      }),
     };
   });
 
@@ -132,8 +147,8 @@ export function importUserSnapshot(
     VALUES (?, ?, ?, ?, ?)
   `);
   const insertMessage = db.prepare(`
-    INSERT OR REPLACE INTO messages (id, conversation_id, user_id, role, content, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMemory = db.prepare(`
     INSERT OR REPLACE INTO memories (id, user_id, ciphertext, iv, tag, confidence, created_at)
@@ -149,12 +164,22 @@ export function importUserSnapshot(
       conversation.updatedAt
     );
     for (const message of conversation.messages) {
+      const providerValue =
+        message.provider === "local" || message.provider === "openai"
+          ? message.provider
+          : null;
+      const botIdValue =
+        typeof message.botId === "string" && message.botId.length > 0
+          ? message.botId
+          : null;
       insertMessage.run(
         message.id,
         conversation.id,
         userId,
         message.role,
         message.content,
+        providerValue,
+        botIdValue,
         message.createdAt
       );
     }

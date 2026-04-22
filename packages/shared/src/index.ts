@@ -21,6 +21,12 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
+  /** Provider that generated the message (assistant only; undefined for user/system). */
+  provider?: "local" | "openai";
+  /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
+  botName?: string;
+  /** Bot's associated accent color (CSS color string). Resolved from bots.color at read time. */
+  botColor?: string;
 }
 
 export interface Conversation {

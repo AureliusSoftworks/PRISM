@@ -5,6 +5,8 @@ import { clearCookie, json, parseCookies, readJsonBody, setCookie, setCorsHeader
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import { processChatMessage } from "./chat.ts";
+import { deleteConversation } from "./conversations.ts";
+import { deleteBot } from "./bots.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import { generateImage } from "./image-provider.ts";
@@ -361,21 +363,35 @@ function buildRoutes(): RouteDefinition[] {
       }
       const messageRows = db
         .prepare(
-          "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
+          `SELECT m.id, m.role, m.content, m.provider, m.created_at,
+                  b.name AS bot_name, b.color AS bot_color
+           FROM messages m
+           LEFT JOIN bots b ON b.id = m.bot_id
+           WHERE m.conversation_id = ? AND m.user_id = ?
+           ORDER BY m.created_at ASC`
         )
         .all(conversationId, userId) as Array<{
         id: string;
         role: "user" | "assistant" | "system";
         content: string;
+        provider: string | null;
+        bot_name: string | null;
+        bot_color: string | null;
         created_at: string;
       }>;
-      // Match the shared ChatMessage shape (createdAt) used by POST /api/chat
-      // and the web UI so both endpoints return the same fields.
+      // Match the shared ChatMessage shape used by POST /api/chat and the
+      // web UI so both endpoints agree.
       const messages = messageRows.map((row) => ({
         id: row.id,
         role: row.role,
         content: row.content,
         createdAt: row.created_at,
+        provider:
+          row.provider === "local" || row.provider === "openai"
+            ? row.provider
+            : undefined,
+        botName: row.bot_name ?? undefined,
+        botColor: row.bot_color ?? undefined,
       }));
       json(ctx.res, 200, {
         ok: true,
@@ -388,6 +404,11 @@ function buildRoutes(): RouteDefinition[] {
         },
       });
     }),
+    route("DELETE", "/api/conversations/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      deleteConversation(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true });
+    }),
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -396,6 +417,12 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.conversationId === "string" ? body.conversationId : undefined;
       const botId = typeof body.botId === "string" ? body.botId : undefined;
       const incognito = body.incognito === true;
+      // Per-request provider override so a fresh sidebar switch takes effect
+      // immediately, even if the settings PATCH is still in flight.
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
 
@@ -443,9 +470,8 @@ function buildRoutes(): RouteDefinition[] {
         message,
         userKey,
         {
-          preferredProvider: user.preferred_provider,
+          preferredProvider: requestedProvider ?? user.preferred_provider,
           autoMemory: !incognito && Boolean(user.auto_memory),
-          autoSwitchModel: Boolean(user.auto_switch_model),
           openAiApiKey,
           botId,
           incognito,
@@ -508,9 +534,11 @@ function buildRoutes(): RouteDefinition[] {
           theme: user.theme,
           preferredProvider: user.preferred_provider,
           autoMemory: Boolean(user.auto_memory),
-          autoSwitchModel: Boolean(user.auto_switch_model),
-          hasOpenAiApiKey: Boolean(user.openai_key_ciphertext)
-        }
+          hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
+          // Surface the server's configured local model so the sidebar can
+          // show users which Ollama model they're hitting in LOCAL mode.
+          ollamaModel: config.ollamaModel,
+        },
       });
     }),
     route("PATCH", "/api/settings", async (ctx) => {
@@ -527,10 +555,6 @@ function buildRoutes(): RouteDefinition[] {
           : user.preferred_provider;
       const autoMemory =
         typeof body.autoMemory === "boolean" ? Number(body.autoMemory) : user.auto_memory;
-      const autoSwitchModel =
-        typeof body.autoSwitchModel === "boolean"
-          ? Number(body.autoSwitchModel)
-          : user.auto_switch_model;
       // Key update semantics:
       //   - Non-empty string: replace the stored key.
       //   - Explicit null: clear the stored key.
@@ -554,16 +578,19 @@ function buildRoutes(): RouteDefinition[] {
         openAiTag = null;
       }
 
+      // `auto_switch_model` is intentionally not updated here. The old
+      // cross-mode escalation setting has been retired; the DB column
+      // stays so a future intra-mode model switcher can adopt it without
+      // another migration.
       db.prepare(`
         UPDATE users
-        SET theme = ?, preferred_provider = ?, auto_memory = ?, auto_switch_model = ?,
+        SET theme = ?, preferred_provider = ?, auto_memory = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
         WHERE id = ?
       `).run(
         theme,
         preferredProvider,
         autoMemory,
-        autoSwitchModel,
         openAiCipher,
         openAiIv,
         openAiTag,
@@ -600,6 +627,24 @@ function buildRoutes(): RouteDefinition[] {
       const size = (body.size as string) ?? "1024x1024";
       const quality = (body.quality as string) ?? "standard";
       const conversationId = typeof body.conversationId === "string" ? body.conversationId : null;
+
+      // Privacy gate: image generation always calls OpenAI DALL-E, so it
+      // must never fire while the user has LOCAL mode selected. Mirror the
+      // chat route's per-request override: the body can carry a
+      // `preferredProvider` for per-send intent, falling back to the user's
+      // stored mode.
+      const user = getUserRow(userId);
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      if (effectiveProvider === "local") {
+        throw new Error(
+          "Image generation requires ONLINE mode. Switch to ONLINE in the sidebar or compose toggle and try again."
+        );
+      }
+
       const userKey = decryptUserKey(userId);
       const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const result = await generateImage(
@@ -629,17 +674,26 @@ function buildRoutes(): RouteDefinition[] {
       const model = typeof body.model === "string" ? body.model : null;
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
       const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 2048;
+      // Accept any non-empty string for color (CSS parses the value at render
+      // time). Native HTML5 color inputs always emit "#RRGGBB".
+      const color =
+        typeof body.color === "string" && body.color.trim().length > 0
+          ? body.color.trim()
+          : null;
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, model, temperature, max_tokens, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
-      ).run(botId, userId, name, systemPrompt, model, temperature, maxTokens, now, now);
-      json(ctx.res, 201, { ok: true, bot: { id: botId, name, systemPrompt, model, temperature, maxTokens } });
+        "INSERT INTO bots (id, user_id, name, system_prompt, model, temperature, max_tokens, color, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(botId, userId, name, systemPrompt, model, temperature, maxTokens, color, now, now);
+      json(ctx.res, 201, {
+        ok: true,
+        bot: { id: botId, name, systemPrompt, model, temperature, maxTokens, color },
+      });
     }),
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, model, temperature, max_tokens, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, model, temperature, max_tokens, color, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -658,12 +712,26 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.model === "string") { fields.push("model = ?"); values.push(body.model); }
       if (typeof body.temperature === "number") { fields.push("temperature = ?"); values.push(body.temperature); }
       if (typeof body.maxTokens === "number") { fields.push("max_tokens = ?"); values.push(body.maxTokens); }
+      // Color update semantics: non-empty string updates, explicit null clears,
+      // empty string or missing field leaves it unchanged.
+      if (typeof body.color === "string" && body.color.trim().length > 0) {
+        fields.push("color = ?");
+        values.push(body.color.trim());
+      } else if (body.color === null) {
+        fields.push("color = ?");
+        values.push(null);
+      }
       if (fields.length > 0) {
         fields.push("updated_at = ?");
         values.push(new Date().toISOString());
         values.push(botId, userId);
         db.prepare(`UPDATE bots SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).run(...values);
       }
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("DELETE", "/api/bots/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      deleteBot(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true });
     }),
     route("DELETE", "/api/bots/:id", async (ctx) => {
