@@ -1,0 +1,809 @@
+import { createServer } from "node:http";
+import { getAppConfig } from "@localai/config";
+import { createDatabase, mapUserProfile } from "./db.ts";
+import { clearCookie, json, parseCookies, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
+import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
+import type { RouteDefinition, RequestContext } from "./types.ts";
+import { processChatMessage } from "./chat.ts";
+import type { GenerateOptions } from "./providers.ts";
+import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
+import { generateImage } from "./image-provider.ts";
+import {
+  INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS,
+  getInactiveAccountCutoff
+} from "./account-retention.ts";
+import { deleteVectorsForUser } from "./qdrant.ts";
+
+const config = getAppConfig();
+const db = createDatabase();
+const masterKey = deriveMasterKey(config.encryptionMasterKey);
+const backupAdapter = new LocalOnlyBackupAdapter();
+
+interface UserDbRow {
+  id: string;
+  email: string;
+  display_name: string;
+  password_hash: string;
+  password_salt: string;
+  wrapped_user_key: string;
+  wrapped_user_key_iv: string;
+  wrapped_user_key_tag: string;
+  theme: "light" | "dark";
+  preferred_provider: "local" | "openai";
+  auto_memory: number;
+  auto_switch_model: number;
+  openai_key_ciphertext: string | null;
+  openai_key_iv: string | null;
+  openai_key_tag: string | null;
+  created_at: string;
+  last_active_at: string;
+}
+
+function route(method: string, pathTemplate: string, handler: RouteDefinition["handler"]): RouteDefinition {
+  const keys: string[] = [];
+  const pattern = new RegExp(
+    "^" +
+      pathTemplate
+        .replace(/\//g, "\\/")
+        .replace(/:([A-Za-z0-9_]+)/g, (_full, key: string) => {
+          keys.push(key);
+          return "([^/]+)";
+        }) +
+      "$"
+  );
+  return { method, pattern, keys, handler };
+}
+
+function parseParams(definition: RouteDefinition, pathname: string): Record<string, string> {
+  const match = pathname.match(definition.pattern);
+  if (!match) {
+    return {};
+  }
+  return definition.keys.reduce<Record<string, string>>((acc, key, index) => {
+    acc[key] = decodeURIComponent(match[index + 1]);
+    return acc;
+  }, {});
+}
+
+function getSessionToken(ctx: RequestContext): string | null {
+  const cookies = parseCookies(ctx.req.headers.cookie);
+  return cookies[config.sessionCookieName] ?? null;
+}
+
+function requireAuth(ctx: RequestContext): string {
+  const sessionToken = getSessionToken(ctx);
+  if (!sessionToken) {
+    throw new Error("Authentication required.");
+  }
+  const session = db
+    .prepare("SELECT user_id, expires_at FROM sessions WHERE token = ?")
+    .get(sessionToken) as { user_id?: string; expires_at?: string } | undefined;
+  if (!session?.user_id || !session.expires_at) {
+    throw new Error("Invalid session.");
+  }
+  if (new Date(session.expires_at).getTime() < Date.now()) {
+    db.prepare("DELETE FROM sessions WHERE token = ?").run(sessionToken);
+    throw new Error("Session expired.");
+  }
+  ctx.sessionToken = sessionToken;
+  ctx.userId = session.user_id;
+  touchUserActivity(session.user_id);
+  return session.user_id;
+}
+
+function getUserRow(userId: string): UserDbRow {
+  const row = db
+    .prepare(
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, auto_memory, auto_switch_model, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+    )
+    .get(userId) as UserDbRow | undefined;
+  if (!row) {
+    throw new Error("User not found.");
+  }
+  return row;
+}
+
+function decryptUserKey(userId: string): Buffer {
+  const row = getUserRow(userId);
+  const userKeyBase64 = decryptText(
+    {
+      ciphertext: row.wrapped_user_key,
+      iv: row.wrapped_user_key_iv,
+      tag: row.wrapped_user_key_tag
+    },
+    masterKey
+  );
+  return Buffer.from(userKeyBase64, "base64");
+}
+
+function getOpenAiApiKeyForUser(userId: string, userKey: Buffer): string | undefined {
+  const user = getUserRow(userId);
+  if (!user.openai_key_ciphertext || !user.openai_key_iv || !user.openai_key_tag) {
+    return undefined;
+  }
+  return decryptText(
+    {
+      ciphertext: user.openai_key_ciphertext,
+      iv: user.openai_key_iv,
+      tag: user.openai_key_tag
+    },
+    userKey
+  );
+}
+
+function readString(value: unknown, fieldName: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${fieldName} is required.`);
+  }
+  return value.trim();
+}
+
+function createSession(userId: string): { token: string; expiresAt: string } {
+  const token = randomId(24);
+  const expiresAt = new Date(
+    Date.now() + config.sessionTtlHours * 60 * 60 * 1000
+  ).toISOString();
+  db.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)").run(
+    token,
+    userId,
+    expiresAt
+  );
+  return { token, expiresAt };
+}
+
+function touchUserActivity(userId: string): void {
+  db.prepare("UPDATE users SET last_active_at = ? WHERE id = ?").run(
+    new Date().toISOString(),
+    userId
+  );
+}
+
+async function deleteUserAccount(userId: string): Promise<void> {
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM conversation_exports WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM images WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM bots WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM memory_summaries WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM memories WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM messages WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM conversations WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  try {
+    await deleteVectorsForUser(userId);
+  } catch {
+    // Qdrant cleanup is best-effort; account data is already removed from SQLite.
+  }
+}
+
+async function purgeInactiveAccounts(): Promise<void> {
+  const cutoffIso = getInactiveAccountCutoff().toISOString();
+  const inactiveUsers = db
+    .prepare(
+      "SELECT id FROM users WHERE COALESCE(last_active_at, created_at) < ?"
+    )
+    .all(cutoffIso) as Array<{ id: string }>;
+
+  for (const user of inactiveUsers) {
+    await deleteUserAccount(user.id);
+  }
+}
+
+function buildRoutes(): RouteDefinition[] {
+  return [
+    route("POST", "/api/auth/register", async (ctx) => {
+      const body = ctx.body as Record<string, unknown>;
+      const email = readString(body.email, "email").toLowerCase();
+      const password = readString(body.password, "password");
+      const displayName = readString(body.displayName, "displayName");
+
+      const existing = db
+        .prepare("SELECT id FROM users WHERE email = ?")
+        .get(email) as { id?: string } | undefined;
+      if (existing?.id) {
+        throw new Error("Email is already registered.");
+      }
+
+      const userId = randomId(12);
+      const salt = randomId(8);
+      const passwordHash = hashPassword(password, salt);
+      const userKey = Buffer.from(randomId(32), "hex");
+      const wrappedUserKey = encryptText(userKey.toString("base64"), masterKey);
+      const createdAt = new Date().toISOString();
+
+      db.prepare(`
+        INSERT INTO users (
+          id, email, display_name, password_hash, password_salt,
+          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+          theme, preferred_provider, auto_memory, auto_switch_model, created_at, last_active_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'dark', 'local', 1, 0, ?, ?)
+      `).run(
+        userId,
+        email,
+        displayName,
+        passwordHash,
+        salt,
+        wrappedUserKey.ciphertext,
+        wrappedUserKey.iv,
+        wrappedUserKey.tag,
+        createdAt,
+        createdAt
+      );
+
+      const { token } = createSession(userId);
+      setCookie(
+        ctx.res,
+        config.sessionCookieName,
+        token,
+        config.sessionTtlHours * 60 * 60
+      );
+      json(ctx.res, 201, {
+        ok: true,
+        user: {
+          id: userId,
+          email,
+          displayName,
+          role: "user",
+          createdAt,
+          theme: "dark",
+          preferredProvider: "local"
+        }
+      });
+    }),
+    route("POST", "/api/auth/login", async (ctx) => {
+      const body = ctx.body as Record<string, unknown>;
+      const email = readString(body.email, "email").toLowerCase();
+      const password = readString(body.password, "password");
+      const user = db
+        .prepare(
+          "SELECT id, password_hash, password_salt FROM users WHERE email = ?"
+        )
+        .get(email) as
+        | { id?: string; password_hash?: string; password_salt?: string }
+        | undefined;
+      if (!user?.id || !user.password_hash || !user.password_salt) {
+        throw new Error("Invalid credentials.");
+      }
+      if (!verifyPassword(password, user.password_salt, user.password_hash)) {
+        throw new Error("Invalid credentials.");
+      }
+      const { token } = createSession(user.id);
+      touchUserActivity(user.id);
+      setCookie(
+        ctx.res,
+        config.sessionCookieName,
+        token,
+        config.sessionTtlHours * 60 * 60
+      );
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/auth/logout", async (ctx) => {
+      const token = getSessionToken(ctx);
+      if (token) {
+        db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+      }
+      clearCookie(ctx.res, config.sessionCookieName);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("DELETE", "/api/account", async (ctx) => {
+      const userId = requireAuth(ctx);
+      await deleteUserAccount(userId);
+      clearCookie(ctx.res, config.sessionCookieName);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("GET", "/api/auth/me", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const row = getUserRow(userId);
+      json(ctx.res, 200, {
+        ok: true,
+        user: mapUserProfile({
+          id: row.id,
+          email: row.email,
+          displayName: row.display_name,
+          passwordHash: row.password_hash,
+          passwordSalt: row.password_salt,
+          wrappedUserKey: row.wrapped_user_key,
+          wrappedUserKeyIv: row.wrapped_user_key_iv,
+          wrappedUserKeyTag: row.wrapped_user_key_tag,
+          theme: row.theme,
+          preferredProvider: row.preferred_provider,
+          autoMemory: row.auto_memory,
+          autoSwitchModel: row.auto_switch_model,
+          openAiKeyCiphertext: row.openai_key_ciphertext,
+          openAiKeyIv: row.openai_key_iv,
+          openAiKeyTag: row.openai_key_tag,
+          createdAt: row.created_at,
+          lastActiveAt: row.last_active_at
+        })
+      });
+    }),
+    route("GET", "/api/conversations", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rows = db
+        .prepare(
+          "SELECT id, title, created_at, updated_at FROM conversations WHERE user_id = ? ORDER BY updated_at DESC"
+        )
+        .all(userId) as Array<{
+        id: string;
+        title: string;
+        created_at: string;
+        updated_at: string;
+      }>;
+      json(ctx.res, 200, {
+        ok: true,
+        conversations: rows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at
+        }))
+      });
+    }),
+    route("GET", "/api/conversations/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const conversation = db
+        .prepare(
+          "SELECT id, title, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
+        )
+        .get(conversationId, userId) as
+        | { id: string; title: string; created_at: string; updated_at: string }
+        | undefined;
+      if (!conversation) {
+        throw new Error("Conversation not found.");
+      }
+      const messageRows = db
+        .prepare(
+          "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
+        )
+        .all(conversationId, userId) as Array<{
+        id: string;
+        role: "user" | "assistant" | "system";
+        content: string;
+        created_at: string;
+      }>;
+      // Match the shared ChatMessage shape (createdAt) used by POST /api/chat
+      // and the web UI so both endpoints return the same fields.
+      const messages = messageRows.map((row) => ({
+        id: row.id,
+        role: row.role,
+        content: row.content,
+        createdAt: row.created_at,
+      }));
+      json(ctx.res, 200, {
+        ok: true,
+        conversation: {
+          id: conversation.id,
+          title: conversation.title,
+          createdAt: conversation.created_at,
+          updatedAt: conversation.updated_at,
+          messages,
+        },
+      });
+    }),
+    route("POST", "/api/chat", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const message = readString(body.message, "message");
+      const conversationId =
+        typeof body.conversationId === "string" ? body.conversationId : undefined;
+      const botId = typeof body.botId === "string" ? body.botId : undefined;
+      const incognito = body.incognito === true;
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+
+      let botSystemPrompt: string | undefined;
+      let botOverrides: GenerateOptions | undefined;
+      if (botId) {
+        const bot = db
+          .prepare(
+            "SELECT system_prompt, model, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+          )
+          .get(botId, userId) as
+          | {
+              system_prompt?: string;
+              model?: string | null;
+              temperature?: number | null;
+              max_tokens?: number | null;
+            }
+          | undefined;
+        if (bot) {
+          botSystemPrompt = bot.system_prompt || undefined;
+          const overrides: GenerateOptions = {};
+          if (typeof bot.model === "string" && bot.model.trim()) {
+            overrides.model = bot.model.trim();
+          }
+          if (typeof bot.temperature === "number") {
+            overrides.temperature = bot.temperature;
+          }
+          if (typeof bot.max_tokens === "number") {
+            overrides.maxTokens = bot.max_tokens;
+          }
+          if (Object.keys(overrides).length > 0) {
+            botOverrides = overrides;
+          }
+        }
+      }
+
+      // Prefer the user's saved key; fall back to the server-wide env key so a
+      // single OPENAI_API_KEY in .env makes chat work without double-entry.
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+
+      const conversation = await processChatMessage(
+        db,
+        userId,
+        message,
+        userKey,
+        {
+          preferredProvider: user.preferred_provider,
+          autoMemory: !incognito && Boolean(user.auto_memory),
+          autoSwitchModel: Boolean(user.auto_switch_model),
+          openAiApiKey,
+          botId,
+          incognito,
+          botSystemPrompt,
+          botOverrides,
+        },
+        conversationId
+      );
+      json(ctx.res, 200, { ok: true, conversation });
+    }),
+    route("GET", "/api/memories", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const rows = db
+        .prepare(
+          "SELECT id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
+        )
+        .all(userId) as Array<{
+        id: string;
+        confidence: number;
+        ciphertext: string;
+        iv: string;
+        tag: string;
+        created_at: string;
+      }>;
+      json(ctx.res, 200, {
+        ok: true,
+        memories: rows.map((row) => {
+          const payload = decryptJson(
+            {
+              ciphertext: row.ciphertext,
+              iv: row.iv,
+              tag: row.tag
+            },
+            userKey
+          ) as { text?: string };
+          return {
+            id: row.id,
+            confidence: row.confidence,
+            text: payload.text ?? "",
+            createdAt: row.created_at
+          };
+        })
+      });
+    }),
+    route("DELETE", "/api/memories/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      db.prepare("DELETE FROM memories WHERE id = ? AND user_id = ?").run(
+        ctx.params.id,
+        userId
+      );
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("GET", "/api/settings", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      json(ctx.res, 200, {
+        ok: true,
+        settings: {
+          theme: user.theme,
+          preferredProvider: user.preferred_provider,
+          autoMemory: Boolean(user.auto_memory),
+          autoSwitchModel: Boolean(user.auto_switch_model),
+          hasOpenAiApiKey: Boolean(user.openai_key_ciphertext)
+        }
+      });
+    }),
+    route("PATCH", "/api/settings", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const user = getUserRow(userId);
+
+      const theme =
+        body.theme === "light" || body.theme === "dark" ? body.theme : user.theme;
+      const preferredProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : user.preferred_provider;
+      const autoMemory =
+        typeof body.autoMemory === "boolean" ? Number(body.autoMemory) : user.auto_memory;
+      const autoSwitchModel =
+        typeof body.autoSwitchModel === "boolean"
+          ? Number(body.autoSwitchModel)
+          : user.auto_switch_model;
+      // Key update semantics:
+      //   - Non-empty string: replace the stored key.
+      //   - Explicit null: clear the stored key.
+      //   - Omitted field or empty string: leave the stored key untouched.
+      // This lets the client safely PATCH other settings without accidentally
+      // wiping the saved API key when the key input is left blank.
+      let openAiCipher = user.openai_key_ciphertext;
+      let openAiIv = user.openai_key_iv;
+      let openAiTag = user.openai_key_tag;
+      if (typeof body.openAiApiKey === "string") {
+        const trimmed = body.openAiApiKey.trim();
+        if (trimmed.length > 0) {
+          const encrypted = encryptText(trimmed, userKey);
+          openAiCipher = encrypted.ciphertext;
+          openAiIv = encrypted.iv;
+          openAiTag = encrypted.tag;
+        }
+      } else if (body.openAiApiKey === null) {
+        openAiCipher = null;
+        openAiIv = null;
+        openAiTag = null;
+      }
+
+      db.prepare(`
+        UPDATE users
+        SET theme = ?, preferred_provider = ?, auto_memory = ?, auto_switch_model = ?,
+            openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
+        WHERE id = ?
+      `).run(
+        theme,
+        preferredProvider,
+        autoMemory,
+        autoSwitchModel,
+        openAiCipher,
+        openAiIv,
+        openAiTag,
+        userId
+      );
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("GET", "/api/backup/export", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const snapshot = exportUserSnapshot(db, userId, userKey);
+      await backupAdapter.upload(userId, snapshot);
+      json(ctx.res, 200, { ok: true, snapshot });
+    }),
+    route("POST", "/api/backup/import", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as { snapshot?: BackupSnapshot };
+      if (!body.snapshot) {
+        throw new Error("snapshot is required.");
+      }
+      const userKey = decryptUserKey(userId);
+      importUserSnapshot(db, userId, body.snapshot, userKey);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("GET", "/api/backup/versions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const versions = await backupAdapter.listVersions(userId);
+      json(ctx.res, 200, { ok: true, versions });
+    }),
+    route("POST", "/api/images/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const prompt = readString(body.prompt, "prompt");
+      const size = (body.size as string) ?? "1024x1024";
+      const quality = (body.quality as string) ?? "standard";
+      const conversationId = typeof body.conversationId === "string" ? body.conversationId : null;
+      const userKey = decryptUserKey(userId);
+      const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const result = await generateImage(
+        prompt,
+        apiKey,
+        size as "1024x1024" | "1024x1792" | "1792x1024",
+        quality as "standard" | "hd"
+      );
+      const imageId = randomId(12);
+      db.prepare(
+        "INSERT INTO images (id, user_id, conversation_id, prompt, revised_prompt, url, size, quality, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?)"
+      ).run(imageId, userId, conversationId, prompt, result.revisedPrompt, result.url, size, quality, new Date().toISOString());
+      json(ctx.res, 200, { ok: true, image: { id: imageId, ...result } });
+    }),
+    route("GET", "/api/images", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rows = db.prepare(
+        "SELECT id, prompt, revised_prompt, url, size, quality, created_at FROM images WHERE user_id = ? ORDER BY created_at DESC LIMIT 50"
+      ).all(userId);
+      json(ctx.res, 200, { ok: true, images: rows });
+    }),
+    route("POST", "/api/bots", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const name = readString(body.name, "name");
+      const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : "";
+      const model = typeof body.model === "string" ? body.model : null;
+      const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
+      const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 2048;
+      const botId = randomId(12);
+      const now = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO bots (id, user_id, name, system_prompt, model, temperature, max_tokens, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(botId, userId, name, systemPrompt, model, temperature, maxTokens, now, now);
+      json(ctx.res, 201, { ok: true, bot: { id: botId, name, systemPrompt, model, temperature, maxTokens } });
+    }),
+    route("GET", "/api/bots", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rows = db.prepare(
+        "SELECT id, name, system_prompt, model, temperature, max_tokens, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+      ).all(userId);
+      json(ctx.res, 200, { ok: true, bots: rows });
+    }),
+    route("PATCH", "/api/bots/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.id;
+      const existing = db.prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?").get(botId, userId) as { id?: string } | undefined;
+      if (!existing?.id) {
+        throw new Error("Bot not found.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const fields: string[] = [];
+      const values: Array<string | number | null> = [];
+      if (typeof body.name === "string") { fields.push("name = ?"); values.push(body.name); }
+      if (typeof body.systemPrompt === "string") { fields.push("system_prompt = ?"); values.push(body.systemPrompt); }
+      if (typeof body.model === "string") { fields.push("model = ?"); values.push(body.model); }
+      if (typeof body.temperature === "number") { fields.push("temperature = ?"); values.push(body.temperature); }
+      if (typeof body.maxTokens === "number") { fields.push("max_tokens = ?"); values.push(body.maxTokens); }
+      if (fields.length > 0) {
+        fields.push("updated_at = ?");
+        values.push(new Date().toISOString());
+        values.push(botId, userId);
+        db.prepare(`UPDATE bots SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).run(...values);
+      }
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("DELETE", "/api/bots/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(ctx.params.id, userId);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/conversations/:id/export", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const conversation = db.prepare(
+        "SELECT id, title, bot_id, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
+      ).get(conversationId, userId) as { id: string; title: string; bot_id: string | null; created_at: string; updated_at: string } | undefined;
+      if (!conversation) {
+        throw new Error("Conversation not found.");
+      }
+      const messages = db.prepare(
+        "SELECT role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
+      ).all(conversationId, userId) as Array<{ role: string; content: string; created_at: string }>;
+      const lines = [
+        `# ${conversation.title}`,
+        `> Exported ${new Date().toISOString()}`,
+        "",
+      ];
+      for (const msg of messages) {
+        lines.push(`**${msg.role === "assistant" ? "Assistant" : "You"}** _(${msg.created_at})_`);
+        lines.push("");
+        lines.push(msg.content);
+        lines.push("");
+        lines.push("---");
+        lines.push("");
+      }
+      const markdown = lines.join("\n");
+      const exportId = randomId(12);
+      db.prepare(
+        "INSERT INTO conversation_exports (id, user_id, conversation_id, markdown, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(exportId, userId, conversationId, markdown, conversation.bot_id, new Date().toISOString());
+      json(ctx.res, 200, { ok: true, exportId, markdown });
+    }),
+    route("GET", "/api/exports", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rows = db.prepare(
+        "SELECT id, conversation_id, bot_id, created_at FROM conversation_exports WHERE user_id = ? ORDER BY created_at DESC LIMIT 50"
+      ).all(userId);
+      json(ctx.res, 200, { ok: true, exports: rows });
+    }),
+    route("GET", "/api/exports/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const row = db.prepare(
+        "SELECT id, conversation_id, markdown, bot_id, created_at FROM conversation_exports WHERE id = ? AND user_id = ?"
+      ).get(ctx.params.id, userId);
+      if (!row) {
+        throw new Error("Export not found.");
+      }
+      json(ctx.res, 200, { ok: true, export: row });
+    }),
+    route("POST", "/api/conversations/:id/fork", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const parentId = ctx.params.id;
+      const body = ctx.body as Record<string, unknown>;
+      const forkMessageId = typeof body.messageId === "string" ? body.messageId : null;
+      const parent = db.prepare("SELECT id, title, bot_id, incognito FROM conversations WHERE id = ? AND user_id = ?").get(parentId, userId) as { id: string; title: string; bot_id: string | null; incognito: number } | undefined;
+      if (!parent) {
+        throw new Error("Parent conversation not found.");
+      }
+      const forkId = randomId(12);
+      const now = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO conversations (id, user_id, title, bot_id, parent_id, fork_message_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(forkId, userId, `Fork of ${parent.title}`, parent.bot_id, parentId, forkMessageId, parent.incognito, now, now);
+      let messageQuery = "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC";
+      let messages: Array<{ id: string; role: string; content: string; created_at: string }>;
+      if (forkMessageId) {
+        const cutoff = db.prepare("SELECT created_at FROM messages WHERE id = ? AND conversation_id = ?").get(forkMessageId, parentId) as { created_at: string } | undefined;
+        if (cutoff) {
+          messages = db.prepare(messageQuery + " ").all(parentId, userId).filter((m: any) => m.created_at <= cutoff.created_at) as any;
+        } else {
+          messages = db.prepare(messageQuery).all(parentId, userId) as any;
+        }
+      } else {
+        messages = db.prepare(messageQuery).all(parentId, userId) as any;
+      }
+      for (const msg of messages) {
+        db.prepare(
+          "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).run(randomId(12), forkId, userId, msg.role, msg.content, msg.created_at);
+      }
+      json(ctx.res, 201, { ok: true, conversationId: forkId });
+    }),
+    route("GET", "/api/health", async (ctx) => {
+      json(ctx.res, 200, { ok: true, uptime: process.uptime() });
+    })
+  ];
+}
+
+const routes = buildRoutes();
+
+void purgeInactiveAccounts();
+setInterval(() => {
+  void purgeInactiveAccounts();
+}, INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS);
+
+const server = createServer(async (req, res) => {
+  try {
+    setCorsHeaders(res, req.headers.origin as string | undefined);
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const pathname = url.pathname;
+    const method = req.method ?? "GET";
+    const body =
+      method === "POST" || method === "PATCH" ? await readJsonBody(req) : {};
+    const matchingRoute = routes.find(
+      (candidate) => candidate.method === method && candidate.pattern.test(pathname)
+    );
+    if (!matchingRoute) {
+      json(res, 404, { ok: false, error: "Route not found." });
+      return;
+    }
+
+    await matchingRoute.handler({
+      req,
+      res,
+      body,
+      query: url.searchParams,
+      params: parseParams(matchingRoute, pathname)
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    json(res, 400, {
+      ok: false,
+      error: message
+    });
+  }
+});
+
+server.listen(config.apiPort, () => {
+  console.log(`API ready at http://localhost:${config.apiPort}`);
+});
