@@ -102,15 +102,6 @@ Double-click `start.bat` at the repo root. On first run it verifies/installs Nod
 
 Session cookies work same-origin because Next's `rewrites()` proxies `/api/*` to `127.0.0.1:8787` server-side. You only need to open **port 3000** on the LAN; port 8787 should stay closed.
 
-### Option E: Dev launcher (`start-dev.bat`)
-For active development on the `dev` branch, double-click `start-dev.bat`. It runs both services in **watch mode** on a separate port + database so you can leave `start.bat` running alongside it:
-
-- **API** on `0.0.0.0:8788` via `node --watch`, using `apps/api/data/localai-dev.db` (prod data stays untouched).
-- **Frontend** on `0.0.0.0:3003` via `next dev` (hot reload, no build step).
-- `NEXT_TELEMETRY_DISABLED=1` is set in both windows.
-
-Hit `Ctrl+C` in either window to stop that process; the other continues running.
-
 One-time Windows Firewall rule for LAN access (PowerShell as admin):
 ```powershell
 New-NetFirewallRule -DisplayName "Prism Frontend" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow -Profile Private,Domain

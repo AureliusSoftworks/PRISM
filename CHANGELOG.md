@@ -45,8 +45,8 @@ command-center UI.
   that on OpenAI's side, so the cleanup just keeps the DB tidy).
 - Inactive-account auto-deletion after 60 days.
 - Self-serve account deletion from Settings with a confirmation prompt.
-- `start.bat` production launcher (web:3000, api:8787) and `start-dev.bat`
-  watch-mode launcher (web:3003, api:8788, separate `localai-dev.db`).
+- `start.bat` one-click production launcher (web:3000, api:8787) with
+  dependency install, `.env` bootstrap, and standalone-build wiring.
 
 ### Fixed
 
@@ -62,11 +62,11 @@ command-center UI.
   `GET /api/conversations/:id` (both return `createdAt`).
 - Error visibility: failed sends now render inline above the composer and
   the optimistic user message rolls back cleanly.
-- `start-dev.bat` now works from LAN devices. `next.config.ts` auto-detects
-  the host's LAN IPv4 addresses and allow-lists them via Next 16's
-  `allowedDevOrigins`, so login / register POSTs from phones and other LAN
-  devices no longer get silently dropped by Next's cross-origin dev guard.
-  An `ALLOWED_DEV_ORIGINS` env var covers any extra hostnames.
+- Cross-origin dev login: `next.config.ts` auto-detects the host's LAN
+  IPv4 addresses and allow-lists them via Next 16's `allowedDevOrigins`,
+  so POSTs from phones / LAN devices no longer get silently dropped by
+  Next's cross-origin dev guard. An `ALLOWED_DEV_ORIGINS` env var covers
+  any extra hostnames.
 
 ### Security
 
@@ -81,7 +81,7 @@ command-center UI.
   the effective provider is LOCAL, and the Images panel reflects that state
   client-side so users are never silently routed to OpenAI DALL-E.
 - **Next.js telemetry is disabled** via `NEXT_TELEMETRY_DISABLED=1` in the
-  web Dockerfile, `.env.example`, and `start-dev.bat`.
+  web Dockerfile and `.env.example`.
 - No third-party analytics or crash-reporting dependencies in the product
   code.
 - Outbound surface (exhaustive): Ollama at `OLLAMA_HOST`, Qdrant at
