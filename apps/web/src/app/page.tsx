@@ -1031,14 +1031,17 @@ function HomeContent(): React.JSX.Element {
     <main className={`${styles.authLayout} ${themeClass}`}>
       <div className={styles.card}>
         <div className={styles.brandLockup}>
-          {/* Rendered as an <img> so the triangle glow filter can target the
-              tinted artwork and not spill onto the wordmark strokes. */}
-          <img
-            src="/icon.jpg"
-            alt=""
-            aria-hidden="true"
-            className={styles.brandIcon}
-          />
+          {/* Static icon artwork wrapped in a dedicated halo shell. The shell's
+              pseudo-elements own the animated prismatic glows so the icon
+              itself stays crisp while the color motion happens behind it. */}
+          <div className={styles.brandIconShell} aria-hidden="true">
+            <img
+              src="/icon.jpg"
+              alt=""
+              aria-hidden="true"
+              className={styles.brandIcon}
+            />
+          </div>
           <img
             src="/wordmark.svg"
             alt="Prism"

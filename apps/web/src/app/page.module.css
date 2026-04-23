@@ -193,11 +193,11 @@
   gap: 10px;
 }
 
-/* Brand lockup: rainbow-prism icon + per-letter color wordmark, sitting
-   on the auth card. The icon lives in a dark rounded tile already; we
-   stack a multi-hue drop-shadow filter under both pieces so the color
-   bleeds softly into the surrounding dark card — the "RGB glow against
-   monochromatic details" effect. */
+/* Brand lockup: static rainbow-prism icon + per-letter color wordmark.
+   The icon itself stays still; the motion happens in two heavily-blurred
+   conic-gradient halos BEHIND it. The halos rotate in opposite directions at
+   different speeds so their colors drift through one another like prism
+   interference instead of the whole icon simply hue-shifting as one unit. */
 .brandLockup {
   display: flex;
   align-items: center;
@@ -205,15 +205,85 @@
   margin: 0 0 6px;
 }
 
+.brandIconShell {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  isolation: isolate;
+}
+
+/* Two blurred rainbow halos behind the icon:
+   - ::before: tighter, brighter inner interference ring
+   - ::after: larger, softer outer wash
+   `mix-blend-mode: screen` keeps the overlaps additive on dark theme, which
+   is what gives the "prism" look where colors crossing one another feel like
+   they brighten rather than muddy. */
+.brandIconShell::before,
+.brandIconShell::after {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    conic-gradient(
+      from 0deg,
+      #ff5f6d 0deg,
+      #ffb703 70deg,
+      #80ffdb 145deg,
+      #38bdf8 215deg,
+      #8b5cf6 290deg,
+      #ff5f6d 360deg
+    );
+  filter: blur(18px) saturate(1.3);
+  opacity: 0.42;
+  mix-blend-mode: screen;
+  transform-origin: center;
+}
+
+.brandIconShell::before {
+  animation: brandPrismSpinA 14s linear infinite;
+}
+
+.brandIconShell::after {
+  inset: -22px;
+  opacity: 0.26;
+  filter: blur(26px) saturate(1.35);
+  animation: brandPrismSpinB 21s linear infinite reverse;
+}
+
+@keyframes brandPrismSpinA {
+  from {
+    transform: rotate(0deg) scale(1);
+  }
+  to {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes brandPrismSpinB {
+  from {
+    transform: rotate(24deg) scale(1.04);
+  }
+  to {
+    transform: rotate(-336deg) scale(1.04);
+  }
+}
+
 .brandIcon {
   width: 56px;
   height: 56px;
   border-radius: 14px;
   display: block;
-  flex-shrink: 0;
-  filter:
-    drop-shadow(0 0 18px rgba(255, 77, 109, 0.28))
-    drop-shadow(0 0 32px rgba(123, 92, 255, 0.18));
+  position: relative;
+  z-index: 1;
+  /* Keep the icon artwork crisp. A tiny neutral shadow separates the tile
+     from the moving halos without tinting it. */
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.18));
 }
 
 .brandWordmark {
@@ -223,6 +293,31 @@
   filter:
     drop-shadow(0 0 10px rgba(255, 159, 28, 0.22))
     drop-shadow(0 0 24px rgba(47, 211, 227, 0.15));
+}
+
+/* Light theme needs a softer hand: "screen" on white mostly disappears, so
+   we switch to normal blend with lower opacity to keep the icon feeling
+   luminous without turning the auth card into a rainbow blot. */
+.themeLight .brandIconShell::before,
+.themeLight .brandIconShell::after {
+  mix-blend-mode: normal;
+}
+
+.themeLight .brandIconShell::before {
+  opacity: 0.24;
+}
+
+.themeLight .brandIconShell::after {
+  opacity: 0.16;
+}
+
+/* Respect reduced-motion: keep the layered halos but freeze them. The user
+   still gets the prismatic look, just without the rotation. */
+@media (prefers-reduced-motion: reduce) {
+  .brandIconShell::before,
+  .brandIconShell::after {
+    animation: none;
+  }
 }
 
 .authToggle {
