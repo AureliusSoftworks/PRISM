@@ -1,7 +1,68 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { deleteBot } from "../bots.ts";
+import { composeBotSystemPrompt, deleteBot } from "../bots.ts";
+
+/**
+ * The composeBotSystemPrompt suite pins the "bot identity reaches the model"
+ * contract: a selected bot's NAME is always folded into the system prompt the
+ * provider sees, not just the user-authored system_prompt. This guards the
+ * case where someone creates a bot called "Tim" with an empty prompt and the
+ * model (without this helper) would deny being Tim entirely.
+ */
+describe("composeBotSystemPrompt", () => {
+  it("prepends an identity preamble when only a name is supplied", () => {
+    const prompt = composeBotSystemPrompt("Tim", "");
+    assert.ok(prompt, "expected a system prompt when a name is present");
+    assert.match(prompt!, /You are Tim\./);
+    assert.match(prompt!, /respond as Tim\./);
+  });
+
+  it("joins the preamble and user prompt with a blank line", () => {
+    const prompt = composeBotSystemPrompt("Frank", "You speak like a sailor.");
+    assert.ok(prompt);
+    // Identity is first so the model has the persona priming before the
+    // user's behavioural instructions take effect.
+    assert.match(prompt!, /^You are Frank\./);
+    assert.match(prompt!, /\n\nYou speak like a sailor\.$/);
+  });
+
+  it("trims whitespace on both fields before composing", () => {
+    const prompt = composeBotSystemPrompt("  Tim  ", "   You help with code.   ");
+    assert.ok(prompt);
+    assert.match(prompt!, /^You are Tim\./);
+    assert.match(prompt!, /You help with code\.$/);
+    assert.doesNotMatch(prompt!, /  /); // no double spaces leaked through
+  });
+
+  it("falls back to the raw system prompt when no name is present", () => {
+    assert.equal(
+      composeBotSystemPrompt(undefined, "You are a haiku poet."),
+      "You are a haiku poet."
+    );
+    assert.equal(
+      composeBotSystemPrompt(null, "You are a haiku poet."),
+      "You are a haiku poet."
+    );
+    assert.equal(
+      composeBotSystemPrompt("", "You are a haiku poet."),
+      "You are a haiku poet."
+    );
+  });
+
+  it("returns undefined when both fields are missing/blank (Default bot case)", () => {
+    assert.equal(composeBotSystemPrompt(undefined, undefined), undefined);
+    assert.equal(composeBotSystemPrompt(null, null), undefined);
+    assert.equal(composeBotSystemPrompt("", ""), undefined);
+    assert.equal(composeBotSystemPrompt("   ", "   "), undefined);
+  });
+
+  it("handles odd-character names without crashing or mangling", () => {
+    const prompt = composeBotSystemPrompt("DJ K-Razor", "");
+    assert.ok(prompt);
+    assert.match(prompt!, /You are DJ K-Razor\./);
+  });
+});
 
 /** In-memory DB with just the tables deleteBot touches. */
 function createTestDb(): DatabaseSync {

@@ -1,6 +1,44 @@
 import type { DatabaseSync } from "node:sqlite";
 
 /**
+ * Build the system-prompt string sent to the model for a selected bot.
+ *
+ * Why this exists: the bot's *name* is meaningful context the user picked
+ * deliberately ("Tim", "Frank", a custom persona) — but without this
+ * helper, only the user-authored `system_prompt` is ever forwarded to the
+ * model. That meant a bot named "Tim" with an empty prompt would introduce
+ * itself as a generic "assistant" and deny being Tim, which reads as a bug.
+ *
+ * Behaviour:
+ *   - With a non-empty name, we always prepend a short identity preamble
+ *     ("You are <name>...") so the model adopts the persona even when the
+ *     user didn't write a prompt.
+ *   - If a system prompt is present, it follows the preamble. Because the
+ *     user's prompt comes last, it still wins when it contradicts the
+ *     preamble (e.g. "Respond as a pirate" overrides the identity tone).
+ *   - Returns undefined when neither a usable name nor prompt is present,
+ *     so the chat pipeline sends no system message at all (the Default
+ *     "Always on" bot case).
+ */
+export function composeBotSystemPrompt(
+  name: string | null | undefined,
+  systemPrompt: string | null | undefined
+): string | undefined {
+  const trimmedName = typeof name === "string" ? name.trim() : "";
+  const trimmedPrompt =
+    typeof systemPrompt === "string" ? systemPrompt.trim() : "";
+
+  if (!trimmedName && !trimmedPrompt) return undefined;
+  if (!trimmedName) return trimmedPrompt || undefined;
+
+  const preamble =
+    `You are ${trimmedName}. When the user addresses you as ${trimmedName}, ` +
+    `respond as ${trimmedName}.`;
+  if (!trimmedPrompt) return preamble;
+  return `${preamble}\n\n${trimmedPrompt}`;
+}
+
+/**
  * Permanently remove a single bot owned by `userId`.
  *
  * Behaviour:

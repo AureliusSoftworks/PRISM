@@ -6,7 +6,8 @@ import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, r
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import { processChatMessage } from "./chat.ts";
 import { deleteConversation } from "./conversations.ts";
-import { deleteBot } from "./bots.ts";
+import { composeBotSystemPrompt, deleteBot } from "./bots.ts";
+import { resolveNextSettings } from "./settings.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import { generateImage } from "./image-provider.ts";
@@ -36,6 +37,7 @@ interface UserDbRow {
   wrapped_user_key_tag: string;
   theme: "light" | "dark" | "system";
   preferred_provider: "local" | "openai";
+  provider_locked: number;
   auto_memory: number;
   auto_switch_model: number;
   openai_key_ciphertext: string | null;
@@ -100,7 +102,7 @@ function requireAuth(ctx: RequestContext): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, auto_memory, auto_switch_model, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -425,10 +427,11 @@ function buildRoutes(): RouteDefinition[] {
       if (botId) {
         const bot = db
           .prepare(
-            "SELECT system_prompt, model, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, model, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(botId, userId) as
           | {
+              name?: string;
               system_prompt?: string;
               model?: string | null;
               temperature?: number | null;
@@ -436,7 +439,11 @@ function buildRoutes(): RouteDefinition[] {
             }
           | undefined;
         if (bot) {
-          botSystemPrompt = bot.system_prompt || undefined;
+          // Name is folded into the system prompt by composeBotSystemPrompt so
+          // the model actually knows who it's supposed to be, even when the
+          // user left the prompt field blank. Unit-tested in
+          // `__tests__/bots.test.ts`.
+          botSystemPrompt = composeBotSystemPrompt(bot.name, bot.system_prompt);
           const overrides: GenerateOptions = {};
           if (typeof bot.model === "string" && bot.model.trim()) {
             overrides.model = bot.model.trim();
@@ -527,6 +534,7 @@ function buildRoutes(): RouteDefinition[] {
         settings: {
           theme: user.theme,
           preferredProvider: user.preferred_provider,
+          providerLocked: Boolean(user.provider_locked),
           autoMemory: Boolean(user.auto_memory),
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           // Surface the server's configured local model so the sidebar can
@@ -541,32 +549,24 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const user = getUserRow(userId);
 
-      const theme =
-        body.theme === "light" || body.theme === "dark" ? body.theme : user.theme;
-      const preferredProvider =
-        body.preferredProvider === "openai" || body.preferredProvider === "local"
-          ? body.preferredProvider
-          : user.preferred_provider;
-      const autoMemory =
-        typeof body.autoMemory === "boolean" ? Number(body.autoMemory) : user.auto_memory;
-      // Key update semantics:
-      //   - Non-empty string: replace the stored key.
-      //   - Explicit null: clear the stored key.
-      //   - Omitted field or empty string: leave the stored key untouched.
-      // This lets the client safely PATCH other settings without accidentally
-      // wiping the saved API key when the key input is left blank.
+      // Validation + merge live in `./settings.ts` so the semantics are pinned
+      // by unit tests. See `__tests__/settings.test.ts` for the contract.
+      const next = resolveNextSettings(body, {
+        theme: user.theme,
+        preferredProvider: user.preferred_provider,
+        providerLocked: user.provider_locked,
+        autoMemory: user.auto_memory,
+      });
+
       let openAiCipher = user.openai_key_ciphertext;
       let openAiIv = user.openai_key_iv;
       let openAiTag = user.openai_key_tag;
-      if (typeof body.openAiApiKey === "string") {
-        const trimmed = body.openAiApiKey.trim();
-        if (trimmed.length > 0) {
-          const encrypted = encryptText(trimmed, userKey);
-          openAiCipher = encrypted.ciphertext;
-          openAiIv = encrypted.iv;
-          openAiTag = encrypted.tag;
-        }
-      } else if (body.openAiApiKey === null) {
+      if (next.openAiKeyIntent.action === "replace") {
+        const encrypted = encryptText(next.openAiKeyIntent.plaintext, userKey);
+        openAiCipher = encrypted.ciphertext;
+        openAiIv = encrypted.iv;
+        openAiTag = encrypted.tag;
+      } else if (next.openAiKeyIntent.action === "clear") {
         openAiCipher = null;
         openAiIv = null;
         openAiTag = null;
@@ -578,13 +578,14 @@ function buildRoutes(): RouteDefinition[] {
       // another migration.
       db.prepare(`
         UPDATE users
-        SET theme = ?, preferred_provider = ?, auto_memory = ?,
+        SET theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
         WHERE id = ?
       `).run(
-        theme,
-        preferredProvider,
-        autoMemory,
+        next.theme,
+        next.preferredProvider,
+        next.providerLocked,
+        next.autoMemory,
         openAiCipher,
         openAiIv,
         openAiTag,
