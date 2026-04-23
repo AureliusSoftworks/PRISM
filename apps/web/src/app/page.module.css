@@ -183,38 +183,50 @@
   letter-spacing: -0.01em;
 }
 
-/* Prism wordmark: monochrome base, subtle rainbow hue-shift across the
-   letters. Clips the gradient to the text itself so the body / background
-   stays untouched. Reads as white at a glance; the chroma is secondary,
-   matching the "monochromatics + bright accents" brand directive. */
-.wordmark {
-  font-size: 36px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  line-height: 1;
-  margin: 0;
-  text-transform: uppercase;
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+/* Row that pairs the Register/Login segmented control on the left with the
+   round theme-cycle button immediately to its right, so the auth controls
+   live as one cluster instead of being scattered around the card. */
+.authControls {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.wordmarkText {
-  background: linear-gradient(
-    90deg,
-    #ff6b6b 0%,
-    #ffb454 20%,
-    #ffe66d 40%,
-    #6bff9e 60%,
-    #6bd5ff 80%,
-    #c084fc 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+/* Brand lockup: rainbow-prism icon + per-letter color wordmark, sitting
+   on the auth card. The icon lives in a dark rounded tile already; we
+   stack a multi-hue drop-shadow filter under both pieces so the color
+   bleeds softly into the surrounding dark card — the "RGB glow against
+   monochromatic details" effect. */
+.brandLockup {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 6px;
+}
+
+.brandIcon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  display: block;
+  flex-shrink: 0;
+  filter:
+    drop-shadow(0 0 18px rgba(255, 77, 109, 0.28))
+    drop-shadow(0 0 32px rgba(123, 92, 255, 0.18));
+}
+
+.brandWordmark {
+  height: 30px;
+  width: auto;
+  display: block;
+  filter:
+    drop-shadow(0 0 10px rgba(255, 159, 28, 0.22))
+    drop-shadow(0 0 24px rgba(47, 211, 227, 0.15));
 }
 
 .authToggle {
-  margin-top: 16px;
+  /* Spacing handled by the enclosing .authControls flex row. */
   display: inline-flex;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -707,19 +719,54 @@
 
 /* Compact icon-only cycle button for Light / Dark / Auto. Lives in the
    headerActions cluster so it sits in the top-right corner of the window. */
+/* Icon-only cycle button for Light / Dark / Auto. Styled after the
+   provider-lock dock so both "small status buttons" look and feel the
+   same: fully round, no chrome at rest, fg-muted glyph that brightens on
+   hover. !important is needed to override the background / border /
+   padding baked into .headerActions button when this lives in the chat
+   header cluster. */
 .themeToggleButton {
-  width: 34px;
-  height: 34px;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 30px !important;
+  height: 30px !important;
   padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--fg-muted);
+  border-radius: 999px !important;
+  box-shadow: none !important;
   display: inline-grid;
   place-items: center;
+  cursor: pointer;
   flex-shrink: 0;
-  font-size: 16px;
-  line-height: 1;
+  transition: color 0.2s ease, background 0.2s ease;
 }
 
-.themeToggleButton span {
-  transform: translateY(-1px);
+.themeToggleButton:hover:not(:disabled) {
+  color: var(--fg);
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+.themeToggleButton:focus-visible {
+  outline: none;
+}
+
+.themeToggleButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.themeToggleGlyph {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* Header-level delete uses the same shape as Fork/Export but tints on hover

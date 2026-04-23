@@ -230,11 +230,42 @@ interface Bot {
 // time a bot is created — so opening the panel always feels generative.
 interface ImageRecord { id: string; prompt: string; url: string; created_at: string; }
 
-const THEME_ICON: Record<Theme, string> = {
-  light: "☀",
-  dark: "☾",
-  system: "◐",
-};
+function ThemeGlyph({ mode }: { mode: Theme }): React.ReactElement {
+  // Stroke-only 16x16 glyphs that take their color from currentColor, so the
+  // same button can shift between muted/hover/locked hues purely via CSS.
+  // Matches the lock glyph's visual weight (14px glyph inside a 30px button).
+  return (
+    <svg
+      className={styles.themeToggleGlyph}
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
+      {mode === "light" && (
+        <>
+          {/* Sun: central disc + 8 radial rays. */}
+          <circle cx="8" cy="8" r="3" />
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5l1.5 1.5M3 13l1.5-1.5M11.5 4.5l1.5-1.5" />
+        </>
+      )}
+      {mode === "dark" && (
+        /* Crescent moon: one arc carved out of a larger one. */
+        <path d="M13 9A5.5 5.5 0 1 1 7 3a4.5 4.5 0 0 0 6 6Z" />
+      )}
+      {mode === "system" && (
+        <>
+          {/* Half-filled circle: outline the full disc, then fill the right
+             hemisphere so it reads as "sun on one side, moon on the other". */}
+          <circle cx="8" cy="8" r="5.5" />
+          <path
+            d="M8 2.5A5.5 5.5 0 0 1 8 13.5Z"
+            fill="currentColor"
+            stroke="none"
+          />
+        </>
+      )}
+    </svg>
+  );
+}
 
 const THEME_LABEL: Record<Theme, string> = {
   light: "Light",
@@ -370,6 +401,11 @@ function HomeContent(): React.JSX.Element {
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
+  // Theme preference used before a user has logged in (or when the user
+  // explicitly logs out). Seeded from localStorage so the auth screen
+  // respects the last choice across refreshes; defaults to "system" so
+  // first-time visitors track OS dark/light preference automatically.
+  const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
   // Shared close helper for the right-hand panels. Also resets panel-specific
   // transient UI so reopening a panel doesn't resurrect stale state.
   const closePanel = useCallback(() => {
@@ -392,10 +428,28 @@ function HomeContent(): React.JSX.Element {
     };
   }, []);
 
+  // Hydrate the pre-auth theme choice from localStorage. We read it after
+  // mount to avoid SSR / hydration mismatches — the initial paint uses the
+  // default ("system"), then flips to the stored choice on the client.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.localStorage.getItem("prism_theme");
+      if (stored === "light" || stored === "dark" || stored === "system") {
+        setPreAuthTheme(stored);
+      }
+    } catch {
+      // localStorage can throw (privacy mode, quota); non-fatal.
+    }
+  }, []);
+
+  // Effective mode: the user's saved choice when logged in, the pre-auth
+  // choice otherwise. Both can be "system", which delegates to the OS.
+  const effectiveThemeMode: Theme = settings?.theme ?? preAuthTheme;
   const resolvedTheme = useMemo<"light" | "dark">(() => {
-    if (settings?.theme === "system") return systemTheme;
-    return settings?.theme ?? "dark";
-  }, [settings?.theme, systemTheme]);
+    if (effectiveThemeMode === "system") return systemTheme;
+    return effectiveThemeMode;
+  }, [effectiveThemeMode, systemTheme]);
 
   const themeClass = useMemo(
     () => (resolvedTheme === "light" ? styles.themeLight : styles.themeDark),
@@ -478,7 +532,7 @@ function HomeContent(): React.JSX.Element {
   async function submitAuth(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setError(null);
     try {
-      if (authMode === "register") await api("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, displayName }) });
+      if (authMode === "register") await api("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, displayName, theme: preAuthTheme }) });
       else await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
       await bootstrap(); setPassword("");
     } catch (err) { setError(err instanceof Error ? err.message : "Auth failed."); }
@@ -626,20 +680,33 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function cycleThemeMode() {
-    if (!settings) return;
-    const previous = settings;
-    const nextTheme = nextThemeMode(settings.theme);
-    setSettings({ ...settings, theme: nextTheme });
-    setError(null);
+    const nextTheme = nextThemeMode(effectiveThemeMode);
+
+    if (settings) {
+      // Logged in: persist the choice server-side, optimistically update the UI.
+      const previous = settings;
+      setSettings({ ...settings, theme: nextTheme });
+      setError(null);
+      try {
+        await api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ theme: nextTheme }),
+        });
+        await refreshSettings();
+      } catch (err) {
+        setSettings(previous);
+        setError(err instanceof Error ? err.message : "Theme switch failed.");
+      }
+      return;
+    }
+
+    // Pre-auth: stash in localStorage so the choice survives reloads and
+    // seeds the new user's theme if they register next.
+    setPreAuthTheme(nextTheme);
     try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ theme: nextTheme }),
-      });
-      await refreshSettings();
-    } catch (err) {
-      setSettings(previous);
-      setError(err instanceof Error ? err.message : "Theme switch failed.");
+      window.localStorage.setItem("prism_theme", nextTheme);
+    } catch {
+      // Non-fatal: if storage is blocked the toggle still works in-memory.
     }
   }
 
@@ -961,27 +1028,58 @@ function HomeContent(): React.JSX.Element {
 
   // ── Auth screen ──
   if (!user) return (
-    <main className={`${styles.authLayout} ${styles.themeDark}`}>
+    <main className={`${styles.authLayout} ${themeClass}`}>
       <div className={styles.card}>
-        <h1 className={styles.wordmark}>
-          <span className={styles.wordmarkText}>Prism</span>
-        </h1>
+        <div className={styles.brandLockup}>
+          {/* Rendered as an <img> so the triangle glow filter can target the
+              tinted artwork and not spill onto the wordmark strokes. */}
+          <img
+            src="/icon.jpg"
+            alt=""
+            aria-hidden="true"
+            className={styles.brandIcon}
+          />
+          <img
+            src="/wordmark.svg"
+            alt="Prism"
+            className={styles.brandWordmark}
+          />
+        </div>
         <p className={styles.muted}>Local-first AI playground. ChatGPT Gov fidelity, FL Studio creativity.</p>
-        <div className={styles.authToggle}>
-          <a
-            href="?mode=register"
-            className={authMode === "register" ? styles.selected : ""}
-            onClick={() => setError(null)}
+        <div className={styles.authControls}>
+          <div className={styles.authToggle}>
+            <a
+              href="?mode=register"
+              className={authMode === "register" ? styles.selected : ""}
+              onClick={() => setError(null)}
+            >
+              Register
+            </a>
+            <a
+              href="?mode=login"
+              className={authMode === "login" ? styles.selected : ""}
+              onClick={() => setError(null)}
+            >
+              Login
+            </a>
+          </div>
+          <button
+            type="button"
+            className={styles.themeToggleButton}
+            onClick={() => void cycleThemeMode()}
+            aria-label={
+              effectiveThemeMode === "system"
+                ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+            }
+            title={
+              effectiveThemeMode === "system"
+                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+            }
           >
-            Register
-          </a>
-          <a
-            href="?mode=login"
-            className={authMode === "login" ? styles.selected : ""}
-            onClick={() => setError(null)}
-          >
-            Login
-          </a>
+            <ThemeGlyph mode={effectiveThemeMode} />
+          </button>
         </div>
         <h2 className={styles.authHeading}>{authMode === "register" ? "Create your account" : "Welcome back"}</h2>
         <form onSubmit={submitAuth} className={styles.form}>
@@ -1105,18 +1203,17 @@ function HomeContent(): React.JSX.Element {
               className={styles.themeToggleButton}
               onClick={() => void cycleThemeMode()}
               aria-label={
-                settings?.theme === "system"
-                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(settings.theme)]}.`
-                  : `Theme: ${THEME_LABEL[settings?.theme ?? "dark"]}. Click to switch to ${THEME_LABEL[nextThemeMode(settings?.theme ?? "dark")]}.`
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
               }
               title={
-                settings?.theme === "system"
+                effectiveThemeMode === "system"
                   ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                  : `Theme: ${THEME_LABEL[settings?.theme ?? "dark"]}`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
               }
-              disabled={!settings}
             >
-              <span aria-hidden="true">{THEME_ICON[settings?.theme ?? "dark"]}</span>
+              <ThemeGlyph mode={effectiveThemeMode} />
             </button>
             {detail && <button type="button" onClick={() => void forkChat()}>Fork</button>}
             {detail && <button type="button" onClick={() => void exportChat()}>Export .md</button>}
