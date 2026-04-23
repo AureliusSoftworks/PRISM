@@ -219,6 +219,14 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error("Email is already registered.");
       }
 
+      // Seed the new user's theme from the client's pre-auth choice so the
+      // auth-screen toggle carries through into the account. Falls back to
+      // "system" (OS preference) to match the DB default.
+      const requestedTheme =
+        body.theme === "light" || body.theme === "dark" || body.theme === "system"
+          ? body.theme
+          : "system";
+
       const userId = randomId(12);
       const salt = randomId(8);
       const passwordHash = hashPassword(password, salt);
@@ -231,7 +239,7 @@ function buildRoutes(): RouteDefinition[] {
           id, email, display_name, password_hash, password_salt,
           wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
           theme, preferred_provider, auto_memory, auto_switch_model, created_at, last_active_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'dark', 'local', 1, 0, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, ?, ?)
       `).run(
         userId,
         email,
@@ -241,6 +249,7 @@ function buildRoutes(): RouteDefinition[] {
         wrappedUserKey.ciphertext,
         wrappedUserKey.iv,
         wrappedUserKey.tag,
+        requestedTheme,
         createdAt,
         createdAt
       );
@@ -260,7 +269,7 @@ function buildRoutes(): RouteDefinition[] {
           displayName,
           role: "user",
           createdAt,
-          theme: "dark",
+          theme: requestedTheme,
           preferredProvider: "local"
         }
       });

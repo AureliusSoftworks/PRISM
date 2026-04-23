@@ -59,7 +59,7 @@ export function createDatabase(): DatabaseSync {
       wrapped_user_key TEXT NOT NULL,
       wrapped_user_key_iv TEXT NOT NULL,
       wrapped_user_key_tag TEXT NOT NULL,
-      theme TEXT NOT NULL DEFAULT 'dark',
+      theme TEXT NOT NULL DEFAULT 'system',
       preferred_provider TEXT NOT NULL DEFAULT 'local',
       provider_locked INTEGER NOT NULL DEFAULT 0,
       auto_memory INTEGER NOT NULL DEFAULT 1,
