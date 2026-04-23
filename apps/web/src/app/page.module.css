@@ -34,6 +34,11 @@
   --accent-soft: color-mix(in srgb, var(--accent) 18%, var(--bg) 82%);
   --accent-glow: color-mix(in srgb, var(--accent) 22%, transparent);
   --accent-text: #0b0b0d;
+  /* --accent-ink: the accent safely-usable AS a foreground (text, icon,
+     border) on top of --bg. Defaults to --accent and is overridden inline
+     when a bot is selected so bright colors get auto-darkened for contrast.
+     See page.tsx shellStyle / ensureContrast(). */
+  --accent-ink: var(--accent);
 
   /* User bubble rides whatever accent is active (gray by default,
      bot color when a bot is selected). Darkens toward one end for
@@ -64,25 +69,37 @@
 }
 
 .themeLight {
-  --bg: #f5f5f7;
-  --bg-deep: #eaeaed;
+  /* Light theme layers:
+     - bg: the page under everything (slight warm gray, not pure white, so
+       floating surfaces actually pop).
+     - bg-surface: cards, sidebar, chat header, compose, panels. Pure white.
+     - bg-elevated: a sub-white for things that float ON a surface (dropdowns,
+       armed delete pill). Lives between bg and bg-surface so it reads as a
+       subtle step.
+     - bg-deep: slightly darker than bg, for recessed rails like the
+       LOCAL/ONLINE track where we want a carved-in look. */
+  --bg: #f1f1f4;
+  --bg-deep: #e6e6ea;
   --bg-surface: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-hover: #ededf0;
-  --bg-active: #dfdfe4;
+  --bg-elevated: #fbfbfc;
+  --bg-hover: #ebebef;
+  --bg-active: #dcdce1;
 
   --fg: #0e0e10;
   --fg-muted: #5c5d63;
   --fg-subtle: #8a8b91;
 
-  --line: #e0e0e4;
-  --line-strong: #c8c8ce;
+  /* Borders get a small bump so card edges don't disappear against white
+     surfaces. Still subtle enough not to feel "heavy". */
+  --line: #d7d7dc;
+  --line-strong: #b8b8bf;
 
   --accent: #2b2b30;
   --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000 15%);
   --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--bg) 88%);
   --accent-glow: color-mix(in srgb, var(--accent) 22%, transparent);
   --accent-text: #ffffff;
+  --accent-ink: var(--accent);
 
   --user-bubble: linear-gradient(
     135deg,
@@ -94,9 +111,11 @@
   --danger: #dc2626;
   --danger-soft: #fde4e6;
 
-  --shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.06);
-  --shadow-md: 0 8px 24px rgba(17, 24, 39, 0.08);
-  --shadow-lg: 0 24px 48px rgba(17, 24, 39, 0.12);
+  /* Nudged up a touch so elevated surfaces actually feel lifted. Still well
+     within the "airy, not heavy" range expected of a light theme. */
+  --shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.09);
+  --shadow-md: 0 8px 24px rgba(17, 24, 39, 0.11);
+  --shadow-lg: 0 24px 48px rgba(17, 24, 39, 0.16);
 
   --app-gradient:
     radial-gradient(ellipse at top left, var(--accent-glow), transparent 55%),
@@ -264,7 +283,7 @@
 .form select:focus,
 .form textarea:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
@@ -435,7 +454,7 @@
 
 .sidebarSelect:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
@@ -735,9 +754,16 @@
 
 .badge {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
+  /* Hair-thin outline in the same ink keeps the pill distinguishable from
+     --bg even when --accent-soft washes out for very bright accents in
+     light theme. At ~30% alpha on the ink, it's near-invisible for the
+     grayscale default and just enough to draw the pill's edge otherwise. */
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent);
   border-radius: 999px;
-  padding: 3px 10px;
+  /* Compensate for the 1px border so the pill keeps the same outer size
+     and alignment it had before the border was added. */
+  padding: 2px 9px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -769,7 +795,7 @@
   height: 56px;
   border-radius: 16px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   display: grid;
   place-items: center;
   font-size: 26px;
@@ -1044,13 +1070,61 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Inline bot picker that lives beside the mode/lock control so all
+   "who/where am I talking?" controls sit in one place above the composer. */
+.composeBotControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-deep);
+}
+
+.composeControlLabel {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  flex-shrink: 0;
+}
+
+.composeBotSelect {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 18px 0 0;
+  cursor: pointer;
+}
+
+.composeBotSelect:focus {
+  outline: none;
+}
+
+.composeBotSelect:disabled {
+  color: var(--fg-muted);
+  cursor: not-allowed;
 }
 
 /* Integrated response-mode control:
-   - left: a horizontal "lightswitch" track with a sliding thumb
-   - right: a docked lock glyph button inside the same rail
-   The thumb never overlaps the lock dock because the track has its own width.
-*/
+   - left: a compact "lightswitch" track with a sliding thumb
+   - right: a background-less lock glyph docked inside the same rail
+   Hover on the lock lights up the WHOLE rail border so the lock's coupling
+   with the switch is obvious. Clicking the lock physically "welds" the thumb
+   to the lock via a pseudo-element that bridges the 4 px gap, so the locked
+   state reads as one continuous raised piece. */
 .modeControl {
   display: inline-flex;
   align-items: center;
@@ -1071,10 +1145,25 @@
   border-color: var(--line-strong);
 }
 
+/* When the padlock is the hover target, treat the whole rail as hot. Tells
+   the user "this button governs the entire control", not just a tiny pill.
+   Browsers without :has() just fall back to the plain .modeLockDock hover. */
+.modeControl:has(.modeLockDock:hover):not(.modeControlLocked) {
+  border-color: var(--accent-ink);
+}
+
+.modeControlLocked {
+  border-color: var(--accent-ink);
+  background: color-mix(in srgb, var(--bg-deep) 88%, var(--bg-surface) 12%);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+}
+
 .modeToggleTrack {
   appearance: none;
   -webkit-appearance: none;
-  width: 92px;
+  /* Width is thumb (56px) + exactly one visible slide step (12px) + 4px inner
+     padding. No dead space for the thumb to float in. */
+  width: 72px;
   height: 30px;
   padding: 2px;
   margin: 0;
@@ -1083,7 +1172,9 @@
   border-radius: 999px;
   position: relative;
   cursor: pointer;
-  overflow: hidden;
+  /* overflow stays visible so the locked-state bridge can extend past the
+     track on the right without being clipped. */
+  overflow: visible;
 }
 
 .modeToggleTrackLocked {
@@ -1093,11 +1184,6 @@
 .modeToggleTrack:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.modeToggleTrackLocked,
-.modeToggleTrackLocked:hover:not(:disabled) {
-  border-color: var(--line-strong);
 }
 
 .modeThumb {
@@ -1115,7 +1201,7 @@
   justify-content: center;
   gap: 6px;
   transition: transform 0.35s ease, box-shadow 0.35s ease,
-    background 0.35s ease, color 0.35s ease;
+    background 0.35s ease, color 0.35s ease, border-radius 0.25s ease;
 }
 
 .modeThumbLocal {
@@ -1123,7 +1209,7 @@
 }
 
 .modeThumbOnline {
-  transform: translateX(32px);
+  transform: translateX(12px);
 }
 
 .themeLight .modeThumb {
@@ -1139,8 +1225,42 @@
   line-height: 1;
 }
 
-/* Right-side lock dock: lives inside the same outer rail, but remains its own
-   button so locking/unlocking doesn't trigger a mode flip. */
+/* Locked: the thumb changes color to an accent tint AND grows a bridge across
+   the 4 px flex gap into the lock dock. Together with the filled lock body
+   (see .modeLockGlyphLocked) the whole right side of the control reads as
+   one welded-shut piece of metal. */
+.modeControlLocked .modeThumb {
+  background: var(--accent-soft);
+  color: var(--fg);
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+  box-shadow: 0 0 0 1px var(--accent), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.modeControlLocked .modeThumb::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  /* Wider than the 4 px flex gap so the join visibly tucks under the lock
+     glyph instead of ending at the seam. */
+  width: 10px;
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent), 0 1px 2px rgba(0, 0, 0, 0.35);
+  /* Square on the left so it butts flush against the squared thumb edge,
+     gently rounded on the right so it tucks under the lock cleanly. */
+  border-radius: 0 4px 4px 0;
+  pointer-events: none;
+}
+
+.themeLight .modeControlLocked .modeThumb,
+.themeLight .modeControlLocked .modeThumb::after {
+  box-shadow: 0 0 0 1px var(--accent), 0 1px 2px rgba(17, 24, 39, 0.1);
+}
+
+/* Right-side lock dock: intentionally transparent at every state. The visual
+   state changes live on the rail border and the glyph color instead. */
 .modeLockDock {
   appearance: none;
   -webkit-appearance: none;
@@ -1158,11 +1278,12 @@
   font: inherit;
   line-height: 1;
   flex-shrink: 0;
-  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  position: relative;
+  z-index: 1;
+  transition: color 0.2s ease;
 }
 
 .modeLockDock:hover:not(:disabled) {
-  background: var(--bg-hover);
   color: var(--fg);
 }
 
@@ -1170,14 +1291,9 @@
   outline: none;
 }
 
-.modeLockDockLocked {
-  background: var(--bg-surface);
-  color: var(--fg);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-}
-
-.themeLight .modeLockDockLocked {
-  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.08);
+.modeLockDockLocked,
+.modeLockDockLocked:hover:not(:disabled) {
+  color: var(--accent-ink);
 }
 
 .modeLockDock:disabled {
@@ -1193,6 +1309,14 @@
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
+  transition: fill 0.2s ease, stroke 0.2s ease;
+}
+
+/* Locked: fill the lock body so the glyph shifts from a hollow outline to
+   a solid padlock silhouette. Pairs with the accent thumb + bridge so the
+   locked state is unmistakable at a glance. */
+.modeLockGlyph.modeLockGlyphLocked .modeLockBody {
+  fill: currentColor;
 }
 
 .composeInner {
@@ -1221,7 +1345,7 @@
 
 .compose textarea:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
@@ -1472,7 +1596,10 @@
   align-items: flex-start;
   gap: 8px;
   position: relative;
-  overflow: hidden;
+  /* overflow visible so the expanded action bubbles can float slightly past
+     the card's right edge. The ::before accent bar below carries a
+     matching border-radius so nothing clips weirdly at the corners. */
+  overflow: visible;
   transition: border-color 0.15s, background 0.15s;
 }
 
@@ -1541,7 +1668,7 @@
 
 .colorSwatchButton:focus-visible {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.06),
     0 0 0 3px var(--accent-glow);
@@ -1714,15 +1841,16 @@
   outline: none;
 }
 
-/* Armed pill anchored inside the card, mirroring the conversation-row
-   confirm affordance so the interaction feels identical across surfaces. */
+/* Armed pill anchored so its ✓ falls under the cursor that just clicked the
+   × bubble (bubbles group uses right: -12px; match that here). Mirrors the
+   conversation-row confirm affordance shape otherwise. */
 .botCardDeleteArmed,
 .botCard:hover .botCardDeleteArmed,
 .botCardDeleteArmed:hover,
 .botCardDeleteArmed:focus-visible {
   position: absolute;
   top: 6px;
-  right: 6px;
+  right: -12px;
   bottom: 6px;
   width: auto;
   min-width: 0;
@@ -1732,8 +1860,9 @@
   align-items: center;
   gap: 8px;
   background: var(--bg-elevated);
-  border-radius: 10px;
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
   z-index: 10;
   outline: none;
 }
@@ -1742,6 +1871,205 @@
   color: #34d399;
   font-size: 20px;
   font-weight: 700;
+}
+
+/* ── Bot card layered action affordance ──
+   Idle ( + ) → Expanded ( [pencil] [×] ) → Armed ( "Are you sure? ✓" )
+   → Editing (inline form replacing the card body). Each layer is a sibling
+   rendered conditionally by React; CSS just handles the visual weight and
+   keeps the animations consistent with the rest of the panel. */
+
+.botCardAction {
+  width: auto;
+  min-width: 28px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.botCard:hover .botCardAction,
+.botCardAction:focus-visible {
+  opacity: 1;
+  outline: none;
+  color: var(--fg);
+}
+
+/* Two-bubble strip shown after clicking the +. Offset rightward past the
+   card's right edge so the delete (×) bubble no longer sits on the exact
+   pixel spot where the idle + button lived. Pencil ends up centered
+   roughly where + was; × is clearly past it. Pairs with
+   `.botCard { overflow: visible }` to let the group float off the card.
+   Uses the existing popIn animation for consistency with the color wheel. */
+.botCardBubbles {
+  position: absolute;
+  top: 6px;
+  /* Negative right anchors the group so its right edge extends ~12px past
+     the card. With the group's 76px width, the pencil ends up ~17px to the
+     LEFT of the idle + spot and the × ends up ~17px to the RIGHT of it —
+     the two expanded actions "straddle" the + position symmetrically,
+     eliminating the "× sits on the + pixel" confusion. */
+  right: -12px;
+  bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  /* A touch more lift than the card so the group reads as a floating
+     toolbar rather than glued to the card's interior. */
+  box-shadow: var(--shadow-md);
+  z-index: 10;
+  animation: popIn 0.16s ease-out;
+}
+
+.botCardBubble {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--bg-surface);
+  color: var(--fg-muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.botCardBubble:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+
+.botCardBubbleDelete {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+}
+
+.botCardBubbleDelete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ── Bot card edit mode ──
+   The normal body (name + prompt + hover affordance) is replaced by an
+   inline form. Keep the accent bar on the left so the bot remains visually
+   identifiable while being edited. */
+.botCardEditing {
+  padding: 14px 16px;
+}
+
+.botCardEditForm {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.botCardEditRow {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.botCardEditRow > input {
+  flex: 1;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 11px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.botCardEditRow > input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.botCardEditForm textarea {
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 9px 11px;
+  resize: vertical;
+  min-height: 72px;
+  max-height: 200px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.botCardEditForm textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.botCardEditActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.botCardEditActions button {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.botCardEditActions button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+
+.botCardEditActions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Double-class selector to beat the generic button rule above without
+   needing !important. */
+.botCardEditActions .botCardEditSave {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.botCardEditActions .botCardEditSave:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--accent-text);
 }
 
 /* Replaces the generate form when LOCAL mode is selected. Neutral (not an
@@ -1779,7 +2107,7 @@
 }
 
 .imageGrid a:hover {
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
   transform: scale(1.02);
 }
 

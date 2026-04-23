@@ -62,6 +62,116 @@ function hexToHsl(hex: string): { h: number; s: number; l: number } {
   return { h, s: s * 100, l: l * 100 };
 }
 
+// WCAG 2 color helpers, duplicated here so the frontend doesn't need to
+// pull in the @localai/shared package at runtime. Mirrored in
+// packages/shared/src/color.ts, which is where the unit tests live —
+// keep these in sync if you tweak the math.
+
+function hexChannels(hex: string): [number, number, number] | null {
+  const clean = hex.replace(/^#/, "").trim();
+  if (clean.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(clean)) return null;
+  return [
+    parseInt(clean.substring(0, 2), 16),
+    parseInt(clean.substring(2, 4), 16),
+    parseInt(clean.substring(4, 6), 16),
+  ];
+}
+
+function relativeLuminance(hex: string): number {
+  const parsed = hexChannels(hex);
+  if (!parsed) return 0;
+  const toLinear = (channel: number): number => {
+    const n = channel / 255;
+    return n <= 0.03928 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4);
+  };
+  const [r, g, b] = parsed;
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+function pickReadableText(hex: string): string {
+  // WCAG threshold: anything brighter than ~0.179 gets a higher contrast
+  // ratio with near-black text than with white text. Bright limes and
+  // yellows sit well above this; deep reds and blues sit well below.
+  return relativeLuminance(hex) > 0.179 ? "#0b0b0d" : "#ffffff";
+}
+
+function contrastRatio(a: string, b: string): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const lighter = Math.max(la, lb);
+  const darker = Math.min(la, lb);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function hexChannelToByte(value: number): string {
+  return Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
+}
+
+function mixHex(a: string, b: string, amount: number): string {
+  const pa = hexChannels(a);
+  const pb = hexChannels(b);
+  if (!pa || !pb) return a;
+  const t = Math.max(0, Math.min(1, amount));
+  return `#${hexChannelToByte(pa[0] + (pb[0] - pa[0]) * t)}${hexChannelToByte(
+    pa[1] + (pb[1] - pa[1]) * t
+  )}${hexChannelToByte(pa[2] + (pb[2] - pa[2]) * t)}`;
+}
+
+// Darken/lighten a color toward black or white until it meets the target
+// contrast ratio against `background`. Keeps the original hue recognisable
+// as long as possible.
+function ensureContrast(foreground: string, background: string, targetRatio = 4.5): string {
+  if (contrastRatio(foreground, background) >= targetRatio) return foreground;
+  const anchor = relativeLuminance(background) > 0.5 ? "#000000" : "#ffffff";
+  let lo = 0;
+  let hi = 1;
+  let best: string = anchor;
+  for (let i = 0; i < 20; i++) {
+    const mid = (lo + hi) / 2;
+    const blended = mixHex(foreground, anchor, mid);
+    if (contrastRatio(blended, background) >= targetRatio) {
+      best = blended;
+      hi = mid;
+    } else {
+      lo = mid;
+    }
+  }
+  return best;
+}
+
+// Clamp a color's luminance into [min, max] by blending toward black (to
+// lower) or white (to raise). Used so light mode can't display eye-searing
+// bright accents and dark mode can't display ink-black accents that
+// disappear into the background.
+function clampLuminance(hex: string, opts: { min?: number; max?: number }): string {
+  const lum = relativeLuminance(hex);
+  const runBinarySearch = (anchor: "#000000" | "#ffffff", target: number): string => {
+    let lo = 0;
+    let hi = 1;
+    let best: string = anchor;
+    for (let i = 0; i < 20; i++) {
+      const mid = (lo + hi) / 2;
+      const blended = mixHex(hex, anchor, mid);
+      const l = relativeLuminance(blended);
+      const satisfies = anchor === "#000000" ? l <= target : l >= target;
+      if (satisfies) {
+        best = blended;
+        hi = mid;
+      } else {
+        lo = mid;
+      }
+    }
+    return best;
+  };
+  if (opts.max !== undefined && lum > opts.max) {
+    return runBinarySearch("#000000", opts.max);
+  }
+  if (opts.min !== undefined && lum < opts.min) {
+    return runBinarySearch("#ffffff", opts.min);
+  }
+  return hex;
+}
+
 type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images";
@@ -162,6 +272,56 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
   return (payload ?? {}) as T;
 }
 
+// ── Inline SVG glyphs ─────────────────────────────────────────────────
+// Kept light-weight and uniform (14px, stroke 2, round caps) so the action
+// affordances on bot cards all feel like they belong to the same set.
+const ICON_PROPS = {
+  width: 14,
+  height: 14,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+};
+
+function IconPlus(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function IconX(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M18 6L6 18" />
+      <path d="M6 6l12 12" />
+    </svg>
+  );
+}
+
+function IconPencil(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
+function IconCheck(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+}
+
 function HomeContent(): React.JSX.Element {
   const searchParams = useSearchParams();
   const authMode = searchParams.get("mode") === "login" ? "login" : "register";
@@ -189,6 +349,17 @@ function HomeContent(): React.JSX.Element {
   // without re-randomizing on every re-render.
   const [newBotColor, setNewBotColor] = useState<string>(() => randomHex());
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
+  // Two-layer action affordance on a bot card:
+  //   expandedBotKey → which card has revealed the [pencil] [×] bubbles
+  //   editingBotId   → which card is currently showing the inline edit form
+  // At most one of each is non-null at any time. Editing a bot supersedes
+  // the expanded state so the pencil click effectively swaps layers.
+  const [expandedBotKey, setExpandedBotKey] = useState<string | null>(null);
+  const [editingBotId, setEditingBotId] = useState<string | null>(null);
+  const [editBotName, setEditBotName] = useState("");
+  const [editBotPrompt, setEditBotPrompt] = useState("");
+  const [editBotColor, setEditBotColor] = useState<string>(() => randomHex());
+  const [editColorWheelOpen, setEditColorWheelOpen] = useState(false);
   // Two-stage delete confirmation. `pendingDeleteKey` holds either a
   // conversation id (sidebar ×) or HEADER_DELETE_KEY (header button).
   // Only one target can be armed at a time, and it auto-disarms after
@@ -204,6 +375,9 @@ function HomeContent(): React.JSX.Element {
   const closePanel = useCallback(() => {
     setPanel(null);
     setColorWheelOpen(false);
+    setEditColorWheelOpen(false);
+    setExpandedBotKey(null);
+    setEditingBotId(null);
   }, []);
 
   useEffect(() => {
@@ -234,18 +408,38 @@ function HomeContent(): React.JSX.Element {
   // undefined style, and the grayscale defaults from the theme block apply.
   const shellStyle = useMemo<React.CSSProperties | undefined>(() => {
     const selectedBot = bots.find(b => b.id === selectedBotId);
-    const color = selectedBot?.color?.trim();
-    if (!color) return undefined;
-    // Pair --accent with an --accent-text that stays legible on it: if the
-    // chosen color is a light pastel, CTAs flip their text to near-black so
-    // the "white-on-color" pattern doesn't wash out.
-    const { l } = hexToHsl(color);
-    const accentText = l > 65 ? "#0b0b0d" : "#ffffff";
+    const raw = selectedBot?.color?.trim();
+    if (!raw) return undefined;
+
+    // Clamp the user's chosen bot color into a theme-appropriate luminance
+    // range BEFORE anything else derives from it. Light mode gets a ceiling
+    // so neon lime doesn't become a CTA/bubble fill; dark mode gets a floor
+    // so ink-black doesn't disappear into the background. The hue stays
+    // recognisable because clampLuminance only blends with black or white
+    // (see packages/shared/src/color.ts for the pinned unit tests).
+    const themeBg = resolvedTheme === "light" ? "#f1f1f4" : "#0a0a0b";
+    const accent =
+      resolvedTheme === "light"
+        ? clampLuminance(raw, { max: 0.55 })
+        : clampLuminance(raw, { min: 0.1 });
+
+    // --accent-text: text that sits ON a solid accent fill (CTA buttons,
+    // user message bubble). Picked from the clamped accent, so bright limes
+    // that were just softened still get the correct black-or-white pair.
+    const accentText = pickReadableText(accent);
+
+    // --accent-ink: accent used AS a foreground on the app background
+    // (badges, empty-state icons, locked padlock). Pushed toward black/white
+    // until it hits 4.5:1 against the actual theme bg so it stays legible
+    // even after the clamp above.
+    const accentInk = ensureContrast(accent, themeBg, 4.5);
+
     return {
-      ["--accent" as string]: color,
+      ["--accent" as string]: accent,
       ["--accent-text" as string]: accentText,
+      ["--accent-ink" as string]: accentInk,
     } as React.CSSProperties;
-  }, [bots, selectedBotId]);
+  }, [bots, selectedBotId, resolvedTheme]);
 
   const bootstrap = useCallback(async () => {
     const controller = new AbortController();
@@ -501,6 +695,12 @@ function HomeContent(): React.JSX.Element {
     pendingDeleteTimerRef.current = setTimeout(() => {
       setPendingDeleteKey(null);
       pendingDeleteTimerRef.current = null;
+      // For bot delete, auto-disarm also collapses the pencil/× bubbles so
+      // the user has to open the layered menu again for another action —
+      // matching the "dismiss = close everything" contract.
+      if (key.startsWith(BOT_DELETE_KEY_PREFIX)) {
+        setExpandedBotKey(null);
+      }
     }, DELETE_CONFIRM_WINDOW_MS);
   }, []);
 
@@ -543,9 +743,11 @@ function HomeContent(): React.JSX.Element {
     }
   }, [panel]);
 
-  // Close the color wheel popover on any outside click or Escape.
+  // Close either color wheel popover on any outside click or Escape. The
+  // create wheel and each per-bot edit wheel share the same affordance
+  // attribute, so a single handler covers both.
   useEffect(() => {
-    if (!colorWheelOpen) return;
+    if (!colorWheelOpen && !editColorWheelOpen) return;
     function handlePointerDown(event: PointerEvent) {
       const target = event.target;
       if (
@@ -555,9 +757,13 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       setColorWheelOpen(false);
+      setEditColorWheelOpen(false);
     }
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setColorWheelOpen(false);
+      if (event.key === "Escape") {
+        setColorWheelOpen(false);
+        setEditColorWheelOpen(false);
+      }
     }
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKey);
@@ -565,7 +771,36 @@ function HomeContent(): React.JSX.Element {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKey);
     };
-  }, [colorWheelOpen]);
+  }, [colorWheelOpen, editColorWheelOpen]);
+
+  // Close the layered bot-card bubbles (pencil + ×) on outside click or
+  // Escape. The bubbles and the armed "Are you sure?" pill both live on
+  // `[data-delete-affordance='true']` elements (so the existing disarm
+  // handler treats them as inside too), plus each bot card's entire right
+  // side shares this attribute to keep clicks on the bubbles themselves
+  // from collapsing the layer.
+  useEffect(() => {
+    if (!expandedBotKey) return;
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest("[data-delete-affordance='true']")
+      ) {
+        return;
+      }
+      setExpandedBotKey(null);
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setExpandedBotKey(null);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [expandedBotKey]);
 
   // Click-to-pick from the color wheel: map click offset to HSL, store as hex.
   const handleColorWheelClick = useCallback(
@@ -630,6 +865,7 @@ function HomeContent(): React.JSX.Element {
   async function deleteBot(id: string) {
     setError(null);
     disarmDelete();
+    setExpandedBotKey(null);
     // Optimistic update: drop the bot from the panel immediately, and if the
     // user had it selected in the sidebar clear that too so subsequent chats
     // don't try to reference a bot that's already gone. Roll back on failure.
@@ -648,6 +884,73 @@ function HomeContent(): React.JSX.Element {
       setError(err instanceof Error ? err.message : "Delete failed.");
     }
   }
+
+  // Enter the inline edit form for a specific bot. Seeds the edit fields
+  // from the current bot values and clears any other layered UI so the
+  // only open affordance is the one the user is working in.
+  function startEditBot(bot: Bot) {
+    disarmDelete();
+    setExpandedBotKey(null);
+    setColorWheelOpen(false);
+    setEditColorWheelOpen(false);
+    setEditBotName(bot.name);
+    setEditBotPrompt(bot.system_prompt ?? "");
+    setEditBotColor(bot.color?.trim() || randomHex());
+    setEditingBotId(bot.id);
+    setError(null);
+  }
+
+  function cancelEditBot() {
+    setEditingBotId(null);
+    setEditColorWheelOpen(false);
+  }
+
+  async function saveBot(id: string) {
+    const trimmedName = editBotName.trim();
+    if (!trimmedName) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/bots/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: trimmedName,
+          systemPrompt: editBotPrompt,
+          color: editBotColor,
+        }),
+      });
+      setEditingBotId(null);
+      setEditColorWheelOpen(false);
+      await refreshBots();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Shared handler for any color-wheel click → picks HSL from offset and
+  // writes hex into the given setter (either the create form's color state
+  // or the edit form's).
+  const handleColorWheelClickForSetter = useCallback(
+    (
+      event: React.MouseEvent<HTMLDivElement>,
+      setColor: (c: string) => void
+    ) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      const x = event.clientX - rect.left - cx;
+      const y = event.clientY - rect.top - cy;
+      const radius = Math.min(rect.width, rect.height) / 2;
+      const distance = Math.sqrt(x * x + y * y);
+      if (distance > radius) return;
+      const hue = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+      const saturation = Math.min(100, (distance / radius) * 100);
+      setColor(hslToHex(hue, saturation, 50));
+    },
+    []
+  );
 
   async function generateImg(e: React.FormEvent) {
     e.preventDefault(); if (!imagePrompt.trim()) return; setBusy(true); setError(null);
@@ -731,24 +1034,6 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.sidebarReadout}>
             {settings?.ollamaModel ?? "Ollama"}
           </div>
-        </div>
-
-        <div className={styles.sidebarField}>
-          <span className={styles.sectionLabel}>Bot</span>
-          <select
-            className={styles.sidebarSelect}
-            value={selectedBotId ?? ""}
-            onChange={e => setSelectedBotId(e.target.value || null)}
-            disabled={bots.length === 0}
-            title={
-              bots.length === 0
-                ? "Default is the only option until you create a custom bot."
-                : undefined
-            }
-          >
-            <option value="">Default</option>
-            {bots.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
         </div>
 
         <label className={styles.checkbox}>
@@ -936,11 +1221,28 @@ function HomeContent(): React.JSX.Element {
         <form className={styles.compose} onSubmit={sendMessage}>
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
           <div className={styles.composeTools}>
+            <div className={styles.composeBotControl}>
+              <span className={styles.composeControlLabel}>Bot</span>
+              <select
+                className={styles.composeBotSelect}
+                value={selectedBotId ?? ""}
+                onChange={e => setSelectedBotId(e.target.value || null)}
+                disabled={bots.length === 0}
+                title={
+                  bots.length === 0
+                    ? "Default is the only option until you create a custom bot."
+                    : undefined
+                }
+              >
+                <option value="">Default</option>
+                {bots.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
             {(() => {
               const isLocal = settings?.preferredProvider === "local";
               const providerLocked = settings?.providerLocked ?? false;
               return (
-                <div className={styles.modeControl}>
+                <div className={`${styles.modeControl} ${providerLocked ? styles.modeControlLocked : ""}`}>
                   <button
                     type="button"
                     className={`${styles.modeToggleTrack} ${providerLocked ? styles.modeToggleTrackLocked : ""}`}
@@ -999,11 +1301,18 @@ function HomeContent(): React.JSX.Element {
                     disabled={!settings}
                   >
                     <svg
-                      className={styles.modeLockGlyph}
+                      className={`${styles.modeLockGlyph} ${providerLocked ? styles.modeLockGlyphLocked : ""}`}
                       viewBox="0 0 16 16"
                       aria-hidden="true"
                     >
-                      <rect x="3.5" y="7" width="9" height="6" rx="1.4" />
+                      <rect
+                        className={styles.modeLockBody}
+                        x="3.5"
+                        y="7"
+                        width="9"
+                        height="6"
+                        rx="1.4"
+                      />
                       {providerLocked ? (
                         <path d="M5.25 7V5.4a2.75 2.75 0 1 1 5.5 0V7" />
                       ) : (
@@ -1164,38 +1473,172 @@ function HomeContent(): React.JSX.Element {
           {bots.map(b => {
             const botKey = `${BOT_DELETE_KEY_PREFIX}${b.id}`;
             const isArmed = pendingDeleteKey === botKey;
-            // Pass the bot's color through a CSS custom property so the
-            // ::before accent bar on .botCard picks it up without inline
-            // styling on the pseudo-element.
-            const cardStyle = b.color
-              ? ({ "--bot-color": b.color } as React.CSSProperties)
+            const isExpanded = expandedBotKey === botKey;
+            const isEditing = editingBotId === b.id;
+            // Live color preview during editing so the accent bar reacts to
+            // the wheel even before Save is clicked.
+            const liveColor = isEditing ? editBotColor : b.color;
+            const cardStyle = liveColor
+              ? ({ "--bot-color": liveColor } as React.CSSProperties)
               : undefined;
+
+            if (isEditing) {
+              const { h, s } = hexToHsl(editBotColor);
+              const rad = (h * Math.PI) / 180;
+              const r = s / 100;
+              const left = 50 + r * 50 * Math.cos(rad);
+              const top = 50 + r * 50 * Math.sin(rad);
+              return (
+                <div key={b.id} className={`${styles.botCard} ${styles.botCardEditing}`} style={cardStyle}>
+                  <form
+                    className={styles.botCardEditForm}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void saveBot(b.id);
+                    }}
+                  >
+                    <div className={styles.botCardEditRow}>
+                      <div className={styles.colorPickerWrapper} data-color-affordance="true">
+                        <button
+                          type="button"
+                          className={styles.colorSwatchButton}
+                          style={{ background: editBotColor }}
+                          onClick={() => setEditColorWheelOpen(o => !o)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setEditBotColor(randomHex());
+                          }}
+                          aria-label="Bot color. Click to open the wheel, right-click for random."
+                          aria-haspopup="dialog"
+                          aria-expanded={editColorWheelOpen}
+                          title="Click to pick a color · right-click: random"
+                        />
+                        {editColorWheelOpen && (
+                          <div
+                            className={styles.colorWheelPopover}
+                            role="dialog"
+                            aria-label="Bot color wheel"
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              setEditBotColor(randomHex());
+                            }}
+                          >
+                            <div
+                              className={styles.colorWheel}
+                              onClick={(e) => handleColorWheelClickForSetter(e, setEditBotColor)}
+                            >
+                              <div
+                                className={styles.colorWheelIndicator}
+                                style={{ left: `${left}%`, top: `${top}%` }}
+                                aria-hidden="true"
+                              />
+                            </div>
+                            <p className={styles.colorWheelHint}>Click: pick · Right-click: random</p>
+                          </div>
+                        )}
+                      </div>
+                      <input
+                        required
+                        placeholder="Bot name"
+                        value={editBotName}
+                        onChange={(e) => setEditBotName(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                    <textarea
+                      placeholder="System prompt"
+                      value={editBotPrompt}
+                      onChange={(e) => setEditBotPrompt(e.target.value)}
+                      rows={3}
+                    />
+                    <div className={styles.botCardEditActions}>
+                      <button type="button" onClick={cancelEditBot} disabled={busy}>
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className={styles.botCardEditSave}
+                        disabled={busy || !editBotName.trim()}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              );
+            }
+
             return (
               <div key={b.id} className={styles.botCard} style={cardStyle}>
                 <div className={styles.botCardBody}>
                   <strong>{b.name}</strong>
                   <small>{b.system_prompt ? b.system_prompt.slice(0, 80) + "..." : "No system prompt"}</small>
                 </div>
-                <button
-                  type="button"
-                  className={`${styles.botCardDelete} ${isArmed ? styles.botCardDeleteArmed : ""}`}
-                  data-delete-affordance="true"
-                  aria-label={isArmed ? `Confirm delete ${b.name}` : `Delete ${b.name}`}
-                  title={isArmed ? undefined : "Delete bot"}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isArmed) {
+                {isArmed ? (
+                  // Armed confirmation pill: full-width overlay on the right,
+                  // clicking it again confirms the delete.
+                  <button
+                    type="button"
+                    className={`${styles.botCardDelete} ${styles.botCardDeleteArmed}`}
+                    data-delete-affordance="true"
+                    aria-label={`Confirm delete ${b.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
                       void deleteBot(b.id);
-                    } else {
-                      armDelete(botKey);
-                    }
-                  }}
-                >
-                  {isArmed && (
+                    }}
+                  >
                     <span className={styles.conversationDeletePrompt}>Are you sure?</span>
-                  )}
-                  <span className={styles.conversationDeleteGlyph}>{isArmed ? "✓" : "×"}</span>
-                </button>
+                    <span className={styles.conversationDeleteGlyph}>✓</span>
+                  </button>
+                ) : isExpanded ? (
+                  // Layered action bubbles: edit (pencil) + delete (red ×).
+                  <div
+                    className={styles.botCardBubbles}
+                    data-delete-affordance="true"
+                    role="group"
+                    aria-label={`${b.name} actions`}
+                  >
+                    <button
+                      type="button"
+                      className={styles.botCardBubble}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEditBot(b);
+                      }}
+                      aria-label={`Edit ${b.name}`}
+                      title="Edit bot"
+                    >
+                      <IconPencil />
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.botCardBubble} ${styles.botCardBubbleDelete}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        armDelete(botKey);
+                      }}
+                      aria-label={`Delete ${b.name}`}
+                      title="Delete bot"
+                    >
+                      <IconX />
+                    </button>
+                  </div>
+                ) : (
+                  // Idle: the + affordance that fades in on card hover / focus.
+                  <button
+                    type="button"
+                    className={styles.botCardAction}
+                    data-delete-affordance="true"
+                    aria-label={`Open actions for ${b.name}`}
+                    title="Actions"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedBotKey(botKey);
+                    }}
+                  >
+                    <IconPlus />
+                  </button>
+                )}
               </div>
             );
           })}
