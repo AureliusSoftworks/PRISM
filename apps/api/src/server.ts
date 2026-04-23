@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { getAppConfig } from "@localai/config";
-import { createDatabase, mapUserProfile } from "./db.ts";
+import { createDatabase } from "./db.ts";
 import { clearCookie, json, parseCookies, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
@@ -14,6 +14,10 @@ import {
   INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS,
   getInactiveAccountCutoff
 } from "./account-retention.ts";
+import {
+  GENERATED_IMAGE_CLEANUP_INTERVAL_MS,
+  purgeExpiredImages
+} from "./image-retention.ts";
 import { deleteVectorsForUser } from "./qdrant.ts";
 
 const config = getAppConfig();
@@ -30,7 +34,7 @@ interface UserDbRow {
   wrapped_user_key: string;
   wrapped_user_key_iv: string;
   wrapped_user_key_tag: string;
-  theme: "light" | "dark";
+  theme: "light" | "dark" | "system";
   preferred_provider: "local" | "openai";
   auto_memory: number;
   auto_switch_model: number;
@@ -305,25 +309,15 @@ function buildRoutes(): RouteDefinition[] {
       const row = getUserRow(userId);
       json(ctx.res, 200, {
         ok: true,
-        user: mapUserProfile({
+        user: {
           id: row.id,
           email: row.email,
           displayName: row.display_name,
-          passwordHash: row.password_hash,
-          passwordSalt: row.password_salt,
-          wrappedUserKey: row.wrapped_user_key,
-          wrappedUserKeyIv: row.wrapped_user_key_iv,
-          wrappedUserKeyTag: row.wrapped_user_key_tag,
-          theme: row.theme,
-          preferredProvider: row.preferred_provider,
-          autoMemory: row.auto_memory,
-          autoSwitchModel: row.auto_switch_model,
-          openAiKeyCiphertext: row.openai_key_ciphertext,
-          openAiKeyIv: row.openai_key_iv,
-          openAiKeyTag: row.openai_key_tag,
+          role: "user",
           createdAt: row.created_at,
-          lastActiveAt: row.last_active_at
-        })
+          theme: row.theme,
+          preferredProvider: row.preferred_provider
+        }
       });
     }),
     route("GET", "/api/conversations", async (ctx) => {
@@ -833,6 +827,14 @@ void purgeInactiveAccounts();
 setInterval(() => {
   void purgeInactiveAccounts();
 }, INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS);
+
+// Periodic purge of generated-image rows past their 30-day retention. OpenAI
+// image URLs expire on their side long before this cutoff, so the rows are
+// just dead references by the time they age out.
+purgeExpiredImages(db);
+setInterval(() => {
+  purgeExpiredImages(db);
+}, GENERATED_IMAGE_CLEANUP_INTERVAL_MS);
 
 const server = createServer(async (req, res) => {
   try {

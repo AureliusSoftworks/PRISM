@@ -1,6 +1,16 @@
-# LocalAI ChatGov
+# Prism
 
-Local-first, multi-user chat workspace hosted on your Windows machine and accessible across your LAN. Per-user isolation, encrypted memory, customizable chatbots, OpenAI image generation, and conversation export — all running headless via Docker Compose.
+A local-first AI playground. The fidelity and per-account isolation of
+ChatGPT Gov, the systems-focus and creative-permission of FL Studio. Runs
+headless on your Windows machine and reachable across the LAN from any
+device. Every account is its own sandbox — encrypted memory, customizable
+chatbots, OpenAI image generation, forkable conversations, markdown export.
+
+**Current release:** v0.1.0. See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+**Branch model:** `main` holds tagged, released versions only; all active
+development happens on `dev`. Every release is a merge of `dev` into `main`
+with a matching `CHANGELOG.md` entry and a semver tag.
 
 ## Architecture
 
@@ -84,6 +94,28 @@ Run `scripts/windows-install-startup-task.ps1` as Administrator to register a ta
 ### Option C: Manual
 Place a shortcut to `scripts/windows-startup.bat` in `shell:startup`.
 
+### Option D: One-click native launcher (no Docker)
+Double-click `start.bat` at the repo root. On first run it verifies/installs Node 22 LTS (via Chocolatey if needed), creates `.env` from `.env.example` and opens it in Notepad for your secrets, installs all workspace dependencies, then builds and launches both services:
+
+- **API** runs in a secondary console titled *"LocalAI API"* via `node --experimental-strip-types apps/api/src/server.ts` and listens on `0.0.0.0:8787`.
+- **Frontend** is built with Next.js `output: "standalone"` and served by `node .next/standalone/apps/web/server.js` on `0.0.0.0:3000`. `start.bat` also stages `.next/static/` and `public/` into the standalone bundle after each build — without this step the browser would load HTML successfully but all JS/CSS would 404.
+
+Session cookies work same-origin because Next's `rewrites()` proxies `/api/*` to `127.0.0.1:8787` server-side. You only need to open **port 3000** on the LAN; port 8787 should stay closed.
+
+### Option E: Dev launcher (`start-dev.bat`)
+For active development on the `dev` branch, double-click `start-dev.bat`. It runs both services in **watch mode** on a separate port + database so you can leave `start.bat` running alongside it:
+
+- **API** on `0.0.0.0:8788` via `node --watch`, using `apps/api/data/localai-dev.db` (prod data stays untouched).
+- **Frontend** on `0.0.0.0:3003` via `next dev` (hot reload, no build step).
+- `NEXT_TELEMETRY_DISABLED=1` is set in both windows.
+
+Hit `Ctrl+C` in either window to stop that process; the other continues running.
+
+One-time Windows Firewall rule for LAN access (PowerShell as admin):
+```powershell
+New-NetFirewallRule -DisplayName "Prism Frontend" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow -Profile Private,Domain
+```
+
 ## Backup & Restore
 
 ### SQLite
@@ -104,7 +136,7 @@ docker run --rm -v localai-local_qdrant_data:/data -v $(pwd):/backup alpine tar 
 
 ## Privacy posture
 
-LocalAI ChatGov is built so that the `LOCAL` mode toggle is a real invariant, not a suggestion:
+Prism is built so that the `LOCAL` mode toggle is a real invariant, not a suggestion:
 
 - **LOCAL mode is strict**: chat routes exclusively through Ollama at `OLLAMA_HOST`. No heuristic can escalate a LOCAL turn to an external provider. Enforced by the unit test in `apps/api/src/__tests__/providers.test.ts`.
 - **OpenAI-only features are gated**: image generation calls OpenAI DALL-E, so it is refused server-side (and hidden client-side) whenever the effective mode is LOCAL.
@@ -117,7 +149,9 @@ LocalAI ChatGov is built so that the `LOCAL` mode toggle is a real invariant, no
 |---------|-----|
 | "Failed to fetch" on frontend | Ensure API container is running: `docker compose logs api` |
 | Ollama not responding | Verify Ollama is running on host and `OLLAMA_HOST` is correct |
-| Can't access from phone | Check Windows firewall allows port 80 inbound |
+| Can't access from phone | Check Windows firewall allows inbound traffic on port 80 (Docker flow) or port 3000 (native `start.bat` flow) |
+| Blank page / white screen over LAN but tab title shows | Next.js standalone output is missing `static/` or `public/`. Re-run `start.bat` (it stages them automatically), or manually `xcopy /E /Y /I ".next\static" ".next\standalone\apps\web\.next\static"` from `apps\web` after `next build` |
+| Frontend error banner shows raw HTML / "Unexpected token" | The API isn't responding on 8787. Check the *"LocalAI API"* console window for a stack trace; the `api()` helper in `apps/web/src/app/page.tsx` now parses non-JSON bodies defensively, so the real cause will surface on the banner |
 | Qdrant connection refused | `docker compose logs qdrant` — may need to recreate volume |
 | Login works but chat fails | Check `ENCRYPTION_MASTER_KEY` matches between restarts |
 

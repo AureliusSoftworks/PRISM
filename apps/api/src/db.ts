@@ -13,8 +13,9 @@ export interface DbUserRecord {
   wrappedUserKey: string;
   wrappedUserKeyIv: string;
   wrappedUserKeyTag: string;
-  theme: "light" | "dark";
+  theme: "light" | "dark" | "system";
   preferredProvider: "local" | "openai";
+  providerLocked: number;
   autoMemory: number;
   autoSwitchModel: number;
   openAiKeyCiphertext: string | null;
@@ -60,6 +61,7 @@ export function createDatabase(): DatabaseSync {
       wrapped_user_key_tag TEXT NOT NULL,
       theme TEXT NOT NULL DEFAULT 'dark',
       preferred_provider TEXT NOT NULL DEFAULT 'local',
+      provider_locked INTEGER NOT NULL DEFAULT 0,
       auto_memory INTEGER NOT NULL DEFAULT 1,
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
       openai_key_ciphertext TEXT,
@@ -160,6 +162,10 @@ export function createDatabase(): DatabaseSync {
   const hasLastActiveAt = userColumns.some((column) => column.name === "last_active_at");
   if (!hasLastActiveAt) {
     db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
+  }
+  const hasProviderLocked = userColumns.some((column) => column.name === "provider_locked");
+  if (!hasProviderLocked) {
+    db.exec("ALTER TABLE users ADD COLUMN provider_locked INTEGER NOT NULL DEFAULT 0;");
   }
   db.exec(`
     UPDATE users

@@ -164,6 +164,36 @@
   letter-spacing: -0.01em;
 }
 
+/* Prism wordmark: monochrome base, subtle rainbow hue-shift across the
+   letters. Clips the gradient to the text itself so the body / background
+   stays untouched. Reads as white at a glance; the chroma is secondary,
+   matching the "monochromatics + bright accents" brand directive. */
+.wordmark {
+  font-size: 36px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  margin: 0;
+  text-transform: uppercase;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.wordmarkText {
+  background: linear-gradient(
+    90deg,
+    #ff6b6b 0%,
+    #ffb454 20%,
+    #ffe66d 40%,
+    #6bff9e 60%,
+    #6bd5ff 80%,
+    #c084fc 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
 .authToggle {
   margin-top: 16px;
   display: inline-flex;
@@ -656,6 +686,23 @@
   border-color: var(--line-strong);
 }
 
+/* Compact icon-only cycle button for Light / Dark / Auto. Lives in the
+   headerActions cluster so it sits in the top-right corner of the window. */
+.themeToggleButton {
+  width: 34px;
+  height: 34px;
+  padding: 0 !important;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.themeToggleButton span {
+  transform: translateY(-1px);
+}
+
 /* Header-level delete uses the same shape as Fork/Export but tints on hover
    so the destructive action reads differently at a glance. The armed state
    is solid danger so the confirm click is unmistakable. */
@@ -766,9 +813,41 @@
   justify-self: start;
   background: var(--bg-surface);
   border: 1px solid var(--line);
-  padding: 12px 14px;
+  padding: 12px 14px 12px 18px;
   border-radius: 14px 14px 14px 4px;
   box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+/* A bot's color belongs on the bubble itself, not as a competing dot next to
+   the HUMAN / LOCAL / ONLINE status marks. The narrow solid bar mirrors the
+   bot cards, while the soft gradient tail makes the accent feel attached to
+   the bubble rather than like a detached border. */
+.messageAssistant::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--message-accent, transparent);
+  border-radius: 14px 0 0 4px;
+}
+
+.messageAssistant::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 22px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--message-accent, transparent) 18%, transparent),
+    transparent
+  );
 }
 
 .messageUser {
@@ -791,23 +870,12 @@
   gap: 8px;
 }
 
-/* Wraps the role / bot-name text so its own bot-color dot sits inline
-   alongside it without disturbing the providerTag sibling. */
+/* Wraps the role / bot-name text so it remains grouped as one inline chunk
+   separate from the provider status tag on the right. */
 .messageRoleLabel {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-
-.messageBotColorDot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  /* Soft outline so very dark bot colors still register on dark surfaces
-     and very light ones still register on light surfaces. */
-  box-shadow: 0 0 0 1px rgba(128, 128, 128, 0.3);
 }
 
 .messageUser h4 {
@@ -978,107 +1046,153 @@
   justify-content: flex-start;
 }
 
-/* Sleek pill switch: a single button that flips between LOCAL and ONLINE.
-   The two inner .modeChip spans act as two equal-width "slots"; only the
-   active slot carries visible content (dot + label). */
-.modeToggle {
-  appearance: none;
-  -webkit-appearance: none;
+/* Integrated response-mode control:
+   - left: a horizontal "lightswitch" track with a sliding thumb
+   - right: a docked lock glyph button inside the same rail
+   The thumb never overlaps the lock dock because the track has its own width.
+*/
+.modeControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--line);
   background: var(--bg-deep);
   border-radius: 999px;
   padding: 3px;
-  margin: 0;
-  display: inline-flex;
-  align-items: stretch;
-  line-height: 1;
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease,
+    background 0.3s ease;
 }
 
-.modeToggle:hover:not(:disabled) {
-  border-color: var(--line-strong);
-}
-
-.modeToggle:focus-visible {
-  outline: none;
+.modeControl:focus-within {
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
-.modeToggle:disabled {
+.modeControl:hover {
+  border-color: var(--line-strong);
+}
+
+.modeToggleTrack {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 92px;
+  height: 30px;
+  padding: 2px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.modeToggleTrackLocked {
+  cursor: not-allowed;
+}
+
+.modeToggleTrack:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.modeChip {
-  /* Fixed slot width so neither chip grows past its content and the total
-     rail stays compact + stable across flips. 64px fits the longer label
-     ("ONLINE") + dot + margin + padding at 9px / 0.06em tracking. */
-  flex: 0 0 64px;
-  padding: 5px 8px;
-  color: var(--fg-subtle);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+.modeToggleTrackLocked,
+.modeToggleTrackLocked:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.modeThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 56px;
+  height: 26px;
   border-radius: 999px;
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg-surface);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  transition: transform 0.35s ease, box-shadow 0.35s ease,
+    background 0.35s ease, color 0.35s ease;
+}
+
+.modeThumbLocal {
+  transform: translateX(0);
+}
+
+.modeThumbOnline {
+  transform: translateX(32px);
+}
+
+.themeLight .modeThumb {
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.08);
+}
+
+.modeThumbLabel {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
   line-height: 1;
-  transition: color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
 }
 
-/* The label lives inside every chip so the layout slots stay stable,
-   but visually collapses when the chip is inactive. */
-.modeChipLabel {
-  display: inline-block;
-  max-width: 0;
-  margin-left: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  opacity: 0;
-  transition:
-    max-width 0.35s ease,
-    margin-left 0.35s ease,
-    opacity 0.3s ease;
-}
-
-/* Inactive dot: fully hidden. The user asked for no dot on the inactive
-   side; we keep it in the DOM and collapse with max-width + margin so the
-   transitions stay smooth. */
-.modeChip .providerDot {
-  max-width: 0;
+/* Right-side lock dock: lives inside the same outer rail, but remains its own
+   button so locking/unlocking doesn't trigger a mode flip. */
+.modeLockDock {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   margin: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition:
-    max-width 0.3s ease,
-    margin-right 0.3s ease,
-    opacity 0.3s ease;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
-.modeChipActive {
+.modeLockDock:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.modeLockDock:focus-visible {
+  outline: none;
+}
+
+.modeLockDockLocked {
   background: var(--bg-surface);
   color: var(--fg);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
-.modeChipActive .providerDot {
-  max-width: 7px;
-  margin-right: 6px;
-  opacity: 1;
-}
-
-.modeChipActive .modeChipLabel {
-  max-width: 8em;
-  opacity: 1;
-}
-
-.themeLight .modeChipActive {
+.themeLight .modeLockDockLocked {
   box-shadow: 0 1px 2px rgba(17, 24, 39, 0.08);
+}
+
+.modeLockDock:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modeLockGlyph {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .composeInner {
@@ -1142,6 +1256,24 @@
 }
 
 /* ── Panels (settings / bots / images) ── */
+.panelOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(2px);
+  z-index: 99;
+  animation: overlayIn 0.18s ease-out;
+}
+
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .panel {
   position: fixed;
   top: 0;

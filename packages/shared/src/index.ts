@@ -6,7 +6,7 @@ export interface UserProfile {
   displayName: string;
   role: UserRole;
   createdAt: string;
-  theme: "light" | "dark";
+  theme: "light" | "dark" | "system";
   preferredProvider: "local" | "openai";
 }
 

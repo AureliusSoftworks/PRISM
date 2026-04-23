@@ -1,9 +1,9 @@
 @echo off
-title LocalAI ChatGov - Starting...
+title Prism - Starting...
 cd /d "%~dp0"
 
 echo ============================================
-echo   LocalAI ChatGov - One-Click Launcher
+echo   Prism - One-Click Launcher
 echo ============================================
 echo.
 
@@ -79,7 +79,7 @@ echo.
 
 REM ── Start API in background, web in foreground ──
 echo Starting API console...
-start "LocalAI API" cmd /k "cd /d ""%~dp0"" && node --experimental-strip-types apps\api\src\server.ts"
+start "Prism API" cmd /k "cd /d ""%~dp0"" && node --experimental-strip-types apps\api\src\server.ts"
 cd apps\web
 echo Building frontend for production...
 call npm run build
@@ -89,4 +89,23 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 echo Starting frontend in production mode...
-call npx next start -H 0.0.0.0 -p 3000
+if not exist ".next\standalone\apps\web\server.js" (
+    echo ERROR: Standalone frontend server was not generated.
+    pause
+    exit /b 1
+)
+
+REM Next.js "output: standalone" does not copy static assets or the public
+REM folder into the standalone bundle. Without these, the browser loads the
+REM HTML document but every JS/CSS/font request 404s, leaving a blank page.
+echo Staging static assets into standalone bundle...
+if exist ".next\static" (
+    xcopy /E /Y /I /Q ".next\static" ".next\standalone\apps\web\.next\static" >nul
+)
+if exist "public" (
+    xcopy /E /Y /I /Q "public" ".next\standalone\apps\web\public" >nul
+)
+
+set "HOSTNAME=0.0.0.0"
+set "PORT=3000"
+call node .next\standalone\apps\web\server.js

@@ -63,7 +63,7 @@ function hexToHsl(hex: string): { h: number; s: number; l: number } {
 }
 
 type Provider = "local" | "openai";
-type Theme = "dark" | "light";
+type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images";
 
 interface SessionUser { id: string; email: string; displayName: string; theme: Theme; preferredProvider: Provider; }
@@ -97,6 +97,7 @@ interface ConversationDetail { id: string; title: string; messages: Message[]; }
 interface UserSettings {
   theme: Theme;
   preferredProvider: Provider;
+  providerLocked: boolean;
   autoMemory: boolean;
   hasOpenAiApiKey: boolean;
   ollamaModel: string;
@@ -114,8 +115,28 @@ interface Bot {
 
 // Accent color pre-selected in the bot creation picker. Users can change it
 // before clicking Create; existing bots with no color just render no accent.
-const DEFAULT_BOT_COLOR = "#6ea8ff";
+// No static default color anymore. The bot color picker seeds itself with
+// a fresh random hex on mount, every time the Bots panel opens, and every
+// time a bot is created — so opening the panel always feels generative.
 interface ImageRecord { id: string; prompt: string; url: string; created_at: string; }
+
+const THEME_ICON: Record<Theme, string> = {
+  light: "☀",
+  dark: "☾",
+  system: "◐",
+};
+
+const THEME_LABEL: Record<Theme, string> = {
+  light: "Light",
+  dark: "Dark",
+  system: "Auto",
+};
+
+function nextThemeMode(current: Theme): Theme {
+  if (current === "light") return "dark";
+  if (current === "dark") return "system";
+  return "light";
+}
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -123,9 +144,22 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     headers: { "content-type": "application/json", ...(options?.headers ?? {}) },
     ...options,
   });
-  const payload = (await res.json()) as T & { ok?: boolean; error?: string };
-  if (!res.ok || payload.ok === false) throw new Error(payload.error ?? `Request failed (${res.status})`);
-  return payload;
+  // Next rewrite failures can come back as plain text, so parse the body
+  // defensively and surface the actual message instead of a JSON parse error.
+  const raw = await res.text();
+  let payload: (T & { ok?: boolean; error?: string }) | null = null;
+  if (raw.trim().length > 0) {
+    try {
+      payload = JSON.parse(raw) as T & { ok?: boolean; error?: string };
+    } catch {
+      payload = null;
+    }
+  }
+  if (!res.ok || payload?.ok === false) {
+    const fallbackMessage = raw.trim() || `Request failed (${res.status})`;
+    throw new Error(payload?.error ?? fallbackMessage);
+  }
+  return (payload ?? {}) as T;
 }
 
 function HomeContent(): React.JSX.Element {
@@ -151,7 +185,9 @@ function HomeContent(): React.JSX.Element {
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [imagePrompt, setImagePrompt] = useState("");
   const [newBotName, setNewBotName] = useState(""); const [newBotPrompt, setNewBotPrompt] = useState("");
-  const [newBotColor, setNewBotColor] = useState(DEFAULT_BOT_COLOR);
+  // Lazy initializer so the very first render already picks a random seed
+  // without re-randomizing on every re-render.
+  const [newBotColor, setNewBotColor] = useState<string>(() => randomHex());
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
   // Two-stage delete confirmation. `pendingDeleteKey` holds either a
   // conversation id (sidebar ×) or HEADER_DELETE_KEY (header button).
@@ -162,8 +198,35 @@ function HomeContent(): React.JSX.Element {
   // Sentinel at the tail of the message stream. The scroll effect brings it
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
+  // Shared close helper for the right-hand panels. Also resets panel-specific
+  // transient UI so reopening a panel doesn't resurrect stale state.
+  const closePanel = useCallback(() => {
+    setPanel(null);
+    setColorWheelOpen(false);
+  }, []);
 
-  const themeClass = useMemo(() => settings?.theme === "light" ? styles.themeLight : styles.themeDark, [settings?.theme]);
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setSystemTheme(media.matches ? "dark" : "light");
+    update();
+    media.addEventListener?.("change", update);
+    media.addListener?.(update);
+    return () => {
+      media.removeEventListener?.("change", update);
+      media.removeListener?.(update);
+    };
+  }, []);
+
+  const resolvedTheme = useMemo<"light" | "dark">(() => {
+    if (settings?.theme === "system") return systemTheme;
+    return settings?.theme ?? "dark";
+  }, [settings?.theme, systemTheme]);
+
+  const themeClass = useMemo(
+    () => (resolvedTheme === "light" ? styles.themeLight : styles.themeDark),
+    [resolvedTheme]
+  );
 
   // When a bot is selected, push its color into the app shell as `--accent`
   // so every --accent-derived token in the CSS (hover, soft, glow, user
@@ -333,7 +396,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function switchProvider(provider: Provider) {
-    if (!settings || settings.preferredProvider === provider) return;
+    if (!settings || settings.providerLocked || settings.preferredProvider === provider) return;
     const previous = settings;
     // Optimistically flip the UI; a failed PATCH rolls back.
     setSettings({ ...settings, preferredProvider: provider });
@@ -347,6 +410,42 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       setSettings(previous);
       setError(err instanceof Error ? err.message : "Provider switch failed.");
+    }
+  }
+
+  async function toggleProviderLock() {
+    if (!settings) return;
+    const previous = settings;
+    const nextLocked = !settings.providerLocked;
+    setSettings({ ...settings, providerLocked: nextLocked });
+    setError(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ providerLocked: nextLocked }),
+      });
+      await refreshSettings();
+    } catch (err) {
+      setSettings(previous);
+      setError(err instanceof Error ? err.message : "Mode lock failed.");
+    }
+  }
+
+  async function cycleThemeMode() {
+    if (!settings) return;
+    const previous = settings;
+    const nextTheme = nextThemeMode(settings.theme);
+    setSettings({ ...settings, theme: nextTheme });
+    setError(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ theme: nextTheme }),
+      });
+      await refreshSettings();
+    } catch (err) {
+      setSettings(previous);
+      setError(err instanceof Error ? err.message : "Theme switch failed.");
     }
   }
 
@@ -435,6 +534,15 @@ function HomeContent(): React.JSX.Element {
     };
   }, [pendingDeleteKey, disarmDelete]);
 
+  // Every time the Bots panel opens, seed the color picker with a fresh
+  // random hex so the starting swatch feels generative instead of always
+  // showing the same default fill.
+  useEffect(() => {
+    if (panel === "bots") {
+      setNewBotColor(randomHex());
+    }
+  }, [panel]);
+
   // Close the color wheel popover on any outside click or Escape.
   useEffect(() => {
     if (!colorWheelOpen) return;
@@ -515,7 +623,7 @@ function HomeContent(): React.JSX.Element {
     });
     setNewBotName("");
     setNewBotPrompt("");
-    setNewBotColor(DEFAULT_BOT_COLOR);
+    setNewBotColor(randomHex());
     await refreshBots();
   }
 
@@ -552,8 +660,10 @@ function HomeContent(): React.JSX.Element {
   if (!user) return (
     <main className={`${styles.authLayout} ${styles.themeDark}`}>
       <div className={styles.card}>
-        <h1>ChatGPT Gov @ Home</h1>
-        <p className={styles.muted}>Local-first multi-user AI chat with encrypted memory.</p>
+        <h1 className={styles.wordmark}>
+          <span className={styles.wordmarkText}>Prism</span>
+        </h1>
+        <p className={styles.muted}>Local-first AI playground. ChatGPT Gov fidelity, FL Studio creativity.</p>
         <div className={styles.authToggle}>
           <a
             href="?mode=register"
@@ -705,6 +815,24 @@ function HomeContent(): React.JSX.Element {
           {incognito && <span className={styles.badge}>Incognito</span>}
           {selectedBotId && <span className={styles.badge}>Bot</span>}
           <div className={styles.headerActions}>
+            <button
+              type="button"
+              className={styles.themeToggleButton}
+              onClick={() => void cycleThemeMode()}
+              aria-label={
+                settings?.theme === "system"
+                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(settings.theme)]}.`
+                  : `Theme: ${THEME_LABEL[settings?.theme ?? "dark"]}. Click to switch to ${THEME_LABEL[nextThemeMode(settings?.theme ?? "dark")]}.`
+              }
+              title={
+                settings?.theme === "system"
+                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                  : `Theme: ${THEME_LABEL[settings?.theme ?? "dark"]}`
+              }
+              disabled={!settings}
+            >
+              <span aria-hidden="true">{THEME_ICON[settings?.theme ?? "dark"]}</span>
+            </button>
             {detail && <button type="button" onClick={() => void forkChat()}>Fork</button>}
             {detail && <button type="button" onClick={() => void exportChat()}>Export .md</button>}
             {detail && selectedId && (() => {
@@ -745,17 +873,21 @@ function HomeContent(): React.JSX.Element {
           )}
           {detail?.messages.map(msg => {
             const status = getMessageStatus(msg);
+            // Push the bot's color into the assistant bubble itself so the
+            // message owns the accent visually, leaving the header dots free
+            // for HUMAN / LOCAL / ONLINE status only.
+            const messageStyle =
+              msg.role === "assistant" && msg.botColor
+                ? ({ "--message-accent": msg.botColor } as React.CSSProperties)
+                : undefined;
             return (
-              <article key={msg.id} className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}>
+              <article
+                key={msg.id}
+                className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
+                style={messageStyle}
+              >
                 <h4>
                   <span className={styles.messageRoleLabel}>
-                    {msg.role === "assistant" && msg.botColor && (
-                      <span
-                        className={styles.messageBotColorDot}
-                        style={{ background: msg.botColor }}
-                        aria-hidden="true"
-                      />
-                    )}
                     {msg.role === "assistant"
                       ? (msg.botName?.trim() || "Assistant")
                       : "You"}
@@ -806,32 +938,80 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.composeTools}>
             {(() => {
               const isLocal = settings?.preferredProvider === "local";
+              const providerLocked = settings?.providerLocked ?? false;
               return (
-                <button
-                  type="button"
-                  className={styles.modeToggle}
-                  onClick={() => {
-                    if (!settings) return;
-                    void switchProvider(isLocal ? "openai" : "local");
-                  }}
-                  aria-label={
-                    isLocal
-                      ? "Response mode: Local. Click to switch to Online."
-                      : "Response mode: Online. Click to switch to Local."
-                  }
-                  aria-pressed={!isLocal}
-                  title={isLocal ? "Switch to Online" : "Switch to Local"}
-                  disabled={!settings}
-                >
-                  <span className={`${styles.modeChip} ${isLocal ? styles.modeChipActive : ""}`}>
-                    <span className={`${styles.providerDot} ${styles.providerDotLocal}`} aria-hidden="true" />
-                    <span className={styles.modeChipLabel}>LOCAL</span>
-                  </span>
-                  <span className={`${styles.modeChip} ${!isLocal ? styles.modeChipActive : ""}`}>
-                    <span className={`${styles.providerDot} ${styles.providerDotOnline}`} aria-hidden="true" />
-                    <span className={styles.modeChipLabel}>ONLINE</span>
-                  </span>
-                </button>
+                <div className={styles.modeControl}>
+                  <button
+                    type="button"
+                    className={`${styles.modeToggleTrack} ${providerLocked ? styles.modeToggleTrackLocked : ""}`}
+                    onClick={() => {
+                      if (!settings || providerLocked) return;
+                      void switchProvider(isLocal ? "openai" : "local");
+                    }}
+                    aria-label={
+                      providerLocked
+                        ? `Response mode locked to ${isLocal ? "Local" : "Online"}.`
+                        : isLocal
+                          ? "Response mode: Local. Click to switch to Online."
+                          : "Response mode: Online. Click to switch to Local."
+                    }
+                    aria-pressed={!isLocal}
+                    aria-disabled={!settings || providerLocked}
+                    title={
+                      providerLocked
+                        ? `Locked to ${isLocal ? "Local" : "Online"}`
+                        : isLocal
+                          ? "Switch to Online"
+                          : "Switch to Local"
+                    }
+                    disabled={!settings}
+                  >
+                    <span
+                      className={`${styles.modeThumb} ${
+                        isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
+                      }`}
+                    >
+                      <span
+                        className={`${styles.providerDot} ${
+                          isLocal ? styles.providerDotLocal : styles.providerDotOnline
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <span className={styles.modeThumbLabel}>
+                        {isLocal ? "LOCAL" : "ONLINE"}
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.modeLockDock} ${providerLocked ? styles.modeLockDockLocked : ""}`}
+                    onClick={() => void toggleProviderLock()}
+                    aria-label={
+                      providerLocked
+                        ? `Unlock response mode. It is currently locked to ${isLocal ? "Local" : "Online"}.`
+                        : `Lock response mode to ${isLocal ? "Local" : "Online"}.`
+                    }
+                    title={
+                      providerLocked
+                        ? `Unlock (${isLocal ? "Local" : "Online"} locked)`
+                        : `Lock ${isLocal ? "Local" : "Online"}`
+                    }
+                    disabled={!settings}
+                  >
+                    <svg
+                      className={styles.modeLockGlyph}
+                      viewBox="0 0 16 16"
+                      aria-hidden="true"
+                    >
+                      <rect x="3.5" y="7" width="9" height="6" rx="1.4" />
+                      {providerLocked ? (
+                        <path d="M5.25 7V5.4a2.75 2.75 0 1 1 5.5 0V7" />
+                      ) : (
+                        <path d="M5.25 7V5.6a2.75 2.75 0 0 1 4.7-1.95" />
+                      )}
+                    </svg>
+                  </button>
+                </div>
               );
             })()}
           </div>
@@ -852,13 +1032,21 @@ function HomeContent(): React.JSX.Element {
         </form>
       </section>
 
+      {panel && (
+        <div
+          className={styles.panelOverlay}
+          onClick={closePanel}
+          aria-hidden="true"
+        />
+      )}
+
       {/* ── Settings panel ── */}
       {panel === "settings" && (
         <div className={styles.panel}>
-          <div className={styles.panelHeader}><h3>Settings</h3><button type="button" className={styles.panelClose} onClick={() => setPanel(null)}>×</button></div>
+          <div className={styles.panelHeader}><h3>Settings</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
           {settings && (
             <form className={styles.form} onSubmit={saveSettings}>
-              <label>Theme<select value={settings.theme} onChange={e => setSettings(p => p ? { ...p, theme: e.target.value as Theme } : p)}><option value="dark">Dark</option><option value="light">Light</option></select></label>
+              <label>Theme<select value={settings.theme} onChange={e => setSettings(p => p ? { ...p, theme: e.target.value as Theme } : p)}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Auto (system)</option></select></label>
               <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
               {settings.hasOpenAiApiKey && (
                 <button
@@ -899,7 +1087,7 @@ function HomeContent(): React.JSX.Element {
       {/* ── Bots panel ── */}
       {panel === "bots" && (
         <div className={styles.panel}>
-          <div className={styles.panelHeader}><h3>Bots</h3><button type="button" className={styles.panelClose} onClick={() => setPanel(null)}>×</button></div>
+          <div className={styles.panelHeader}><h3>Bots</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
           <form className={styles.form} onSubmit={createBot}>
             <div className={styles.botNameRow}>
               <div className={styles.colorPickerWrapper} data-color-affordance="true">
@@ -1022,7 +1210,7 @@ function HomeContent(): React.JSX.Element {
         const canGenerate = settings?.preferredProvider === "openai";
         return (
           <div className={styles.panel}>
-            <div className={styles.panelHeader}><h3>Images</h3><button type="button" className={styles.panelClose} onClick={() => setPanel(null)}>×</button></div>
+            <div className={styles.panelHeader}><h3>Images</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
             {canGenerate ? (
               <form className={styles.form} onSubmit={generateImg}>
                 <input required placeholder="Describe an image..." value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} />
