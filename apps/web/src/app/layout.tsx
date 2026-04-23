@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ChatGPT Gov @ Home",
-  description: "Local-first multi-user conversational workspace",
+  title: "Prism",
+  description: "Local-first AI playground with per-account isolation.",
 };
 
 export default function RootLayout({

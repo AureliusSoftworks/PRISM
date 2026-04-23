@@ -2,7 +2,12 @@
 
 ## Goal
 
-A self-hosted "ChatGPT gov at home" that runs headlessly on a Windows machine, serves a mobile-friendly UI across the LAN, and provides per-user isolation with encrypted memory.
+A self-hosted AI playground — **Prism** — that runs headlessly on a
+Windows machine, serves a mobile-friendly UI across the LAN, and provides
+per-account isolation with encrypted memory. Positioned at the intersection
+of ChatGPT Gov's security posture and FL Studio's systems-minded creative
+permission: every account is its own sealed sandbox for AI testing across
+local and online providers.
 
 ## Stack
 

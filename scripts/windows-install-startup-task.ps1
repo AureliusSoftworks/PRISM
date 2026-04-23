@@ -1,4 +1,4 @@
-# Creates a Windows scheduled task to start LocalAI Docker stack at login.
+# Creates a Windows scheduled task to start the Prism Docker stack at login.
 # Run as Administrator.
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -9,11 +9,11 @@ $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 
 Register-ScheduledTask `
-    -TaskName "LocalAI-AutoStart" `
+    -TaskName "Prism-AutoStart" `
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `
-    -Description "Starts LocalAI Docker Compose stack at user login" `
+    -Description "Starts the Prism Docker Compose stack at user login" `
     -RunLevel Highest
 
-Write-Host "Scheduled task 'LocalAI-AutoStart' registered successfully."
+Write-Host "Scheduled task 'Prism-AutoStart' registered successfully."

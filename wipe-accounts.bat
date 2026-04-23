@@ -1,9 +1,9 @@
 @echo off
-title LocalAI ChatGov - Wipe Accounts
+title Prism - Wipe Accounts
 cd /d "%~dp0"
 
 echo ============================================
-echo   LocalAI ChatGov - Wipe All Accounts
+echo   Prism - Wipe All Accounts
 echo ============================================
 echo.
 echo This will permanently delete all accounts and
