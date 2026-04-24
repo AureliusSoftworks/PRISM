@@ -29,6 +29,14 @@ const config = getAppConfig();
 
 const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
 
+/**
+ * Cap on how many characters of an OpenAI error body we echo back through
+ * the API surface. OpenAI messages are usually short (<200 chars) but we
+ * guard against pathological bodies (HTML error pages from a proxy, etc.)
+ * so we don't dump multi-KB strings into the user's toast.
+ */
+const OPENAI_ERROR_MESSAGE_MAX_CHARS = 500;
+
 function fallbackEmbedding(text: string): number[] {
   const vector = new Array<number>(12).fill(0);
   for (let index = 0; index < text.length; index += 1) {
@@ -37,6 +45,51 @@ function fallbackEmbedding(text: string): number[] {
   }
   const magnitude = Math.sqrt(vector.reduce((acc, v) => acc + v * v, 0)) || 1;
   return vector.map((value) => value / magnitude);
+}
+
+/**
+ * Pull the human-readable reason out of a failed OpenAI response.
+ *
+ * OpenAI returns a JSON body shaped like:
+ *   { "error": { "message": "...", "type": "...", "code": "..." } }
+ *
+ * but proxies, rate-limit pages, and network intermediaries can return
+ * HTML or plain text instead, so we fall back to the raw body and finally
+ * an empty string if the body cannot be read at all. The caller is
+ * responsible for composing the final error message.
+ */
+export async function readOpenAiErrorMessage(
+  response: Response
+): Promise<string> {
+  let raw = "";
+  try {
+    raw = await response.text();
+  } catch {
+    return "";
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: { message?: unknown };
+    };
+    const message = parsed.error?.message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return truncateForDisplay(message.trim());
+    }
+  } catch {
+    // Body wasn't JSON; fall through to raw-text fallback.
+  }
+  return truncateForDisplay(trimmed);
+}
+
+function truncateForDisplay(value: string): string {
+  if (value.length <= OPENAI_ERROR_MESSAGE_MAX_CHARS) {
+    return value;
+  }
+  return `${value.slice(0, OPENAI_ERROR_MESSAGE_MAX_CHARS)}...`;
 }
 
 export class LocalOllamaProvider implements LlmProvider {
@@ -136,7 +189,18 @@ export class OpenAiProvider implements LlmProvider {
       body: JSON.stringify(requestBody)
     });
     if (!response.ok) {
-      throw new Error(`OpenAI request failed (${response.status})`);
+      // Surface OpenAI's actual reason (e.g. "model 'foo' does not exist",
+      // "Incorrect API key provided", context-length errors) instead of a
+      // bare status code. Log the full detail server-side too so a dev
+      // tailing the terminal can diagnose without the user re-hitting it.
+      const detail = await readOpenAiErrorMessage(response);
+      const modelUsed = (requestBody.model as string) ?? OPENAI_DEFAULT_MODEL;
+      console.error(
+        `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
+          detail || "<empty body>"
+        }`
+      );
+      throw new Error(formatOpenAiError("OpenAI request failed", response.status, detail));
     }
     const payload = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
@@ -161,13 +225,35 @@ export class OpenAiProvider implements LlmProvider {
       })
     });
     if (!response.ok) {
-      throw new Error(`OpenAI embedding failed (${response.status})`);
+      const detail = await readOpenAiErrorMessage(response);
+      console.error(
+        `[openai] embeddings failed status=${response.status} detail=${
+          detail || "<empty body>"
+        }`
+      );
+      throw new Error(formatOpenAiError("OpenAI embedding failed", response.status, detail));
     }
     const payload = (await response.json()) as {
       data?: Array<{ embedding?: number[] }>;
     };
     return payload.data?.[0]?.embedding ?? fallbackEmbedding(text);
   }
+}
+
+/**
+ * Build a terse, single-line error message safe to put in a toast. Keeps
+ * the status code for quick triage and tacks on the detail OpenAI gave us
+ * (already length-capped by `readOpenAiErrorMessage`).
+ */
+function formatOpenAiError(
+  prefix: string,
+  status: number,
+  detail: string
+): string {
+  if (!detail) {
+    return `${prefix} (${status})`;
+  }
+  return `${prefix} (${status}): ${detail}`;
 }
 
 /**

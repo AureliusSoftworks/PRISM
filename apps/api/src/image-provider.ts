@@ -1,4 +1,5 @@
 import { getAppConfig } from "@localai/config";
+import { readOpenAiErrorMessage } from "./providers.ts";
 
 export interface ImageGenerationResult {
   url: string;
@@ -35,8 +36,19 @@ export async function generateImage(
   });
 
   if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`OpenAI image generation failed (${response.status}): ${errorBody}`);
+    // Reuse the shared OpenAI error parser so the message we echo back is
+    // the actual `error.message` (e.g. "Your prompt was rejected by our
+    // safety system.") rather than a raw JSON blob dumped verbatim.
+    const detail = await readOpenAiErrorMessage(response);
+    console.error(
+      `[openai] image generation failed status=${response.status} detail=${
+        detail || "<empty body>"
+      }`
+    );
+    const suffix = detail ? `: ${detail}` : "";
+    throw new Error(
+      `OpenAI image generation failed (${response.status})${suffix}`
+    );
   }
 
   const payload = (await response.json()) as {
