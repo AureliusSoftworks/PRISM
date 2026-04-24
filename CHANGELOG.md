@@ -8,6 +8,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Active development happens on the `dev` branch; every release is a merge into
 `main` tagged with its semver version.
 
+## [Unreleased]
+
+### Added
+
+- Long chat messages (over 600 characters) now render with a max-height
+  cap, a soft bottom fade, and a **Show more / Show less** toggle.
+  Applies symmetrically to user and assistant bubbles in both Chat and
+  Sandbox so long responses or pasted blobs stop dominating the viewport
+  until you opt in to the full text.
+- Post-auth **Hub** landing screen. After login you now land on a hub
+  with two mode tiles — **Chat** and **Sandbox** — styled with 5-color
+  prism glyphs (one colour per letter of "prism") that echo the
+  wordmark's per-letter palette.
+- **Sandbox** mode: the full command-center experience (bots, provider
+  toggle, fork, export, images, incognito, advanced settings, memories)
+  — i.e. the entire previous main UI, now reached by choosing the
+  Sandbox tile.
+- **Chat** mode: a stripped-down "personal Prism" surface that keeps
+  the conversation sidebar, message history, and typing indicator but
+  hides every technical knob (bot picker, Local/Online toggle + lock,
+  per-message Fork, Export, Incognito, Bots/Images panels). Chat mode
+  pins its accent to the pink P-letter colour so the surface reads
+  warmer/distinct from Sandbox's grayscale default, uses the default
+  persona for new messages, and routes silently through the user's
+  saved provider.
+- Mode routing is mirrored into the URL (`?view=chat`, `?view=sandbox`)
+  so refreshes preserve the active surface and browser back/forward
+  step naturally between Hub and each mode.
+- Clickable prism wordmark in the Chat and Sandbox chat headers acts
+  as a back-to-Hub affordance.
+
+### Fixed
+
+- Assistant message bubbles no longer collapse to just their header once
+  the conversation grows tall enough to scroll. Root cause was the
+  assistant bubble's `overflow: hidden` (used to clip the accent-gradient
+  pseudo-element to the bubble's rounded corners) silently establishing
+  a new block formatting context, which switched its implicit
+  `min-height: auto` to `0` and let the outer `.messages` grid track
+  shrink the body past the `<p>`'s real height. Swapped to
+  `overflow: clip`, which preserves the clipping without the BFC side
+  effect.
+
 ## [0.1.0] - 2026-04-22
 
 First tagged release. The project ships under the name **Prism** (previously

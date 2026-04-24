@@ -215,62 +215,152 @@
   isolation: isolate;
 }
 
-/* Two blurred rainbow halos behind the icon:
-   - ::before: tighter, brighter inner interference ring
-   - ::after: larger, softer outer wash
-   `mix-blend-mode: screen` keeps the overlaps additive on dark theme, which
-   is what gives the "prism" look where colors crossing one another feel like
-   they brighten rather than muddy. */
+/* Two blurred rainbow halos behind the icon — phase-locked to prevent
+   the "desaturation flash" that happens when complementary hues overlap
+   under mix-blend-mode: screen, plus a gentle organic wobble on top.
+   
+   THE MATH
+     screen(A, B) = 1 − (1 − A)(1 − B) per channel.
+     Screen of complementary hues (e.g. red + cyan) produces pure white
+     = zero saturation. If ring A and ring B rotate at DIFFERENT speeds
+     or in OPPOSITE directions, their relative phase drifts through all
+     values — including 180° — so every few seconds the whole halo
+     flashes pale grey. To keep saturation constant, the relative hue
+     at every spatial overlap must stay inside the analogous window
+     (≲ 90° apart).
+
+   THE FIX (saturation)
+     Both rings share a steady linear spin (`brandPrismSpin`, 6s). They
+     use the same palette; the outer ring's color map is pre-rotated
+     45° via `from 45deg` on its conic-gradient. Rotating in lockstep
+     preserves that 45° hue offset at every spatial point, forever.
+
+   THE WOBBLE (organic motion)
+     On top of the shared spin, each ring gets its own gentle wobble
+     via `--brand-wobble` — inner ±12°/4.3s, outer ±18°/5.7s. Their
+     relative wobble therefore lives in ±30°, so the live hue distance
+     stays in the 15°–75° range (still analogous, still saturated).
+     Periods 4.3s, 5.7s, 5s (breathe), 6s (spin) are mutually
+     non-commensurate, so the whole pattern never visibly repeats.
+
+   COMPOSITION TRICK
+     Two `transform: rotate()` keyframes on the same element clobber
+     each other — so we animate `--brand-spin` and `--brand-wobble` as
+     typed angles (registered via @property) and compose them in a
+     single `transform: rotate(calc(...))`. That's the only way to
+     stack two independent rotations on one pseudo-element. */
+
+@property --brand-spin {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --brand-wobble {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 .brandIconShell::before,
 .brandIconShell::after {
   content: "";
   position: absolute;
-  inset: -14px;
   border-radius: 999px;
   pointer-events: none;
   z-index: 0;
-  background:
-    conic-gradient(
-      from 0deg,
-      #ff5f6d 0deg,
-      #ffb703 70deg,
-      #80ffdb 145deg,
-      #38bdf8 215deg,
-      #8b5cf6 290deg,
-      #ff5f6d 360deg
-    );
-  filter: blur(18px) saturate(1.3);
-  opacity: 0.42;
   mix-blend-mode: screen;
   transform-origin: center;
+  transform: rotate(calc(var(--brand-spin) + var(--brand-wobble)));
 }
 
 .brandIconShell::before {
-  animation: brandPrismSpinA 14s linear infinite;
+  /* Inner ring — full rainbow anchored at 0°, with a small wobble. */
+  inset: -8px;
+  background: conic-gradient(
+    from 0deg,
+    #ff5f6d 0deg,
+    #ffb703 55deg,
+    #80ffdb 120deg,
+    #38bdf8 190deg,
+    #8b5cf6 260deg,
+    #ec4899 320deg,
+    #ff5f6d 360deg
+  );
+  filter: blur(10px) saturate(1.45);
+  opacity: 0.45;
+  animation:
+    brandPrismSpin 6s linear infinite,
+    brandPrismWobbleInner 4.3s ease-in-out infinite;
 }
 
 .brandIconShell::after {
-  inset: -22px;
-  opacity: 0.26;
-  filter: blur(26px) saturate(1.35);
-  animation: brandPrismSpinB 21s linear infinite reverse;
+  /* Outer ring — same palette, anchored at 45°. That 45° offset is the
+     fixed analogous-hue gap that the screen blend will see at every
+     spatial point once the rings are rotating in lockstep. Its wobble
+     is a touch wider than the inner ring's so the outer halo "breathes"
+     a bit more visibly. */
+  inset: -14px;
+  background: conic-gradient(
+    from 45deg,
+    #ff5f6d 0deg,
+    #ffb703 55deg,
+    #80ffdb 120deg,
+    #38bdf8 190deg,
+    #8b5cf6 260deg,
+    #ec4899 320deg,
+    #ff5f6d 360deg
+  );
+  filter: blur(14px) saturate(1.4);
+  opacity: 0.32;
+  animation:
+    brandPrismSpin 6s linear infinite,
+    brandPrismWobbleOuter 5.7s ease-in-out infinite,
+    brandPrismBreathe 5s ease-in-out infinite;
 }
 
-@keyframes brandPrismSpinA {
+@keyframes brandPrismSpin {
   from {
-    transform: rotate(0deg) scale(1);
+    --brand-spin: 0deg;
   }
   to {
-    transform: rotate(360deg) scale(1);
+    --brand-spin: 360deg;
   }
 }
 
-@keyframes brandPrismSpinB {
-  from {
-    transform: rotate(24deg) scale(1.04);
+/* Wobble amplitudes must satisfy: amp_inner + amp_outer ≤ 45°, so the
+   relative hue distance at any overlap stays within the analogous
+   window (baseline 45° ± 30° = 15°–75°). */
+@keyframes brandPrismWobbleInner {
+  0%,
+  100% {
+    --brand-wobble: -12deg;
   }
-  to {
-    transform: rotate(-336deg) scale(1.04);
+  50% {
+    --brand-wobble: 12deg;
+  }
+}
+
+@keyframes brandPrismWobbleOuter {
+  0%,
+  100% {
+    --brand-wobble: -18deg;
+  }
+  50% {
+    --brand-wobble: 18deg;
+  }
+}
+
+/* Shimmer that doesn't touch hue — just opacity. Targets only the outer
+   ring. Period is intentionally not a factor of the spin period so the
+   two never phase-lock into a repeating loop. */
+@keyframes brandPrismBreathe {
+  0%,
+  100% {
+    opacity: 0.32;
+  }
+  50% {
+    opacity: 0.2;
   }
 }
 
@@ -304,11 +394,19 @@
 }
 
 .themeLight .brandIconShell::before {
-  opacity: 0.24;
+  opacity: 0.18;
 }
 
 .themeLight .brandIconShell::after {
-  opacity: 0.16;
+  /* Keep spin + wobble in light mode (both are hue/opacity-neutral and
+     read as subtle "alive" motion) but drop the opacity-breathing —
+     the base 0.12 is already so low that a pulse is imperceptible, and
+     keeping the breathe keyframe would override this direct 0.12
+     declaration (animations win over author declarations). */
+  animation:
+    brandPrismSpin 6s linear infinite,
+    brandPrismWobbleOuter 5.7s ease-in-out infinite;
+  opacity: 0.12;
 }
 
 /* Respect reduced-motion: keep the layered halos but freeze them. The user
@@ -421,6 +519,176 @@
 .btnPrimary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* ── Hub ──
+   Post-auth landing surface. Reuses .authLayout for the background so
+   the login -> hub transition feels like a single continuous page; the
+   card just widens to accommodate the two mode tiles side-by-side. */
+.hubCard {
+  width: 100%;
+  max-width: 640px;
+  background: var(--bg-surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 36px 32px 28px;
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  gap: 22px;
+}
+
+.hubGreeting {
+  font-size: 15px;
+  color: var(--fg-muted);
+  letter-spacing: -0.005em;
+  margin: 2px 0 0;
+}
+
+.hubGreetingName {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.hubTiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+/* Tile is a big clickable card. The prism-colored glyph carries the
+   brand; the tile chrome itself stays neutral so the five colors pop. */
+.hubTile {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 16px;
+  padding: 26px 20px 22px;
+  cursor: pointer;
+  font: inherit;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+  transition: background 0.2s ease, border-color 0.2s ease,
+    box-shadow 0.2s ease, transform 0.08s ease;
+}
+
+.hubTile:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.hubTile:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.hubTile:focus-visible {
+  outline: none;
+  border-color: var(--accent-ink);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.hubTile:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hubTileGlyph {
+  width: 88px;
+  height: 88px;
+  display: grid;
+  place-items: center;
+}
+
+.hubTileGlyph svg {
+  display: block;
+}
+
+.hubTileLabel {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+
+.hubTileTagline {
+  font-size: 12px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+  max-width: 24ch;
+}
+
+/* Utility row at the bottom of the Hub: theme toggle + logout. Keeps
+   the hub's visual weight on the two mode tiles while still giving the
+   user an escape hatch. */
+.hubFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.hubFooter button:not(.themeToggleButton) {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg-muted);
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.hubFooter button:not(.themeToggleButton):hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+
+/* Clickable prism wordmark that lives in the Sandbox chat header as a
+   back-to-Hub affordance. Styled as a quiet hover target so it sits
+   left of the title without competing for attention with it. */
+.hubHomeButton {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  margin-right: 2px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.08s;
+}
+
+.hubHomeButton:hover {
+  background: var(--bg-hover);
+}
+
+.hubHomeButton:active {
+  transform: translateY(1px);
+}
+
+.hubHomeButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.hubHomeWordmark {
+  height: 20px;
+  width: auto;
+  display: block;
 }
 
 /* ── App shell ── */
@@ -985,7 +1253,14 @@
   border-radius: 14px 14px 14px 4px;
   box-shadow: var(--shadow-sm);
   position: relative;
-  overflow: hidden;
+  /* `overflow: clip` (not `hidden`) — we only need to clip the absolutely
+     positioned ::after accent gradient to the bubble's rounded corners.
+     `clip` does that without establishing a new block formatting context,
+     which `hidden` does. The BFC was silently switching this grid item's
+     implicit `min-height: auto` to 0, letting the outer `.messages` grid
+     row shrink the assistant bubble down to just its header height once
+     the conversation grew tall enough to need scrolling. */
+  overflow: clip;
 }
 
 /* A bot's color belongs on the bubble itself, not as a competing dot next to
@@ -1109,6 +1384,72 @@
   word-break: break-word;
   line-height: 1.55;
   font-size: 14px;
+}
+
+/* Wraps the <p> body so we can cap the rendered height on long messages
+   without constraining the parent bubble (which owns the accent bar,
+   border, and status header). Short messages skip this wrapper entirely,
+   so there is zero cost in the common case. */
+.messageBody {
+  display: block;
+  min-width: 0;
+}
+
+/* Collapsed variant: cap the body at ~12 lines and fade the bottom edge
+   so the user sees "there is more text here" without a hard cut-off.
+   Mask-image is a standard CSS property in every evergreen browser; the
+   -webkit- prefix covers older Safari. */
+.messageBodyCollapsed {
+  max-height: 16em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+}
+
+/* Inline toggle shown under collapsible messages. Styled to read as a
+   quiet affordance (muted type, underline on hover) rather than a CTA so
+   it doesn't compete with the message content itself. */
+.messageExpandToggle {
+  appearance: none;
+  -webkit-appearance: none;
+  align-self: start;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 0;
+  margin-top: 2px;
+  transition: color 0.15s;
+}
+
+.messageExpandToggle:hover {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.messageExpandToggle:focus-visible {
+  outline: none;
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* On the user bubble the surrounding text uses --user-bubble-fg, so the
+   toggle picks that up (with a fade) to stay legible against the accent
+   fill instead of the grayscale muted colour from the default theme. */
+.messageUser .messageExpandToggle {
+  color: color-mix(in srgb, var(--accent-text) 70%, transparent);
+}
+
+.messageUser .messageExpandToggle:hover,
+.messageUser .messageExpandToggle:focus-visible {
+  color: var(--accent-text);
 }
 
 .messageActions {

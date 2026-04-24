@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./page.module.css";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
@@ -16,6 +16,28 @@ const HEADER_DELETE_KEY = "__header__";
 // Namespace bot-delete keys so they can share the same single "armed" state
 // slot used for conversation deletion without id collisions.
 const BOT_DELETE_KEY_PREFIX = "bot:";
+
+// Messages whose content exceeds this character count get rendered with a
+// collapsible body: a max-height cap + bottom fade + "Show more" toggle.
+// Chosen so ~12 lines of typical prose fit comfortably; under it, there is
+// no affordance shown and the message renders as before. Tuned alongside
+// the `.messageBodyCollapsed` `max-height` in page.module.css — keep them
+// roughly in sync (shorter content than the cap would leave the toggle
+// dangling below an already-short message).
+const MESSAGE_COLLAPSE_THRESHOLD = 600;
+
+// ── Prism brand palette ───────────────────────────────────────────────
+// One hex per letter of "prism", mirroring the per-letter stroke colors
+// in public/wordmark.svg. Kept as a single source of truth so anywhere we
+// render the 5-color signature look (currently the Hub glyphs) stays in
+// lockstep with the wordmark if the palette ever changes.
+const PRISM_COLORS = {
+  p: "#ff4d6d",
+  r: "#ff9f1c",
+  i: "#b7e63a",
+  s: "#2fd3e3",
+  m: "#7b5cff",
+} as const;
 
 // ── Color math for the bot color wheel ────────────────────────────────
 // The wheel paints a HSL hue ring via conic-gradient with a white-centered
@@ -139,6 +161,15 @@ function ensureContrast(foreground: string, background: string, targetRatio = 4.
   return best;
 }
 
+// Theme-specific baseline backgrounds. Kept as named constants so any
+// helper that needs to reason about "what does --bg evaluate to right
+// now?" doesn't have to duplicate literals. Mirrored in page.module.css
+// under .themeDark / .themeLight — keep these in sync.
+const THEME_BG: Record<"light" | "dark", string> = {
+  light: "#f1f1f4",
+  dark: "#0a0a0b",
+};
+
 // Clamp a color's luminance into [min, max] by blending toward black (to
 // lower) or white (to raise). Used so light mode can't display eye-searing
 // bright accents and dark mode can't display ink-black accents that
@@ -172,9 +203,37 @@ function clampLuminance(hex: string, opts: { min?: number; max?: number }): stri
   return hex;
 }
 
+// Build the --accent / --accent-text / --accent-ink triad for a given raw
+// hex against the active theme background. Shared between the Sandbox
+// bot-color override and the Chat-mode P-color pinning so both code paths
+// apply the same clamp + contrast treatment.
+function deriveAccentStyle(
+  rawHex: string,
+  resolvedTheme: "light" | "dark"
+): React.CSSProperties {
+  const themeBg = THEME_BG[resolvedTheme];
+  const accent =
+    resolvedTheme === "light"
+      ? clampLuminance(rawHex, { max: 0.55 })
+      : clampLuminance(rawHex, { min: 0.1 });
+  const accentText = pickReadableText(accent);
+  const accentInk = ensureContrast(accent, themeBg, 4.5);
+  return {
+    ["--accent" as string]: accent,
+    ["--accent-text" as string]: accentText,
+    ["--accent-ink" as string]: accentInk,
+  } as React.CSSProperties;
+}
+
 type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images";
+// Which post-auth surface is currently rendered. "hub" is the landing
+// screen shown after login; each mode tile navigates to a specific
+// experience. The "chat" mode is scaffolded for a follow-up phase; until
+// then, its Hub tile stays disabled and stray ?view=chat URLs fall
+// through to the Sandbox shell.
+type View = "hub" | "chat" | "sandbox";
 
 interface SessionUser { id: string; email: string; displayName: string; theme: Theme; preferredProvider: Provider; }
 interface ConversationSummary { id: string; title: string; updatedAt: string; }
@@ -353,9 +412,137 @@ function IconCheck(): React.JSX.Element {
   );
 }
 
+// ── Hub glyphs ────────────────────────────────────────────────────────
+// Each Hub tile carries a large 5-color glyph echoing the wordmark's
+// per-letter palette (P / R / I / S / M). Drawn as inline SVG with one
+// coloured element per prism letter so the icons read as miniature
+// wordmark refractions — no single-color fill, no gradient shortcut.
+
+interface GlyphProps {
+  size?: number;
+}
+
+function GlyphChat({ size = 88 }: GlyphProps): React.JSX.Element {
+  // Speech bubble whose perimeter is split into four 90° arcs (P / R / I
+  // / S) plus a small tail (M). Each arc is its own <path> so the colour
+  // transitions happen at the cardinal points, giving the bubble a
+  // refracted-rainbow look without needing gradients.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeWidth={3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Arc 1 (P): top -> right */}
+      <path d="M24 6 A 16 16 0 0 1 40 22" stroke={PRISM_COLORS.p} />
+      {/* Arc 2 (R): right -> bottom */}
+      <path d="M40 22 A 16 16 0 0 1 24 38" stroke={PRISM_COLORS.r} />
+      {/* Arc 3 (I): bottom -> left */}
+      <path d="M24 38 A 16 16 0 0 1 8 22" stroke={PRISM_COLORS.i} />
+      {/* Arc 4 (S): left -> top */}
+      <path d="M8 22 A 16 16 0 0 1 24 6" stroke={PRISM_COLORS.s} />
+      {/* Tail (M): small chevron hanging off the bottom-left of the bubble */}
+      <path d="M18 36 L10 44 L22 38" stroke={PRISM_COLORS.m} />
+    </svg>
+  );
+}
+
+function GlyphSandbox({ size = 88 }: GlyphProps): React.JSX.Element {
+  // Triangular prism with a monochrome input ray striking the left face
+  // and five coloured rays (P / R / I / S / M) fanning out of the right
+  // face. The triangle outline stays in currentColor so it reads on both
+  // themes without us having to thread theme-aware colours in.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Prism body */}
+      <path
+        d="M24 8 L10 34 L38 34 Z"
+        stroke="currentColor"
+        strokeWidth={2.5}
+      />
+      {/* Input ray: neutral "white light" entering the left face */}
+      <path
+        d="M2 24 L15 24"
+        stroke="currentColor"
+        strokeWidth={2}
+        opacity="0.55"
+      />
+      {/* Output rays: 5 prism-coloured beams fanning out of the right face */}
+      <path d="M31 24 L46 8" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      <path d="M31 24 L46 16" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      <path d="M31 24 L46 24" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      <path d="M31 24 L46 32" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      <path d="M31 24 L46 40" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
+// ── Message body with collapsible long content ────────────────────────
+// Wraps the <p> text so we can cap the rendered height on long messages
+// and reveal a "Show more" toggle. Messages under MESSAGE_COLLAPSE_THRESHOLD
+// chars bypass the wrapper entirely — no dangling toggle, no mask cost.
+// Shared between Chat and Sandbox so the behaviour stays consistent.
+
+interface MessageBodyProps {
+  messageId: string;
+  content: string;
+  expanded: boolean;
+  onToggle: (id: string) => void;
+}
+
+function MessageBody({ messageId, content, expanded, onToggle }: MessageBodyProps): React.JSX.Element {
+  const isLong = content.length > MESSAGE_COLLAPSE_THRESHOLD;
+  if (!isLong) {
+    return <p>{content}</p>;
+  }
+  const collapsed = !expanded;
+  return (
+    <>
+      <div className={collapsed ? `${styles.messageBody} ${styles.messageBodyCollapsed}` : styles.messageBody}>
+        <p>{content}</p>
+      </div>
+      <button
+        type="button"
+        className={styles.messageExpandToggle}
+        onClick={() => onToggle(messageId)}
+        aria-expanded={expanded}
+      >
+        {expanded ? "Show less" : "Show more"}
+      </button>
+    </>
+  );
+}
+
 function HomeContent(): React.JSX.Element {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const authMode = searchParams.get("mode") === "login" ? "login" : "register";
+  // Post-auth surface is derived from the URL so refreshes preserve the
+  // current mode and browser back/forward walk naturally between Hub,
+  // Chat, and Sandbox. Anything unrecognised (missing param, stale
+  // values) resolves to the Hub.
+  const viewParam = searchParams.get("view");
+  const view: View =
+    viewParam === "chat" ? "chat"
+      : viewParam === "sandbox" ? "sandbox"
+        : "hub";
+  const navigateToView = useCallback((next: View) => {
+    const href = next === "hub" ? "/" : `/?view=${next}`;
+    router.replace(href);
+  }, [router]);
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [displayName, setDisplayName] = useState("");
   const [user, setUser] = useState<SessionUser | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -368,6 +555,19 @@ function HomeContent(): React.JSX.Element {
   const [openAiKey, setOpenAiKey] = useState("");
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [pendingReply, setPendingReply] = useState(false);
+  // IDs of messages the user has explicitly expanded past the
+  // collapse-long-content cap. Kept as a Set so toggling is O(1) and
+  // independent of message order. Lives in-memory only — reloading a
+  // conversation resets every message to its default (collapsed if long).
+  const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => new Set());
+  const toggleMessageExpand = useCallback((id: string) => {
+    setExpandedMessageIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
   const [panel, setPanel] = useState<PanelView>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bots, setBots] = useState<Bot[]>([]);
@@ -456,44 +656,24 @@ function HomeContent(): React.JSX.Element {
     [resolvedTheme]
   );
 
-  // When a bot is selected, push its color into the app shell as `--accent`
-  // so every --accent-derived token in the CSS (hover, soft, glow, user
-  // bubble, ambient gradient, CTA fills) recomputes. No bot selected →
-  // undefined style, and the grayscale defaults from the theme block apply.
+  // Derive the --accent / --accent-text / --accent-ink triad written onto
+  // the app shell. Two distinct code paths, both of which run the raw hex
+  // through the shared deriveAccentStyle helper so they share the clamp +
+  // contrast treatment:
+  //   - Chat mode: pinned to PRISM_COLORS.p so Chat reads visually
+  //     distinct from Sandbox (warm pink vs. grayscale / bot-driven).
+  //   - Sandbox mode: follows the currently-selected bot's color, or
+  //     returns undefined so the grayscale defaults from the theme block
+  //     apply when no bot is active.
   const shellStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (view === "chat") {
+      return deriveAccentStyle(PRISM_COLORS.p, resolvedTheme);
+    }
     const selectedBot = bots.find(b => b.id === selectedBotId);
     const raw = selectedBot?.color?.trim();
     if (!raw) return undefined;
-
-    // Clamp the user's chosen bot color into a theme-appropriate luminance
-    // range BEFORE anything else derives from it. Light mode gets a ceiling
-    // so neon lime doesn't become a CTA/bubble fill; dark mode gets a floor
-    // so ink-black doesn't disappear into the background. The hue stays
-    // recognisable because clampLuminance only blends with black or white
-    // (see packages/shared/src/color.ts for the pinned unit tests).
-    const themeBg = resolvedTheme === "light" ? "#f1f1f4" : "#0a0a0b";
-    const accent =
-      resolvedTheme === "light"
-        ? clampLuminance(raw, { max: 0.55 })
-        : clampLuminance(raw, { min: 0.1 });
-
-    // --accent-text: text that sits ON a solid accent fill (CTA buttons,
-    // user message bubble). Picked from the clamped accent, so bright limes
-    // that were just softened still get the correct black-or-white pair.
-    const accentText = pickReadableText(accent);
-
-    // --accent-ink: accent used AS a foreground on the app background
-    // (badges, empty-state icons, locked padlock). Pushed toward black/white
-    // until it hits 4.5:1 against the actual theme bg so it stays legible
-    // even after the clamp above.
-    const accentInk = ensureContrast(accent, themeBg, 4.5);
-
-    return {
-      ["--accent" as string]: accent,
-      ["--accent-text" as string]: accentText,
-      ["--accent-ink" as string]: accentInk,
-    } as React.CSSProperties;
-  }, [bots, selectedBotId, resolvedTheme]);
+    return deriveAccentStyle(raw, resolvedTheme);
+  }, [view, bots, selectedBotId, resolvedTheme]);
 
   const bootstrap = useCallback(async () => {
     const controller = new AbortController();
@@ -539,7 +719,19 @@ function HomeContent(): React.JSX.Element {
     finally { setBusy(false); }
   }
 
-  async function logout() { await api("/api/auth/logout", { method: "POST", body: "{}" }); setUser(null); setConversations([]); setDetail(null); setMemories([]); setSettings(null); setBots([]); setImages([]); }
+  async function logout() {
+    await api("/api/auth/logout", { method: "POST", body: "{}" });
+    setUser(null);
+    setConversations([]);
+    setDetail(null);
+    setMemories([]);
+    setSettings(null);
+    setBots([]);
+    setImages([]);
+    // Drop any ?view= param so the next login lands on the Hub instead
+    // of whichever mode the user was last browsing.
+    navigateToView("hub");
+  }
 
   async function deleteAccount() {
     const confirmed = window.confirm(
@@ -592,13 +784,18 @@ function HomeContent(): React.JSX.Element {
     setDraft("");
 
     try {
+      // Chat mode is the stripped-down "personal companion" surface: the
+      // user has no UI to pick bots or toggle Incognito, so new outgoing
+      // messages always use the default persona and leave memory capture
+      // enabled. Sandbox keeps the full picker/toggle contract.
+      const isChatMode = view === "chat";
       const d = await api<{ conversation: ConversationDetail }>("/api/chat", {
         method: "POST",
         body: JSON.stringify({
           conversationId: selectedId ?? undefined,
           message: trimmed,
-          botId: selectedBotId ?? undefined,
-          incognito,
+          botId: isChatMode ? undefined : (selectedBotId ?? undefined),
+          incognito: isChatMode ? false : incognito,
           // Sent explicitly so switching providers in the sidebar takes effect
           // on the very next message, without waiting on the settings PATCH.
           preferredProvider: settings?.preferredProvider,
@@ -1096,7 +1293,366 @@ function HomeContent(): React.JSX.Element {
     </main>
   );
 
-  // ── App shell ──
+  // ── Hub ──
+  // Landing screen shown immediately after login. Reuses the auth
+  // background verbatim so the visual transition from login to hub feels
+  // like a single continuous surface. Each tile represents a post-auth
+  // mode; Chat stays disabled in Phase 1 and lights up once the mode is
+  // built out.
+  if (view === "hub") return (
+    <main className={`${styles.authLayout} ${themeClass}`}>
+      <div className={styles.hubCard}>
+        <div className={styles.brandLockup}>
+          <div className={styles.brandIconShell} aria-hidden="true">
+            <img
+              src="/icon.jpg"
+              alt=""
+              aria-hidden="true"
+              className={styles.brandIcon}
+            />
+          </div>
+          <img
+            src="/wordmark.svg"
+            alt="Prism"
+            className={styles.brandWordmark}
+          />
+        </div>
+        <p className={styles.hubGreeting}>
+          Welcome back, <span className={styles.hubGreetingName}>{user.displayName}</span>.
+        </p>
+        <div className={styles.hubTiles}>
+          <button
+            type="button"
+            className={styles.hubTile}
+            onClick={() => navigateToView("chat")}
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphChat size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Chat</div>
+            <div className={styles.hubTileTagline}>
+              A calm, personal chat with your AI. Just say hello.
+            </div>
+          </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            onClick={() => navigateToView("sandbox")}
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphSandbox size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Sandbox</div>
+            <div className={styles.hubTileTagline}>
+              Full playground: bots, providers, memory, images, and more.
+            </div>
+          </button>
+        </div>
+        <div className={styles.hubFooter}>
+          <button
+            type="button"
+            className={styles.themeToggleButton}
+            onClick={() => void cycleThemeMode()}
+            aria-label={
+              effectiveThemeMode === "system"
+                ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+            }
+            title={
+              effectiveThemeMode === "system"
+                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+            }
+          >
+            <ThemeGlyph mode={effectiveThemeMode} />
+          </button>
+          <button type="button" onClick={() => void logout()}>Logout</button>
+        </div>
+      </div>
+    </main>
+  );
+
+  // ── Chat mode ──
+  // Stripped-down "personal Prism" surface. Shares the sandbox layout
+  // primitives (sidebar, chat pane, messages, composer, Settings panel)
+  // but hides every knob that makes the composer feel technical — no bot
+  // picker, no Local/Online toggle, no fork/export, no Incognito, no
+  // Bots/Images panels. Default persona is silent; provider routing is
+  // whatever the user saved in Settings.
+  if (view === "chat") return (
+    <main className={`${styles.appLayout} ${themeClass}`} style={shellStyle}>
+      <button type="button" className={styles.menuToggle} onClick={() => setSidebarOpen(o => !o)}>☰</button>
+      {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
+
+      <aside className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}>
+        <div className={styles.profile}>
+          <div className={styles.profileAvatar} aria-hidden="true">
+            {(user.displayName || user.email).charAt(0).toUpperCase()}
+          </div>
+          <div className={styles.profileInfo}>
+            <strong>{user.displayName}</strong>
+            <span>{user.email}</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className={styles.newChatButton}
+          onClick={() => { setSelectedId(null); setDetail(null); setSidebarOpen(false); }}
+        >
+          New chat
+        </button>
+
+        <span className={styles.sectionLabel}>Conversations</span>
+        <ul className={styles.conversationList}>
+          {conversations.map(c => {
+            const isSelected = c.id === selectedId;
+            const isArmed = pendingDeleteKey === c.id;
+            return (
+              <li key={c.id} className={styles.conversationRow}>
+                <button
+                  type="button"
+                  className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
+                  onClick={() => { disarmDelete(); void refreshConversation(c.id); setSidebarOpen(false); }}
+                >
+                  {c.title}
+                </button>
+                {!isSelected && (
+                  <button
+                    type="button"
+                    className={`${styles.conversationDelete} ${isArmed ? styles.conversationDeleteArmed : ""}`}
+                    data-delete-affordance="true"
+                    aria-label={isArmed ? `Confirm delete ${c.title}` : `Delete ${c.title}`}
+                    title={isArmed ? undefined : "Delete chat"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isArmed) {
+                        void deleteConversation(c.id);
+                      } else {
+                        armDelete(c.id);
+                      }
+                    }}
+                  >
+                    {isArmed && (
+                      <span className={styles.conversationDeletePrompt}>Are you sure?</span>
+                    )}
+                    <span className={styles.conversationDeleteGlyph}>{isArmed ? "✓" : "×"}</span>
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className={styles.sidebarFooter}>
+          <button type="button" onClick={() => { setPanel("settings"); setSidebarOpen(false); }}>Settings</button>
+          <button type="button" onClick={() => void logout()}>Logout</button>
+        </div>
+      </aside>
+
+      <section className={styles.chatPane}>
+        <header className={styles.chatHeader}>
+          <button
+            type="button"
+            className={styles.hubHomeButton}
+            onClick={() => navigateToView("hub")}
+            aria-label="Back to Hub"
+            title="Back to Hub"
+          >
+            <img src="/wordmark.svg" alt="Prism" className={styles.hubHomeWordmark} />
+          </button>
+          <h2>{detail?.title ?? "New conversation"}</h2>
+          <div className={styles.headerActions}>
+            <button
+              type="button"
+              className={styles.themeToggleButton}
+              onClick={() => void cycleThemeMode()}
+              aria-label={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+              }
+              title={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+              }
+            >
+              <ThemeGlyph mode={effectiveThemeMode} />
+            </button>
+            {detail && selectedId && (() => {
+              const armed = pendingDeleteKey === HEADER_DELETE_KEY;
+              return (
+                <button
+                  type="button"
+                  className={armed ? styles.headerDeleteArmed : styles.headerDelete}
+                  data-delete-affordance="true"
+                  onClick={() => {
+                    if (armed) {
+                      void deleteConversation(selectedId);
+                    } else {
+                      armDelete(HEADER_DELETE_KEY);
+                    }
+                  }}
+                >
+                  {armed ? "✓ Confirm" : "Delete"}
+                </button>
+              );
+            })()}
+          </div>
+        </header>
+
+        <div className={styles.messages}>
+          {!detail && !pendingReply && (
+            <div className={styles.emptyState}>
+              <div className={styles.emptyStateIcon} aria-hidden="true">◈</div>
+              <div className={styles.emptyStateTitle}>What&apos;s on your mind?</div>
+              <p className={styles.emptyStateHint}>
+                Say anything. Prism keeps what matters and lets the rest go.
+              </p>
+            </div>
+          )}
+          {detail?.messages.map(msg => {
+            const status = getMessageStatus(msg);
+            // Historical messages keep their original bot accent bar even
+            // though Chat mode itself doesn't let the user pick a bot.
+            const messageStyle =
+              msg.role === "assistant" && msg.botColor
+                ? ({ "--message-accent": msg.botColor } as React.CSSProperties)
+                : undefined;
+            return (
+              <article
+                key={msg.id}
+                className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
+                style={messageStyle}
+              >
+                <h4>
+                  <span className={styles.messageRoleLabel}>
+                    {msg.role === "assistant"
+                      ? (msg.botName?.trim() || "Prism")
+                      : "You"}
+                  </span>
+                  {status && (
+                    <span
+                      className={styles.providerTag}
+                      title={STATUS_LABEL[status]}
+                    >
+                      <span
+                        className={`${styles.providerDot} ${
+                          status === "human"
+                            ? styles.providerDotHuman
+                            : status === "online"
+                              ? styles.providerDotOnline
+                              : styles.providerDotLocal
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <span className={styles.providerLabel}>{STATUS_LABEL[status]}</span>
+                    </span>
+                  )}
+                </h4>
+                <MessageBody
+                  messageId={msg.id}
+                  content={msg.content}
+                  expanded={expandedMessageIds.has(msg.id)}
+                  onToggle={toggleMessageExpand}
+                />
+                {/* No per-message "Fork here" in Chat mode — forking is a
+                    Sandbox power feature. */}
+              </article>
+            );
+          })}
+          {pendingReply && (
+            <div className={styles.typingIndicator} role="status" aria-live="polite">
+              <span>Thinking</span>
+              <span className={styles.typingDots} aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+            </div>
+          )}
+          <div ref={messagesEndRef} aria-hidden="true" />
+        </div>
+
+        <form className={styles.compose} onSubmit={sendMessage}>
+          {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
+          <div className={styles.composeInner}>
+            <textarea
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              placeholder="Say something..."
+              spellCheck
+              autoCorrect="on"
+              autoCapitalize="sentences"
+              enterKeyHint="send"
+              lang="en"
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(e); } }}
+            />
+            <button type="submit" disabled={pendingReply || !draft.trim()}>Send</button>
+          </div>
+        </form>
+      </section>
+
+      {panel && (
+        <div
+          className={styles.panelOverlay}
+          onClick={closePanel}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Settings is the only panel reachable from Chat — Bots/Images
+          are Sandbox-only affordances. */}
+      {panel === "settings" && (
+        <div className={styles.panel}>
+          <div className={styles.panelHeader}><h3>Settings</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
+          {settings && (
+            <form className={styles.form} onSubmit={saveSettings}>
+              <label>Theme<select value={settings.theme} onChange={e => setSettings(p => p ? { ...p, theme: e.target.value as Theme } : p)}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Auto (system)</option></select></label>
+              <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
+              {settings.hasOpenAiApiKey && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={() => void clearSavedKey()}
+                  disabled={busy}
+                >
+                  Clear saved key
+                </button>
+              )}
+              <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
+              <button type="submit" disabled={busy}>Save</button>
+            </form>
+          )}
+          <div className={styles.dangerZone}>
+            <h4>Danger Zone</h4>
+            <p className={styles.muted}>Accounts inactive for over 60 days are removed automatically. You can also permanently delete this account right now.</p>
+            <button
+              type="button"
+              className={styles.dangerButton}
+              onClick={() => void deleteAccount()}
+              disabled={busy}
+            >
+              Delete account
+            </button>
+          </div>
+          <h4 className={styles.sectionLabel}>Memories</h4>
+          <ul className={styles.memoryList}>
+            {memories.map(m => (
+              <li key={m.id}><p>{m.text}</p><small className={styles.muted}>confidence {m.confidence.toFixed(2)}</small><button type="button" onClick={() => void deleteMemory(m.id)}>Delete</button></li>
+            ))}
+          </ul>
+          {error && <p className={styles.error}>{error}</p>}
+        </div>
+      )}
+    </main>
+  );
+
+  // ── App shell (Sandbox mode) ──
+  // Reached when view !== "hub" and view !== "chat". Any stray ?view=
+  // value falls through here so the user still sees a usable surface
+  // instead of a blank page.
   return (
     <main className={`${styles.appLayout} ${themeClass}`} style={shellStyle}>
       {/* Mobile menu toggle */}
@@ -1197,6 +1753,15 @@ function HomeContent(): React.JSX.Element {
       {/* Chat */}
       <section className={styles.chatPane}>
         <header className={styles.chatHeader}>
+          <button
+            type="button"
+            className={styles.hubHomeButton}
+            onClick={() => navigateToView("hub")}
+            aria-label="Back to Hub"
+            title="Back to Hub"
+          >
+            <img src="/wordmark.svg" alt="Prism" className={styles.hubHomeWordmark} />
+          </button>
           <h2>{detail?.title ?? "New conversation"}</h2>
           {incognito && <span className={styles.badge}>Incognito</span>}
           {selectedBotId && <span className={styles.badge}>Bot</span>}
@@ -1296,7 +1861,12 @@ function HomeContent(): React.JSX.Element {
                     </span>
                   )}
                 </h4>
-                <p>{msg.content}</p>
+                <MessageBody
+                  messageId={msg.id}
+                  content={msg.content}
+                  expanded={expandedMessageIds.has(msg.id)}
+                  onToggle={toggleMessageExpand}
+                />
                 <div className={styles.messageActions}>
                   <button type="button" onClick={() => void forkChat(msg.id)}>Fork here</button>
                 </div>

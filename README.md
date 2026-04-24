@@ -69,6 +69,10 @@ npm run dev
 ## Features
 
 - **Per-user auth** with encrypted session cookies
+- **Post-auth Hub** with two mode tiles, each carrying a 5-colour prism glyph:
+  - **Chat** — a calm, stripped-down "personal Prism" surface (sidebar + history + typing + send; no bots, no provider toggle, no fork/export/incognito)
+  - **Sandbox** — the full command-center experience (bots, provider toggle, fork/export, incognito, images, advanced settings)
+  Mode is mirrored to the URL (`?view=chat` / `?view=sandbox`) so refreshes preserve the current surface.
 - **Strict data isolation** — every query is tenant-scoped by `user_id`
 - **Customizable chatbots** with system prompts, temperature, and model overrides
 - **Forkable chats** — branch from any message in a conversation
