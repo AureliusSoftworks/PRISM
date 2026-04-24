@@ -177,3 +177,183 @@ function blendToTargetLuminance(
   }
   return best;
 }
+
+// ── HSL conversion ────────────────────────────────────────────────────
+// The color picker operates in HSL space (hue × lightness is the 2D grid
+// the user clicks) and downstream helpers normalize accent colors by
+// pinning lightness. These helpers keep the math in one place so every
+// consumer (picker, normalization, tests) uses the same conversion.
+
+/**
+ * Convert a `#rrggbb` hex string to HSL. Returns `{ h: 0..360, s: 0..100,
+ * l: 0..100 }`. Invalid inputs collapse to `{ h: 0, s: 0, l: 50 }` so the
+ * round trip through `hslToHex` returns a safe medium gray rather than
+ * throwing.
+ */
+export function hexToHsl(hex: string): { h: number; s: number; l: number } {
+  const parsed = parseHex(hex);
+  if (!parsed) return { h: 0, s: 0, l: 50 };
+  const r = parsed[0] / 255;
+  const g = parsed[1] / 255;
+  const b = parsed[2] / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let s = 0;
+  let h = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return { h, s: s * 100, l: l * 100 };
+}
+
+/**
+ * Convert HSL (`h: 0..360`, `s: 0..100`, `l: 0..100`) to a `#rrggbb` hex
+ * string. Uses the standard formulation so `hslToHex(hexToHsl(x))` is
+ * idempotent for valid inputs (within 1-bit rounding error per channel).
+ */
+export function hslToHex(h: number, s: number, l: number): string {
+  const sNorm = s / 100;
+  const lNorm = l / 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = sNorm * Math.min(lNorm, 1 - lNorm);
+  const f = (n: number) =>
+    lNorm - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const toHex = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(v * 255)))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+}
+
+/**
+ * HSL-lightness range the app's accent color picker is allowed to produce.
+ * Clamping both ends (not just one) means bot colors never go dark enough
+ * to vanish into the dark-mode shell nor pale enough to wash out against
+ * the light-mode shell, while preserving shade variation in the middle.
+ *
+ * Chosen empirically:
+ *   - 30 is dark enough for a rich deep red / navy without disappearing
+ *     against `#0a0a0b`.
+ *   - 70 is bright enough for a warm pastel without dissolving into
+ *     `#f1f1f4` or losing saturation punch.
+ *   - The band comfortably contains the PRISM logo's letter palette
+ *     (L ≈ 54–68), so a user picking any of those letter hues by hand
+ *     passes through the clamp cleanly.
+ *
+ * Exported as constants (not magic numbers) so downstream consumers — the
+ * color picker UI, the render-time clamp, unit tests — all agree on the
+ * same range.
+ */
+export const ACCENT_LIGHTNESS_MIN = 30;
+export const ACCENT_LIGHTNESS_MAX = 70;
+
+/**
+ * Tighter HSL-lightness band applied specifically when painting accents on
+ * top of the dark-theme shell. The default band [30, 70] works great in
+ * light mode but has two failure modes on `#0a0a0b`:
+ *
+ *   - Deep hues (pure blue/red/purple) at L=30 sit at WCAG luminance
+ *     ~0.02–0.05, well below the contrast threshold that makes a glyph
+ *     stroke readable on the chat bg. The triangle-glyph screenshot that
+ *     motivated this pair of constants was a pure-blue pick that clamped
+ *     to L=30 and became nearly invisible.
+ *   - Pale hues at L=70 glare on a near-black surround; the eye reads
+ *     them as "washed out" rather than "bright" because the surround
+ *     gives nothing to anchor the mid-tones against.
+ *
+ * Pulling both ends 8 units toward L=50 compresses the range to [38, 62]
+ * without squashing shade variation to a single point. Hue and saturation
+ * are left untouched — `clampAccentLightness` only moves the L axis — so
+ * "dark colors get a little brighter, bright colors get a little darker"
+ * in the user's mental model, with saturation preserved.
+ *
+ * If you retune these, bump the `.colorSquare` overlay alpha in
+ * `apps/web/src/app/page.module.css` in lockstep: the visible gradient is
+ * what-you-see = what-you-pick, so the overlay alpha must equal
+ * `(50 - MIN_DARK) / 50 = (MAX_DARK - 50) / 50`.
+ */
+export const ACCENT_LIGHTNESS_MIN_DARK = 38;
+export const ACCENT_LIGHTNESS_MAX_DARK = 62;
+
+/**
+ * Resolve which `[min, max]` HSL-lightness band applies for the given
+ * theme. Factored out so the picker UI, the CSS overlay math, and the
+ * render-time clamp all agree on the same answer for any theme the app
+ * renders in. An unknown / omitted theme falls back to the light-mode
+ * band, which is the historical default.
+ */
+export function accentLightnessBand(
+  theme?: "light" | "dark"
+): { min: number; max: number } {
+  if (theme === "dark") {
+    return { min: ACCENT_LIGHTNESS_MIN_DARK, max: ACCENT_LIGHTNESS_MAX_DARK };
+  }
+  return { min: ACCENT_LIGHTNESS_MIN, max: ACCENT_LIGHTNESS_MAX };
+}
+
+/**
+ * Clamp a color's HSL lightness into the accent band while leaving its
+ * hue and saturation untouched. Pass `theme: "dark"` to apply the tighter
+ * dark-mode band (darks lift, brights dim, saturation identical) so the
+ * same user-picked color renders readable against both theme shells.
+ *
+ * This is the one-stop normalizer for any surface that paints a user-
+ * chosen bot color as an accent (bot card bar, glyph tile, message
+ * bubble, shell --accent triad). Instead of pinning every accent to a
+ * single "shadeless" 50% lightness (which erases the subtle shade
+ * variation users express through the picker), we keep whatever shade
+ * they picked — as long as it's inside the safe band for the active
+ * theme.
+ *
+ * Colors already inside the band pass through unchanged, so the function
+ * is idempotent per theme. Note that a round-trip through the dark-mode
+ * clamp is NOT a no-op against the light-mode clamp: an input clamped for
+ * dark mode may still be outside the light-mode band (or vice versa), so
+ * always clamp for the active theme, never reuse a clamped result across
+ * themes.
+ */
+export function clampAccentLightness(
+  hex: string,
+  theme?: "light" | "dark"
+): string {
+  const { h, s, l } = hexToHsl(hex);
+  const { min, max } = accentLightnessBand(theme);
+  const clamped = Math.max(min, Math.min(max, l));
+  return hslToHex(h, s, clamped);
+}
+
+/**
+ * Compute how strongly a swatch whose fill is `fillHex` needs a
+ * compensating border to remain visible on a surface of `surfaceHex`.
+ *
+ * Returns 0..1:
+ *   - 0 → "no compensation"  (fill and surface are comfortably separated)
+ *   - 1 → "full compensation" (fill is nearly indistinguishable from surface)
+ *
+ * The ramp is linear in WCAG contrast ratio between the two colors,
+ * clamped to `[endRatio, startRatio]` and then eased via `easeInOutQuad`
+ * so the visual transition feels natural instead of popping into view at
+ * the threshold. Callers stitch the returned amount into their own
+ * border-color pipeline — typically by mixing the theme's `--line` token
+ * toward `--fg` by `amount * 100%`.
+ */
+export function swatchBorderCompensation(
+  fillHex: string,
+  surfaceHex: string,
+  opts?: { startRatio?: number; endRatio?: number }
+): number {
+  const start = opts?.startRatio ?? 2.0;
+  const end = opts?.endRatio ?? 1.05;
+  const ratio = contrastRatio(fillHex, surfaceHex);
+  const raw = Math.max(0, Math.min(1, (start - ratio) / (start - end)));
+  // Quadratic ease in/out so the middle of the ramp moves faster than
+  // the ends. Matches the curve a CSS `ease-in-out` timing function would
+  // apply if the browser were driving the transition.
+  return raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
+}
