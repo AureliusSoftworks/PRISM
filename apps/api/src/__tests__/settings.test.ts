@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { resolveNextSettings, type CurrentSettings } from "../settings.ts";
+import {
+  resolveNextSettings,
+  sanitizeOpenAiKeyInput,
+  type CurrentSettings,
+} from "../settings.ts";
 
 /**
  * These tests pin the PATCH /api/settings semantics. They exist because the
@@ -136,6 +140,104 @@ describe("resolveNextSettings — openAiApiKey", () => {
   it("missing field is 'keep' so other PATCHes don't wipe the stored key", () => {
     const next = resolveNextSettings({}, baseline());
     assert.deepEqual(next.openAiKeyIntent, { action: "keep" });
+  });
+
+  it("strips a pasted `OPENAI_API_KEY=` prefix (the real-world foot-gun)", () => {
+    // Users often copy the whole `.env` line and paste it into the Settings
+    // input. Without sanitization, the saved Bearer token would be
+    // `OPENAI_API_KEY=sk-...` and every chat call would 401.
+    const next = resolveNextSettings(
+      { openAiApiKey: "OPENAI_API_KEY=sk-proj-abc" },
+      baseline()
+    );
+    assert.deepEqual(next.openAiKeyIntent, {
+      action: "replace",
+      plaintext: "sk-proj-abc",
+    });
+  });
+
+  it("strips surrounding double quotes", () => {
+    const next = resolveNextSettings(
+      { openAiApiKey: '"sk-proj-abc"' },
+      baseline()
+    );
+    assert.deepEqual(next.openAiKeyIntent, {
+      action: "replace",
+      plaintext: "sk-proj-abc",
+    });
+  });
+
+  it("strips VAR= prefix + inner quotes in one pass", () => {
+    const next = resolveNextSettings(
+      { openAiApiKey: 'OPENAI_API_KEY="sk-proj-abc"' },
+      baseline()
+    );
+    assert.deepEqual(next.openAiKeyIntent, {
+      action: "replace",
+      plaintext: "sk-proj-abc",
+    });
+  });
+});
+
+describe("sanitizeOpenAiKeyInput", () => {
+  it("pass-through for a clean key", () => {
+    assert.equal(sanitizeOpenAiKeyInput("sk-proj-abc123"), "sk-proj-abc123");
+  });
+
+  it("trims outer whitespace", () => {
+    assert.equal(sanitizeOpenAiKeyInput("   sk-proj-abc  "), "sk-proj-abc");
+  });
+
+  it("strips a leading VAR= prefix (uppercase)", () => {
+    assert.equal(
+      sanitizeOpenAiKeyInput("OPENAI_API_KEY=sk-proj-abc"),
+      "sk-proj-abc"
+    );
+  });
+
+  it("strips a leading var= prefix (lowercase, case-insensitive)", () => {
+    assert.equal(
+      sanitizeOpenAiKeyInput("api_key=sk-proj-abc"),
+      "sk-proj-abc"
+    );
+  });
+
+  it("strips surrounding single quotes", () => {
+    assert.equal(sanitizeOpenAiKeyInput("'sk-proj-abc'"), "sk-proj-abc");
+  });
+
+  it("strips both the VAR= prefix AND inner quotes", () => {
+    assert.equal(
+      sanitizeOpenAiKeyInput('OPENAI_API_KEY="sk-proj-abc"'),
+      "sk-proj-abc"
+    );
+  });
+
+  it("strips outer quotes first, then VAR= prefix", () => {
+    assert.equal(
+      sanitizeOpenAiKeyInput('"OPENAI_API_KEY=sk-proj-abc"'),
+      "sk-proj-abc"
+    );
+  });
+
+  it("does NOT touch a key with a dash before the first =", () => {
+    // Guard against accidentally chopping a real key. Real OpenAI keys
+    // start with `sk-` which contains a dash, so the VAR= regex can't
+    // match them even case-insensitively.
+    assert.equal(
+      sanitizeOpenAiKeyInput("sk-proj-Ab12=something"),
+      "sk-proj-Ab12=something"
+    );
+  });
+
+  it("does NOT strip a mismatched quote pair", () => {
+    assert.equal(sanitizeOpenAiKeyInput("\"sk-proj-abc"), "\"sk-proj-abc");
+    assert.equal(sanitizeOpenAiKeyInput("sk-proj-abc'"), "sk-proj-abc'");
+  });
+
+  it("returns empty string for all-whitespace / pure quotes", () => {
+    assert.equal(sanitizeOpenAiKeyInput("   "), "");
+    assert.equal(sanitizeOpenAiKeyInput('""'), "");
   });
 });
 

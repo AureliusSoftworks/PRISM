@@ -49,6 +49,43 @@ function isProvider(value: unknown): value is Provider {
 }
 
 /**
+ * Defensively strip shell/.env decoration that users commonly paste into the
+ * Settings API-key field when copying from a `.env` line or quoted example.
+ *
+ * Handles, in order:
+ *   - Outer whitespace
+ *   - Outer matched quotes:    "sk-..."     -> sk-...
+ *   - Leading `VAR=` prefix:   OPENAI_API_KEY=sk-...  -> sk-...
+ *   - Inner matched quotes:    OPENAI_API_KEY="sk-..." -> sk-...
+ *
+ * The `[A-Z_][A-Z0-9_]*=` shape is deliberately restrictive: real OpenAI keys
+ * start with `sk-` (contains a dash, which isn't in the class) so we can't
+ * accidentally chop a legitimate prefix. Regression-tested in
+ * `__tests__/settings.test.ts`.
+ */
+export function sanitizeOpenAiKeyInput(input: string): string {
+  let value = input.trim();
+  if (isWrappedInMatchedQuotes(value)) {
+    value = value.slice(1, -1).trim();
+  }
+  const prefixMatch = value.match(/^[A-Z_][A-Z0-9_]*=/i);
+  if (prefixMatch) {
+    value = value.slice(prefixMatch[0].length).trim();
+  }
+  if (isWrappedInMatchedQuotes(value)) {
+    value = value.slice(1, -1).trim();
+  }
+  return value;
+}
+
+function isWrappedInMatchedQuotes(value: string): boolean {
+  if (value.length < 2) return false;
+  const first = value[0];
+  const last = value[value.length - 1];
+  return (first === '"' && last === '"') || (first === "'" && last === "'");
+}
+
+/**
  * Merge an incoming PATCH body into the current settings, validating each
  * field. Unknown or invalid fields fall through to the existing value — this
  * is the whole point: a partial PATCH cannot accidentally clobber other
@@ -74,9 +111,13 @@ export function resolveNextSettings(
 
   let openAiKeyIntent: NextSettings["openAiKeyIntent"] = { action: "keep" };
   if (typeof body.openAiApiKey === "string") {
-    const trimmed = body.openAiApiKey.trim();
-    if (trimmed.length > 0) {
-      openAiKeyIntent = { action: "replace", plaintext: trimmed };
+    // Defensive strip: users commonly paste the whole `.env` line
+    // (`OPENAI_API_KEY=sk-...`) or a quoted variant. Without this, the
+    // server would encrypt+store a bogus Bearer token and chat would 401
+    // on every turn with the decorative characters as the key prefix.
+    const sanitized = sanitizeOpenAiKeyInput(body.openAiApiKey);
+    if (sanitized.length > 0) {
+      openAiKeyIntent = { action: "replace", plaintext: sanitized };
     }
     // Empty / whitespace string → keep. This is what lets the Settings
     // form save other fields without wiping a stored key when the field
