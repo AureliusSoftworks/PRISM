@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Light-theme brand icon: rainbow-stroked triangle built from three
+     independent <line> elements, one per edge, each carrying its own
+     linear gradient aligned along that edge's direction.
+
+     Why three lines instead of a single <polygon>: one polygon can only
+     reference a single gradient. A diagonal linear gradient leaves at
+     least one edge running nearly parallel to the gradient direction,
+     which renders that edge as a near-solid color. Splitting into three
+     independent strokes lets every edge carry its own full color sweep.
+
+     The three edge-gradients together distribute the same 7-stop
+     rainbow palette used by the dark-mode conic halos (#ff5f6d,
+     #ffb703, #80ffdb, #38bdf8, #8b5cf6, #ec4899, loop) across the
+     triangle so:
+       - the right edge sweeps pink-red → orange → mint
+       - the bottom edge sweeps mint → sky → purple
+       - the left edge sweeps purple → hot-pink → pink-red (loop close)
+     Each edge's ENDING color equals the next edge's STARTING color, so
+     there is no visible color seam at any vertex.
+
+     stroke-linecap="round" produces semicircular caps at each line's
+     endpoints. Adjacent edges share an endpoint, so their caps overlay
+     as a single disc of radius (stroke-width / 2), visually equivalent
+     to stroke-linejoin="round" on a closed polygon. At 34px display
+     size the overlap reads as a clean rounded vertex.
+
+     Paired in page.module.css with a drop-shadow filter that traces the
+     stroke's alpha, plus a continuous hue-rotate animation that spins
+     the entire palette around the color wheel so light mode mirrors
+     dark mode's chromatic motion language. -->
+<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <defs>
+    <linearGradient id="prismEdgeRight" gradientUnits="userSpaceOnUse" x1="28" y1="6" x2="50" y2="48">
+      <stop offset="0" stop-color="#ff5f6d"/>
+      <stop offset="0.5" stop-color="#ffb703"/>
+      <stop offset="1" stop-color="#80ffdb"/>
+    </linearGradient>
+    <linearGradient id="prismEdgeBottom" gradientUnits="userSpaceOnUse" x1="50" y1="48" x2="6" y2="48">
+      <stop offset="0" stop-color="#80ffdb"/>
+      <stop offset="0.5" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="prismEdgeLeft" gradientUnits="userSpaceOnUse" x1="6" y1="48" x2="28" y2="6">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="0.5" stop-color="#ec4899"/>
+      <stop offset="1" stop-color="#ff5f6d"/>
+    </linearGradient>
+  </defs>
+  <g stroke-width="7" stroke-linecap="round" fill="none">
+    <line x1="28" y1="6" x2="50" y2="48" stroke="url(#prismEdgeRight)"/>
+    <line x1="50" y1="48" x2="6" y2="48" stroke="url(#prismEdgeBottom)"/>
+    <line x1="6" y1="48" x2="28" y2="6" stroke="url(#prismEdgeLeft)"/>
+  </g>
+</svg>

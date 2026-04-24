@@ -262,6 +262,17 @@
   initial-value: 0deg;
 }
 
+/* Drives the light-mode triangle's continuous hue-rotate drift. Must be
+   registered as <angle> so the keyframe animation can interpolate it
+   smoothly; without @property the browser treats the variable as an
+   opaque string and the filter would snap between keyframes instead
+   of tweening. */
+@property --brand-icon-light-hue-shift {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 .brandIconShell::before,
 .brandIconShell::after {
   content: "";
@@ -364,6 +375,21 @@
   }
 }
 
+/* Light-mode sibling of the dark-mode halo spin: rather than physically
+   rotating anything, we shift the triangle's entire rainbow palette
+   around the color wheel via filter: hue-rotate(). A full 360° cycle
+   returns to the exact starting colors, so the loop is seamless. The
+   18s period is slower than dark-mode's 6s halo spin by design — light
+   mode reads as a calmer, more ambient sibling rather than a mirror. */
+@keyframes brandIconLightHueDrift {
+  from {
+    --brand-icon-light-hue-shift: 0deg;
+  }
+  to {
+    --brand-icon-light-hue-shift: 360deg;
+  }
+}
+
 .brandIcon {
   width: 56px;
   height: 56px;
@@ -376,6 +402,20 @@
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.18));
 }
 
+/* Light-theme sibling of .brandIcon. Both icons are rendered in the DOM;
+   CSS picks exactly one per theme (see .themeLight overrides below). The
+   triangle SVG owns its own rainbow gradient so it doesn't need the
+   animated halos for color — a single soft drop-shadow is enough to anchor
+   it on the card's white surface. Hidden by default so the dark theme
+   keeps its boxed tile untouched. */
+.brandIconLight {
+  width: 34px;
+  height: 34px;
+  display: none;
+  position: relative;
+  z-index: 1;
+}
+
 .brandWordmark {
   height: 30px;
   width: auto;
@@ -385,35 +425,60 @@
     drop-shadow(0 0 24px rgba(47, 211, 227, 0.15));
 }
 
-/* Light theme needs a softer hand: "screen" on white mostly disappears, so
-   we switch to normal blend with lower opacity to keep the icon feeling
-   luminous without turning the auth card into a rainbow blot. */
+/* Light theme brand lockup: swap the boxed JPG for the bare triangle,
+   kill the animated halos, and repaint the wordmark in solid black so
+   the whole lockup reads as a calm, high-contrast mark on the white
+   card. `filter: brightness(0)` is the simplest way to force every
+   stroke color in the wordmark SVG to pure black without having to ship
+   a second asset or inline the SVG — it also implicitly clears the
+   orange/cyan glow drop-shadows, which is what we want. */
 .themeLight .brandIconShell::before,
 .themeLight .brandIconShell::after {
-  mix-blend-mode: normal;
+  display: none;
 }
 
-.themeLight .brandIconShell::before {
-  opacity: 0.18;
+.themeLight .brandIcon {
+  display: none;
 }
 
-.themeLight .brandIconShell::after {
-  /* Keep spin + wobble in light mode (both are hue/opacity-neutral and
-     read as subtle "alive" motion) but drop the opacity-breathing —
-     the base 0.12 is already so low that a pulse is imperceptible, and
-     keeping the breathe keyframe would override this direct 0.12
-     declaration (animations win over author declarations). */
-  animation:
-    brandPrismSpin 6s linear infinite,
-    brandPrismWobbleOuter 5.7s ease-in-out infinite;
-  opacity: 0.12;
+.themeLight .brandIconLight {
+  display: block;
+  /* Filter chain, in order:
+       1. hue-rotate spins the triangle's rainbow gradient around the
+          color wheel. Must run FIRST so it doesn't also rotate the
+          shadow colors below — drop-shadow()'s color applies to the
+          output of everything that came before it, so putting
+          hue-rotate after would hue-cycle the shadow's tint along with
+          the triangle, making the ground plane feel unstable.
+       2. Two stacked drop-shadows produce material-style layered
+          elevation on the triangle's stroke alpha only (no rectangular
+          bounding-box shadow since the SVG has no fill):
+            - ambient: wider/softer for the general "floating" cue
+            - contact: tight/darker right under the stroke for crisp
+              edge definition against the white card background.
+     A single soft shadow at 12px blur was too diffuse to read on a
+     white surface; the contact layer is what makes the border visibly
+     lift. */
+  filter:
+    hue-rotate(var(--brand-icon-light-hue-shift))
+    drop-shadow(0 4px 8px rgba(17, 24, 39, 0.32))
+    drop-shadow(0 1px 2px rgba(17, 24, 39, 0.45));
+  animation: brandIconLightHueDrift 18s linear infinite;
 }
 
-/* Respect reduced-motion: keep the layered halos but freeze them. The user
-   still gets the prismatic look, just without the rotation. */
+.themeLight .brandWordmark {
+  filter: brightness(0);
+}
+
+/* Respect reduced-motion: keep the layered halos and light-mode
+   triangle hue-drift visible, but freeze them. The user still gets the
+   full prismatic look in both themes — dark mode shows static rainbow
+   halos, light mode shows the triangle at its rest palette — just
+   without any ongoing rotation. */
 @media (prefers-reduced-motion: reduce) {
   .brandIconShell::before,
-  .brandIconShell::after {
+  .brandIconShell::after,
+  .themeLight .brandIconLight {
     animation: none;
   }
 }
@@ -581,8 +646,25 @@
   box-shadow: var(--shadow-md);
 }
 
+/* Prismatic press feedback. Replaces the plain 1px drop with a gentle
+   scale-in plus a warm-ring / cool-halo shadow using the same two hues
+   that glow behind .brandWordmark — so the press moment visually
+   echoes the wordmark's signature glow instead of introducing a new
+   palette. Scale 0.98 is deliberately tiny; the tile shouldn't shrink
+   enough to feel like a shove, just enough to acknowledge the touch.
+   Reduced-motion users get the color cue without the transform
+   (handled just below). */
 .hubTile:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: scale(0.98);
+  box-shadow:
+    0 0 0 1px rgba(255, 159, 28, 0.28),
+    0 6px 22px rgba(47, 211, 227, 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hubTile:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 .hubTile:focus-visible {
@@ -603,8 +685,15 @@
   place-items: center;
 }
 
+/* Let the wrapper size be authoritative. The glyph components render
+   with an explicit width/height attribute (default 88), so without this
+   override any CSS-only resize of .hubTileGlyph would clip rather than
+   scale the SVG. width/height:100% hands full control back to CSS and
+   keeps the explicit prop as just the intrinsic/default. */
 .hubTileGlyph svg {
   display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .hubTileLabel {
@@ -918,18 +1007,21 @@
   font-weight: 500;
 }
 
-/* Delete hotzone on the right edge of each non-active row.
-   Invisible at rest so the sidebar reads as a clean list of titles; it
-   fades in the moment the cursor enters its own hit area (or it takes
-   keyboard focus, or it's armed for confirmation). The × itself carries
-   all the visual feedback — no background tint, just the glyph. */
+/* ── Sidebar × delete button ───────────────────────────────────────────
+   Baseline: the × is always visible but very subtle (muted fg at ~45 %
+   opacity) so it reads as a quiet "here, if you need it" affordance
+   without ever competing with the chat titles. Hover / focus lights it
+   up to embossed danger red with a soft glow — the emboss comes from
+   the text-shadow, not a background tint, so the button stays a clean
+   glyph-on-negative-space.                                              */
 .conversationDelete {
   width: auto;
   min-width: 32px;
   padding: 0 8px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--danger);
+  color: var(--fg-muted);
+  opacity: 0.45;
   border-radius: 8px;
   cursor: pointer;
   font: inherit;
@@ -937,32 +1029,41 @@
   line-height: 1;
   display: grid;
   place-items: center;
-  opacity: 0;
-  transition: opacity 0.15s, transform 0.12s;
+  transition:
+    opacity 130ms ease-out,
+    color 130ms ease-out,
+    text-shadow 130ms ease-out,
+    transform 130ms ease-out;
+  /* Disable the iOS/Android long-press callout and text-selection halo
+     so the press-and-hold gesture feels native instead of surfacing
+     the browser's own context menu mid-hold. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .conversationDelete:hover,
 .conversationDelete:focus-visible {
   opacity: 1;
-  background: transparent;
   color: var(--danger);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--danger) 32%, transparent);
   outline: none;
 }
 
 .conversationDeleteGlyph {
   display: inline-grid;
   place-items: center;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 500;
   line-height: 1;
   transform: translateY(-2px);
 }
 
-/* Armed state: the button becomes a single pill anchored to the × spot
-   and grows leftward to reveal "Are you sure?". The ✓ stays pinned to
-   the right edge (under the cursor the user just clicked from); the
-   prompt text fills in on the left so the whole thing reads as one
-   cohesive confirm affordance. */
+/* Single-chat armed confirm: unchanged pill anchored to the × slot that
+   grows leftward to reveal "Are you sure?". The armed state deliberately
+   opts out of the glow / tilt visuals (text-shadow: none, transform:
+   none) so the per-row confirm reads as "this is a separate, calmer
+   decision" and not a continuation of the hold gesture. */
 .conversationDeleteArmed,
 .conversationDeleteArmed:hover,
 .conversationDeleteArmed:focus-visible {
@@ -982,11 +1083,11 @@
   box-shadow: var(--shadow-sm);
   z-index: 10;
   outline: none;
+  text-shadow: none;
+  transform: none;
 }
 
 .conversationDeleteArmed .conversationDeleteGlyph {
-  /* Green check to pair with the red × — affirmative/success hue on the
-     confirm gesture regardless of theme. */
   color: #34d399;
   font-size: 20px;
   font-weight: 700;
@@ -998,6 +1099,107 @@
   font-weight: 500;
   color: var(--fg);
   letter-spacing: 0.005em;
+}
+
+/* ── Hold-to-delete-all: immediate glow + static tilt ──────────────────
+   As soon as the user presses-and-holds any × (or the header Delete),
+   React ships two discrete signals:
+     • `[data-holding="true"]` on the button under the finger,
+     • `data-delete-holding="true"` on the parent `<ul>`.
+   Every × in the list immediately lights up red with a subtle glow.
+   The held × scales up slightly more than the crowd (so the user can
+   always find their anchor); the siblings each adopt a small static
+   tilt angle cycled via `:nth-child(4n+x)` so the row reads as a group
+   of "aware but not yet shaking" targets. This happens with a 130 ms
+   transition — essentially immediate by human perception — matching the
+   user's ask for "immediately glow brighter". The 900 ms JS timer runs
+   in parallel; when it fires, the list gets the armed-all attribute
+   and the ×'s snap into the iOS jiggle.                                */
+
+/* Held ×: the one under your finger. Brighter glow, bigger scale, no
+   tilt so it stays the visual anchor of the gesture. */
+.conversationDelete[data-holding="true"],
+.conversationDelete[data-holding="true"]:hover,
+.conversationDelete[data-holding="true"]:focus-visible {
+  opacity: 1;
+  color: var(--danger);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--danger) 60%, transparent);
+  transform: scale(1.18);
+  outline: none;
+}
+
+/* Crowd ×'s: every other × in the list. Glow + individual tilt. */
+.conversationList[data-delete-holding="true"]
+  .conversationDelete:not([data-holding="true"]):not(.conversationDeleteArmed) {
+  opacity: 1;
+  color: var(--danger);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--danger) 40%, transparent);
+  transform: scale(1.08) rotate(var(--delete-tilt, 0deg));
+}
+
+/* Four tilt variants, chosen to feel organic. Each row of the list
+   gets one of these based on its nth-child position; the cycle length
+   of 4 is short enough to cover most sidebars, long enough that
+   neighbouring rows land on different angles. */
+.conversationList[data-delete-holding="true"]
+  .conversationRow:nth-child(4n+1) .conversationDelete { --delete-tilt: -4deg; }
+.conversationList[data-delete-holding="true"]
+  .conversationRow:nth-child(4n+2) .conversationDelete { --delete-tilt:  3deg; }
+.conversationList[data-delete-holding="true"]
+  .conversationRow:nth-child(4n+3) .conversationDelete { --delete-tilt: -2deg; }
+.conversationList[data-delete-holding="true"]
+  .conversationRow:nth-child(4n+4) .conversationDelete { --delete-tilt:  5deg; }
+
+/* ── Armed-all: iOS home-screen jiggle ─────────────────────────────────
+   Once the 900 ms threshold hits, `data-delete-armed-all` lights up
+   the whole list and every × starts to jiggle — same cadence as the
+   classic iOS "edit mode" icon wobble (130 ms period, ±2.4°). Two
+   phase-shifted keyframes (A on odd rows, B on even rows with a
+   negative animation-delay to offset mid-cycle) prevent the crowd from
+   moving in unison, which would read as "everything synchronised by a
+   computer" instead of "each thing has its own little life". */
+
+@keyframes conversationDeleteJiggleA {
+  0%, 100% { transform: scale(1.08) rotate(-2.4deg); }
+  50%      { transform: scale(1.08) rotate( 2.4deg); }
+}
+
+@keyframes conversationDeleteJiggleB {
+  0%, 100% { transform: scale(1.08) rotate( 2.4deg); }
+  50%      { transform: scale(1.08) rotate(-2.4deg); }
+}
+
+.conversationList[data-delete-armed-all="true"] .conversationDelete,
+.conversationList[data-delete-armed-all="true"]
+  .conversationDelete:not([data-holding="true"]):not(.conversationDeleteArmed) {
+  opacity: 1;
+  color: var(--danger);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 45%, transparent);
+  animation: conversationDeleteJiggleA 130ms linear infinite;
+  /* Wipe any stale --delete-tilt from the pre-threshold phase — the
+     jiggle keyframes own the transform now. */
+  --delete-tilt: 0deg;
+}
+
+.conversationList[data-delete-armed-all="true"]
+  .conversationRow:nth-child(even) .conversationDelete {
+  animation-name: conversationDeleteJiggleB;
+  animation-delay: -45ms;
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .conversationList[data-delete-holding="true"]
+    .conversationDelete:not([data-holding="true"]):not(.conversationDeleteArmed) {
+    transform: none;
+  }
+  .conversationList[data-delete-armed-all="true"] .conversationDelete,
+  .conversationList[data-delete-armed-all="true"]
+    .conversationRow:nth-child(even) .conversationDelete {
+    animation: none;
+    transform: scale(1.08);
+  }
 }
 
 .sidebarFooter {
@@ -1027,6 +1229,131 @@
   border-color: var(--line-strong);
 }
 
+/* ── Delete-all confirmation modal ────────────────────────────────────
+   The at-scale commit surface for the hold-to-delete-all gesture.
+   Centred alertdialog with a dimmed + subtly blurred backdrop so the
+   jiggling sidebar ×'s are still faintly visible underneath — reinforcing
+   that the modal is about THEM — while the panel itself stays visually
+   dominant. Backdrop click and Esc both route to disarmDelete(). */
+
+.deleteAllModalBackdrop {
+  position: fixed;
+  inset: 0;
+  /* Mix black ~55 % into transparent so the sidebar ×'s read through
+     the backdrop but focus is unambiguously on the panel. */
+  background: color-mix(in srgb, #000 55%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 20px;
+  overflow: auto;
+  animation: deleteAllBackdropIn 180ms ease-out;
+}
+
+@keyframes deleteAllBackdropIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.deleteAllModalPanel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 28px 26px 22px;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.4),
+    0 10px 24px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  max-width: 420px;
+  display: grid;
+  gap: 10px;
+  animation: deleteAllPanelIn 240ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@keyframes deleteAllPanelIn {
+  from { opacity: 0; transform: scale(0.92) translateY(12px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.deleteAllModalTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: 0.005em;
+}
+
+.deleteAllModalBody {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.deleteAllModalActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.deleteAllModalCancel,
+.deleteAllModalConfirm {
+  border-radius: 8px;
+  padding: 9px 18px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  transition:
+    background 120ms ease-out,
+    color 120ms ease-out,
+    border-color 120ms ease-out,
+    transform 90ms ease-out,
+    filter 120ms ease-out;
+}
+
+.deleteAllModalCancel {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.deleteAllModalCancel:hover,
+.deleteAllModalCancel:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  outline: none;
+}
+
+.deleteAllModalConfirm {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+  font-weight: 600;
+}
+
+.deleteAllModalConfirm:hover,
+.deleteAllModalConfirm:focus-visible {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deleteAllModalBackdrop,
+  .deleteAllModalPanel {
+    animation-duration: 120ms;
+  }
+  .deleteAllModalConfirm:hover,
+  .deleteAllModalConfirm:focus-visible {
+    transform: none;
+  }
+}
+
 /* ── Chat pane ── */
 .chatPane {
   display: grid;
@@ -1054,6 +1381,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  visibility: hidden;
 }
 
 .headerActions {
@@ -1147,6 +1475,9 @@
   font-size: 12px;
   font-weight: 500;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .headerDelete:hover {
@@ -1160,6 +1491,45 @@
   background: var(--danger-soft);
   color: var(--danger);
   border-color: var(--danger);
+}
+
+/* Header button hold + armed-all visuals. The hold state glows the
+   pill red immediately (same "energy arrives on pointerdown" feel as
+   the sidebar ×'s). The armed-all state (data-shaking="true", set
+   whenever pendingDeleteKey === DELETE_ALL_KEY regardless of which
+   surface triggered it) joins the sidebar ×'s in the iOS jiggle so
+   every delete affordance moves as a coordinated "edit mode" chorus
+   while the modal owns the decision. */
+.headerDelete[data-holding="true"],
+.headerDelete[data-holding="true"]:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--line));
+  text-shadow: 0 0 6px color-mix(in srgb, var(--danger) 30%, transparent);
+  transform: scale(1.04);
+  transition:
+    background 130ms ease-out,
+    border-color 130ms ease-out,
+    color 130ms ease-out,
+    text-shadow 130ms ease-out,
+    transform 130ms ease-out;
+}
+
+.headerDelete[data-shaking="true"],
+.headerDelete[data-shaking="true"]:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 45%, transparent);
+  animation: conversationDeleteJiggleA 130ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .headerDelete[data-shaking="true"],
+  .headerDelete[data-shaking="true"]:hover {
+    animation: none;
+    transform: scale(1.04);
+  }
 }
 
 .badge {
@@ -1200,16 +1570,91 @@
   color: var(--fg-muted);
 }
 
-.emptyStateIcon {
+/* Empty-state icon — Default (no bot) variant.
+ *
+ * Mirrors the auth screen's .brandIconShell / .brandIcon / .brandIconLight
+ * asset-swap pattern so the "new conversation" placeholder reads as part
+ * of the same brand family, but deliberately omits the animated halos
+ * (.brandIconShell::before / ::after) and the light-mode hue-drift. This
+ * icon surfaces on every new chat — motion in the user's peripheral
+ * vision on every fresh thread would be distracting, so the auth screen
+ * keeps the motion as the dedicated entry moment and the empty state
+ * renders a calm, static sibling.
+ *
+ * Both assets are rendered in the DOM; CSS picks exactly one per theme,
+ * matching the auth lockup so a theme change in-session swaps the icon
+ * without a re-mount. */
+.emptyStateBrand {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  isolation: isolate;
+}
+
+.emptyStateBrandIconDark {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  display: block;
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.18));
+}
+
+.emptyStateBrandIconLight {
+  width: 44px;
+  height: 44px;
+  display: none;
+  position: relative;
+  z-index: 1;
+}
+
+.themeLight .emptyStateBrandIconDark {
+  display: none;
+}
+
+/* Light-theme triangle gets a lift via two stacked drop-shadows — ambient
+   for the general float cue and a tighter contact shadow for crisp edge
+   definition against the white card. No hue-rotate animation here; the
+   stroke's built-in rainbow gradient reads as plenty of color without
+   needing motion on every new chat. */
+.themeLight .emptyStateBrandIconLight {
+  display: block;
+  filter:
+    drop-shadow(0 3px 6px rgba(17, 24, 39, 0.26))
+    drop-shadow(0 1px 2px rgba(17, 24, 39, 0.38));
+}
+
+/* Empty-state icon — Bot variant.
+ *
+ * Scaled-up sibling of .botCardGlyph (see note there). Identical visual
+ * vocabulary — color-mixed tinted background, color-mixed border, bot
+ * color on the stroke — so the empty state, the bot card, the inline
+ * name glyph, and the message bubble all read as "the same bot". Size
+ * and border-radius match .emptyStateBrand's 56×56 footprint so the
+ * layout never jumps when the user switches bots. */
+.emptyStateBotGlyph {
   width: 56px;
   height: 56px;
   border-radius: 16px;
-  background: var(--accent-soft);
-  color: var(--accent-ink);
   display: grid;
   place-items: center;
-  font-size: 26px;
-  font-weight: 600;
+  flex-shrink: 0;
+  color: var(--bot-color, var(--fg-muted));
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 14%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--bot-color, var(--fg-muted)) 30%,
+      transparent
+    );
   box-shadow: var(--shadow-sm);
 }
 
@@ -1452,17 +1897,38 @@
   color: var(--accent-text);
 }
 
+/* Wraps the single-row action strip in a grid-rows "collapser" so the
+   idle bubble claims zero vertical space where the button would live.
+   Expands on hover / focus-within / while armed for confirmation — the
+   armed rule keeps the Confirm pill visible even if the pointer drifts
+   off during the ~3.5s confirm window. Negative margin-top cancels the
+   .message grid's 6px row-gap when collapsed so the bubble's bottom
+   edge sits flush to the body; it animates back to 0 on reveal. */
+.messageActionsSlot {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-top: -6px;
+  transition:
+    grid-template-rows 0.16s ease,
+    margin-top 0.16s ease,
+    opacity 0.16s ease;
+}
+
+.message:hover .messageActionsSlot,
+.message:focus-within .messageActionsSlot,
+.messageActionsSlot[data-armed="true"] {
+  grid-template-rows: 1fr;
+  margin-top: 0;
+  opacity: 1;
+}
+
 .messageActions {
   display: flex;
   gap: 6px;
-  margin-top: 4px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.message:hover .messageActions,
-.message:focus-within .messageActions {
-  opacity: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding-top: 4px;
 }
 
 .messageActions button {
@@ -1473,7 +1939,7 @@
   padding: 3px 8px;
   cursor: pointer;
   font-size: 11px;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .messageActions button:hover {
@@ -1489,6 +1955,18 @@
 .messageUser .messageActions button:hover {
   background: color-mix(in srgb, var(--accent-text) 12%, transparent);
   color: var(--accent-text);
+}
+
+/* Armed "Confirm resend?" state. Uses the accent (bot color) rather than
+   --danger because resend isn't destructive — it's a deliberate rerun,
+   and the accent echo hints that the rerun will carry the currently
+   selected bot / provider settings. Applied on the button inside
+   .messageUser so both themes read correctly against the bubble fill. */
+.messageUser .messageActions button.messageActionArmed,
+.messageUser .messageActions button.messageActionArmed:hover {
+  background: var(--accent-text);
+  color: var(--accent);
+  border-color: var(--accent-text);
 }
 
 .typingIndicator {
@@ -1555,6 +2033,61 @@
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+/* Chat-mode-only pill in the .composeTools row. Doubles as the
+   online/offline toggle for Chat since it forces provider=local AND
+   skips memory when active. Intentionally monochrome and calm — this is
+   the "stripped-down personal Prism" surface, not the full cockpit. */
+.incognitoToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-deep);
+  color: var(--fg-subtle);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.incognitoToggle:hover {
+  color: var(--fg);
+  border-color: var(--fg-subtle);
+}
+
+.incognitoToggleActive {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.incognitoToggleActive:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-text);
+}
+
+/* Status dot inside the Incognito pill — hollow when off, filled when
+   on. Gives an at-a-glance "is this private right now?" signal
+   without needing a tooltip. */
+.incognitoDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  background: transparent;
+  transition: background 0.2s;
+}
+
+.incognitoDotActive {
+  background: currentColor;
 }
 
 /* Inline bot picker that lives beside the mode/lock control so all
@@ -1886,7 +2419,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: 400px;
+  width: 479px;
   max-width: 100vw;
   background: var(--bg-surface);
   border-left: 1px solid var(--line);
@@ -2109,6 +2642,129 @@
   gap: 6px;
 }
 
+/* Avatar-style tile on the left of each bot card. Uses the bot's own
+   color via --bot-color (falls back to fg-muted for the default card or
+   bots without a color). The tile has a soft accent-tinted background
+   and the glyph itself inherits the accent color. */
+.botCardGlyph {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  align-self: flex-start;
+  color: var(--bot-color, var(--fg-muted));
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 14%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--bot-color, var(--fg-muted)) 30%,
+      transparent
+    );
+}
+
+/* Inline bot glyph shown next to the bot name in an assistant message
+   header. Inherits `color` from the wrapper, which receives the bot's
+   exact hex color as an inline style so it reads at full saturation
+   even when --message-accent is tweaking the bubble fill. */
+.messageBotGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: 2px;
+}
+
+/* ── Bot glyph picker ────────────────────────────────────────────
+   Dense, glyph-first grid. 14 columns in a 320px popover (after 8px
+   padding + 2px gaps) give ~20px cells — cell chrome is deliberately
+   suppressed (transparent border + no background at rest) so the 22px
+   BotGlyph inside DOMINATES its tile. On hover and in the selected
+   state the cell takes on the currently-picked wheel color for BOTH
+   the glyph tint and the tile border, giving a live "paint-preview"
+   feel where you can see each candidate glyph wearing the accent
+   before you commit. The wheel color is piped in via --picker-color,
+   which is set inline on .glyphGridShell (clampAccentLightness-
+   normalized so it reads in both light and dark modes identically to
+   accents elsewhere). Falls back to the theme's stock accent tokens
+   when --picker-color is unavailable. */
+.glyphPicker {
+  display: grid;
+  grid-template-columns: repeat(14, 1fr);
+  gap: 2px;
+}
+
+.glyphOption {
+  appearance: none;
+  -webkit-appearance: none;
+  aspect-ratio: 1 / 1;
+  /* Transparent border + background by default so the tile melts
+     into the shell and only the glyph reads. Border is kept at 1px
+     (instead of 0) to reserve layout, so activating the hover/
+     selected ring doesn't jitter the glyph by a pixel. */
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 4px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
+}
+
+.glyphOption:hover:not(.glyphOptionSelected) {
+  /* Glyph + border take on the currently-picked wheel color so
+     hovering previews the chosen accent on the candidate mark.
+     Background is a heavily-faded mix so the tile reads as touched
+     without competing with the glyph. */
+  color: var(--picker-color, var(--fg));
+  border-color: var(--picker-color, var(--line-strong));
+  background: color-mix(
+    in srgb,
+    var(--picker-color, var(--bg-hover)) 14%,
+    transparent
+  );
+}
+
+.glyphOption:focus-visible {
+  outline: none;
+  border-color: var(--picker-color, var(--accent));
+  box-shadow: 0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--picker-color, var(--accent-glow)) 35%,
+      transparent
+    );
+}
+
+.glyphOptionSelected,
+.glyphOptionSelected:hover {
+  color: var(--picker-color, var(--accent));
+  border-color: var(--picker-color, var(--accent));
+  background: color-mix(
+    in srgb,
+    var(--picker-color, var(--accent-soft)) 20%,
+    transparent
+  );
+  box-shadow: 0 0 0 1px
+    color-mix(
+      in srgb,
+      var(--picker-color, var(--accent-glow)) 40%,
+      transparent
+    );
+}
+
 /* Row in the create-bot form: color swatch picker + name input side by side. */
 .botNameRow {
   display: flex;
@@ -2121,9 +2777,11 @@
   min-width: 0;
 }
 
-/* Swatch trigger: a solid colored button that opens the wheel popover.
-   Replaces the native <input type="color"> so the OS slider UI never
-   appears; we ship our own minimal wheel below. */
+/* Swatch trigger: a solid colored button whose foreground color (set via
+   inline style driven by pickReadableText) carries the current glyph. The
+   button is the bot's identity condensed into one tap target — color +
+   mark in a single affordance. Click opens the combined picker popover;
+   right-click re-rolls BOTH color and glyph. */
 .colorPickerWrapper {
   position: relative;
   display: inline-flex;
@@ -2131,18 +2789,57 @@
 }
 
 .colorSwatchButton {
-  width: 44px;
+  /* aspect-ratio + min-width pin the button to a perfect square regardless
+     of how tall the sibling input stretches, so the centered glyph never
+     drifts sideways when the row grows. min-height keeps the button from
+     collapsing if the input ever ends up shorter than 36px. */
+  aspect-ratio: 1 / 1;
+  min-width: 36px;
+  min-height: 36px;
   padding: 0;
-  border-radius: 10px;
-  border: 1px solid var(--line);
+  border-radius: 8px;
+  /* --swatch-border is injected inline per-render by swatchBorderStyle()
+     as a color-mix() expression. It ramps from the theme's default --line
+     toward --fg as the fill color approaches the surface luminance, so
+     a near-black swatch in dark mode (or a near-white swatch in light
+     mode) still reads as a distinct tile. When the custom property is
+     missing (e.g. server-side render before hydration), the fallback
+     keeps the original --line value so nothing suddenly jumps visually. */
+  border: 1px solid var(--swatch-border, var(--line));
   cursor: pointer;
+  /* Glyph is the button's child; center it inside the color fill on both
+     axes. The glyph inherits currentColor, which is set inline per-swatch
+     by pickReadableText() to either near-black (#0b0b0d) or pure white
+     depending on the color's WCAG relative luminance — so bright picks
+     (yellow, lime) switch to dark ink and deep picks (navy, purple) keep
+     white, automatically, without any per-color tuning. */
+  display: grid;
+  place-items: center;
+  line-height: 0;
   /* Subtle inner ring so dark picks still register against a dark card. */
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s;
 }
 
+.colorSwatchButton > svg {
+  /* Defensive: some glyph paths drift a pixel inside their 24×24 viewBox.
+     Belt-and-suspenders centering so the whole SVG node sits square inside
+     the grid cell. */
+  display: block;
+  margin: auto;
+}
+
 .colorSwatchButton:hover {
-  border-color: var(--line-strong);
+  /* Blend the current (possibly compensated) border one step further
+     toward --fg on hover instead of snapping to --line-strong. That way
+     a fully-compensated near-white border in light mode still gets a
+     discernible "hover" bump without the border jumping back to the
+     theme default mid-hover. */
+  border-color: color-mix(
+    in srgb,
+    var(--swatch-border, var(--line-strong)) 70%,
+    var(--fg) 30%
+  );
 }
 
 .colorSwatchButton:active {
@@ -2157,23 +2854,228 @@
     0 0 0 3px var(--accent-glow);
 }
 
-/* Wheel popover drops from the swatch. Uses CSS conic-gradient for hue and
-   a radial-gradient over the top for saturation falloff toward white at
-   the center. No sliders — the picker IS the wheel. */
-.colorWheelPopover {
+/* Combined color + glyph popover. Drops from the swatch like the old
+   wheel-only popover, but now also hosts the full glyph library in a
+   scrollable grid. Width and padding are tuned so the 14-column dense
+   glyph grid reads comfortably while the color square keeps a sensible
+   2:1 aspect; capped vertically so the scroll region doesn't push the
+   Create button below the fold. */
+.colorGlyphPopover {
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
   z-index: 120;
+  width: 320px;
   background: var(--bg-surface);
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 12px;
+  padding: 8px;
   box-shadow: var(--shadow-md);
   animation: popIn 0.18s ease-out;
   display: grid;
   gap: 8px;
   justify-items: center;
+}
+
+/* Thin divider between the color wheel and the glyph grid sections of the
+   combined picker. Keeps the two concerns visually distinct without
+   needing explicit section headers. */
+.popoverDivider {
+  width: 100%;
+  height: 1px;
+  background: var(--line);
+  margin: 2px 0;
+}
+
+/* Vignette coords are registered as typed custom properties so the browser
+   can interpolate them with CSS transitions. Without @property, swapping
+   the value via setProperty() would snap the gradient — no smooth ease-
+   back to center on mouseleave. Falls back to "instant" in browsers that
+   don't support @property (Firefox <128), which is acceptable. */
+@property --vignette-x {
+  syntax: "<percentage>";
+  initial-value: 50%;
+  inherits: false;
+}
+
+@property --vignette-y {
+  syntax: "<percentage>";
+  initial-value: 50%;
+  inherits: false;
+}
+
+/* Vignette intensity multiplier — the JS camera ramps this from 1.0
+   (camera centered, matching the original resting vignette strength)
+   up to 1.35 (camera at a corner) so the far-wall shadow DEEPENS with
+   motion but never weakens at rest. Typed as <number> so it can drive
+   the calc() inside rgba() alphas on ::after. */
+@property --vignette-intensity {
+  syntax: "<number>";
+  initial-value: 1;
+  inherits: false;
+}
+
+/* Glyph grid: three-layer composition because no single element can carry
+   "clip + dynamic vignette + scroll + 3D-tilted content" cleanly.
+     · .glyphGridShell  — clips, hosts the perspective frame, AND paints
+                          the mouse-driven radial vignette that follows
+                          the cursor to simulate a 3D box's shadow.
+     · .glyphGridScroll — the actual overflow container. Scrollbar hidden
+                          (user prefers no chrome) — vignette + parallax
+                          communicate "there is more to pan" on their own.
+     · .glyphGridInner  — the 3D tilt target. Rotated imperatively on
+                          mousemove; resets to flat on mouseleave. Tilts
+                          around the same mouse coordinates the vignette
+                          uses so the two cues never disagree. */
+.glyphGridShell {
+  position: relative;
+  width: 100%;
+  /* Taller than before so the denser grid surfaces 10+ rows in one
+     glance without scrolling (vs. ~6 rows in the old 180px + 8-col
+     layout). Matches the popover's new wider footprint. */
+  height: 280px;
+  border-radius: 10px;
+  overflow: hidden;
+  /* 3D stage for the inner tilt. 800px gives a gentle perspective —
+     enough to see the rotation, not so much that glyphs distort. */
+  perspective: 800px;
+  perspective-origin: center center;
+  /* Default "camera" pose. The JS camera driver (scroll baseline +
+     cursor override) rewrites these per-frame; on touch devices only
+     the scroll driver is ever active, so the vignette Y sweeps from 0%
+     at scrollTop=0 to 100% at scrollTop=max, pulling the rim-light
+     with it. Intensity ramps 1.0 → 1.35 with camera distance — rest
+     state matches the ORIGINAL vignette strength so the shadow doesn't
+     look suddenly dimmer than it used to; motion only adds depth. */
+  --vignette-x: 50%;
+  --vignette-y: 50%;
+  --vignette-intensity: 1;
+  /* Inertia tuning: the 0.38s duration + cubic-bezier(0.2, 1, 0.3, 1)
+     (soft ease-out that holds near the end) makes every camera cue
+     trail the input by a visible beat — reads as mass, not lag. Same
+     curve is used on .glyphGridInner and .glyphOption so tilt, rim,
+     vignette, and per-glyph scale all settle on a shared rhythm. */
+  transition:
+    --vignette-x 0.38s cubic-bezier(0.2, 1, 0.3, 1),
+    --vignette-y 0.38s cubic-bezier(0.2, 1, 0.3, 1),
+    --vignette-intensity 0.38s cubic-bezier(0.2, 1, 0.3, 1);
+}
+
+/* Seamless rim-light — a cursor/scroll-tracked radial-gradient painted
+   onto a 2.5px transparent border and masked so only the border band
+   shows. The brightest point on the perimeter is whichever point of
+   the ring is closest to (--vignette-x, --vignette-y); brightness
+   falls off smoothly around the rest of the ring, giving effectively
+   infinite directions instead of four discrete edges. Matches how rim
+   light behaves on a 3D surface — the highlight focuses near the
+   cursor/camera, not painted evenly across entire edges.
+
+   Why the transparent-border + padding-box mask technique (rather than
+   padding + content-box)? On Chromium and WebKit, `background-origin:
+   border-box` combined with a `padding-box` mask reliably clips to the
+   border ring. The previous padding + content-box variant rendered
+   inconsistently (sometimes not at all) depending on engine and
+   absolute-positioning context. The border here takes no layout space
+   (the ::before is absolutely positioned inside `inset: 0`) and is
+   transparent, so it's purely a container for the gradient band. */
+.glyphGridShell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 4; /* above ::after vignette so rim reads cleanly */
+  border: 2.5px solid transparent;
+  /* IMPORTANT — ellipse, NOT circle. The shell is wider than it is tall,
+     so a `circle farthest-corner` gradient puts the left/right edge
+     midpoints at ~82% of the gradient radius while the top/bottom edges
+     sit at ~57% — so any stop tuning that lights the top/bottom evenly
+     makes the left/right vanish. An `ellipse farthest-corner` sizes its
+     axes proportionally to the distance from center to the far corner
+     on each axis, so EVERY edge midpoint lands at exactly 100% of the
+     gradient. All four edges glow equally; corners (~141%) fall cleanly
+     past the transparent stop. This was reverted once, don't do that
+     again. */
+  background: radial-gradient(
+    ellipse at var(--vignette-x) var(--vignette-y),
+    rgba(255, 255, 255, 1) 0%,
+    rgba(255, 255, 255, 0.6) 35%,
+    rgba(255, 255, 255, 0.3) 70%,
+    rgba(255, 255, 255, 0.15) 100%,
+    transparent 140%
+  );
+  background-origin: border-box;
+  background-clip: border-box;
+  /* Clip to the border band: layer 1 (padding-box origin) covers the
+     inside; layer 2 (border-box default) covers the whole element.
+     mask-composite: exclude XORs them so only the 2.5px border ring
+     paints. Fallback for non-supporting browsers is a full cursor-
+     tracked inner glow — dim but still harmonious. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+/* Dynamic vignette overlay. The radial-gradient is centered on the
+   current camera position (--vignette-x / --vignette-y) and fades out
+   to its farthest corner — so whichever wall of the box is farthest
+   from the camera gets the strongest shadow. Camera at left → darkness
+   pools on the right. Camera centered → uniform ring of shadow around
+   the edges. The alpha stops are multiplied by --vignette-intensity so
+   the shadow "breathes" stronger when the camera is at a corner and
+   softer when it's centered — the center-rest state is intentionally
+   muted so the shoebox doesn't look aggressively vignetted at rest. */
+.glyphGridShell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  /* Ellipse (matching the rim) so shadow and rim stay symmetrical:
+     light on whichever side the camera faces, shadow pooling on the
+     opposite side. Alpha stops are multiplied by --vignette-intensity
+     so the shadow breathes stronger as the camera reaches the corners. */
+  background: radial-gradient(
+    ellipse at var(--vignette-x) var(--vignette-y),
+    rgba(0, 0, 0, 0) 15%,
+    rgba(0, 0, 0, calc(0.14 * var(--vignette-intensity, 1))) 55%,
+    rgba(0, 0, 0, calc(0.42 * var(--vignette-intensity, 1))) 100%,
+    rgba(0, 0, 0, calc(0.6 * var(--vignette-intensity, 1))) 140%
+  );
+}
+
+.glyphGridScroll {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  /* Hide the native scrollbar — vignette + parallax communicate scroll
+     affordance, we don't want a chrome slab breaking the depth illusion. */
+  scrollbar-width: none;
+}
+
+.glyphGridScroll::-webkit-scrollbar {
+  display: none;
+}
+
+.glyphGridInner {
+  /* Subtle 3D tilt target. transform is set imperatively by
+     updateGlyphCamera (no React rerender on every mousemove).
+     preserve-3d so any future nested motion stays in the same stage.
+     will-change keeps the compositor happy. Duration + easing matches
+     the shell's camera-prop transitions so tilt and vignette settle in
+     lockstep — otherwise tilt finishes first and the scene looks like
+     it's catching up to itself. */
+  transform: rotateX(0deg) rotateY(0deg);
+  transform-style: preserve-3d;
+  transform-origin: center center;
+  transition: transform 0.38s cubic-bezier(0.2, 1, 0.3, 1);
+  will-change: transform;
+  padding: 6px 6px 10px;
 }
 
 @keyframes popIn {
@@ -2187,45 +3089,83 @@
   }
 }
 
-.colorWheel {
+/* Color square: replaces the old hue/saturation wheel. X axis = hue
+   (0→360° left to right), Y axis = lightness (top=brightest allowed,
+   bottom=darkest allowed, pure hue in the middle band). Saturation is
+   pinned at 100% — the axis is traded for lightness, which is what
+   the user wanted ("shade along with hue, more colors to use").
+   Two stacked gradients compose the effect without any pixel data:
+     1. Horizontal conic-sliced linear: the full hue spectrum.
+     2. Vertical white/black overlay that stops at a bounded alpha at
+        each end rather than ramping to solid white / solid black.
+   The overlay alpha encodes the picker's safe accent band: any alpha
+   X on a pure 50%-lightness hue produces a ±50·X shift, so
+     alpha = (50 - BAND_MIN) / 50 = (BAND_MAX - 50) / 50
+   Light theme: alpha 0.4 → band [30, 70] (ACCENT_LIGHTNESS_{MIN,MAX})
+   Dark  theme: alpha 0.24 → band [38, 62] (_MIN_DARK / _MAX_DARK)
+   Kept in lockstep with the matching constants in
+   apps/web/src/app/page.tsx and packages/shared/src/color.ts —
+   bumping the band requires bumping this alpha too. Bounding the
+   visible gradient (instead of bounding the click handler invisibly)
+   keeps what-you-see = what-you-pick. */
+.colorSquare {
+  /* Light-mode default; `.themeDark .colorSquare` overrides below.
+     Driving the alpha through a CSS variable means both overlays stay
+     in lockstep even after future retunes, and there's no need to
+     duplicate the gradient declaration per theme. */
+  --color-square-band-alpha: 0.4;
   position: relative;
-  width: 180px;
-  height: 180px;
-  border-radius: 50%;
+  width: 100%;
+  height: 150px;
+  border-radius: 10px;
   cursor: crosshair;
-  /* The radial layer sits on top for the saturation falloff; the conic
-     layer beneath supplies the hue ring. `from 90deg` aligns hue 0 (red)
-     with the 3 o'clock position so atan2(y, x) maps cleanly to hue. */
+  /* Suppress the browser's default touch gestures (scroll, pinch-zoom,
+     long-press callout) so press-and-drag on the square resolves to a
+     color pick instead of panning the page. Pointer Events still fire
+     as usual; this only opts out of the native scroll-and-zoom layer.
+     Keep in lockstep with the onPointerDown/Move/Up wiring on this
+     element in page.tsx. */
+  touch-action: none;
   background:
-    radial-gradient(
-      circle at center,
-      rgba(255, 255, 255, 0.95) 0%,
-      rgba(255, 255, 255, 0.55) 18%,
-      rgba(255, 255, 255, 0) 72%
+    linear-gradient(
+      to bottom,
+      hsla(0, 0%, 100%, var(--color-square-band-alpha)) 0%,
+      hsla(0, 0%, 100%, 0) 50%,
+      hsla(0, 0%, 0%, 0) 50%,
+      hsla(0, 0%, 0%, var(--color-square-band-alpha)) 100%
     ),
-    conic-gradient(
-      from 90deg,
+    linear-gradient(
+      to right,
       hsl(0, 100%, 50%),
-      hsl(30, 100%, 50%),
       hsl(60, 100%, 50%),
-      hsl(90, 100%, 50%),
       hsl(120, 100%, 50%),
-      hsl(150, 100%, 50%),
       hsl(180, 100%, 50%),
-      hsl(210, 100%, 50%),
       hsl(240, 100%, 50%),
-      hsl(270, 100%, 50%),
       hsl(300, 100%, 50%),
-      hsl(330, 100%, 50%),
       hsl(360, 100%, 50%)
     );
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
 }
 
-/* Tiny ring that marks the currently picked hue+saturation on the wheel.
-   Stays in the layout above the wheel via transform; pointer-events:none
-   lets clicks pass through to the wheel so the user can always reposition. */
-.colorWheelIndicator {
+/* Dark-mode band compression: pulls the overlay's black/white caps
+   closer to the mid-band so the visible gradient spans [38, 62] in
+   HSL lightness rather than the light-mode [30, 70]. Deep hues come
+   out a little brighter (readable against `#0a0a0b`), pale hues a
+   little dimmer (no more glare). Saturation is unchanged — the overlay
+   only touches the L axis. */
+.themeDark .colorSquare {
+  --color-square-band-alpha: 0.24;
+}
+
+/* Tiny ring marking the currently picked (hue, lightness). Works for
+   both the square and any future picker shape — positioned by left/top
+   percent, centered via translate, and pointer-events:none so the
+   press-and-drag always lands on the underlying picker surface. No
+   left/top CSS transition: during a drag the indicator has to track
+   the pointer 1:1; any smoothing here would make the ring visibly lag
+   behind the cursor and read as lossy / disconnected. The pointer IS
+   the animation. */
+.colorPickerIndicator {
   position: absolute;
   width: 12px;
   height: 12px;
@@ -2237,15 +3177,6 @@
     0 0 0 1px rgba(0, 0, 0, 0.45),
     0 0 6px rgba(0, 0, 0, 0.25);
   pointer-events: none;
-  transition: left 0.08s ease, top 0.08s ease;
-}
-
-.colorWheelHint {
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  color: var(--fg-subtle);
-  text-transform: uppercase;
 }
 
 .botCard strong {
@@ -2604,8 +3535,144 @@
   display: none;
 }
 
+/* Faded out while EITHER drawer is open:
+     · sidebar expanded — the fixed top-left hamburger would otherwise
+       sit directly on top of the sidebar's profile avatar.
+     · right-side panel (Settings / Bots / Images) open — the hamburger
+       lives at z-index:201, above the panelOverlay dimmer (z-index:99),
+       so it visually pokes through the dim while the panel is up.
+   Kept in the DOM (opacity + pointer-events) rather than unmounted so
+   the fade can cross-ride the sidebar's 0.25s slide and the panel's
+   0.2s slide-in/out. */
+.menuToggleHidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ── Mobile ── */
 @media (max-width: 720px) {
+  /* ── Hub: full-bleed, inverted elevation ────────────────────────
+     On phones the Hub sheds its card chrome entirely. The outer
+     layout anchors to the top safe-area, and the card's background
+     drops to --bg (the page color) with border, radius, and shadow
+     stripped — the "card" dissolves into the page. Tiles promote to
+     --bg-surface so they become the raised element instead of the
+     card itself. This inverts the desktop elevation and matches the
+     iOS Settings pattern (flat group, slightly-raised rows), which
+     preserves tile tappability without the borders doing all the
+     work on a surface that now shares their background.
+
+     Scoped via :has(.hubCard) so the login / register card (which
+     shares .authLayout) keeps its centered, chromed presentation.
+     Browsers without :has() fall back to the desktop hub layout,
+     which is still perfectly usable on phone — just less tailored. */
+  .authLayout:has(.hubCard) {
+    place-items: start stretch;
+    padding: 0;
+  }
+
+  /* DISTRIBUTE LAYOUT
+     min-height: 100dvh + grid-template-rows: auto auto 1fr auto makes
+     the card occupy the whole viewport and split into four regions:
+       1. brand lockup       (natural height)
+       2. greeting heading   (natural height)
+       3. tiles              (flex-fill — absorbs remaining vertical)
+       4. footer             (natural height, pinned to bottom)
+     The 1fr track is what kills the "empty dark slab below the
+     footer" problem on tall phones. Padding uses env(safe-area-*)
+     so notch/home-indicator phones stay clean. */
+  .hubCard {
+    min-height: 100dvh;
+    max-width: none;
+    background: var(--bg);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    gap: 18px;
+    grid-template-rows: auto auto 1fr auto;
+    padding:
+      calc(env(safe-area-inset-top) + 16px)
+      max(20px, env(safe-area-inset-right) + 16px)
+      calc(env(safe-area-inset-bottom) + 20px)
+      max(20px, env(safe-area-inset-left) + 16px);
+  }
+
+  /* Smaller brand lockup scoped to the Hub only — the login card
+     still wants its desktop-sized mark because that's the first
+     "this is Prism" moment. On the Hub, the user has already logged
+     in, so the mark can step back and let the greeting carry more
+     weight. */
+  .hubCard .brandIconShell {
+    width: 48px;
+    height: 48px;
+  }
+
+  .hubCard .brandWordmark {
+    height: 24px;
+  }
+
+  /* ELEVATED GREETING
+     Desktop treats "Welcome back, <name>." as a small caption under
+     the lockup. On mobile the hub is the only screen carrying the
+     user's name, so promote it to a real 21px heading — full-contrast
+     body with a bold name — so it reads as a personal address, not
+     metadata. letter-spacing and line-height tightened to match the
+     heavier size. */
+  .hubGreeting {
+    font-size: 21px;
+    color: var(--fg);
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+    margin: 0;
+  }
+
+  /* TILES FILL THE 1fr TRACK
+     grid-auto-rows: 1fr makes the two stacked tiles share the
+     remaining vertical space equally — each becomes a ~260–340px
+     "place you go" on a typical phone rather than a compact button.
+     align-self: stretch is already the default for grid items, so
+     .hubTiles automatically inflates to fill its row. */
+  .hubTiles {
+    grid-auto-rows: 1fr;
+  }
+
+  /* align-content: center pins the glyph + label + tagline group to
+     the vertical center of the now-taller tile, avoiding the "content
+     huddled at the top, empty half at the bottom" feel. */
+  .hubTile {
+    background: var(--bg-surface);
+    border-color: transparent;
+    padding: 20px 18px 18px;
+    align-content: center;
+  }
+
+  /* iPad-trackpad / mouse hover: subtle bg promotion only, no
+     border color change — the border is transparent by design here
+     and flashing a line on hover would undo the clean look. */
+  .hubTile:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  /* Keep the glyph at its full desktop size so it stays the visual
+     anchor of each tile. With the tiles now growing to fill the 1fr
+     track, a compact 72px glyph would look stranded inside a big
+     rectangle — 88px matches the "big vertical, let it breathe"
+     intent. */
+  .hubTileGlyph {
+    width: 88px;
+    height: 88px;
+  }
+
+  /* Spread the utility row across the full width of the now
+     full-bleed card: theme toggle left, Logout right. On desktop
+     the card is only 640px so flex-end felt tidy; on mobile the
+     same alignment left the left half of the screen empty. */
+  .hubFooter {
+    justify-content: space-between;
+  }
+
   .appLayout {
     grid-template-columns: 1fr;
   }
@@ -2662,6 +3729,7 @@
     box-shadow: var(--shadow-sm);
     align-items: center;
     justify-content: center;
+    transition: opacity 0.2s ease;
   }
 
   .chatHeader {
@@ -2672,11 +3740,15 @@
     padding: 18px 14px;
   }
 
-  /* Touch devices have no hover state, so reveal the delete control at a
-     quiet opacity — visible enough to be discoverable, dim enough to stay
-     out of the way while scanning titles. */
+  /* On touch devices the × is already visible in the baseline (0.45),
+     but without a hover state to graduate it to "embossed red" the user
+     never gets the "oh, that's destructive" signal before tapping.
+     Nudging opacity up slightly + tinting the glyph danger-red here
+     (still muted vs. the full hold-state danger) gives the same
+     embossed-ready feel that desktop users get from hover. */
   .conversationDelete {
-    opacity: 0.4;
+    opacity: 0.7;
+    color: color-mix(in srgb, var(--danger) 75%, var(--fg-muted));
   }
 
   .message {
@@ -2685,5 +3757,107 @@
 
   .panel {
     width: 100vw;
+    padding: 18px 16px 24px;
+    gap: 16px;
+  }
+
+  /* Bigger, more tappable close glyph. 30×30 is on the small side of
+     the 40px comfort target on touch. */
+  .panelClose {
+    width: 38px;
+    height: 38px;
+    font-size: 18px;
+  }
+
+  /* ── Form polish ────────────────────────────────────────────────────
+     Two wins in one:
+       · 16px font-size keeps iOS Safari from auto-zooming the viewport
+         when an input gains focus (happens for anything <16px). Panels
+         are full-width on phone, so the zoom lurch is especially ugly
+         here.
+       · Slightly more generous padding gives a proper tap target. */
+  .form input,
+  .form select,
+  .form textarea {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
+
+  .form button,
+  .btnPrimary {
+    padding: 13px 16px;
+    font-size: 15px;
+  }
+
+  /* ── Memory list items ─────────────────────────────────────────────
+     More breathing room so each memory reads as its own card rather
+     than a cramped bullet, and the Delete control becomes a real tap
+     target instead of the desktop's 11px pill. */
+  .memoryList {
+    gap: 10px;
+  }
+
+  .memoryList li {
+    padding: 12px 14px;
+    gap: 8px;
+    border-radius: 12px;
+  }
+
+  .memoryList p {
+    font-size: 14px;
+  }
+
+  .memoryList button {
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 8px;
+  }
+
+  /* ── Bot cards ─────────────────────────────────────────────────────
+     Desktop hides action controls at opacity:0 and fades them in on
+     hover. Touch devices never fire hover, so without an override the
+     edit/delete bubbles are completely invisible on a phone. Mirror
+     the .conversationDelete touch accommodation and keep the + idle
+     affordance at a quiet 0.55 opacity — enough to discover, calm
+     enough to stay out of the way. */
+  .botCard {
+    padding: 14px;
+    padding-left: 18px;
+    border-radius: 14px;
+  }
+
+  .botCardAction,
+  .botCardDelete {
+    opacity: 0.55;
+  }
+
+  .botCardGlyph {
+    width: 38px;
+    height: 38px;
+  }
+
+  .botCard strong {
+    font-size: 14px;
+  }
+
+  .botCard small {
+    font-size: 13px;
+  }
+
+  /* ── Images panel ──────────────────────────────────────────────────
+     Slightly larger gate card + thumbnails so the grid doesn't feel
+     like a cramped afterthought beside the generate form. */
+  .imagesGate {
+    padding: 16px 18px;
+    border-radius: 14px;
+  }
+
+  .imagesGateTitle {
+    font-size: 14px;
+  }
+
+  .imageGrid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
   }
 }
