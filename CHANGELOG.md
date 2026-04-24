@@ -12,6 +12,32 @@ Active development happens on the `dev` branch; every release is a merge into
 
 ### Added
 
+- **Per-mode memory model.** Memory behavior now splits cleanly by
+  post-auth surface, so the two modes mean what they look like they
+  mean:
+  - **Chat** keeps the cross-thread personal-memory pipeline
+    (personal-fact extraction into the `memories` table + Qdrant
+    summary recall across conversations). Nothing changed for existing
+    chat users.
+  - **Sandbox** no longer touches cross-thread memory at all. The
+    `memories` table stays clean of Sandbox traffic, Qdrant never
+    sees a Sandbox summary, and the sidebar memory list never
+    surfaces a Sandbox artifact.
+  - Sandbox threads instead get a silent **rolling thread-compaction
+    summary** that kicks in once a conversation outgrows the live
+    window. Scoped strictly by `conversation_id`, stored only in
+    SQLite, never indexed for similarity search, never shown in
+    the UI — purely context plumbing so a long Sandbox thread
+    doesn't feel amnesiac when older turns roll off the 30-message
+    window. Prep groundwork for bot-to-bot threads.
+- **Chat-mode Incognito toggle.** The `Incognito` pill in Sandbox is
+  gone (the concept doesn't apply there anymore). Chat gains a small
+  inline pill above the composer: on = this send goes local-only
+  (forces offline provider routing) and bypasses memory; off = the
+  saved provider + normal memory pipeline. A hollow/filled status dot
+  gives at-a-glance "is this private right now?" feedback. Enforced
+  server-side as well so a misbehaving client can't leak an
+  incognito turn to a remote provider.
 - Long chat messages (over 600 characters) now render with a max-height
   cap, a soft bottom fade, and a **Show more / Show less** toggle.
   Applies symmetrically to user and assistant bubbles in both Chat and
@@ -22,17 +48,16 @@ Active development happens on the `dev` branch; every release is a merge into
   prism glyphs (one colour per letter of "prism") that echo the
   wordmark's per-letter palette.
 - **Sandbox** mode: the full command-center experience (bots, provider
-  toggle, fork, export, images, incognito, advanced settings, memories)
-  — i.e. the entire previous main UI, now reached by choosing the
-  Sandbox tile.
+  toggle, fork, export, images, advanced settings) — i.e. the entire
+  previous main UI, now reached by choosing the Sandbox tile.
 - **Chat** mode: a stripped-down "personal Prism" surface that keeps
   the conversation sidebar, message history, and typing indicator but
   hides every technical knob (bot picker, Local/Online toggle + lock,
-  per-message Fork, Export, Incognito, Bots/Images panels). Chat mode
-  pins its accent to the pink P-letter colour so the surface reads
+  per-message Fork, Export, Bots/Images panels). Chat mode pins its
+  accent to the pink P-letter colour so the surface reads
   warmer/distinct from Sandbox's grayscale default, uses the default
   persona for new messages, and routes silently through the user's
-  saved provider.
+  saved provider unless Incognito is on.
 - Mode routing is mirrored into the URL (`?view=chat`, `?view=sandbox`)
   so refreshes preserve the active surface and browser back/forward
   step naturally between Hub and each mode.
@@ -41,6 +66,18 @@ Active development happens on the `dev` branch; every release is a merge into
 
 ### Fixed
 
+- **Recent-history window bug.** The chat prompt-assembly query used
+  `ORDER BY created_at ASC LIMIT 30`, which fetched the OLDEST 30
+  messages. Once a thread exceeded 30 messages, every new turn would
+  lose recent context and freeze the prompt on ancient history.
+  Inverted to fetch the NEWEST 30 and reverse to chronological order
+  for the provider. Relevant for any long thread; essential for the
+  new Sandbox thread-compaction path.
+- **Summarization milestone cap.** The milestone gate used
+  `history.length + 2` as the message count, which stayed pinned at
+  32 after the history limit took effect — so summarization silently
+  never fired on threads past 30 messages. Replaced with a `COUNT(*)`
+  query so milestones trigger correctly at every 12 messages past 24.
 - Assistant message bubbles no longer collapse to just their header once
   the conversation grows tall enough to scroll. Root cause was the
   assistant bubble's `overflow: hidden` (used to clip the accent-gradient

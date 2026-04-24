@@ -70,18 +70,19 @@ npm run dev
 
 - **Per-user auth** with encrypted session cookies
 - **Post-auth Hub** with two mode tiles, each carrying a 5-colour prism glyph:
-  - **Chat** — a calm, stripped-down "personal Prism" surface (sidebar + history + typing + send; no bots, no provider toggle, no fork/export/incognito)
-  - **Sandbox** — the full command-center experience (bots, provider toggle, fork/export, incognito, images, advanced settings)
+  - **Chat** — a calm, stripped-down "personal Prism" surface (sidebar + history + typing + send). The only compose-adjacent control is an **Incognito** pill that doubles as an online/offline toggle: on = this send is local-only and bypasses memory; off = saved provider + normal memory pipeline.
+  - **Sandbox** — the full command-center experience (bots, provider toggle + lock, fork/export, images, advanced settings). No Incognito, no cross-session memory — the thread is its own memory.
   Mode is mirrored to the URL (`?view=chat` / `?view=sandbox`) so refreshes preserve the current surface.
 - **Strict data isolation** — every query is tenant-scoped by `user_id`
+- **Mode-specific memory model**:
+  - Chat gets cross-thread personal-fact memory (extracted preferences in the `memories` table + Qdrant similarity recall across conversations), surfaced in the Settings sidebar.
+  - Sandbox gets a silent, thread-scoped **rolling compaction summary** that kicks in when a thread outgrows the 30-message live window. Stored only in SQLite, never indexed into Qdrant, never surfaced in the sidebar — pure context plumbing so long Sandbox threads don't go amnesiac. Nothing ever crosses between threads.
+  - Incognito opts out of both paths for the turn and forces the provider to LOCAL.
 - **Customizable chatbots** with system prompts, temperature, and model overrides
-- **Forkable chats** — branch from any message in a conversation
-- **Per-chat deletion** — remove individual chats from the sidebar (hover-reveal × with click-to-confirm) or the chat header; messages and exports are purged, generated images and extracted memories are preserved
-- **Incognito mode** — no memories saved for the session
-- **Automatic memory** — extracts user preferences and stores them encrypted
-- **Qdrant vector retrieval** — semantic memory search across summarized conversations
-- **OpenAI image generation** (DALL-E 3) with gallery
-- **Conversation export** to Markdown files persisted in the database
+- **Forkable chats** — branch from any message in a conversation (Sandbox)
+- **Per-chat deletion** — remove individual chats from the sidebar (subtle × that embosses red on hover, click-to-confirm) or from the chat header. **Press-and-hold any × (or the header Delete button) for ~1 s** to clear *every* chat at once: on pointerdown every × immediately glows red and tilts to its own small angle; at the 900 ms threshold the whole row shakes like iOS edit-mode while a centered confirmation modal ("Delete all chats?" · Cancel / Delete all) takes over the decision. Release before the threshold to snap the ×'s back. Messages and exports are purged; generated images and extracted memories are preserved.
+- **OpenAI image generation** (DALL-E 3) with gallery (Sandbox)
+- **Conversation export** to Markdown files persisted in the database (Sandbox)
 - **Mobile-first UI** — responsive chat interface with slide-out sidebar
 - **Dark/light themes** per user
 - **Self-serve account deletion** from Settings
