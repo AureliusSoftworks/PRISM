@@ -132,6 +132,7 @@ export function createDatabase(): DatabaseSync {
       temperature REAL DEFAULT 0.7,
       max_tokens INTEGER DEFAULT 2048,
       color TEXT,
+      glyph TEXT,
       visibility TEXT NOT NULL DEFAULT 'private',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -190,8 +191,8 @@ export function createDatabase(): DatabaseSync {
     db.exec("ALTER TABLE messages ADD COLUMN bot_id TEXT;");
   }
 
-  // Migrate existing DBs to the bots.color column used for the visual
-  // identifier that appears on the bot card and on messages.
+  // Migrate existing DBs to the bots.color and bots.glyph columns used
+  // for the visual identifier that appears on the bot card and messages.
   const botColumns = db
     .prepare("PRAGMA table_info(bots)")
     .all() as Array<{ name: string }>;
@@ -200,6 +201,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotColorColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN color TEXT;");
+  }
+  const hasBotGlyphColumn = botColumns.some(
+    (column) => column.name === "glyph"
+  );
+  if (!hasBotGlyphColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN glyph TEXT;");
   }
 
   return db;

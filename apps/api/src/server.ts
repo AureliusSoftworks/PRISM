@@ -5,7 +5,7 @@ import { clearCookie, json, parseCookies, readJsonBody, setCookie, setCorsHeader
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import { processChatMessage } from "./chat.ts";
-import { deleteConversation } from "./conversations.ts";
+import { deleteAllConversations, deleteConversation, rewindConversation } from "./conversations.ts";
 import { composeBotSystemPrompt, deleteBot } from "./bots.ts";
 import { resolveNextSettings } from "./settings.ts";
 import type { GenerateOptions } from "./providers.ts";
@@ -369,7 +369,7 @@ function buildRoutes(): RouteDefinition[] {
       const messageRows = db
         .prepare(
           `SELECT m.id, m.role, m.content, m.provider, m.created_at,
-                  b.name AS bot_name, b.color AS bot_color
+                  b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
            FROM messages m
            LEFT JOIN bots b ON b.id = m.bot_id
            WHERE m.conversation_id = ? AND m.user_id = ?
@@ -382,6 +382,7 @@ function buildRoutes(): RouteDefinition[] {
         provider: string | null;
         bot_name: string | null;
         bot_color: string | null;
+        bot_glyph: string | null;
         created_at: string;
       }>;
       // Match the shared ChatMessage shape used by POST /api/chat and the
@@ -397,6 +398,7 @@ function buildRoutes(): RouteDefinition[] {
             : undefined,
         botName: row.bot_name ?? undefined,
         botColor: row.bot_color ?? undefined,
+        botGlyph: row.bot_glyph ?? undefined,
       }));
       json(ctx.res, 200, {
         ok: true,
@@ -414,6 +416,15 @@ function buildRoutes(): RouteDefinition[] {
       deleteConversation(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true });
     }),
+    // Bulk-clear — removes every chat the caller owns in one atomic
+    // transaction. Powers the web client's hold-to-delete-all gesture on
+    // the sidebar × buttons; keeping it strictly scoped to the authed
+    // userId means there's no footgun for an admin/shared-DB scenario.
+    route("DELETE", "/api/conversations", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const deleted = deleteAllConversations(db, userId);
+      json(ctx.res, 200, { ok: true, deleted });
+    }),
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -421,7 +432,17 @@ function buildRoutes(): RouteDefinition[] {
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
       const botId = typeof body.botId === "string" ? body.botId : undefined;
-      const incognito = body.incognito === true;
+      // Which post-auth surface this turn came from. Default to "sandbox"
+      // so that any client that forgets to send `mode` gets the safer
+      // no-side-effects posture (no memory writes) rather than silently
+      // leaking a sandbox turn into cross-session storage. processChatMessage
+      // enforces the same default as defense in depth.
+      const mode = body.mode === "chat" ? "chat" : "sandbox";
+      // Incognito is a Chat-mode concept (see chat.ts): it flips the turn
+      // offline AND skips memory. We deliberately ignore any `incognito`
+      // flag for Sandbox requests so the two modes stay semantically
+      // distinct even if a stale client still sends the field.
+      const incognito = mode === "chat" && body.incognito === true;
       // Per-request provider override so a fresh sidebar switch takes effect
       // immediately, even if the settings PATCH is still in flight.
       const requestedProvider =
@@ -487,6 +508,7 @@ function buildRoutes(): RouteDefinition[] {
           incognito,
           botSystemPrompt,
           botOverrides,
+          mode,
         },
         conversationId
       );
@@ -684,20 +706,27 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.color === "string" && body.color.trim().length > 0
           ? body.color.trim()
           : null;
+      // Glyph is an opaque identifier for the icon the UI should render
+      // (e.g. "bot", "sparkles"). The frontend's glyph registry resolves
+      // it; unknown keys fall back to a default icon client-side.
+      const glyph =
+        typeof body.glyph === "string" && body.glyph.trim().length > 0
+          ? body.glyph.trim()
+          : null;
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, model, temperature, max_tokens, color, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
-      ).run(botId, userId, name, systemPrompt, model, temperature, maxTokens, color, now, now);
+        "INSERT INTO bots (id, user_id, name, system_prompt, model, temperature, max_tokens, color, glyph, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(botId, userId, name, systemPrompt, model, temperature, maxTokens, color, glyph, now, now);
       json(ctx.res, 201, {
         ok: true,
-        bot: { id: botId, name, systemPrompt, model, temperature, maxTokens, color },
+        bot: { id: botId, name, systemPrompt, model, temperature, maxTokens, color, glyph },
       });
     }),
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, model, temperature, max_tokens, color, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, model, temperature, max_tokens, color, glyph, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -723,6 +752,15 @@ function buildRoutes(): RouteDefinition[] {
         values.push(body.color.trim());
       } else if (body.color === null) {
         fields.push("color = ?");
+        values.push(null);
+      }
+      // Glyph update semantics mirror color: non-empty string updates,
+      // explicit null clears, empty/missing leaves unchanged.
+      if (typeof body.glyph === "string" && body.glyph.trim().length > 0) {
+        fields.push("glyph = ?");
+        values.push(body.glyph.trim());
+      } else if (body.glyph === null) {
+        fields.push("glyph = ?");
         values.push(null);
       }
       if (fields.length > 0) {
@@ -791,6 +829,23 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error("Export not found.");
       }
       json(ctx.res, 200, { ok: true, export: row });
+    }),
+    // Rewind a conversation to just before a given user message and return
+    // the original text so the client can resubmit it through /api/chat
+    // under whatever bot / provider / incognito settings are currently
+    // live. Server-side truncation + thread-scoped summary purge is
+    // atomic; the subsequent /api/chat call is a separate step so it
+    // inherits the existing autoMemory / summarization pipeline unchanged.
+    route("POST", "/api/conversations/:id/rewind", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const body = ctx.body as Record<string, unknown>;
+      const messageId = typeof body.messageId === "string" ? body.messageId : null;
+      if (!messageId) {
+        throw new Error("messageId is required.");
+      }
+      const { content } = rewindConversation(db, userId, conversationId, messageId);
+      json(ctx.res, 200, { ok: true, message: content });
     }),
     route("POST", "/api/conversations/:id/fork", async (ctx) => {
       const userId = requireAuth(ctx);

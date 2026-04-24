@@ -3,8 +3,37 @@ import { randomId } from "./security.ts";
 import type { LlmProvider } from "./providers.ts";
 import { upsertVector, ensureCollection, searchVectors } from "./qdrant.ts";
 
-const SUMMARY_SYSTEM_PROMPT = `You are a memory extraction assistant. Given a conversation thread, extract 1-3 concise factual bullet points about the user's preferences, facts about them, or key decisions. Respond ONLY with the bullet points, one per line. If there is nothing worth remembering, respond with "NONE".`;
+/**
+ * Chat-mode summarizer prompt: extracts cross-thread personal facts the
+ * model should remember about the user even in unrelated conversations.
+ * Output feeds `memory_summaries` AND Qdrant for similarity retrieval.
+ */
+const FACT_EXTRACTION_PROMPT = `You are a memory extraction assistant. Given a conversation thread, extract 1-3 concise factual bullet points about the user's preferences, facts about them, or key decisions. Respond ONLY with the bullet points, one per line. If there is nothing worth remembering, respond with "NONE".`;
 
+/**
+ * Sandbox-mode thread-compaction prompt: rolls earlier messages (plus any
+ * prior rolling summary) into ONE compact paragraph that lets the model
+ * keep threading context once older turns roll off the live window. Scope
+ * is strictly the current conversation — output is never indexed into
+ * Qdrant and never surfaced in the sidebar.
+ */
+const ROLLING_COMPACT_PROMPT = `You are compacting an ongoing conversation thread so the model can keep threading it even after older turns roll out of its live context window. You will receive an optional prior summary followed by a block of earlier messages. Produce ONE short dense paragraph (4-8 sentences) that preserves, in rough order of importance: (1) names, roles, entities, and project/file references; (2) concrete decisions, agreements, or commitments; (3) the user's stated preferences and constraints; (4) the emotional arc or intent of the conversation so far. Write in third person, present tense. Omit pleasantries and narration. Never quote messages verbatim. Respond with ONLY the paragraph — no preamble, no bullets, no "Summary:" prefix.`;
+
+/**
+ * How many most-recent messages stay verbatim in the live prompt window.
+ * Summarization kicks in when the conversation grows beyond this, so
+ * anything older than the tail has been compacted into a rolling summary
+ * instead of rolling off silently.
+ */
+const RECENT_WINDOW_SIZE = 30;
+
+/**
+ * Chat-mode (cross-thread) summarizer. Folds the conversation so far into
+ * 1-3 bullet points of personal facts and indexes them into Qdrant so
+ * future turns on OTHER conversations can recall them. Keeps its original
+ * 40-message horizon since its goal is long-lived personal memory, not
+ * thread-compaction.
+ */
 export async function summarizeAndStoreMemories(
   db: DatabaseSync,
   provider: LlmProvider,
@@ -24,7 +53,7 @@ export async function summarizeAndStoreMemories(
     .join("\n");
 
   const summary = await provider.generateResponse([
-    { role: "system", content: SUMMARY_SYSTEM_PROMPT },
+    { role: "system", content: FACT_EXTRACTION_PROMPT },
     { role: "user", content: thread },
   ]);
 
@@ -53,6 +82,10 @@ export async function summarizeAndStoreMemories(
   }
 }
 
+/**
+ * Cross-thread retrieval via Qdrant. Chat mode only — Sandbox never reads
+ * from this path because its memory is strictly thread-scoped.
+ */
 export async function retrieveMemorySummaries(
   provider: LlmProvider,
   userId: string,
@@ -72,3 +105,101 @@ export async function retrieveMemorySummaries(
     return [];
   }
 }
+
+/**
+ * Sandbox-mode rolling thread compaction. Produces a single short
+ * paragraph covering everything in the thread EXCEPT the most recent
+ * RECENT_WINDOW_SIZE messages (which stay verbatim in the live prompt).
+ * Each call folds the previous summary together with every message
+ * currently outside the window, trusting the LLM to compress redundancy
+ * — a deliberately simple contract so we don't need a per-row cutoff
+ * column to track what the prior summary already covered. Writes only
+ * to SQLite, scoped by conversation_id; deliberately NOT indexed into
+ * Qdrant so it can never be retrieved by a different thread.
+ *
+ * No-ops cheaply when the thread still fits verbatim in the live
+ * window, so it's safe to call at every summarization milestone.
+ */
+export async function summarizeThreadCompact(
+  db: DatabaseSync,
+  provider: LlmProvider,
+  userId: string,
+  conversationId: string
+): Promise<void> {
+  const allMessages = db
+    .prepare(
+      "SELECT role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
+    )
+    .all(conversationId, userId) as Array<{
+    role: string;
+    content: string;
+    created_at: string;
+  }>;
+
+  // Nothing to compact yet — the whole thread still fits in the live
+  // window, so rolling context is a no-op.
+  if (allMessages.length <= RECENT_WINDOW_SIZE) {
+    return;
+  }
+
+  const olderMessages = allMessages.slice(0, -RECENT_WINDOW_SIZE);
+  // Slice length is total - RECENT_WINDOW_SIZE; the guard above already
+  // ensured this is > 0, but we re-check to keep the branch obvious.
+  if (olderMessages.length === 0) {
+    return;
+  }
+
+  const priorSummary = db
+    .prepare(
+      "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 1"
+    )
+    .get(userId, conversationId) as { summary: string } | undefined;
+
+  const priorBlock = priorSummary
+    ? `[Prior summary]\n${priorSummary.summary}\n\n`
+    : "";
+  const messagesBlock = olderMessages
+    .map((m) => `${m.role}: ${m.content}`)
+    .join("\n");
+
+  const compact = await provider.generateResponse([
+    { role: "system", content: ROLLING_COMPACT_PROMPT },
+    {
+      role: "user",
+      content: `${priorBlock}[Earlier messages to fold in]\n${messagesBlock}`,
+    },
+  ]);
+
+  if (!compact || compact.trim().length === 0) {
+    return;
+  }
+
+  const summaryId = randomId(12);
+  const now = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(summaryId, userId, conversationId, compact.trim(), now);
+  // Intentional: no Qdrant write. Thread-scoped summaries must stay
+  // unreachable from cross-thread similarity search.
+}
+
+/**
+ * Latest thread-scoped summary for this conversation, or null when none
+ * has been written yet. Sandbox-mode prompt assembly uses this as a
+ * rolling system prefix; Chat mode retrieves summaries through Qdrant
+ * instead.
+ */
+export function getLatestThreadSummary(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string
+): string | null {
+  const row = db
+    .prepare(
+      "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 1"
+    )
+    .get(userId, conversationId) as { summary?: string } | undefined;
+  return row?.summary ?? null;
+}
+
+export { RECENT_WINDOW_SIZE };

@@ -12,10 +12,13 @@ import {
   type ProviderMessage,
 } from "./providers.ts";
 import {
+  RECENT_WINDOW_SIZE,
+  getLatestThreadSummary,
   retrieveMemorySummaries,
   summarizeAndStoreMemories,
+  summarizeThreadCompact,
 } from "./memory-summarizer.ts";
-import type { ChatMessage, Conversation } from "@localai/shared";
+import type { ChatMessage, ChatMode, Conversation } from "@localai/shared";
 
 export interface UserChatSettings {
   preferredProvider: "local" | "openai";
@@ -26,9 +29,21 @@ export interface UserChatSettings {
   botSystemPrompt?: string;
   /** Optional per-bot generation overrides, forwarded to the provider. */
   botOverrides?: GenerateOptions;
+  /**
+   * Which post-auth surface the request originated from. Changes what
+   * "memory" means for this turn:
+   *   - "chat": cross-thread personal-fact memory + Qdrant summary recall.
+   *     Honors `incognito` as a force-offline + skip-memory shortcut.
+   *   - "sandbox": NO cross-thread memory. Thread-scoped rolling
+   *     compaction only — silent, invisible in the sidebar, never
+   *     retrievable from other conversations.
+   * Defaults to "sandbox" because that's the no-side-effects posture if
+   * the server can't tell what the client meant.
+   */
+  mode?: ChatMode;
 }
 
-/** How long (ms) to wait on memory retrieval before skipping memory hints. */
+/** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
 const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
 
 function generateConversationTitle(message: string): string {
@@ -46,6 +61,7 @@ type MessageRow = {
   provider: string | null;
   bot_name: string | null;
   bot_color: string | null;
+  bot_glyph: string | null;
   created_at: string;
 };
 
@@ -61,40 +77,65 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         : undefined,
     botName: row.bot_name ? row.bot_name : undefined,
     botColor: row.bot_color ? row.bot_color : undefined,
+    botGlyph: row.bot_glyph ? row.bot_glyph : undefined,
   }));
 }
 
-function buildPromptMessages(
-  memoryLines: string[],
-  chatHistory: ChatMessage[],
-  userMessage: string,
-  botSystemPrompt?: string
-): ProviderMessage[] {
+/**
+ * Assemble the final system+history payload the provider actually sees.
+ *
+ * Order is deliberate:
+ *   1. Bot persona (if any)
+ *   2. Thread-compaction summary (Sandbox rolling context — present ONLY
+ *      once the conversation has grown past the live window)
+ *   3. Cross-thread memory hints (Chat mode only)
+ *   4. Raw recent history (already chronological)
+ *   5. The new user message
+ *
+ * Summary and cross-thread hints are mutually exclusive in practice —
+ * Sandbox never produces hints and Chat never produces a thread summary
+ * prefix — but the function stays agnostic so a future hybrid mode could
+ * use both.
+ */
+function buildPromptMessages(args: {
+  botSystemPrompt?: string;
+  threadSummary?: string | null;
+  memoryLines: string[];
+  chatHistory: ChatMessage[];
+  userMessage: string;
+}): ProviderMessage[] {
   const promptMessages: ProviderMessage[] = [];
-  if (botSystemPrompt) {
-    promptMessages.push({ role: "system", content: botSystemPrompt });
+  if (args.botSystemPrompt) {
+    promptMessages.push({ role: "system", content: args.botSystemPrompt });
   }
-  if (memoryLines.length > 0) {
+  if (args.threadSummary && args.threadSummary.trim().length > 0) {
     promptMessages.push({
       role: "system",
-      content: `User memory hints:\n${memoryLines
+      content: `Earlier in this thread (compacted context):\n${args.threadSummary.trim()}`,
+    });
+  }
+  if (args.memoryLines.length > 0) {
+    promptMessages.push({
+      role: "system",
+      content: `User memory hints:\n${args.memoryLines
         .map((line) => `- ${line}`)
         .join("\n")}`,
     });
   }
   promptMessages.push(
-    ...chatHistory.map((item) => ({
+    ...args.chatHistory.map((item) => ({
       role: item.role,
       content: item.content,
     }))
   );
-  promptMessages.push({ role: "user", content: userMessage });
+  promptMessages.push({ role: "user", content: args.userMessage });
   return promptMessages;
 }
 
 /**
- * Run both memory lookups in parallel with a short overall timeout.
- * A failure or timeout returns no hints so chat always proceeds.
+ * Chat-mode cross-thread retrieval. Runs personal-fact lookup and Qdrant
+ * summary similarity in parallel under a short timeout so chat always
+ * proceeds even if one path is slow or down.
  */
 async function retrieveMemoriesWithFallback(
   db: DatabaseSync,
@@ -152,10 +193,32 @@ export async function processChatMessage(
   conversationId?: string
 ): Promise<Conversation> {
   const now = new Date().toISOString();
-  const provider = selectProvider(
-    settings.preferredProvider,
-    settings.openAiApiKey
-  );
+  const mode: ChatMode = settings.mode ?? "sandbox";
+  // Incognito is a Chat-mode concept (see shared types): flips this turn
+  // offline AND skips all memory. We force LOCAL below as defense in
+  // depth so a misbehaving client can't route an incognito turn to a
+  // remote provider. Sandbox ignores `incognito` entirely — the UI
+  // doesn't surface it there and the concept doesn't apply.
+  const incognitoForTurn = mode === "chat" && settings.incognito === true;
+  const effectiveProvider = incognitoForTurn
+    ? "local"
+    : settings.preferredProvider;
+  // The three memory concerns are deliberately NOT one flag:
+  //   - skipPersonalFacts: don't write to `memories` (cross-thread facts).
+  //     True for Sandbox (thread isolation) AND incognito (leave no trace).
+  //   - skipSummarization: don't run any summarizer. True only for
+  //     incognito — Sandbox still summarizes, just into a thread-scoped,
+  //     Qdrant-free path.
+  //   - retrievalMode: which recall path (if any) feeds this turn's prompt.
+  const skipPersonalFacts = mode === "sandbox" || incognitoForTurn;
+  const skipSummarization = incognitoForTurn;
+  const retrievalMode: "none" | "cross_thread" | "thread_only" =
+    incognitoForTurn
+      ? "none"
+      : mode === "sandbox"
+        ? "thread_only"
+        : "cross_thread";
+  const provider = selectProvider(effectiveProvider, settings.openAiApiKey);
 
   let activeConversationId = conversationId;
   if (!activeConversationId) {
@@ -167,7 +230,7 @@ export async function processChatMessage(
       userId,
       generateConversationTitle(message),
       settings.botId ?? null,
-      settings.incognito ? 1 : 0,
+      incognitoForTurn ? 1 : 0,
       now,
       now
     );
@@ -180,29 +243,46 @@ export async function processChatMessage(
     }
   }
 
-  const historyRows = db
+  // Fetch the NEWEST N messages (not the oldest). Prior implementation used
+  // ORDER BY ASC LIMIT 30, which once a thread exceeded 30 messages froze
+  // the prompt on ancient history and silently dropped every recent turn.
+  // We page the latest N, then reverse to chronological order for the
+  // provider. Anything older than this window is covered by the
+  // thread-compaction summary in Sandbox mode.
+  const historyRowsDesc = db
     .prepare(
       `SELECT m.id, m.role, m.content, m.provider, m.created_at,
-              b.name AS bot_name, b.color AS bot_color
+              b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
        WHERE m.conversation_id = ? AND m.user_id = ?
-       ORDER BY m.created_at ASC
-       LIMIT 30`
+       ORDER BY m.created_at DESC
+       LIMIT ?`
     )
-    .all(activeConversationId, userId) as MessageRow[];
-  const history = hydrateMessages(historyRows);
+    .all(activeConversationId, userId, RECENT_WINDOW_SIZE) as MessageRow[];
+  const history = hydrateMessages(historyRowsDesc.slice().reverse());
 
-  const memoryLines = settings.incognito
-    ? []
-    : await retrieveMemoriesWithFallback(db, provider, userId, message, userKey);
+  let threadSummary: string | null = null;
+  let memoryLines: string[] = [];
+  if (retrievalMode === "thread_only") {
+    threadSummary = getLatestThreadSummary(db, userId, activeConversationId);
+  } else if (retrievalMode === "cross_thread") {
+    memoryLines = await retrieveMemoriesWithFallback(
+      db,
+      provider,
+      userId,
+      message,
+      userKey
+    );
+  }
 
-  const promptMessages = buildPromptMessages(
+  const promptMessages = buildPromptMessages({
+    botSystemPrompt: settings.botSystemPrompt,
+    threadSummary,
     memoryLines,
-    history,
-    message,
-    settings.botSystemPrompt
-  );
+    chatHistory: history,
+    userMessage: message,
+  });
 
   const userMessageId = randomId(12);
   db.prepare(
@@ -230,16 +310,51 @@ export async function processChatMessage(
     "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
   ).run(assistantCreatedAt, activeConversationId, userId);
 
-  if (settings.autoMemory && !settings.incognito) {
+  // Count live message rows for milestone gating. An earlier version
+  // derived this from `history.length + 2`, but `history` is capped at
+  // the recent window — so on long threads history.length stays at
+  // RECENT_WINDOW_SIZE and the count would freeze at RECENT_WINDOW_SIZE
+  // + 2 forever, causing the summarization milestone to NEVER fire past
+  // the window. The COUNT(*) below is the post-insert truth.
+  const totalMessages = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?"
+      )
+      .get(activeConversationId, userId) as { n: number }
+  ).n;
+
+  // Cross-thread personal facts: Chat mode only, non-incognito, with
+  // autoMemory on. Gate is deliberately conservative so Sandbox threads
+  // and incognito turns never seed the `memories` table.
+  if (
+    !skipPersonalFacts &&
+    mode === "chat" &&
+    settings.autoMemory
+  ) {
     const candidates = extractMemoryCandidates(message);
     if (candidates.length > 0) {
       await persistMemoryCandidates(db, provider, userId, candidates, userKey);
     }
-    // `history` was captured BEFORE this turn's two inserts, so the total
-    // message count after the turn is history.length + 2.
-    const totalMessages = history.length + 2;
-    if (shouldSummarizeAtMilestone(totalMessages)) {
+  }
+
+  // Summarization runs for BOTH modes (just into different sinks):
+  //   - Chat: cross-thread, indexed into Qdrant for similarity recall.
+  //   - Sandbox: thread-scoped rolling compaction, SQLite only, invisible.
+  // Incognito opts out completely.
+  if (!skipSummarization && shouldSummarizeAtMilestone(totalMessages)) {
+    if (mode === "chat" && settings.autoMemory) {
       summarizeAndStoreMemories(
+        db,
+        provider,
+        userId,
+        activeConversationId
+      ).catch(() => {});
+    } else if (mode === "sandbox") {
+      // Thread compaction is NOT gated by autoMemory — that setting is a
+      // user-facing knob for the sidebar "Memories" list, which Sandbox
+      // deliberately doesn't touch. Compaction is context plumbing.
+      summarizeThreadCompact(
         db,
         provider,
         userId,
@@ -263,7 +378,7 @@ export async function processChatMessage(
   const messageRows = db
     .prepare(
       `SELECT m.id, m.role, m.content, m.provider, m.created_at,
-              b.name AS bot_name, b.color AS bot_color
+              b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
        WHERE m.conversation_id = ? AND m.user_id = ?
