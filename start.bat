@@ -78,8 +78,11 @@ echo Press Ctrl+C to stop both servers.
 echo.
 
 REM ── Start API in background, web in foreground ──
+REM `--env-file-if-exists` silently no-ops when .env is missing (Node 22+).
+REM Without it, OPENAI_API_KEY / OLLAMA_HOST / etc. from .env never reach the
+REM API process and every OpenAI chat turn 401s with a cryptic "invalid key".
 echo Starting API console...
-start "Prism API" cmd /k "cd /d ""%~dp0"" && node --experimental-strip-types apps\api\src\server.ts"
+start "Prism API" cmd /k "cd /d ""%~dp0"" && node --env-file-if-exists=.env --experimental-strip-types apps\api\src\server.ts"
 cd apps\web
 echo Building frontend for production...
 call npm run build
