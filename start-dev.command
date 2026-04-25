@@ -48,7 +48,7 @@ fi
 # The API already picks up .env via `node --env-file-if-exists=.env`, but
 # `next dev` runs from apps/web/ and Next.js only reads .env files from
 # its own working directory — it never sees the repo-root .env. Sourcing
-# here is how NEXT_PUBLIC_* vars (DEV_TOOLS, API_BASE_URL, etc.) defined
+# here is how NEXT_PUBLIC_* vars (API_BASE_URL, etc.) defined
 # once at the repo root actually reach the web dev server.
 if [ -f ".env" ]; then
     set -a

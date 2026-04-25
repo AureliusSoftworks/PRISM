@@ -5,7 +5,6 @@ import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
-  deleteBots,
   resolveBotChatEnabled,
 } from "../bots.ts";
 
@@ -229,70 +228,10 @@ describe("deleteBot", () => {
 });
 
 /**
- * deleteBots backs the Developer Tools "Delete N bots" affordance. It should
- * remove a bounded newest slice for the acting user without disturbing older
- * bots or other users' rows.
- */
-describe("deleteBots", () => {
-  it("removes the requested number of newest bots and preserves older ones", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "bot-old", "2026-01-01T00:00:00.000Z");
-    seedBot(db, "user-1", "bot-middle", "2026-01-02T00:00:00.000Z");
-    seedBot(db, "user-1", "bot-new", "2026-01-03T00:00:00.000Z");
-    seedHistoryReferencingBot(db, "user-1", "bot-old", "old");
-    seedHistoryReferencingBot(db, "user-1", "bot-new", "new");
-
-    const deleted = deleteBots(db, "user-1", 2);
-
-    assert.equal(deleted, 2);
-    const survivors = db
-      .prepare("SELECT id FROM bots ORDER BY updated_at ASC")
-      .all() as Array<{ id: string }>;
-    assert.deepEqual(
-      survivors.map((b) => b.id),
-      ["bot-old"]
-    );
-
-    const oldMsg = db
-      .prepare("SELECT bot_id FROM messages WHERE id = ?")
-      .get("msg-old") as { bot_id: string | null } | undefined;
-    assert.equal(oldMsg?.bot_id, "bot-old");
-
-    const newMsg = db
-      .prepare("SELECT bot_id FROM messages WHERE id = ?")
-      .get("msg-new") as { bot_id: string | null } | undefined;
-    assert.equal(newMsg?.bot_id, null);
-  });
-
-  it("strictly scopes bounded deletion to the acting user", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "bot-1", "2026-01-01T00:00:00.000Z");
-    seedBot(db, "user-2", "bot-2", "2026-01-03T00:00:00.000Z");
-    seedHistoryReferencingBot(db, "user-2", "bot-2", "2");
-
-    const deleted = deleteBots(db, "user-1", 10);
-
-    assert.equal(deleted, 1);
-    const survivors = db
-      .prepare("SELECT id FROM bots ORDER BY id")
-      .all() as Array<{ id: string }>;
-    assert.deepEqual(
-      survivors.map((b) => b.id),
-      ["bot-2"]
-    );
-
-    const otherUserMsg = db
-      .prepare("SELECT bot_id FROM messages WHERE id = ?")
-      .get("msg-2") as { bot_id: string | null } | undefined;
-    assert.equal(otherUserMsg?.bot_id, "bot-2");
-  });
-});
-
-/**
- * The deleteAllBots suite pins the bulk-clear behaviour used by the
- * Developer Tools "Delete all bots" affordance. The contract mirrors
- * deleteBot applied in aggregate: history survives with bot_id nulled
- * out, and the operation stays strictly scoped to the acting user.
+ * The deleteAllBots suite pins the bulk-clear behaviour used by the Bots panel
+ * press-and-hold "delete all" affordance. The contract mirrors deleteBot
+ * applied in aggregate: history survives with bot_id nulled out, and the
+ * operation stays strictly scoped to the acting user.
  */
 describe("deleteAllBots", () => {
   it("returns 0 and no-ops when the user has no bots", () => {

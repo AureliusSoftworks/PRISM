@@ -10,7 +10,6 @@ import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
-  deleteBots,
   resolveBotChatEnabled,
 } from "./bots.ts";
 import { resolveNextSettings } from "./settings.ts";
@@ -901,23 +900,11 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(ctx.params.id, userId);
       json(ctx.res, 200, { ok: true });
     }),
-    // Bulk-clear — removes every bot the caller owns in one atomic
-    // transaction, or the newest `limit` bots when the Developer Tools
-    // panel asks for a bounded cleanup. Historical messages/conversations
-    // keep their rows — only `bot_id` is nulled out, mirroring the
-    // single-bot delete contract.
+    // User-facing bulk-clear — removes every bot the caller owns in one
+    // atomic transaction. Historical messages/conversations keep their rows;
+    // only `bot_id` is nulled out, mirroring the single-bot delete contract.
     route("DELETE", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
-      const rawLimit = ctx.query.get("limit");
-      if (rawLimit !== null) {
-        const limit = Number(rawLimit);
-        if (!Number.isInteger(limit) || limit < 1) {
-          throw new Error("Bot delete limit must be a positive integer.");
-        }
-        const deleted = deleteBots(db, userId, limit);
-        json(ctx.res, 200, { ok: true, deleted });
-        return;
-      }
       const deleted = deleteAllBots(db, userId);
       json(ctx.res, 200, { ok: true, deleted });
     }),

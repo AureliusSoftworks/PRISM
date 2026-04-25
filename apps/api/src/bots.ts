@@ -99,55 +99,6 @@ export function deleteBot(
 }
 
 /**
- * Permanently remove up to `limit` of the caller's most recently updated bots.
- *
- * This powers the Developer Tools "Delete N bots" action. It uses the same
- * history-preserving contract as {@link deleteBot}: conversations/messages
- * stay in place, but references to deleted bots are nulled before the rows are
- * removed. The operation is atomic and strictly scoped to `userId`.
- */
-export function deleteBots(
-  db: DatabaseSync,
-  userId: string,
-  limit: number
-): number {
-  const normalizedLimit = Math.floor(limit);
-  if (!Number.isFinite(normalizedLimit) || normalizedLimit <= 0) return 0;
-
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
-  try {
-    const botIds = db
-      .prepare(
-        "SELECT id FROM bots WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?"
-      )
-      .all(userId, normalizedLimit) as Array<{ id: string }>;
-
-    if (botIds.length === 0) {
-      db.exec("COMMIT");
-      return 0;
-    }
-
-    const ids = botIds.map(({ id }) => id);
-    const placeholders = ids.map(() => "?").join(", ");
-
-    db.prepare(
-      `UPDATE messages SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
-    ).run(userId, ...ids);
-    db.prepare(
-      `UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
-    ).run(userId, ...ids);
-    db.prepare(
-      `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
-    ).run(userId, ...ids);
-    db.exec("COMMIT");
-    return ids.length;
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
-/**
  * Permanently remove every bot owned by `userId` in a single transaction.
  *
  * Behaviour mirrors {@link deleteBot} applied in bulk:
@@ -161,9 +112,7 @@ export function deleteBots(
  *     own) are never touched.
  *   - Returns the count of bots removed (0 if the user had none).
  *
- * Intended for the Developer Tools "Delete all bots" affordance; exposed
- * via `DELETE /api/bots` and gated on the frontend by
- * `NEXT_PUBLIC_DEV_TOOLS`.
+ * Intended for the user-facing Bots panel press-and-hold "delete all" flow.
  */
 export function deleteAllBots(db: DatabaseSync, userId: string): number {
   db.exec("BEGIN IMMEDIATE TRANSACTION");
