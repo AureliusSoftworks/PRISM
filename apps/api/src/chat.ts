@@ -24,7 +24,18 @@ export interface UserChatSettings {
   preferredProvider: "local" | "openai";
   autoMemory: boolean;
   openAiApiKey?: string;
-  botId?: string;
+  /**
+   * Tri-valued by design:
+   *   - undefined → client didn't send a botId (leave conversation's
+   *     existing bot_id alone; new conversations fall back to null).
+   *   - null      → explicit "Default persona" (no bot). On existing
+   *     conversations, persists the switch to default.
+   *   - string    → specific bot id.
+   * The tri-state is what lets a mid-thread bot switch persist to the
+   * conversation row without also nuking the bot_id for every legacy
+   * caller that forgets to include the field.
+   */
+  botId?: string | null;
   incognito?: boolean;
   botSystemPrompt?: string;
   /** Optional per-bot generation overrides, forwarded to the provider. */
@@ -306,9 +317,30 @@ export async function processChatMessage(
     assistantCreatedAt
   );
 
-  db.prepare(
-    "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
-  ).run(assistantCreatedAt, activeConversationId, userId);
+  // Persist a mid-thread bot switch here (not at request-parse time) so
+  // the change only "takes" if the new bot successfully produced a
+  // reply. If generateResponse() throws above, we never get here and
+  // the conversation's bot_id stays on its previous value — matching
+  // the spec that a dropdown flip without a send doesn't stick.
+  //
+  // `settings.botId === undefined` means the client didn't include the
+  // key (legacy callers, Sandbox, scripts) so we leave bot_id alone.
+  // Explicit null (client chose "Default") and strings (specific bot)
+  // both flow through as real UPDATEs.
+  if (settings.botId !== undefined) {
+    db.prepare(
+      "UPDATE conversations SET updated_at = ?, bot_id = ? WHERE id = ? AND user_id = ?"
+    ).run(
+      assistantCreatedAt,
+      settings.botId,
+      activeConversationId,
+      userId
+    );
+  } else {
+    db.prepare(
+      "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+    ).run(assistantCreatedAt, activeConversationId, userId);
+  }
 
   // Count live message rows for milestone gating. An earlier version
   // derived this from `history.length + 2`, but `history` is capped at
@@ -363,14 +395,43 @@ export async function processChatMessage(
     }
   }
 
+  // Row payload mirrors the GET endpoints' shape — last_bot_* plus
+  // has_assistant_reply via correlated subqueries so the POST /api/chat
+  // response carries the same sidebar-tint data as a
+  // refreshConversations() fetch would. Without this,
+  // `setDetail(d.conversation)` would briefly render stale fields
+  // between send and the follow-up list refresh.
+  //
+  // No bot_id IS NOT NULL filter on the last_bot_* subqueries: Default
+  // replies (bot_id NULL) count as "last spoken" too, and the client
+  // distinguishes them from "no reply yet" via has_assistant_reply.
   const conversationRow = db
     .prepare(
-      "SELECT id, user_id, title, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
+      `SELECT c.id, c.user_id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
+              (SELECT m.bot_id FROM messages m
+                 WHERE m.conversation_id = c.id
+                   AND m.role = 'assistant'
+                 ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
+              (SELECT b.color FROM messages m
+                 LEFT JOIN bots b ON b.id = m.bot_id
+                 WHERE m.conversation_id = c.id
+                   AND m.role = 'assistant'
+                 ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
+              EXISTS (SELECT 1 FROM messages m
+                        WHERE m.conversation_id = c.id
+                          AND m.role = 'assistant') AS has_assistant_reply
+         FROM conversations c
+        WHERE c.id = ? AND c.user_id = ?`
     )
     .get(activeConversationId, userId) as {
     id: string;
     user_id: string;
     title: string;
+    bot_id: string | null;
+    incognito: number;
+    last_bot_id: string | null;
+    last_bot_color: string | null;
+    has_assistant_reply: number;
     created_at: string;
     updated_at: string;
   };
@@ -390,6 +451,11 @@ export async function processChatMessage(
     id: conversationRow.id,
     userId: conversationRow.user_id,
     title: conversationRow.title,
+    botId: conversationRow.bot_id ?? null,
+    incognito: conversationRow.incognito === 1,
+    lastBotId: conversationRow.last_bot_id ?? null,
+    lastBotColor: conversationRow.last_bot_color ?? null,
+    hasAssistantReply: conversationRow.has_assistant_reply === 1,
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,
     messages: hydrateMessages(messageRows),

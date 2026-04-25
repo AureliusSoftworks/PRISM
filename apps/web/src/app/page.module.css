@@ -1,12 +1,12 @@
 /* ── Theme tokens ──
-   Grayscale base: no chromatic color lives in this file. The only
-   "color" that appears in the UI is supplied by `--accent`, which
-   defaults to a neutral gray (light in dark theme, dark in light
-   theme). When a bot is selected, `--accent` and `--accent-text`
-   are overridden inline on the app shell to the bot's color —
-   every derived token below (hover, soft, glow, user bubble,
-   ambient gradient) is built with `color-mix()` so they all
-   recompute automatically without any JS coordination.
+   Near-neutral base: the app chrome avoids saturated color except where
+   `--accent` supplies it. Dark theme stays grayscale; light theme uses
+   low-chroma warm neutrals so the page reads softly instead of as a
+   blue-white sheet. When a bot is selected, `--accent` and
+   `--accent-text` are overridden inline on the app shell to the bot's
+   color — every derived token below (hover, soft, glow, user bubble,
+   ambient gradient) is built with `color-mix()` so they all recompute
+   automatically without any JS coordination.
 
    Status indicators that mean the same thing regardless of which
    bot is active (ONLINE green LED, danger red, etc.) stay outside
@@ -70,35 +70,34 @@
 
 .themeLight {
   /* Light theme layers:
-     - bg: the page under everything (slight warm gray, not pure white, so
-       floating surfaces actually pop).
-     - bg-surface: cards, sidebar, chat header, compose, panels. Pure white.
-     - bg-elevated: a sub-white for things that float ON a surface (dropdowns,
-       armed delete pill). Lives between bg and bg-surface so it reads as a
-       subtle step.
-     - bg-deep: slightly darker than bg, for recessed rails like the
-       LOCAL/ONLINE track where we want a carved-in look. */
-  --bg: #f1f1f4;
-  --bg-deep: #e6e6ea;
-  --bg-surface: #ffffff;
-  --bg-elevated: #fbfbfc;
-  --bg-hover: #ebebef;
-  --bg-active: #dcdce1;
+     - bg: the page under everything (warm paper, not blue-white).
+     - bg-surface: cards, sidebar, chat header, compose, panels. Warm ivory
+       instead of pure white so large surfaces stop feeling backlit.
+     - bg-elevated: a barely brighter paper layer for things that float ON a
+       surface (dropdowns, armed delete pill).
+     - bg-deep: slightly darker/warm for recessed rails like the LOCAL/ONLINE
+       track where we want a carved-in look. */
+  --bg: #eee7dc;
+  --bg-deep: #ded3c5;
+  --bg-surface: #faf3e9;
+  --bg-elevated: #fff8ef;
+  --bg-hover: #e8ded0;
+  --bg-active: #d8cab8;
 
-  --fg: #0e0e10;
-  --fg-muted: #5c5d63;
-  --fg-subtle: #8a8b91;
+  --fg: #17130f;
+  --fg-muted: #625a51;
+  --fg-subtle: #92887c;
 
   /* Borders get a small bump so card edges don't disappear against white
      surfaces. Still subtle enough not to feel "heavy". */
-  --line: #d7d7dc;
-  --line-strong: #b8b8bf;
+  --line: #d5c8b9;
+  --line-strong: #b8a894;
 
-  --accent: #2b2b30;
+  --accent: #312b24;
   --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000 15%);
   --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--bg) 88%);
-  --accent-glow: color-mix(in srgb, var(--accent) 22%, transparent);
-  --accent-text: #ffffff;
+  --accent-glow: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-text: #fff8ef;
   --accent-ink: var(--accent);
 
   --user-bubble: linear-gradient(
@@ -109,20 +108,19 @@
   --user-bubble-fg: var(--accent-text);
 
   --danger: #dc2626;
-  --danger-soft: #fde4e6;
+  --danger-soft: #f7ddd9;
 
-  /* Nudged up a touch so elevated surfaces actually feel lifted. Still well
-     within the "airy, not heavy" range expected of a light theme. */
-  --shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.09);
-  --shadow-md: 0 8px 24px rgba(17, 24, 39, 0.11);
-  --shadow-lg: 0 24px 48px rgba(17, 24, 39, 0.16);
+  /* Warm shadows keep elevation visible without reintroducing cool gray haze. */
+  --shadow-sm: 0 1px 2px rgba(64, 46, 27, 0.08);
+  --shadow-md: 0 8px 24px rgba(64, 46, 27, 0.1);
+  --shadow-lg: 0 24px 48px rgba(64, 46, 27, 0.14);
 
   --app-gradient:
-    radial-gradient(ellipse at top left, var(--accent-glow), transparent 55%),
+    radial-gradient(ellipse at top left, var(--accent-glow), transparent 52%),
     radial-gradient(
       ellipse at bottom right,
-      color-mix(in srgb, var(--accent) 8%, transparent),
-      transparent 55%
+      color-mix(in srgb, var(--accent) 5%, transparent),
+      transparent 52%
     );
 }
 
@@ -157,7 +155,7 @@
 
 /* ── Auth ── */
 .authLayout {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
   background: var(--bg);
   background-image: var(--app-gradient);
   color: var(--fg);
@@ -178,9 +176,10 @@
 }
 
 .card h1 {
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
   font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-weight: var(--font-weight-title, 300);
+  letter-spacing: 0.025em;
 }
 
 /* Row that pairs the Register/Login segmented control on the left with the
@@ -379,8 +378,8 @@
    rotating anything, we shift the triangle's entire rainbow palette
    around the color wheel via filter: hue-rotate(). A full 360° cycle
    returns to the exact starting colors, so the loop is seamless. The
-   18s period is slower than dark-mode's 6s halo spin by design — light
-   mode reads as a calmer, more ambient sibling rather than a mirror. */
+   6s period gives light mode a more visible RGB drift while still moving
+   slower than the dark-mode halo spin. */
 @keyframes brandIconLightHueDrift {
   from {
     --brand-icon-light-hue-shift: 0deg;
@@ -409,8 +408,8 @@
    it on the card's white surface. Hidden by default so the dark theme
    keeps its boxed tile untouched. */
 .brandIconLight {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   display: none;
   position: relative;
   z-index: 1;
@@ -443,27 +442,12 @@
 
 .themeLight .brandIconLight {
   display: block;
-  /* Filter chain, in order:
-       1. hue-rotate spins the triangle's rainbow gradient around the
-          color wheel. Must run FIRST so it doesn't also rotate the
-          shadow colors below — drop-shadow()'s color applies to the
-          output of everything that came before it, so putting
-          hue-rotate after would hue-cycle the shadow's tint along with
-          the triangle, making the ground plane feel unstable.
-       2. Two stacked drop-shadows produce material-style layered
-          elevation on the triangle's stroke alpha only (no rectangular
-          bounding-box shadow since the SVG has no fill):
-            - ambient: wider/softer for the general "floating" cue
-            - contact: tight/darker right under the stroke for crisp
-              edge definition against the white card background.
-     A single soft shadow at 12px blur was too diffuse to read on a
-     white surface; the contact layer is what makes the border visibly
-     lift. */
+  /* True hue-rotation: spins the triangle's rainbow gradient around the
+     color wheel. Contrast comes from the SVG's darker gradient stops +
+     subtle keyline, so no drop-shadow is needed in light mode. */
   filter:
-    hue-rotate(var(--brand-icon-light-hue-shift))
-    drop-shadow(0 4px 8px rgba(17, 24, 39, 0.32))
-    drop-shadow(0 1px 2px rgba(17, 24, 39, 0.45));
-  animation: brandIconLightHueDrift 18s linear infinite;
+    hue-rotate(var(--brand-icon-light-hue-shift));
+  animation: brandIconLightHueDrift 6s linear infinite;
 }
 
 .themeLight .brandWordmark {
@@ -546,6 +530,7 @@
   font: inherit;
   padding: 11px 13px;
   font-size: 14px;
+  resize: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
@@ -697,9 +682,10 @@
 }
 
 .hubTileLabel {
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
   font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: var(--font-weight-title, 300);
+  letter-spacing: 0.025em;
   color: var(--fg);
 }
 
@@ -780,9 +766,26 @@
   display: block;
 }
 
+/* Mirror the auth/hub lockup in light mode: force every letter stroke
+   to solid black so the back-to-Hub wordmark reads as a calm, high-
+   contrast mark against the white chat header. `brightness(0)` is the
+   same trick used on .brandWordmark — works on the inline SVG's five
+   letter colors without shipping a second asset. */
+.themeLight .hubHomeWordmark {
+  filter: brightness(0);
+}
+
 /* ── App shell ── */
 .appLayout {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  /* Instrument Sans keeps body/supporting text flexible and readable while
+     Raleway carries the thin Prism-line title treatment. */
+  --font-size-conversation-title: 14px;
+  --font-size-message: 16px;
+  --font-size-compose: 16px;
+  --font-title: var(--font-title-sans), var(--font-ui-sans), system-ui, sans-serif;
+  --font-weight-title: 300;
+  --font-weight-subtext: 600;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
   background: var(--bg);
   background-image: var(--app-gradient);
   color: var(--fg);
@@ -858,6 +861,15 @@
   white-space: nowrap;
 }
 
+/* Sidebar start-of-chat controls. The regular "New chat" button is the
+   primary affordance; the "Private chat" sibling sits under it as a
+   quieter, stroke-only alternative so the calm hierarchy of the sidebar
+   (profile → pick a chat kind → conversations → footer) stays intact. */
+.newChatGroup {
+  display: grid;
+  gap: 6px;
+}
+
 .newChatButton {
   border: 1px solid var(--accent);
   background: var(--accent);
@@ -893,6 +905,62 @@
   display: inline-block;
   width: 14px;
   text-align: center;
+}
+
+/* Private chat — secondary ghost-style button deliberately stripped of
+   the accent triad so even when the active chat's bot color is lighting
+   up the shell, Private chat still reads as "B&W, no color leaks here".
+   Uses fg/line tokens directly rather than var(--accent), matching the
+   spec's "remove accent colors (black and white only)" clause. */
+.privateChatButton {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg-muted);
+  border-radius: 10px;
+  padding: 9px 11px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.05s;
+}
+
+.privateChatButton:hover {
+  border-color: var(--line-strong);
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.privateChatButton:active {
+  transform: translateY(1px);
+}
+
+/* "Armed" state — user clicked Private chat and the next send will
+   create an incognito conversation. Subtle outlined fill, still B&W. */
+.privateChatButtonActive {
+  border-color: var(--fg);
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+.privateChatButtonActive:hover {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+
+.privateChatButtonIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+  color: currentColor;
 }
 
 .sidebarField {
@@ -981,6 +1049,12 @@
 .conversationTitleButton {
   width: 100%;
   text-align: left;
+  /* Baseline: transparent chrome. When the row has a --row-color set
+     inline (from the server's lastBotColor resolution in React), the
+     dedicated `.conversationRow[style*="--row-color"]` rule further
+     down takes over and paints a subtle tint + shade-compensated
+     border on top. Without --row-color the row renders exactly as it
+     did before. */
   border: 1px solid transparent;
   background: transparent;
   color: var(--fg-muted);
@@ -988,7 +1062,7 @@
   padding: 8px 10px;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-conversation-title);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1005,6 +1079,101 @@
   color: var(--fg);
   border-color: var(--line-strong);
   font-weight: 500;
+}
+
+/* Bot-colored tint for conversation rows, keyed off the --row-color
+   custom property the React layer sets inline based on the LAST bot to
+   respond in each chat. For Chat-mode chats the bot is locked at
+   start, so this renders a static rainbow panel across many chats;
+   for Sandbox-mode chats, the tint updates on every assistant reply
+   since refreshConversations() pulls the server's live lastBotColor.
+   Private chats (data-private="true") never get a --row-color set and
+   thus keep their existing grayscale rendering.
+
+   The `[style*="--row-color"]` attribute selector lights up only when
+   the inline style actually carries the var — cheaper than threading a
+   dedicated modifier class through the JSX, and naturally "inert" when
+   row tinting is disabled (null resolver → undefined style → no
+   selector match → baseline look). */
+.conversationRow[style*="--row-color"] .conversationTitleButton {
+  /* Subtle tint: ~22% of the (already lightness-clamped) bot color over
+     the natural transparent baseline. This is enough hue to read as a
+     color band when many rows are stacked, without overpowering the
+     title text. */
+  background: color-mix(in srgb, var(--row-color) 22%, transparent);
+  /* Shade-aware border: starts at the bot color itself and blends
+     toward --fg by a percentage that the React layer computed from
+     the fill's WCAG contrast against the theme surface. Low-contrast
+     fills (bright-on-light, dark-on-dark) pull the border fully toward
+     --fg so the tile reads as "outlined"; high-contrast fills keep the
+     border close to the bot color. The net effect is borders that
+     automatically darken or lighten depending on the shade of the
+     card, matching the user's "shade consideration" requirement. */
+  border-color: color-mix(
+    in srgb,
+    var(--row-color),
+    var(--fg) var(--row-border-mix, 0%)
+  );
+  /* Bump the title color to full --fg on tinted rows. The baseline
+     --fg-muted used by untinted rows blends too close to the tint
+     itself, reading as "grayed out" against the colored fill. Pulling
+     up to --fg keeps the title legible over any bot color in either
+     theme. Selected rows still differentiate via `font-weight: 500`
+     + the heavier --fg border + a denser 36% tint. */
+  color: var(--fg);
+}
+
+.conversationRow[style*="--row-color"] .conversationTitleButton:hover {
+  /* Denser tint on hover (32%) so the row visually "lifts" while
+     keeping the same hue. Text color falls through to the baseline
+     hover rule above so there's still a strong title-to-background
+     contrast shift. */
+  background: color-mix(in srgb, var(--row-color) 32%, transparent);
+}
+
+.conversationRow[style*="--row-color"] .conversationTitleButton.selected {
+  /* Selected state keeps its commanding --fg border (the clearest
+     "you are here" affordance in the sidebar) but lets the bot tint
+     shine through even more (36%). Bold title text + --fg border +
+     heavier fill together read unambiguously as "active", while the
+     hue preserves the bot identity. */
+  background: color-mix(in srgb, var(--row-color) 36%, transparent);
+  border-color: var(--fg);
+}
+
+/* Sidebar marker for private chats. The row gets data-private="true"
+   from the React layer based on the conversation's incognito flag; CSS
+   prepends a tiny lock glyph via a data-URL so we don't add a DOM
+   element (keeps the conversationRow grid template stable and the
+   delete-button geometry untouched). Muted by default, lights up to fg
+   on hover / selected so it tracks the title's own emphasis. */
+.conversationRow[data-private="true"] .conversationTitleButton {
+  padding-left: 26px;
+  position: relative;
+  font-style: italic;
+}
+
+.conversationRow[data-private="true"] .conversationTitleButton::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  background-color: currentColor;
+  opacity: 0.55;
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><rect x='4' y='11' width='16' height='9' rx='2'/><path d='M8 11V8a4 4 0 0 1 8 0v3'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><rect x='4' y='11' width='16' height='9' rx='2'/><path d='M8 11V8a4 4 0 0 1 8 0v3'/></svg>");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.conversationRow[data-private="true"] .conversationTitleButton:hover::before,
+.conversationRow[data-private="true"] .conversationTitleButton.selected::before {
+  opacity: 1;
 }
 
 /* ── Sidebar × delete button ───────────────────────────────────────────
@@ -1231,24 +1400,23 @@
 
 /* ── Delete-all confirmation modal ────────────────────────────────────
    The at-scale commit surface for the hold-to-delete-all gesture.
-   Centred alertdialog with a dimmed + subtly blurred backdrop so the
-   jiggling sidebar ×'s are still faintly visible underneath — reinforcing
-   that the modal is about THEM — while the panel itself stays visually
-   dominant. Backdrop click and Esc both route to disarmDelete(). */
+   Centred alertdialog with a strong, non-blurred dimmer so third-layer
+   confirmation adds focus through darkness instead of stacking more
+   backdrop blur over an already-layered drawer. Backdrop click and Esc
+   both route to disarmDelete(). */
 
 .deleteAllModalBackdrop {
   position: fixed;
   inset: 0;
-  /* Mix black ~55 % into transparent so the sidebar ×'s read through
-     the backdrop but focus is unambiguously on the panel. */
-  background: color-mix(in srgb, #000 55%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
+  /* Darken, don't blur: this layer may sit above the right drawer, whose
+     own backdrop already provides any softening underneath it. */
+  background: color-mix(in srgb, #000 74%, transparent);
   display: grid;
   place-items: center;
   z-index: 1000;
   padding: 20px;
   overflow: auto;
+  overscroll-behavior: contain;
   animation: deleteAllBackdropIn 180ms ease-out;
 }
 
@@ -1267,6 +1435,8 @@
     0 10px 24px rgba(0, 0, 0, 0.25);
   width: 100%;
   max-width: 420px;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
   display: grid;
   gap: 10px;
   animation: deleteAllPanelIn 240ms cubic-bezier(0.2, 0.8, 0.3, 1);
@@ -1345,12 +1515,347 @@
 
 @media (prefers-reduced-motion: reduce) {
   .deleteAllModalBackdrop,
-  .deleteAllModalPanel {
+  .deleteAllModalPanel,
+  .devToolsFloatingPanel {
     animation-duration: 120ms;
   }
   .deleteAllModalConfirm:hover,
   .deleteAllModalConfirm:focus-visible {
     transform: none;
+  }
+}
+
+/* ── Developer Tools floating panel ───────────────────────────────────
+   Non-modal developer surface for at-scale UI testing. It intentionally
+   has no backdrop or click-away close, so the app underneath remains
+   interactive while the panel stays open. Only ever rendered when
+   NEXT_PUBLIC_DEV_TOOLS=1 at build time (see DEV_TOOLS_ENABLED in
+   page.tsx); prod builds without that flag strip the JSX entirely. */
+
+/* Inline launcher button — sits directly to the right of the PRISM wordmark
+   so it stays visible even when framework dev overlays claim the viewport
+   corners. */
+.devToolsButton {
+  width: 30px !important;
+  height: 30px !important;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 70%, var(--danger) 30%) !important;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--danger) 12%) !important;
+  color: color-mix(in srgb, var(--fg) 84%, var(--danger) 16%) !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18) !important;
+}
+
+.devToolsButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-hover) 82%, var(--danger) 18%) !important;
+  color: var(--fg) !important;
+}
+
+.devToolsFloatingPanel {
+  position: fixed;
+  top: 76px;
+  left: 14px;
+  z-index: 2147483646;
+  width: min(460px, calc(100vw - 28px));
+  max-height: calc(100dvh - 96px);
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding: 22px 22px 18px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, var(--danger) 22%);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, var(--danger) 6%);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.34),
+    0 8px 22px rgba(0, 0, 0, 0.22);
+  transform-origin: top right;
+  animation: deleteAllPanelIn 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.devToolsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 4px 0;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.devToolsHeader:active {
+  cursor: grabbing;
+}
+
+.devToolsDragHint {
+  color: var(--fg-muted);
+  font-size: 16px;
+  letter-spacing: -0.28em;
+  line-height: 1;
+  padding-right: 0.28em;
+}
+
+.devToolsSection {
+  display: grid;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  margin-top: 10px;
+  border: 1px dashed color-mix(in srgb, var(--line-strong) 60%, var(--danger) 40%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, var(--danger) 8%);
+}
+
+.devToolsSectionTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.devToolsSectionHint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.devToolsSectionHint strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.devToolsViewportStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.devToolsViewportStatus span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.devToolsViewportStatus strong {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.devToolsCountControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.devToolsCountControl input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.devToolsCountControl input:focus {
+  border-color: var(--line-strong);
+  outline: none;
+}
+
+.devToolsCountControl input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.devToolsQuantityRail {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.devToolsPresetButton {
+  appearance: none;
+  min-width: 38px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--bg-hover) 12%);
+  color: var(--fg-muted);
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out, transform 120ms ease-out;
+}
+
+.devToolsPresetButton:hover:not(:disabled),
+.devToolsPresetButton:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--fg);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.devToolsPresetButtonActive {
+  background: color-mix(in srgb, var(--danger-soft) 60%, var(--bg) 40%);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--line) 50%);
+  color: var(--fg);
+}
+
+.devToolsPresetButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.devToolsStageRail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.devToolsStageButton {
+  appearance: none;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--bg-hover) 12%);
+  color: var(--fg-muted);
+  padding: 8px 9px;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsStageButton span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.devToolsStageButton strong {
+  color: var(--fg);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.devToolsStageButton small {
+  min-height: 2.4em;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  line-height: 1.2;
+}
+
+.devToolsStageButton:hover:not(:disabled),
+.devToolsStageButton:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--fg);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.devToolsStageButtonActive {
+  background: color-mix(in srgb, var(--danger-soft) 58%, var(--bg) 42%);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--line) 50%);
+  color: var(--fg);
+}
+
+.devToolsStageButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.devToolsActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.devToolsAction {
+  appearance: none;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+
+.devToolsAction:hover:not(:disabled),
+.devToolsAction:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  outline: none;
+}
+
+.devToolsAction:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.devToolsActionDanger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line) 45%);
+}
+
+.devToolsActionDanger:hover:not(:disabled),
+.devToolsActionDanger:focus-visible {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.devToolsStatus {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+@media (max-width: 560px) {
+  .devToolsFloatingPanel {
+    width: min(460px, calc(100vw - 28px));
+    max-height: calc(100dvh - 82px);
+    padding: 20px 18px 16px;
+  }
+
+  .devToolsAction {
+    flex: 1 1 160px;
+  }
+
+  .devToolsStageRail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1373,9 +1878,10 @@
 }
 
 .chatHeader h2 {
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
   font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: var(--font-weight-title, 300);
+  letter-spacing: 0.025em;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -1533,6 +2039,8 @@
 }
 
 .badge {
+  -webkit-appearance: none;
+  appearance: none;
   background: var(--accent-soft);
   color: var(--accent-ink);
   /* Hair-thin outline in the same ink keeps the pill distinguishable from
@@ -1543,11 +2051,29 @@
   border-radius: 999px;
   /* Compensate for the 1px border so the pill keeps the same outer size
      and alignment it had before the border was added. */
-  padding: 2px 9px;
-  font-size: 10px;
-  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+  font: inherit;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 0.9;
+  font-size: 8px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+}
+
+.badge:hover,
+.badge:focus-visible {
+  background: var(--accent-hover);
+  border-color: color-mix(in srgb, var(--accent-ink) 55%, transparent);
+  color: var(--accent-text);
+  outline: none;
+  transform: translateY(-1px);
 }
 
 .messages {
@@ -1561,29 +2087,54 @@
   margin: 0 auto;
 }
 
+/* When the messages pane holds an empty-state block (no conversation
+   yet), switch from its default grid layout to a flex column so the
+   empty state can claim the FULL remaining height of the pane. That
+   height hook is what lets .chatBotPicker stick to the bottom via
+   margin-top: auto — without it, grid's align-content: start collapses
+   the row to content size and the picker rides along with the hero
+   block whenever the description grows. Browsers without :has() fall
+   back to the old content-sized layout (still correct, just no
+   bottom-anchoring on the picker). */
+.messages:has(> .emptyState) {
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+}
+
+.messages:has(> .emptyState) > .emptyState {
+  flex: 1 1 auto;
+}
+
 .emptyState {
-  display: grid;
-  justify-items: center;
+  /* Flex column (was grid) so a child can opt into margin-top: auto
+     to anchor itself to the bottom of the pane. Visually equivalent
+     to the old grid — single-column stack with centered children and
+     a 12px gap — except the picker now floats down to the composer
+     instead of being shoved around by a long description. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 12px;
   padding: 56px 24px 32px;
   text-align: center;
   color: var(--fg-muted);
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+  overflow: visible;
+}
+
+.emptyStateSearching {
+  gap: 10px;
+  padding-top: 40px;
 }
 
 /* Empty-state icon — Default (no bot) variant.
  *
- * Mirrors the auth screen's .brandIconShell / .brandIcon / .brandIconLight
- * asset-swap pattern so the "new conversation" placeholder reads as part
- * of the same brand family, but deliberately omits the animated halos
- * (.brandIconShell::before / ::after) and the light-mode hue-drift. This
- * icon surfaces on every new chat — motion in the user's peripheral
- * vision on every fresh thread would be distracting, so the auth screen
- * keeps the motion as the dedicated entry moment and the empty state
- * renders a calm, static sibling.
- *
- * Both assets are rendered in the DOM; CSS picks exactly one per theme,
- * matching the auth lockup so a theme change in-session swaps the icon
- * without a re-mount. */
+ * Uses the bare Prism triangle in both themes. The boxed dark icon and
+ * animated halos stay exclusive to the auth screen's entry moment; the
+ * "new conversation" placeholder should feel calmer and background-free. */
 .emptyStateBrand {
   position: relative;
   width: 56px;
@@ -1594,38 +2145,22 @@
   isolation: isolate;
 }
 
-.emptyStateBrandIconDark {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
-  display: block;
-  position: relative;
-  z-index: 1;
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.18));
+/* Hover-preview brand mark: keep the hero as Prism's triangle, but tint
+   it to the hovered bot's normalized color. This is an inline SVG rather
+   than the rainbow asset so the stroke can inherit currentColor cleanly
+   from the shell's active --accent in both themes. */
+.emptyStateBrandPreview {
+  color: var(--accent);
+  transition: color 0.18s ease, filter 0.18s ease;
 }
 
-.emptyStateBrandIconLight {
-  width: 44px;
-  height: 44px;
-  display: none;
-  position: relative;
-  z-index: 1;
-}
-
-.themeLight .emptyStateBrandIconDark {
-  display: none;
-}
-
-/* Light-theme triangle gets a lift via two stacked drop-shadows — ambient
-   for the general float cue and a tighter contact shadow for crisp edge
-   definition against the white card. No hue-rotate animation here; the
-   stroke's built-in rainbow gradient reads as plenty of color without
-   needing motion on every new chat. */
-.themeLight .emptyStateBrandIconLight {
+.emptyStateBrandTriangle {
+  width: 30px;
+  height: 30px;
   display: block;
   filter:
-    drop-shadow(0 3px 6px rgba(17, 24, 39, 0.26))
-    drop-shadow(0 1px 2px rgba(17, 24, 39, 0.38));
+    drop-shadow(0 3px 6px color-mix(in srgb, currentColor 24%, transparent))
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.28));
 }
 
 /* Empty-state icon — Bot variant.
@@ -1637,13 +2172,16 @@
  * and border-radius match .emptyStateBrand's 56×56 footprint so the
  * layout never jumps when the user switches bots. */
 .emptyStateBotGlyph {
+  position: relative;
   width: 56px;
   height: 56px;
   border-radius: 16px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  color: var(--bot-color, var(--fg-muted));
+  isolation: isolate;
+  overflow: visible;
+  color: var(--bot-ink, var(--bot-color, var(--fg-muted)));
   background: color-mix(
     in srgb,
     var(--bot-color, var(--fg-muted)) 14%,
@@ -1656,20 +2194,1091 @@
       transparent
     );
   box-shadow: var(--shadow-sm);
+  /* Transitions on color-driving properties so the hero glyph morphs
+     smoothly as committed bot selections change. The background / border
+     / color share the same easing so the three properties read as a
+     single breathing object. */
+  transition:
+    color 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.2s ease;
+}
+
+/* Clickable hero in the COMMITTED state — wraps EmptyStateIcon so the
+   user has an obvious-enough-but-not-cluttered way to go back to
+   default. Transparent chrome by default; a subtle ring + scale lift
+   on hover / focus signals "this is interactive". Keeps the same 56×56
+   inner footprint so the layout never jumps when the hero transitions
+   between interactive and static modes. */
+.emptyStateIconButton {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  color: inherit;
+  font: inherit;
+  transition:
+    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.18s ease,
+    filter 0.18s ease;
+}
+
+.emptyStateIconButton:hover,
+.emptyStateIconButton:focus-visible {
+  outline: none;
+  transform: scale(1.04);
+  filter: brightness(1.08);
+}
+
+.emptyStateIconButton:focus-visible {
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--accent-glow, rgba(128, 128, 128, 0.35)) 60%, transparent);
+}
+
+.emptyStateIconButton:active {
+  transform: scale(0.98);
+}
+
+.emptyStateSearchTrigger {
+  position: relative;
+}
+
+.emptyStateSearchTrigger::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 22px;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--accent-glow) 34%, transparent),
+    transparent 68%
+  );
+  transform: scale(0.82);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.emptyStateSearchTrigger:hover::after,
+.emptyStateSearchTrigger:focus-visible::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.emptyStateSearch {
+  width: min(520px, calc(100% - 32px));
+  margin: 0 auto 2px;
+  display: grid;
+  gap: 8px;
+  position: relative;
+  z-index: 2;
+  animation: emptyStateSearchSpotlightIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.emptyStateSearching .emptyStateSearch {
+  margin: 0 auto 6px;
+}
+
+.emptyStateSearchField {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px 11px 14px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 88%, rgba(255, 255, 255, 0.08)),
+      color-mix(in srgb, var(--bg) 82%, rgba(255, 255, 255, 0.08))
+    );
+  border: 1px solid color-mix(in srgb, var(--line) 72%, var(--accent-glow));
+  box-shadow:
+    0 18px 56px color-mix(in srgb, #000 24%, transparent),
+    0 0 0 1px color-mix(in srgb, #fff 4%, transparent) inset;
+  backdrop-filter: blur(18px) saturate(1.24);
+}
+
+.emptyStateSearchGlyph {
+  color: color-mix(in srgb, var(--fg-muted) 72%, var(--accent));
+  font-size: 19px;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+.emptyStateSearchInput {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 17px;
+  font-weight: var(--font-weight-body, 500);
+}
+
+.emptyStateSearchInput::placeholder {
+  color: color-mix(in srgb, var(--fg-muted) 76%, transparent);
+}
+
+.emptyStateSearchInput::-webkit-search-decoration,
+.emptyStateSearchInput::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.emptyStateSearchMeta {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: var(--font-weight-subtext, 600);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@keyframes emptyStateSearchSpotlightIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: none;
+  }
+}
+
+/* A subtle "× to clear" affordance on hover of the committed hero: a
+   small fade-in ring drawn via the icon's own shadow so no extra DOM
+   is required. The selected-bot color is already inherited through
+   --bot-color on the child glyph, so the pulse reads as a small
+   breathing ring in the bot's own hue. */
+.emptyStateIconButton:hover .emptyStateBotGlyph {
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 4px
+      color-mix(
+        in srgb,
+        var(--bot-color, var(--fg-muted)) 22%,
+        transparent
+      );
 }
 
 .emptyStateTitle {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--fg);
-  letter-spacing: -0.01em;
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
+  font-size: 22px;
+  font-weight: var(--font-weight-title, 300);
+  color: var(--bot-ink, var(--fg));
+  letter-spacing: 0.03em;
+  line-height: 1.18;
 }
 
 .emptyStateHint {
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: var(--font-weight-subtext, 600);
   color: var(--fg-muted);
-  max-width: 360px;
+  max-width: 420px;
   line-height: 1.55;
+}
+
+/* Chat-mode start-of-conversation bot picker.
+ *
+ * Flex-wrap with a pinned WIDTH so rows are cleanly stacked.
+ *
+ * The per-row count is computed by pickerGridCols() in page.tsx based
+ * on bot count + physical width cap, then multiplied out to an exact
+ * pixel width and pushed here as `width` (inline style). Flex-wrap
+ * then wraps at EXACTLY that cols count because no additional tile can
+ * fit within the pinned row width. For counts that factor perfectly
+ * (N=9 → 3×3, N=16 → 4×4), every row is uniform. For prime counts
+ * that can't factor cleanly (N=11 → 6+5), the last short row CENTERS
+ * naturally via justify-content, which reads as more "intentional"
+ * than a left-aligned orphan row in a CSS Grid layout.
+ *
+ * Tile size is still driven by --tile-size so the one-bot → wall-of-
+ * tiles sizing curve in pickerGeometry() still works.
+ *
+ * Visual DNA stays in lockstep with .glyphOption / .botCardGlyph /
+ * .emptyStateBotGlyph: each tile carries its own --bot-color via inline
+ * style and color-mixes background, border, and glyph against it.
+ *
+ * The hover effect is "Apple Watch but inverted" — instead of layout
+ * dictating focus (center icon biggest), the cursor dictates focus: the
+ * hovered tile pops UP via transform: scale(--tile-hover-scale), and
+ * its siblings ease BACK via the :has() / :not(:hover) selector pair.
+ * Spring easing on the transform + a layered shadow lift give the tile
+ * a tactile "I'm picking THIS one" signal without any JS. */
+.chatBotPickerFrame {
+  position: absolute;
+  left: 50%;
+  bottom: 32px;
+  width: var(--picker-width, 320px);
+  height: var(--picker-height, 320px);
+  max-width: calc(100% - 48px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  transform-origin: 50% 100%;
+  transform: translate3d(
+    calc(-50% + var(--picker-parallax-x, 0px)),
+    var(--picker-parallax-y, 0px),
+    0
+  );
+  transition:
+    transform 0.14s ease-out,
+    width 0.26s ease,
+    height 0.26s ease;
+}
+
+.chatBotPickerFrame[data-returning-all="true"] {
+  animation: botPickerReturnToAll
+    var(--picker-return-duration, 360ms)
+    cubic-bezier(0.22, 1, 0.36, 1)
+    both;
+}
+
+.chatBotPickerFrame[data-returning-all="true"] .chatBotPicker {
+  animation: botPickerReturnGridBloom
+    var(--picker-return-duration, 360ms)
+    ease-out
+    both;
+}
+
+/* While a touch preview is mid-gesture, suppress the browser's native
+   touch handling on the picker so dragging across the grid doesn't
+   compete with vertical scroll, refresh-pull, or browser zoom. The flag
+   is added by React only while the captured pointer is active, so
+   non-touch sessions and idle states keep their default touch-action. */
+.chatBotPickerFrame[data-touch-active="true"] {
+  touch-action: none;
+}
+
+@media (min-width: 721px) {
+  .emptyStateSearch {
+    margin-bottom: 28px;
+  }
+
+  .chatBotPickerFrame[data-search-active="true"] {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    top: 28px;
+    width: min(var(--picker-width, 320px), calc(100% - 48px));
+    height: min(var(--picker-height, 320px), 200px);
+    margin: 28px auto 0;
+    overflow: hidden;
+    transform: none;
+  }
+
+  .chatBotPickerFrame[data-search-active="true"][data-returning-all="true"],
+  .chatBotPickerFrame[data-search-active="true"][data-returning-all="true"] .chatBotPicker {
+    animation: none;
+  }
+}
+
+@keyframes botPickerReturnToAll {
+  0% {
+    opacity: 0.78;
+    filter: saturate(1.16) blur(0.2px);
+    transform: translate3d(
+        calc(-50% + var(--picker-parallax-x, 0px)),
+        var(--picker-parallax-y, 0px),
+        0
+      )
+      scale(1.16);
+  }
+  62% {
+    opacity: 1;
+    filter: saturate(1);
+    transform: translate3d(
+        calc(-50% + var(--picker-parallax-x, 0px)),
+        var(--picker-parallax-y, 0px),
+        0
+      )
+      scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    filter: none;
+    transform: translate3d(
+        calc(-50% + var(--picker-parallax-x, 0px)),
+        var(--picker-parallax-y, 0px),
+        0
+      )
+      scale(1);
+  }
+}
+
+@keyframes botPickerReturnGridBloom {
+  0% {
+    opacity: 0.62;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.chatBotPicker {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-cols, 1), var(--tile-size, 40px));
+  justify-content: center;
+  align-items: center;
+  /* The frame owns the outer footprint; the inner picker owns capped
+     tile sizing, so a lone bot can sit centered instead of filling the
+     frame edge-to-edge. */
+  gap: var(--tile-gap, 6px);
+  padding: 0;
+  margin: 0;
+  transition:
+    width 0.26s ease,
+    gap 0.26s ease;
+}
+
+.chatBotPickerSingle {
+  align-items: stretch;
+}
+
+.chatBotPickerThreeStack {
+  transform: translateY(28px);
+}
+
+.chatBotPickerThreeStack .chatBotTile:nth-of-type(3) {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+
+.chatBotPickerMobileColumnStack {
+  transform: translateY(12px);
+}
+
+.chatBotTilePlaceholder {
+  width: var(--tile-size, 40px);
+  height: var(--tile-size, 40px);
+  pointer-events: none;
+  border-radius: min(18px, calc(var(--tile-size, 40px) * 0.22));
+  border: 1px solid color-mix(in srgb, var(--fg-muted) 16%, var(--line));
+  background: color-mix(in srgb, var(--fg-muted) 7%, var(--bg-surface));
+  opacity: 0.38;
+}
+
+.chatBotPickerPixelGrid {
+  gap: 0;
+  padding: 0;
+  transition: none;
+}
+
+.chatBotTile {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--tile-size, 40px);
+  height: var(--tile-size, 40px);
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  /* Border-radius scales with tile size — clamped at 18px so giant
+     tiles don't go full pill. */
+  border-radius: min(18px, calc(var(--tile-size, 40px) * 0.22));
+  /* Default (non-selected) state: opaque two-stop gradient carrying a
+     faint --bot-color tint so the user still reads a flash of color,
+     but the glyph stays the focal point. Both stops mix bot color into
+     --bg-surface (theme-aware: white in light, #121214 in dark) — top
+     edge gets a touch more tint, bottom edge fades toward neutral, so
+     each tile reads as a subtly-lifted card instead of a flat swatch.
+     A 1px border mixed against --line reserves layout so hover/
+     selected rings don't jitter the glyph. */
+  color: var(--bot-color, var(--fg-muted));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 14%, var(--bg-surface)),
+    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 6%, var(--bg-surface))
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--bot-color, var(--fg-muted)) 34%,
+      var(--line)
+    );
+  /* Spring-y back-easing on transform = the bouncy Apple-y "pop". */
+  transition:
+    width 0.26s ease,
+    height 0.26s ease,
+    transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 0.18s ease,
+    border-radius 0.24s ease,
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    box-shadow 0.2s;
+  position: relative;
+  /* will-change is intentional — the picker is short-lived (only on the
+     empty state) so the perf hint pays for itself in smooth hovers. */
+  will-change: transform;
+}
+
+.chatBotPickerSingle .chatBotTile {
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-items: center;
+  gap: 26px;
+  padding: 22px;
+  background:
+    radial-gradient(
+      circle at 50% 38%,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 30%, transparent),
+      transparent 42%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 18%, var(--bg-surface)),
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 8%, var(--bg))
+    );
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 52%,
+    var(--line)
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent),
+    0 14px 36px color-mix(in srgb, var(--bot-color, var(--fg)) 14%, transparent);
+}
+
+.chatBotPickerSingle .chatBotTileBotGlyph {
+  grid-area: auto;
+}
+
+.chatBotPickerSingle .chatBotTile:hover,
+.chatBotPickerSingle .chatBotTile:focus-visible {
+  background:
+    radial-gradient(
+      circle at 50% 38%,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 42%, transparent),
+      transparent 44%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 24%, var(--bg-surface)),
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 10%, var(--bg))
+    );
+}
+
+.chatBotTileFeaturedName {
+  grid-area: auto;
+  align-self: start;
+  margin-bottom: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--bot-color, var(--fg)) 72%, var(--fg));
+  font-size: clamp(14px, calc(var(--tile-size, 40px) * 0.08), 18px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+
+.chatBotTile:active {
+  transform: translateY(1px);
+}
+
+.chatBotTile:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--bot-color, var(--accent-glow)) 38%,
+      transparent
+    );
+}
+
+/* Sibling shrink — the "inverted Apple Watch" half of the effect.
+   Keep the dim state active while the cursor is anywhere inside the
+   picker, not only while directly hovering a tile. That avoids a bright
+   flash when slowly crossing the gaps between buttons. */
+.chatBotPicker:not(.chatBotPickerSolidSwatch):hover .chatBotTile:not(:hover) {
+  transform: scale(0.94);
+  opacity: 0.55;
+}
+
+/* Hovered tile pops forward. Scale is driven by --tile-hover-scale set
+   by the picker container so big base tiles get a restrained 1.12 lift
+   while tiny tiles get a more dramatic 1.3 (pickerGeometry() handles
+   the mapping). z-index keeps the magnified tile above its neighbors
+   so the shadow lift doesn't get clipped by adjacent tile borders. */
+.chatBotTile:hover {
+  transform: scale(var(--tile-hover-scale, 1.2));
+  z-index: 3;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 28%, var(--bg-surface)),
+    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 14%, var(--bg-surface))
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 68%,
+    var(--line)
+  );
+  color: var(--bot-color, var(--fg));
+  box-shadow:
+    0 8px 24px
+      color-mix(
+        in srgb,
+        var(--bot-color, var(--fg)) 32%,
+        transparent
+      ),
+    0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.chatBotTileBotGlyph {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+  transition: opacity 0.18s ease;
+}
+
+.chatBotTileBotGlyph {
+  opacity: 1;
+}
+
+.chatBotTile:hover .chatBotTileBotGlyph,
+.chatBotTile:focus-visible .chatBotTileBotGlyph {
+  opacity: 0.72;
+}
+
+.themeDark .chatBotTile:not(.chatBotTileSelected):hover,
+.themeDark .chatBotTile:not(.chatBotTileSelected):focus-visible,
+.themeDark .chatBotTile:not(.chatBotTileSelected):active {
+  --hover-bot-contrast-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg)) 72%,
+    #fff
+  );
+  border-color: var(--hover-bot-contrast-color);
+}
+
+.themeDark .chatBotTile:not(.chatBotTileSelected):hover .chatBotTileBotGlyph,
+.themeDark .chatBotTile:not(.chatBotTileSelected):focus-visible .chatBotTileBotGlyph,
+.themeDark .chatBotTile:not(.chatBotTileSelected):active .chatBotTileBotGlyph {
+  color: var(--hover-bot-contrast-color);
+  opacity: 0.9;
+}
+
+.themeLight .chatBotTile:not(.chatBotTileSelected):hover,
+.themeLight .chatBotTile:not(.chatBotTileSelected):focus-visible,
+.themeLight .chatBotTile:not(.chatBotTileSelected):active {
+  --hover-bot-contrast-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg)) 70%,
+    #000
+  );
+  border-color: var(--hover-bot-contrast-color);
+}
+
+.themeLight .chatBotTile:not(.chatBotTileSelected):hover .chatBotTileBotGlyph,
+.themeLight .chatBotTile:not(.chatBotTileSelected):focus-visible .chatBotTileBotGlyph,
+.themeLight .chatBotTile:not(.chatBotTileSelected):active .chatBotTileBotGlyph {
+  color: var(--hover-bot-contrast-color);
+  opacity: 0.88;
+}
+
+.chatBotTileSwatchOnly .chatBotTileBotGlyph {
+  opacity: 0;
+}
+
+.chatBotPickerCrosshair,
+.chatBotPickerCrosshair .chatBotTile {
+  cursor: crosshair;
+}
+
+.chatBotPickerDotCursor,
+.chatBotPickerDotCursor .chatBotTile {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='17' viewBox='0 0 17 17'%3E%3Ccircle cx='8.5' cy='8.5' r='3.25' fill='%23fff' stroke='%23000' stroke-width='1.5'/%3E%3C/svg%3E")
+      8 8,
+    crosshair;
+}
+
+.chatBotTileFlat {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 17%,
+    var(--bg-surface)
+  );
+}
+
+.chatBotTileFlat:hover,
+.chatBotTileFlat:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 26%,
+    var(--bg-surface)
+  );
+}
+
+/* Glyphless stage: with the mark hidden, the swatch carries the entire
+   visual identity of each tile. The flat-stage color mix (17% bot color
+   into bg-surface) reads dim once the glyph leaves because the glyph
+   was contributing roughly half the on-screen color. Bump the bot-color
+   contribution so each tile reads as a confident color block instead
+   of a faded card. Both flat and swatch-only classes are applied at
+   this density level; this rule sits AFTER .chatBotTileFlat so equal-
+   specificity selectors resolve in our favor. */
+.chatBotTileSwatchOnly {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 30%,
+    var(--bg-surface)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 48%,
+    var(--line)
+  );
+}
+
+.chatBotTileSwatchOnly:hover,
+.chatBotTileSwatchOnly:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 44%,
+    var(--bg-surface)
+  );
+}
+
+/* High-count pixel state. At very large bot counts the tile stops being
+   a tiny card and becomes a transparent color pixel: no gradient, no
+   glyph, no border chrome, and hard square corners. */
+.chatBotTileSolidSwatch {
+  border-radius: 0;
+  color: var(--bot-color, var(--fg-muted));
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 48%,
+    transparent
+  );
+  border: 0;
+  box-shadow: none;
+}
+
+.chatBotTileSolidSwatch .chatBotTileBotGlyph {
+  display: none;
+}
+
+.chatBotTileSolidSwatch:hover,
+.chatBotTileSolidSwatch:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 58%,
+    transparent
+  );
+  box-shadow: none;
+}
+
+/* Fifth density state: hundreds of bots collapse into a flat pixel grid.
+   The native cursor disappears only while inside this picker; the hovered
+   pixel becomes the locator by growing/glowing while neighbours dim. */
+.chatBotPickerPixelGrid {
+  cursor: none;
+}
+
+.chatBotPickerPixelGrid .chatBotTile {
+  --pixel-bot-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 68%,
+    #000
+  );
+  background: var(--pixel-bot-color);
+  color: var(--pixel-bot-color);
+  transform: none;
+  cursor: none;
+  transition:
+    transform 90ms ease-out,
+    opacity 90ms ease-out,
+    box-shadow 90ms ease-out;
+  will-change: transform;
+}
+
+.chatBotPickerPixelGrid:hover .chatBotTile:not(:hover):not(.chatBotTileSelected) {
+  opacity: 0.42;
+}
+
+.chatBotPickerPixelGrid .chatBotTilePlaceholder {
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--fg-muted) 10%, var(--bg));
+  opacity: 1;
+}
+
+.themeLight .chatBotPickerPixelGrid .chatBotTile {
+  --pixel-bot-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 78%,
+    #fff
+  );
+}
+
+.chatBotPickerRainbowGradient {
+  background:
+    radial-gradient(
+      circle at center,
+      color-mix(in srgb, var(--bg) 86%, transparent) 0 8%,
+      transparent 28%
+    ),
+    conic-gradient(
+      from -90deg,
+      #ff4d6d,
+      #ff9f1c,
+      #b7e63a,
+      #2fd3e3,
+      #7b5cff,
+      #ff4d6d
+    );
+  overflow: hidden;
+}
+
+.chatBotPickerRainbowGradient .chatBotTile:not(.chatBotTileSelected),
+.chatBotPickerRainbowGradient .chatBotTilePlaceholder {
+  background: transparent;
+  color: transparent;
+  box-shadow: none;
+}
+
+.chatBotPickerRainbowGradient:hover .chatBotTile:not(:hover):not(.chatBotTileSelected) {
+  opacity: 0.72;
+}
+
+.chatBotPickerPixelGrid .chatBotTile:hover,
+.chatBotPickerPixelGrid .chatBotTile:focus-visible,
+.chatBotPickerPixelGrid .chatBotTile:active {
+  background: var(--pixel-bot-color);
+  color: var(--bot-color, var(--fg));
+  opacity: 1;
+  transform: scale(1.9);
+  z-index: 4;
+  box-shadow:
+    0 0 0 1px var(--hover-bot-contrast-color, var(--bot-color, var(--fg))),
+    0 0 10px
+      color-mix(
+        in srgb,
+        var(--hover-bot-contrast-color, var(--bot-color, var(--fg))) 58%,
+        transparent
+      ),
+    0 0 22px
+      color-mix(
+        in srgb,
+        var(--hover-bot-contrast-color, var(--bot-color, var(--fg))) 34%,
+        transparent
+      );
+}
+
+.chatBotPickerPixelGrid .chatBotTile .chatBotTileBotGlyph {
+  display: none;
+  opacity: 0;
+}
+
+.chatBotPickerPixelGrid .chatBotTile:hover .chatBotTileBotGlyph,
+.chatBotPickerPixelGrid .chatBotTile:focus-visible .chatBotTileBotGlyph,
+.chatBotPickerPixelGrid .chatBotTile:active .chatBotTileBotGlyph {
+  display: grid;
+  opacity: 1;
+}
+
+.chatBotPickerPixelGrid .chatBotTile:hover .chatBotTileBotGlyph svg,
+.chatBotPickerPixelGrid .chatBotTile:focus-visible .chatBotTileBotGlyph svg,
+.chatBotPickerPixelGrid .chatBotTile:active .chatBotTileBotGlyph svg {
+  stroke-width: 1.6;
+}
+
+/* Selected = inverted fill. Tile flips to --fg (near-white in dark
+   mode, near-black in light) and the glyph flips to --bg so it draws
+   as the literal inverse of the tile — white tile / black glyph in
+   dark mode, black tile / white glyph in light mode. No bot-color
+   tint on the selected tile: the inversion is the only "armed" signal
+   we need. Selection wins over hover, so the hover variant keeps the
+   same inverted fill and adds a soft bot-color drop-glow purely for
+   hand-feel. */
+.chatBotTileSelected {
+  color: var(--bg);
+  background: var(--fg);
+  border-color: var(--fg);
+  box-shadow: none;
+}
+
+.chatBotTileSelected:hover {
+  color: var(--bg);
+  background: var(--fg);
+  border-color: var(--fg);
+  box-shadow: 0 6px 18px
+    color-mix(in srgb, var(--bot-color, var(--fg)) 28%, transparent);
+}
+
+/* In the final pixel-grid stage, selection uses the high-contrast inverted
+   tile treatment. Hovered cells also reveal their glyph via the rules above. */
+.chatBotPickerPixelGrid .chatBotTileSelected {
+  background: var(--fg);
+  color: var(--bg);
+  transform: none;
+  z-index: 2;
+  box-shadow: none;
+}
+
+.chatBotPickerPixelGrid .chatBotTileSelected:hover,
+.chatBotPickerPixelGrid .chatBotTileSelected:focus-visible,
+.chatBotPickerPixelGrid .chatBotTileSelected:active {
+  background: var(--fg);
+  color: var(--bg);
+  transform: scale(1.9);
+  z-index: 4;
+  box-shadow: 0 0 14px
+    color-mix(in srgb, var(--bot-color, var(--fg)) 58%, transparent);
+}
+
+.chatBotPickerPixelGrid .chatBotTileSelected .chatBotTileBotGlyph {
+  display: grid;
+  opacity: 1;
+}
+
+.chatBotTileSelectedDotGlyph {
+  display: block;
+  width: clamp(5px, calc(var(--tile-size, 40px) * 0.48), 14px);
+  height: clamp(5px, calc(var(--tile-size, 40px) * 0.48), 14px);
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.chatBotTileSelectedHoverGlyph {
+  display: none;
+}
+
+.chatBotPickerPixelGrid .chatBotTileSelected:hover .chatBotTileSelectedDotGlyph,
+.chatBotPickerPixelGrid .chatBotTileSelected:focus-visible .chatBotTileSelectedDotGlyph,
+.chatBotPickerPixelGrid .chatBotTileSelected:active .chatBotTileSelectedDotGlyph {
+  display: none;
+}
+
+.chatBotPickerPixelGrid .chatBotTileSelected:hover .chatBotTileSelectedHoverGlyph,
+.chatBotPickerPixelGrid .chatBotTileSelected:focus-visible .chatBotTileSelectedHoverGlyph,
+.chatBotPickerPixelGrid .chatBotTileSelected:active .chatBotTileSelectedHoverGlyph {
+  display: block;
+}
+
+.chatBotPickerPixelGrid .chatBotTileSelected .chatBotTileBotGlyph svg {
+  stroke-width: 0.9;
+}
+
+/* Touch keyboard-balloon preview. Lifts above the user's finger when
+   they touch the picker at high-density stages. The visual identity
+   mirrors a single resting `.chatBotTile`: rounded card, soft shadow,
+   bot-color fill, glyph centered, name underneath. The container is
+   `position: fixed` so it floats above any clipping/transform parents,
+   and `transform: translate(-50%, ...)` centers the balloon
+   horizontally on the touch x-coordinate. */
+.touchPreviewBalloon {
+  position: fixed;
+  z-index: 320;
+  pointer-events: none;
+  transform: translate(-50%, 0);
+  display: grid;
+  grid-template-rows: auto auto;
+  align-items: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 14px 18px 12px;
+  width: max-content;
+  min-width: 96px;
+  max-width: 220px;
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 28%, var(--bg-surface)),
+    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 14%, var(--bg-surface))
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 60%, var(--line));
+  box-shadow:
+    0 14px 40px rgba(0, 0, 0, 0.32),
+    0 4px 12px rgba(0, 0, 0, 0.2);
+  color: var(--bot-color, var(--fg));
+  animation: touchPreviewBalloonIn 120ms ease-out;
+}
+
+.touchPreviewBalloon[data-flip-below="true"] {
+  /* When the balloon flips below the finger, the visual logic is the
+     same — it just sits beneath the touch point instead of above. The
+     class hook is here so future tail/arrow indicators can flip with
+     it; today the balloon is plain to keep the visual minimal. */
+}
+
+.touchPreviewBalloonGlyph {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  color: var(--bot-color, var(--fg));
+}
+
+.touchPreviewBalloonName {
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes touchPreviewBalloonIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .touchPreviewBalloon {
+    animation: none;
+  }
+}
+
+/* Light mode needs a stronger edge treatment because warm bot colors sit on
+   warm ivory instead of near-black. Keep the fill soft, but lean tile outlines
+   slightly toward foreground so bright oranges/yellows remain legible. */
+.themeLight .emptyStateBotGlyph,
+.themeLight .botCardGlyph,
+.themeLight .chatBotTile:not(.chatBotTileSolidSwatch) {
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 42%,
+    var(--line-strong)
+  );
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--bot-color, var(--fg-muted)) 18%,
+        transparent
+      );
+}
+
+.themeLight .chatBotTile:not(.chatBotTileSolidSwatch):hover,
+.themeLight .chatBotTile:not(.chatBotTileSolidSwatch):focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 58%,
+    var(--fg)
+  );
+  box-shadow:
+    0 8px 24px
+      color-mix(
+        in srgb,
+        var(--bot-color, var(--fg)) 24%,
+        transparent
+      ),
+    0 2px 6px rgba(64, 46, 27, 0.12),
+    inset 0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--bot-color, var(--fg-muted)) 22%,
+        transparent
+      );
+}
+
+.themeLight .chatBotTile:not(.chatBotTileSelected):not(.chatBotTileSolidSwatch):hover,
+.themeLight .chatBotTile:not(.chatBotTileSelected):not(.chatBotTileSolidSwatch):focus-visible,
+.themeLight .chatBotTile:not(.chatBotTileSelected):not(.chatBotTileSolidSwatch):active {
+  border-color: var(--hover-bot-contrast-color);
+}
+
+/* Light-mode selected: the base rule's `background: var(--fg)` already
+   resolves to near-black on light theme, so the inversion is automatic
+   without a separate override. Keep this selector around as a no-op
+   anchor in case future per-theme tuning is needed. */
+
+/* Conversation intro — glyph + name + description block that sits at
+   the top of the message stream once a Chat-mode conversation has a
+   persisted bot. Renders INSIDE .messages so it scrolls out naturally
+   with the thread (the spec: "let messages push it off-screen"), rather
+   than pinning to the viewport top. Inherits --bot-color from the React
+   layer so the name + divider tint themselves to the bot's hue, echoing
+   the same visual vocabulary used by .botCardGlyph / .chatBotTile. */
+.conversationIntro {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 20px 24px 24px;
+  text-align: center;
+  color: var(--fg-muted);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--bot-color, var(--line)) 35%, var(--line));
+  margin: 0 0 8px;
+}
+
+.conversationIntroName {
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
+  font-size: 18px;
+  font-weight: var(--font-weight-title, 300);
+  color: var(--bot-ink, var(--bot-color, var(--fg)));
+  letter-spacing: 0.025em;
+}
+
+.conversationIntroDescription {
+  font-size: 13px;
+  font-weight: var(--font-weight-subtext, 600);
+  color: var(--fg-muted);
+  max-width: 420px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* Respect users who prefer reduced motion: kill the spring transform
+   transition and the sibling-shrink shift, but keep the color/shadow
+   feedback so hover affordance still reads. */
+@media (prefers-reduced-motion: reduce) {
+  .chatBotPickerFrame {
+    transform: translateX(-50%);
+    transition: none;
+  }
+  .chatBotTile {
+    transition:
+      background 0.15s,
+      border-color 0.15s,
+      color 0.15s,
+      box-shadow 0.2s;
+  }
+  .chatBotPicker:not(.chatBotPickerSolidSwatch):has(.chatBotTile:hover)
+    .chatBotTile:not(:hover) {
+    transform: none;
+    opacity: 0.7;
+  }
+  .chatBotTile:hover {
+    transform: none;
+  }
+  .chatBotTileBotGlyph {
+    transition: none;
+  }
 }
 
 .message {
@@ -1828,7 +3437,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.55;
-  font-size: 14px;
+  font-size: var(--font-size-message);
 }
 
 /* Wraps the <p> body so we can cap the rendered height on long messages
@@ -2035,73 +3644,230 @@
   gap: 10px;
 }
 
-/* Chat-mode-only pill in the .composeTools row. Doubles as the
-   online/offline toggle for Chat since it forces provider=local AND
-   skips memory when active. Intentionally monochrome and calm — this is
-   the "stripped-down personal Prism" surface, not the full cockpit. */
-.incognitoToggle {
-  display: inline-flex;
+/* Hue lens row — Prism-style color filter. Full-width in the pre-chat
+   composer, compact when embedded in the bot popout after a thread has
+   begun. The colored bars show only bot color families that currently
+   exist; unavailable families fall back to the neutral rail. */
+.hueLensRow {
+  max-width: 860px;
+  margin: 0 auto 8px;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 14px;
-  height: 36px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--bg-deep);
-  color: var(--fg-subtle);
-  font: inherit;
-  font-size: 12px;
+  gap: 10px;
+}
+
+.hueLensLabel {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  flex-shrink: 0;
+}
+
+/* Native range input + a hand-drawn segmented color track. Browsers don't let
+   us style the track and the thumb with a single rule, so we do the
+   color track on the input background and reset the default OS track via
+   ::-webkit-slider-runnable-track / ::-moz-range-track. */
+.hueLensSlider {
+  flex: 1 1 auto;
+  min-width: 120px;
+  height: 14px;
+  -webkit-appearance: none;
+  appearance: none;
+  /* `--lens-track-gradient` paints only populated PRISM families, compacted
+     across the full rail; background-color is the neutral fallback. */
+  background-color: color-mix(in srgb, var(--fg) 16%, transparent);
+  background-image: var(
+    --lens-track-gradient,
+    linear-gradient(
+      to right,
+      hsl(0, 80%, 55%),
+      hsl(60, 80%, 55%),
+      hsl(120, 70%, 50%),
+      hsl(180, 65%, 50%),
+      hsl(240, 70%, 60%),
+      hsl(300, 70%, 60%),
+      hsl(360, 80%, 55%)
+    )
+  );
+  border-radius: 999px;
+  border: 1px solid var(--line);
   cursor: pointer;
-  transition: background 0.2s, color 0.2s, border-color 0.2s;
+  outline: none;
+  opacity: 0.55;
+  transition: opacity 180ms ease;
+  padding: 0;
+  margin: 0;
 }
 
-.incognitoToggle:hover {
-  color: var(--fg);
-  border-color: var(--fg-subtle);
+.hueLensRow[data-active="true"] .hueLensSlider {
+  opacity: 1;
 }
 
-.incognitoToggleActive {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
+.hueLensRowCompact {
+  max-width: none;
+  margin: 8px 0 0;
+  gap: 8px;
 }
 
-.incognitoToggleActive:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-  color: var(--accent-text);
+.hueLensRowCompact .hueLensLabel {
+  display: none;
 }
 
-/* Status dot inside the Incognito pill — hollow when off, filled when
-   on. Gives an at-a-glance "is this private right now?" signal
-   without needing a tooltip. */
-.incognitoDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 1.5px solid currentColor;
+.hueLensRowCompact .hueLensSlider {
+  min-width: 110px;
+  height: 12px;
+}
+
+.hueLensRowCompact .hueLensCount {
+  font-size: 10px;
+}
+
+.hueLensRowCompact .hueLensClear {
+  padding: 3px 9px;
+  font-size: 10.5px;
+}
+
+.hueLensSlider::-webkit-slider-runnable-track {
+  height: 100%;
   background: transparent;
-  transition: background 0.2s;
+  border-radius: inherit;
 }
 
-.incognitoDotActive {
-  background: currentColor;
+.hueLensSlider::-moz-range-track {
+  height: 100%;
+  background: transparent;
+  border-radius: inherit;
+}
+
+.hueLensSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: #000000;
+  border: 2px solid var(--bg-surface);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+  cursor: grab;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.hueLensSlider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #000000;
+  border: 2px solid var(--bg-surface);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+  cursor: grab;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.hueLensSlider:active::-webkit-slider-thumb,
+.hueLensSlider:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.18);
+  cursor: grabbing;
+}
+
+.hueLensSlider:active::-moz-range-thumb,
+.hueLensSlider:focus-visible::-moz-range-thumb {
+  transform: scale(1.18);
+  cursor: grabbing;
+}
+
+.hueLensSlider:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, #000000 35%, transparent);
+}
+
+.hueLensCount {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.hueLensClear {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg-deep);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.hueLensClear:hover {
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+
+.hueLensClear:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-glow) 45%, transparent);
+}
+
+@media (max-width: 560px) {
+  .hueLensRow {
+    gap: 8px;
+  }
+  .hueLensLabel {
+    display: none;
+  }
 }
 
 /* Inline bot picker that lives beside the mode/lock control so all
-   "who/where am I talking?" controls sit in one place above the composer. */
+   "who/where am I talking?" controls sit in one place above the
+   composer. This is a CUSTOM dropdown (not a native <select>) because
+   we need per-option glyphs and color tints — the OS-rendered popup
+   can't do either. The rail retains its pill shape; only the interior
+   changes shape based on whether a bot is selected. */
 .composeBotControl {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
-  padding: 0 10px;
   height: 36px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--bg-deep);
+  position: relative; /* anchor for the absolute-positioned popover */
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+/* When a bot is selected, tint the pill with that bot's color so the
+   control reads as "this bot's rail". Border gets a stronger hint, fill
+   a faint wash — keeps contrast with the composer's bg-deep surround
+   without overwhelming the surrounding controls. */
+.composeBotControl[data-bot-selected="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--line)) 55%,
+    var(--line)
+  );
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--bg-deep)) 14%,
+    var(--bg-deep)
+  );
+}
+
+.composeBotControl[data-disabled="true"] {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg-deep) 88%, var(--fg) 12%);
+  filter: saturate(0);
 }
 
 .composeControlLabel {
@@ -2114,24 +3880,315 @@
   flex-shrink: 0;
 }
 
-.composeBotSelect {
+/* Trigger: replaces the old <select> element. Fills the pill so hover +
+   focus feel natural on the whole rail. Text and glyph recolour via
+   --bot-color when a bot is active; fall through to --fg-muted for the
+   Default state so the "BOT" label reads as an understated affordance. */
+.composeBotTrigger {
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
+  height: 100%;
+  padding: 0 12px 0 10px;
+  background: transparent;
   border: 0;
+  color: var(--bot-color, var(--fg));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: inherit;
+}
+
+.composeBotTrigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--bot-color, var(--accent-glow)) 45%,
+      transparent
+    );
+}
+
+.composeBotTrigger:disabled {
+  cursor: not-allowed;
+  color: var(--fg-muted);
+  opacity: 0.68;
+}
+
+.composeBotTriggerGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--bot-color, currentColor);
+}
+
+.composeBotTriggerName {
+  color: var(--bot-color, var(--fg));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  max-width: 11ch; /* bot names beyond ~11 chars ellipsize gracefully */
+}
+
+.composeBotTrigger:disabled .composeBotTriggerGlyph,
+.composeBotTrigger:disabled .composeBotTriggerName,
+.composeBotTrigger:disabled .composeBotTriggerChevron {
+  color: var(--fg-muted);
+}
+
+.composeBotTriggerChevron {
+  display: inline-flex;
+  align-items: center;
+  color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 55%,
+    var(--fg-muted)
+  );
+  margin-left: auto; /* pushes the chevron to the right edge */
+  padding-left: 4px;
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+.composeBotControl[data-open="true"] .composeBotTriggerChevron {
+  transform: rotate(180deg);
+}
+
+/* Popover menu. Opens UPWARD from the trigger because the composer
+   sits at the bottom of the viewport — opening downward would clip.
+   min-width: max(100%, 180px) guarantees the menu is at least as wide
+   as the trigger pill but never shrinks below a readable threshold
+   even when a short-name bot (e.g. "Hal") happens to be selected. */
+.composeBotMenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  min-width: max(100%, 260px);
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 160px));
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* subtle entry animation so the popover doesn't pop in harshly */
+  animation: composeBotMenuIn 0.14s ease-out;
+}
+
+.composeBotFilters {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 92%, var(--fg) 8%);
+}
+
+.composeBotSearchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composeBotSearch {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-deep);
+  color: var(--fg);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.composeBotSearch::placeholder {
+  color: var(--fg-subtle);
+}
+
+.composeBotSearch:focus {
+  border-color: var(--accent-ink);
+  background: var(--bg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-glow) 55%, transparent);
+}
+
+.composeBotFilterCount {
+  flex-shrink: 0;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.composeBotListbox {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.themeLight .composeBotFilters {
+  border-bottom-color: var(--line-strong);
+  background: color-mix(in srgb, var(--bg) 88%, var(--fg) 12%);
+}
+
+.themeLight .composeBotSearch {
+  border-color: var(--line-strong);
+  background: var(--bg-deep);
+}
+
+.themeLight .composeBotSearch:focus {
+  background: var(--bg-surface);
+}
+
+@keyframes composeBotMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Each option row is a button so keyboard users can Tab through them
+   without extra wiring. Tint + glyph colour come from --bot-color,
+   which the React layer sets inline per-row (null for the Default
+   option → falls back to neutral fg-muted). */
+.composeBotOption {
+  -webkit-appearance: none;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 12px;
-  padding: 0 18px 0 0;
+  font-size: 13px;
+  text-align: left;
   cursor: pointer;
+  transition: background 0.12s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  min-height: 30px;
 }
 
-.composeBotSelect:focus {
+.composeBotOption:hover,
+.composeBotOption:focus-visible {
   outline: none;
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--bg-hover)) 20%,
+    var(--bg-hover)
+  );
 }
 
-.composeBotSelect:disabled {
+.composeBotOption[aria-selected="true"] {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--bg-active)) 28%,
+    var(--bg-active)
+  );
+  font-weight: 500;
+}
+
+.composeBotOption[aria-selected="true"]:hover,
+.composeBotOption[aria-selected="true"]:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--bg-active)) 34%,
+    var(--bg-active)
+  );
+}
+
+.themeLight .composeBotOption:hover,
+.themeLight .composeBotOption:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--bg-hover)) 14%,
+    var(--bg-hover)
+  );
+}
+
+.themeLight .composeBotOption[aria-selected="true"] {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--bg-active)) 18%,
+    var(--bg-active)
+  );
+}
+
+.themeLight .composeBotOption[aria-selected="true"]:hover,
+.themeLight .composeBotOption[aria-selected="true"]:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--bg-active)) 22%,
+    var(--bg-active)
+  );
+}
+
+/* Default option is a distinct look — no hue, softer text — so it
+   reads as "no brand" rather than "a white bot". */
+.composeBotOptionDefault .composeBotOptionName {
   color: var(--fg-muted);
-  cursor: not-allowed;
+}
+
+.composeBotOptionDefault[aria-selected="true"] .composeBotOptionName {
+  color: var(--fg);
+}
+
+.composeBotNoMatches {
+  padding: 10px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.composeBotOptionGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--bot-color, var(--fg-muted));
+}
+
+.composeBotOptionName {
+  color: var(--bot-color, var(--fg));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.themeLight .composeBotOptionGlyph,
+.themeLight .composeBotOptionName {
+  color: var(--bot-menu-color, var(--fg));
+}
+
+.themeLight .composeBotOptionDefault .composeBotOptionName {
+  color: var(--fg-muted);
+}
+
+.themeLight .composeBotOptionDefault[aria-selected="true"] .composeBotOptionName {
+  color: var(--fg);
 }
 
 /* Integrated response-mode control:
@@ -2351,10 +4408,10 @@
   color: var(--fg);
   min-height: 56px;
   max-height: 200px;
-  resize: vertical;
+  resize: none;
   padding: 14px 16px;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--font-size-compose);
   line-height: 1.5;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -2363,6 +4420,15 @@
   outline: none;
   border-color: var(--accent-ink);
   box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.compose[data-compose-bot-selected="true"] textarea::placeholder {
+  color: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 82%,
+    var(--fg) 18%
+  );
+  opacity: 1;
 }
 
 /* Scoped to composeInner so the mode-toggle chips above the textarea don't
@@ -2376,7 +4442,7 @@
   padding: 14px 18px;
   cursor: pointer;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--font-size-compose);
   font-weight: 600;
   transition: background 0.25s, border-color 0.25s, color 0.25s, transform 0.05s;
   box-shadow: var(--shadow-sm);
@@ -2386,12 +4452,30 @@
   background: var(--accent-hover);
 }
 
+.compose[data-compose-bot-selected="true"] .composeInner button:not(:disabled) {
+  border-color: var(--compose-bot-color, var(--accent));
+  background: var(--compose-bot-color, var(--accent));
+  color: var(--accent-text);
+}
+
+.compose[data-compose-bot-selected="true"] .composeInner button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 88%,
+    var(--fg) 12%
+  );
+}
+
 .composeInner button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
 .composeInner button:disabled {
-  opacity: 0.5;
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg-deep) 86%, var(--fg) 14%);
+  color: var(--fg-muted);
+  filter: saturate(0);
+  opacity: 0.72;
   cursor: not-allowed;
 }
 
@@ -2419,8 +4503,8 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: 479px;
-  max-width: 100vw;
+  width: min(479px, calc(100vw - 32px));
+  max-width: none;
   background: var(--bg-surface);
   border-left: 1px solid var(--line);
   padding: 20px;
@@ -2444,6 +4528,57 @@
   }
 }
 
+/* The Bots panel must be visually independent of whichever bot is
+   currently driving the app shell's --accent triad. The shell writes
+   --accent/--accent-text/--accent-ink/--accent-soft/--accent-hover/
+   --accent-glow from the active bot's color onto <main>, and every
+   descendant inherits them. Overriding that triad at the Bots panel
+   boundary neutralises the bleed in one place instead of patching each
+   descendant selector. Resolves to near-black accents in light mode
+   (--fg = #0b0b0d) and near-white accents in dark mode, so buttons +
+   focus rings + input highlights inside the panel read in pure B/W
+   regardless of the last bot talked to.
+   Per-card identity (`.botCard::before` bar and `.botCardGlyph`) keeps
+   working because those use `--bot-color` set inline per card, not the
+   shared accent triad. The picker swatch and its inline --picker-color
+   are likewise untouched — the popover's hover/selected rings still
+   light up in the currently-picked hex. */
+.panelBots {
+  --accent: var(--fg);
+  --accent-hover: color-mix(in srgb, var(--fg) 88%, var(--bg) 12%);
+  --accent-text: var(--bg);
+  --accent-ink: var(--fg);
+  --accent-soft: color-mix(in srgb, var(--fg) 12%, var(--bg) 88%);
+  --accent-glow: color-mix(in srgb, var(--fg) 22%, transparent);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  align-content: stretch;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.panelBots .form {
+  margin-top: 0;
+  gap: 12px;
+}
+
+.panelBots .form textarea {
+  min-height: clamp(180px, 32dvh, 320px);
+}
+
+.panelBots[data-color-picker-open="true"]::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  background: color-mix(in srgb, #000 62%, transparent);
+  pointer-events: auto;
+  animation: overlayIn 0.14s ease-out;
+}
+
+.panelBots[data-color-picker-open="true"] .colorGlyphPopover {
+  z-index: 120;
+}
+
 .panelHeader {
   display: flex;
   justify-content: space-between;
@@ -2453,9 +4588,10 @@
 }
 
 .panelHeader h3 {
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
   font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: var(--font-weight-title, 300);
+  letter-spacing: 0.025em;
 }
 
 .panelClose {
@@ -2491,6 +4627,75 @@
   height: 16px;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+.botChatToggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.botChatToggle input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 44px;
+  min-width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-deep);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.botChatToggle input::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  transition: transform 0.15s, background 0.15s;
+}
+
+.botChatToggle input:checked {
+  border-color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent-ink) 22%, var(--bg-deep) 78%);
+}
+
+.botChatToggle input:checked::before {
+  transform: translateX(20px);
+  background: var(--accent-ink);
+}
+
+.botChatToggle input:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+.botChatToggleCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.botChatToggleCopy strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.botChatToggleCopy small {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
 }
 
 /* Low-emphasis text-style button for secondary panel actions. */
@@ -2682,40 +4887,45 @@
 }
 
 /* ── Bot glyph picker ────────────────────────────────────────────
-   Dense, glyph-first grid. 14 columns in a 320px popover (after 8px
-   padding + 2px gaps) give ~20px cells — cell chrome is deliberately
-   suppressed (transparent border + no background at rest) so the 22px
-   BotGlyph inside DOMINATES its tile. On hover and in the selected
-   state the cell takes on the currently-picked wheel color for BOTH
-   the glyph tint and the tile border, giving a live "paint-preview"
-   feel where you can see each candidate glyph wearing the accent
-   before you commit. The wheel color is piped in via --picker-color,
-   which is set inline on .glyphGridShell (clampAccentLightness-
-   normalized so it reads in both light and dark modes identically to
-   accents elsewhere). Falls back to the theme's stock accent tokens
-   when --picker-color is unavailable. */
+   Dense, glyph-first grid. Compact square cells keep the chooser tidy
+   while the glyph size/stroke relationship comes from BotGlyph itself:
+   larger marks get thinner strokes, smaller marks get thicker strokes.
+   Cells use an explicit black/white polarity: resting glyph buttons are
+   black with white marks, and selected buttons invert to white with
+   black marks. On hover, the currently-picked wheel color gives a live
+   "paint-preview" feel where you can see each candidate glyph wearing
+   the accent before you commit. The wheel color is piped in via
+   --picker-color, which is set inline on .glyphGridShell
+   (clampAccentLightness-normalized so it reads in both light and dark
+   modes identically to accents elsewhere). Falls back to the theme's
+   stock accent tokens when --picker-color is unavailable. */
 .glyphPicker {
   display: grid;
-  grid-template-columns: repeat(14, 1fr);
-  gap: 2px;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 4px;
 }
 
-.glyphOption {
-  appearance: none;
+.glyphPicker button.glyphOption {
   -webkit-appearance: none;
+  appearance: none;
   aspect-ratio: 1 / 1;
-  /* Transparent border + background by default so the tile melts
-     into the shell and only the glyph reads. Border is kept at 1px
-     (instead of 0) to reserve layout, so activating the hover/
-     selected ring doesn't jitter the glyph by a pixel. */
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  justify-self: center;
+  align-self: center;
+  /* Transparent border reserves layout without drawing an extra ring.
+     The tile fill itself carries the black/white state, while the 1px
+     border keeps hover/selection from jittering the glyph. */
   border: 1px solid transparent;
-  background: transparent;
-  color: var(--fg-muted);
+  background: #000000;
+  color: #ffffff;
   border-radius: 4px;
   padding: 0;
   display: grid;
   place-items: center;
   cursor: pointer;
+  box-shadow: none;
   transition:
     background 0.15s,
     border-color 0.15s,
@@ -2723,46 +4933,72 @@
     box-shadow 0.15s;
 }
 
-.glyphOption:hover:not(.glyphOptionSelected) {
-  /* Glyph + border take on the currently-picked wheel color so
-     hovering previews the chosen accent on the candidate mark.
-     Background is a heavily-faded mix so the tile reads as touched
-     without competing with the glyph. */
-  color: var(--picker-color, var(--fg));
+.themeLight .glyphPicker button.glyphOption {
+  color: #ffffff;
+  background: #000000;
+  border-color: #000000;
+}
+
+.glyphOption > svg {
+  display: block;
+  max-width: none;
+  max-height: none;
+  pointer-events: none;
+}
+
+.glyphOptionIcon {
+  width: 28px;
+  height: 28px;
+  max-width: 68%;
+  max-height: 68%;
+  transform-origin: center;
+}
+
+/* Picker color is confined to hover/focus so the grid stays calm. Selection
+   uses the app-wide inverted-button language: --fg tile fill, --bg glyph ink. */
+.glyphPicker button.glyphOption:hover:not(.glyphOptionSelected) {
+  color: var(--picker-ink, #ffffff);
+  background: var(--picker-color, var(--line-strong));
   border-color: var(--picker-color, var(--line-strong));
-  background: color-mix(
-    in srgb,
-    var(--picker-color, var(--bg-hover)) 14%,
-    transparent
-  );
 }
 
-.glyphOption:focus-visible {
+.glyphPicker button.glyphOption:focus-visible {
   outline: none;
-  border-color: var(--picker-color, var(--accent));
-  box-shadow: 0 0 0 2px
-    color-mix(
-      in srgb,
-      var(--picker-color, var(--accent-glow)) 35%,
-      transparent
-    );
+  border-color: var(--picker-color, var(--line-strong));
 }
 
-.glyphOptionSelected,
-.glyphOptionSelected:hover {
-  color: var(--picker-color, var(--accent));
-  border-color: var(--picker-color, var(--accent));
-  background: color-mix(
-    in srgb,
-    var(--picker-color, var(--accent-soft)) 20%,
-    transparent
-  );
-  box-shadow: 0 0 0 1px
-    color-mix(
-      in srgb,
-      var(--picker-color, var(--accent-glow)) 40%,
-      transparent
-    );
+.glyphPicker button.glyphOptionSelected,
+.glyphPicker button.glyphOptionSelected:focus-visible {
+  color: #000000;
+  background: #ffffff;
+  background-image: none;
+  border-color: #ffffff;
+  box-shadow: none;
+}
+
+.glyphPicker button.glyphOptionSelected:hover {
+  color: var(--picker-color, #000000);
+  background: #ffffff;
+  background-image: none;
+  border-color: #ffffff;
+  box-shadow: none;
+}
+
+.themeLight .glyphPicker button.glyphOptionSelected,
+.themeLight .glyphPicker button.glyphOptionSelected:focus-visible {
+  color: #000000;
+  background: #ffffff;
+  background-image: none;
+  border-color: #ffffff;
+  box-shadow: none;
+}
+
+.themeLight .glyphPicker button.glyphOptionSelected:hover {
+  color: var(--picker-color, #000000);
+  background: #ffffff;
+  background-image: none;
+  border-color: #ffffff;
+  box-shadow: none;
 }
 
 /* Row in the create-bot form: color swatch picker + name input side by side. */
@@ -2789,13 +5025,13 @@
 }
 
 .colorSwatchButton {
-  /* aspect-ratio + min-width pin the button to a perfect square regardless
-     of how tall the sibling input stretches, so the centered glyph never
-     drifts sideways when the row grows. min-height keeps the button from
-     collapsing if the input ever ends up shorter than 36px. */
+  /* Pin the preview to a confident square instead of letting the input row
+     collapse it; this keeps the selected glyph/color preview legible next to
+     the larger selector glyphs. */
   aspect-ratio: 1 / 1;
-  min-width: 36px;
-  min-height: 36px;
+  width: 56px;
+  min-width: 56px;
+  min-height: 56px;
   padding: 0;
   border-radius: 8px;
   /* --swatch-border is injected inline per-render by swatchBorderStyle()
@@ -2807,6 +5043,7 @@
      keeps the original --line value so nothing suddenly jumps visually. */
   border: 1px solid var(--swatch-border, var(--line));
   cursor: pointer;
+  overflow: hidden;
   /* Glyph is the button's child; center it inside the color fill on both
      axes. The glyph inherits currentColor, which is set inline per-swatch
      by pickReadableText() to either near-black (#0b0b0d) or pure white
@@ -2826,7 +5063,11 @@
      Belt-and-suspenders centering so the whole SVG node sits square inside
      the grid cell. */
   display: block;
+  width: 100%;
+  height: 100%;
   margin: auto;
+  transform: translateY(-1px) scale(1.82);
+  transform-origin: center;
 }
 
 .colorSwatchButton:hover {
@@ -2866,6 +5107,7 @@
   left: 0;
   z-index: 120;
   width: 320px;
+  max-height: calc(100dvh - 96px);
   background: var(--bg-surface);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -2875,6 +5117,7 @@
   display: grid;
   gap: 8px;
   justify-items: center;
+  overflow: hidden;
 }
 
 /* Thin divider between the color wheel and the glyph grid sections of the
@@ -3089,6 +5332,17 @@
   }
 }
 
+@keyframes popModalIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 8px)) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
 /* Color square: replaces the old hue/saturation wheel. X axis = hue
    (0→360° left to right), Y axis = lightness (top=brightest allowed,
    bottom=darkest allowed, pure hue in the middle band). Saturation is
@@ -3180,13 +5434,43 @@
 }
 
 .botCard strong {
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
   font-size: 13px;
+  font-weight: var(--font-weight-title, 300);
+  letter-spacing: 0.02em;
+}
+
+.botCardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.botCardChatBadge {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+
+.botCardChatBadge[data-enabled="true"] {
+  color: var(--bot-color, var(--fg));
+  border-color: color-mix(in srgb, var(--bot-color, var(--fg)) 42%, var(--line) 58%);
+  background: color-mix(in srgb, var(--bot-color, var(--fg)) 10%, transparent);
 }
 
 .botCard small {
   color: var(--fg-muted);
   font-size: 12px;
+  font-weight: var(--font-weight-subtext, 600);
   line-height: 1.45;
 }
 
@@ -3228,15 +5512,56 @@
   line-height: 1.2;
 }
 
-/* Hidden at rest so bot cards read as clean content tiles; fades in on
-   card hover or keyboard focus. Mirrors .conversationDelete visually. */
+/* ── Bot card tile (click-to-edit affordance) ────────────────────────
+   The whole glyph + body area is a single <button> so tapping anywhere
+   on the tile hydrates the top form with that bot's values. Kept as
+   a sibling of .botCardDelete (not a parent) so we never nest <button>
+   in <button> — the × delivers delete via stopPropagation on its own
+   click, and the two affordances coexist cleanly in one flex row. */
+.botCardTile {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* Stretch the button to the card's full vertical so the clickable
+     area covers everything up to the × on the right. Keeps the
+     affordance discoverable without painting hover backgrounds that
+     might fight the card's own hover treatment. */
+  align-self: stretch;
+}
+
+.botCardTile:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--bot-color, var(--fg)) 70%, var(--fg) 30%);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ── Bot card × delete ──
+   Visual + interaction twin of .conversationDelete. The 0.45 rest
+   opacity makes the × discoverable on the card without shouting,
+   hover/focus lifts to full danger red with a soft glow, and the
+   hold/armed-all dataset hooks below drive the press-and-hold-for-all
+   flow. Kept in lockstep with .conversationDelete so both delete
+   surfaces feel like the same gesture in two places.
+*/
 .botCardDelete {
   width: auto;
-  min-width: 28px;
-  padding: 0 6px;
-  border: none;
+  min-width: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--danger);
+  color: var(--fg-muted);
+  opacity: 0.45;
   border-radius: 8px;
   cursor: pointer;
   font: inherit;
@@ -3245,26 +5570,39 @@
   display: grid;
   place-items: center;
   align-self: stretch;
-  opacity: 0;
-  transition: opacity 0.15s;
+  transition:
+    opacity 130ms ease-out,
+    color 130ms ease-out,
+    text-shadow 130ms ease-out,
+    transform 130ms ease-out;
+  /* Kill iOS long-press callout + text selection halo so the hold
+     gesture feels native instead of summoning the browser context
+     menu mid-hold. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-.botCard:hover .botCardDelete,
-.botCardDelete:focus-visible {
+.botCardDelete:hover,
+.botCardDelete:focus-visible,
+.botCard:hover .botCardDelete {
   opacity: 1;
+  color: var(--danger);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--danger) 32%, transparent);
   outline: none;
 }
 
-/* Armed pill anchored so its ✓ falls under the cursor that just clicked the
-   × bubble (bubbles group uses right: -12px; match that here). Mirrors the
-   conversation-row confirm affordance shape otherwise. */
+/* Armed single-bot confirm pill. Anchored to the × slot so the ✓
+   lands under the cursor that just clicked the × glyph. Opts out
+   of the hold-glow / tilt visuals so this calmer "are you sure?"
+   moment doesn't read as a continuation of the gesture. */
 .botCardDeleteArmed,
 .botCard:hover .botCardDeleteArmed,
 .botCardDeleteArmed:hover,
 .botCardDeleteArmed:focus-visible {
   position: absolute;
   top: 6px;
-  right: -12px;
+  right: 6px;
   bottom: 6px;
   width: auto;
   min-width: 0;
@@ -3275,10 +5613,12 @@
   gap: 8px;
   background: var(--bg-elevated);
   border: 1px solid var(--line);
-  border-radius: 999px;
-  box-shadow: var(--shadow-md);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
   z-index: 10;
   outline: none;
+  text-shadow: none;
+  transform: none;
 }
 
 .botCardDeleteArmed .conversationDeleteGlyph {
@@ -3287,203 +5627,296 @@
   font-weight: 700;
 }
 
-/* ── Bot card layered action affordance ──
-   Idle ( + ) → Expanded ( [pencil] [×] ) → Armed ( "Are you sure? ✓" )
-   → Editing (inline form replacing the card body). Each layer is a sibling
-   rendered conditionally by React; CSS just handles the visual weight and
-   keeps the animations consistent with the rest of the panel. */
+/* ── Hold-to-delete-all: bot-list variant ──────────────────────────
+   Parallels the .conversationDelete family. Press-and-hold on any
+   bot card × triggers the same two-phase visual escalation:
+     1. data-holding="true" lights the pressed × + tilts all siblings,
+     2. data-delete-armed-all="true" (set once the 900 ms threshold
+        crosses) takes every × into the iOS edit-mode jiggle while
+        the confirmation modal grabs the decision. */
 
-.botCardAction {
-  width: auto;
-  min-width: 28px;
-  padding: 0 6px;
-  border: none;
-  background: transparent;
-  color: var(--fg-muted);
-  border-radius: 8px;
+.botCardDelete[data-holding="true"],
+.botCardDelete[data-holding="true"]:hover,
+.botCardDelete[data-holding="true"]:focus-visible {
+  opacity: 1;
+  color: var(--danger);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--danger) 60%, transparent);
+  transform: scale(1.18);
+  outline: none;
+}
+
+.botList[data-delete-holding="true"]
+  .botCardDelete:not([data-holding="true"]):not(.botCardDeleteArmed) {
+  opacity: 1;
+  color: var(--danger);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--danger) 40%, transparent);
+  transform: scale(1.08) rotate(var(--delete-tilt, 0deg));
+}
+
+.botList[data-delete-holding="true"]
+  .botCard:nth-child(4n+1) .botCardDelete { --delete-tilt: -4deg; }
+.botList[data-delete-holding="true"]
+  .botCard:nth-child(4n+2) .botCardDelete { --delete-tilt:  3deg; }
+.botList[data-delete-holding="true"]
+  .botCard:nth-child(4n+3) .botCardDelete { --delete-tilt: -2deg; }
+.botList[data-delete-holding="true"]
+  .botCard:nth-child(4n+4) .botCardDelete { --delete-tilt:  5deg; }
+
+/* Jiggle keyframes mirror the conversation-list equivalents (130 ms
+   period, ±2.4°) so both surfaces feel like one gesture. */
+@keyframes botCardDeleteJiggleA {
+  0%, 100% { transform: scale(1.08) rotate(-2.4deg); }
+  50%      { transform: scale(1.08) rotate( 2.4deg); }
+}
+
+@keyframes botCardDeleteJiggleB {
+  0%, 100% { transform: scale(1.08) rotate( 2.4deg); }
+  50%      { transform: scale(1.08) rotate(-2.4deg); }
+}
+
+.botList[data-delete-armed-all="true"] .botCardDelete,
+.botList[data-delete-armed-all="true"]
+  .botCardDelete:not([data-holding="true"]):not(.botCardDeleteArmed) {
+  opacity: 1;
+  color: var(--danger);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 45%, transparent);
+  animation: botCardDeleteJiggleA 130ms linear infinite;
+  --delete-tilt: 0deg;
+}
+
+.botList[data-delete-armed-all="true"]
+  .botCard:nth-child(even) .botCardDelete {
+  animation-name: botCardDeleteJiggleB;
+  animation-delay: -45ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .emptyStateIconButton .emptyStateBotGlyph::after {
+    animation: none;
+  }
+
+  .chatBotPickerFrame[data-returning-all="true"],
+  .chatBotPickerFrame[data-returning-all="true"] .chatBotPicker,
+  .emptyStateSearch {
+    animation: none;
+  }
+
+  .emptyStateSearchTrigger::after {
+    transition: none;
+  }
+
+  .botList[data-delete-holding="true"]
+    .botCardDelete:not([data-holding="true"]):not(.botCardDeleteArmed) {
+    transform: none;
+  }
+  .botList[data-delete-armed-all="true"] .botCardDelete,
+  .botList[data-delete-armed-all="true"]
+    .botCard:nth-child(even) .botCardDelete {
+    animation: none;
+    transform: scale(1.08);
+  }
+}
+
+/* ── Bot card edit-mode highlight ──
+   Replaces the pre-rewrite "inline per-card form" treatment. Now that
+   edit happens in the top form, the card itself just needs a quiet
+   "this is the one being edited" signal: thicker accent bar + a subtle
+   tint of the bot's color mixed into the card background. Keeps the
+   card visually anchored to the form without shouting. */
+.botCardEditing {
+  background: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 8%,
+    var(--bg)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--line-strong)) 40%,
+    var(--line)
+  );
+}
+
+.botCardEditing::before {
+  width: 6px;
+}
+
+/* Wrapper around the map of bot cards. Exists purely as a hook for
+   the data-delete-holding / data-delete-armed-all dataset attrs —
+   the hold-and-armed-all CSS above keys off .botList as the parent
+   scope, the way the sidebar uses .conversationList. */
+.botList {
+  display: grid;
+  gap: 10px;
+}
+
+/* ── Bot color group dashboard ──
+   Five Prism-letter tiles render in place of the long bot list by
+   default. Each tile is a button that drills into that color group;
+   .botGroupBack returns to this collapsed root view. */
+.botGroupGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.botGroupTile {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--group-color, var(--line)) 32%, var(--line) 68%);
+  border-radius: 12px;
+  background: var(
+    --group-gradient,
+    color-mix(in srgb, var(--group-color, var(--bg)) 10%, var(--bg) 90%)
+  );
+  color: var(--fg);
   cursor: pointer;
-  font: inherit;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.botGroupTile:hover:not(:disabled),
+.botGroupTile:focus-visible {
+  border-color: color-mix(in srgb, var(--group-color, var(--fg)) 55%, var(--line) 45%);
+  background: var(
+    --group-gradient-hover,
+    color-mix(in srgb, var(--group-color, var(--bg)) 18%, var(--bg) 82%)
+  );
+  outline: none;
+}
+
+.botGroupTile:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.botGroupTileLetter {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
-  align-self: stretch;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--bg);
+  background: var(--group-color, var(--fg));
+  flex: 0 0 auto;
 }
 
-.botCard:hover .botCardAction,
-.botCardAction:focus-visible {
-  opacity: 1;
-  outline: none;
+.botGroupTileCount {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.botGroupDrilldown {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px 0 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.botGroupBack {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg);
   color: var(--fg);
-}
-
-/* Two-bubble strip shown after clicking the +. Offset rightward past the
-   card's right edge so the delete (×) bubble no longer sits on the exact
-   pixel spot where the idle + button lived. Pencil ends up centered
-   roughly where + was; × is clearly past it. Pairs with
-   `.botCard { overflow: visible }` to let the group float off the card.
-   Uses the existing popIn animation for consistency with the color wheel. */
-.botCardBubbles {
-  position: absolute;
-  top: 6px;
-  /* Negative right anchors the group so its right edge extends ~12px past
-     the card. With the group's 76px width, the pencil ends up ~17px to the
-     LEFT of the idle + spot and the × ends up ~17px to the RIGHT of it —
-     the two expanded actions "straddle" the + position symmetrically,
-     eliminating the "× sits on the + pixel" confusion. */
-  right: -12px;
-  bottom: 6px;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  /* A touch more lift than the card so the group reads as a floating
-     toolbar rather than glued to the card's interior. */
-  box-shadow: var(--shadow-md);
-  z-index: 10;
-  animation: popIn 0.16s ease-out;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s, border-color 0.15s;
 }
 
-.botCardBubble {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-  background: var(--bg-surface);
-  color: var(--fg-muted);
+.botGroupBack:hover,
+.botGroupBack:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  outline: none;
+}
+
+.botGroupDrilldownTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fg);
+  letter-spacing: 0.01em;
+}
+
+.botGroupDrilldownLetter {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   display: grid;
   place-items: center;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.botCardBubble:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
-  border-color: var(--line-strong);
-}
-
-.botCardBubbleDelete {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
-}
-
-.botCardBubbleDelete:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border-color: var(--danger);
-}
-
-/* ── Bot card edit mode ──
-   The normal body (name + prompt + hover affordance) is replaced by an
-   inline form. Keep the accent bar on the left so the bot remains visually
-   identifiable while being edited. */
-.botCardEditing {
-  padding: 14px 16px;
-}
-
-.botCardEditForm {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  gap: 8px;
-}
-
-.botCardEditRow {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
-}
-
-.botCardEditRow > input {
-  flex: 1;
-  min-width: 0;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 14px;
-  padding: 9px 11px;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.botCardEditRow > input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
-}
-
-.botCardEditForm textarea {
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
   font-size: 13px;
-  padding: 9px 11px;
-  resize: vertical;
-  min-height: 72px;
-  max-height: 200px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  font-weight: 700;
+  color: var(--bg);
+  background: var(--group-color, var(--fg));
 }
 
-.botCardEditForm textarea:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
-}
-
-.botCardEditActions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.botCardEditActions button {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 1px solid var(--line);
-  background: transparent;
+.botGroupDrilldownCount {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
   color: var(--fg-muted);
+  text-transform: uppercase;
+}
+
+.botsScrollArea {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+/* Editing banner inside the form. The banner is a calm "you're
+   editing <name>" chip sitting above the name/prompt row. Adopts
+   the bot's color lightly so it still reads as "Bots panel" rather
+   than "yet another alert". */
+.formEditingBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
   border-radius: 8px;
-  padding: 7px 14px;
-  cursor: pointer;
-  font: inherit;
   font-size: 12px;
-  font-weight: 500;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  color: var(--fg-muted);
 }
 
-.botCardEditActions button:hover:not(:disabled) {
-  background: var(--bg-hover);
+.formEditingBannerLabel {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.formEditingBannerName {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--fg);
-  border-color: var(--line-strong);
-}
-
-.botCardEditActions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Double-class selector to beat the generic button rule above without
-   needing !important. */
-.botCardEditActions .botCardEditSave {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
-}
-
-.botCardEditActions .botCardEditSave:hover:not(:disabled) {
-  background: var(--accent-hover);
-  color: var(--accent-text);
 }
 
 /* Replaces the generate form when LOCAL mode is selected. Neutral (not an
@@ -3531,7 +5964,9 @@
 }
 
 /* Mobile-only menu toggle. Hidden on desktop. */
-.menuToggle {
+.menuToggle,
+.panelMenuToggle,
+.panelQuickMenu {
   display: none;
 }
 
@@ -3732,8 +6167,72 @@
     transition: opacity 0.2s ease;
   }
 
+  .panelMenuToggle {
+    display: inline-flex;
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 201;
+    border: 1px solid var(--line);
+    background: var(--bg-surface);
+    color: var(--fg);
+    border-radius: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 16px;
+    box-shadow: var(--shadow-sm);
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s ease, background 0.15s, border-color 0.15s;
+  }
+
+  .panelMenuToggle:hover,
+  .panelMenuToggle:focus-visible {
+    background: var(--bg-hover);
+    border-color: var(--line-strong);
+    outline: none;
+  }
+
+  .panelQuickMenu {
+    display: grid;
+    position: fixed;
+    top: 54px;
+    right: 12px;
+    z-index: 202;
+    min-width: 132px;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-lg);
+    animation: popIn 0.16s ease-out;
+  }
+
+  .panelQuickMenu button {
+    border: 0;
+    background: transparent;
+    color: var(--fg);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: right;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .panelQuickMenu button:hover,
+  .panelQuickMenu button:focus-visible {
+    background: var(--bg-hover);
+    outline: none;
+  }
+
   .chatHeader {
     padding-left: 60px;
+    padding-right: 60px;
   }
 
   .messages {
@@ -3756,9 +6255,18 @@
   }
 
   .panel {
-    width: 100vw;
-    padding: 18px 16px 24px;
-    gap: 16px;
+    width: min(360px, calc(100vw - clamp(72px, 28vw, 120px)));
+    max-width: none;
+    padding: 16px 12px 22px;
+    gap: 12px;
+  }
+
+  .panelBots {
+    gap: 10px;
+  }
+
+  .panelHeader {
+    padding-bottom: 8px;
   }
 
   /* Bigger, more tappable close glyph. 30×30 is on the small side of
@@ -3780,13 +6288,92 @@
   .form select,
   .form textarea {
     font-size: 16px;
-    padding: 12px 14px;
+    padding: 10px 12px;
   }
 
   .form button,
   .btnPrimary {
-    padding: 13px 16px;
-    font-size: 15px;
+    padding: 11px 14px;
+    font-size: 14px;
+  }
+
+  .panelBots .form {
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .panelBots .form textarea {
+    min-height: clamp(132px, 24dvh, 220px);
+    max-height: none;
+  }
+
+  .botNameRow {
+    gap: 8px;
+  }
+
+  .colorSwatchButton {
+    width: 48px;
+    min-width: 48px;
+    min-height: 48px;
+  }
+
+  .colorGlyphPopover {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    width: min(320px, calc(100vw - 48px));
+    height: min(
+      520px,
+      66dvh,
+      calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 128px)
+    );
+    max-height: none;
+    padding: 10px;
+    grid-template-rows: clamp(112px, 22dvh, 148px) auto minmax(0, 1fr);
+    align-content: stretch;
+    justify-items: stretch;
+    border-radius: 16px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+    transform: translate(-50%, -50%);
+    animation: popModalIn 0.18s ease-out;
+  }
+
+  .colorSquare,
+  .glyphGridShell {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .glyphGridInner {
+    min-height: 100%;
+    padding: 6px 6px 14px;
+  }
+
+  .deleteAllModalBackdrop {
+    padding:
+      calc(env(safe-area-inset-top) + 16px)
+      max(16px, calc(env(safe-area-inset-right) + 14px))
+      calc(env(safe-area-inset-bottom) + 16px)
+      max(16px, calc(env(safe-area-inset-left) + 14px));
+  }
+
+  .deleteAllModalPanel {
+    max-height: calc(
+      100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px
+    );
+    padding: 24px 20px 20px;
+  }
+
+  .deleteAllModalActions {
+    justify-content: stretch;
+  }
+
+  .deleteAllModalCancel,
+  .deleteAllModalConfirm {
+    flex: 1 1 0;
+    min-height: 44px;
   }
 
   /* ── Memory list items ─────────────────────────────────────────────
@@ -3814,34 +6401,85 @@
   }
 
   /* ── Bot cards ─────────────────────────────────────────────────────
-     Desktop hides action controls at opacity:0 and fades them in on
-     hover. Touch devices never fire hover, so without an override the
-     edit/delete bubbles are completely invisible on a phone. Mirror
-     the .conversationDelete touch accommodation and keep the + idle
-     affordance at a quiet 0.55 opacity — enough to discover, calm
-     enough to stay out of the way. */
+     Desktop keeps × dim (opacity 0.45) and brightens it on hover.
+     Touch devices never fire hover, so without an override the ×
+     would sit dim permanently on mobile. Bump up to 0.55 — enough
+     to discover, calm enough to stay out of the way. Mirrors the
+     .conversationDelete mobile accommodation. */
   .botCard {
-    padding: 14px;
-    padding-left: 18px;
-    border-radius: 14px;
+    padding: 10px 9px 10px 13px;
+    gap: 7px;
+    border-radius: 12px;
   }
 
-  .botCardAction,
   .botCardDelete {
     opacity: 0.55;
   }
 
   .botCardGlyph {
-    width: 38px;
-    height: 38px;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
   }
 
   .botCard strong {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .botCard small {
-    font-size: 13px;
+    font-size: 11.5px;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .botCardDelete {
+    min-width: 28px;
+    padding: 0 6px;
+  }
+
+  .botsScrollArea,
+  .botList {
+    gap: 8px;
+  }
+
+  /* Mobile: keep the stacked dashboard tiles touch-friendly and
+     re-tighten the back/drilldown header so the row doesn't feel
+     overweight on narrow drawers. */
+  .botGroupGrid {
+    gap: 6px;
+  }
+
+  .botGroupTile {
+    padding: 12px 12px;
+    min-height: 44px;
+  }
+
+  .botGroupTileLetter {
+    width: 30px;
+    height: 30px;
+    font-size: 17px;
+  }
+
+  .botGroupTileCount {
+    font-size: 10px;
+  }
+
+  .botGroupBack {
+    padding: 8px 12px;
+    min-height: 36px;
+  }
+
+  .botGroupDrilldownTitle {
+    font-size: 12.5px;
+  }
+
+  .botGroupDrilldownLetter {
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
   }
 
   /* ── Images panel ──────────────────────────────────────────────────

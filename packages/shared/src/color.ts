@@ -240,8 +240,8 @@ export function hslToHex(h: number, s: number, l: number): string {
  * Chosen empirically:
  *   - 30 is dark enough for a rich deep red / navy without disappearing
  *     against `#0a0a0b`.
- *   - 70 is bright enough for a warm pastel without dissolving into
- *     `#f1f1f4` or losing saturation punch.
+ *   - 70 is bright enough for a warm pastel; the later light-theme
+ *     luminance cap handles hues that still dissolve into warm ivory.
  *   - The band comfortably contains the PRISM logo's letter palette
  *     (L ≈ 54–68), so a user picking any of those letter hues by hand
  *     passes through the clamp cleanly.
@@ -252,6 +252,17 @@ export function hslToHex(h: number, s: number, l: number): string {
  */
 export const ACCENT_LIGHTNESS_MIN = 30;
 export const ACCENT_LIGHTNESS_MAX = 70;
+
+/**
+ * Relative-luminance ceiling applied after the light-theme HSL lightness band.
+ * HSL lightness alone underestimates how bright warm yellows/oranges feel on
+ * the app's warm ivory surface, so this second pass trims only the colors that
+ * still read too luminous after hue/saturation-preserving normalization.
+ */
+export const ACCENT_LUMINANCE_MAX_LIGHT = 0.42;
+export const ACCENT_LUMINANCE_MAX_LIGHT_YELLOW = 0.3;
+const YELLOW_HUE_MIN = 40;
+const YELLOW_HUE_MAX = 75;
 
 /**
  * Tighter HSL-lightness band applied specifically when painting accents on
@@ -326,6 +337,27 @@ export function clampAccentLightness(
   const { min, max } = accentLightnessBand(theme);
   const clamped = Math.max(min, Math.min(max, l));
   return hslToHex(h, s, clamped);
+}
+
+/**
+ * Normalize an arbitrary bot/accent color for the active theme.
+ *
+ * The first pass preserves the user's hue/saturation while keeping HSL
+ * lightness inside the theme band. The second light-theme-only pass caps WCAG
+ * luminance, which catches bright warm hues that can still wash out on ivory
+ * despite having acceptable HSL lightness.
+ */
+export function normalizeAccentForTheme(
+  hex: string,
+  theme?: "light" | "dark"
+): string {
+  const lightnessClamped = clampAccentLightness(hex, theme);
+  if (theme === "dark") return lightnessClamped;
+  const { h } = hexToHsl(lightnessClamped);
+  const max = h >= YELLOW_HUE_MIN && h <= YELLOW_HUE_MAX
+    ? ACCENT_LUMINANCE_MAX_LIGHT_YELLOW
+    : ACCENT_LUMINANCE_MAX_LIGHT;
+  return clampLuminance(lightnessClamped, { max });
 }
 
 /**

@@ -43,6 +43,20 @@ if not exist ".env" (
     echo [2/5] .env already exists.
 )
 
+REM -- Load root .env into this cmd session so every child inherits it. -------
+REM The API already picks up .env via `node --env-file-if-exists=.env`, but
+REM `next dev` runs from apps\web and Next.js only reads .env files from its
+REM own working directory -- it never sees the repo-root .env. Sourcing here
+REM is how NEXT_PUBLIC_* vars (DEV_TOOLS, API_BASE_URL, etc.) defined once at
+REM the repo root actually reach the web dev server. `eol=#` skips comments;
+REM `tokens=1,* delims==` splits only on the FIRST `=` so values containing
+REM `=` survive intact.
+if exist ".env" (
+    for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do (
+        if not "%%A"=="" set "%%A=%%B"
+    )
+)
+
 REM -- [3/5] dependencies -----------------------------------------------------
 echo [3/5] Installing dependencies (first run may take a minute)...
 cd packages\shared

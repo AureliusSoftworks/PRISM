@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ACCENT_LUMINANCE_MAX_LIGHT,
+  ACCENT_LUMINANCE_MAX_LIGHT_YELLOW,
   ACCENT_LIGHTNESS_MAX,
   ACCENT_LIGHTNESS_MAX_DARK,
   ACCENT_LIGHTNESS_MIN,
@@ -12,12 +14,13 @@ import {
   ensureContrast,
   hexToHsl,
   hslToHex,
+  normalizeAccentForTheme,
   pickReadableText,
   relativeLuminance,
   swatchBorderCompensation,
 } from "@localai/shared";
 
-const LIGHT_BG = "#f5f5f7";
+const LIGHT_BG = "#eee7dc";
 const DARK_BG = "#0a0a0b";
 
 /**
@@ -542,6 +545,54 @@ describe("clampAccentLightness (dark mode)", () => {
     const thenDark = clampAccentLightness(lightClamped, "dark");
     assert.notEqual(lightClamped, thenDark);
     assert.equal(Math.round(hexToHsl(thenDark).l), ACCENT_LIGHTNESS_MIN_DARK);
+  });
+});
+
+/**
+ * `normalizeAccentForTheme` is the render-time bot color normalizer. It keeps
+ * the existing HSL lightness band, then adds a light-mode luminance cap so
+ * bright warm hues stay readable on the ivory light theme.
+ */
+describe("normalizeAccentForTheme", () => {
+  it("dims bright yellow light-mode colors below the stronger yellow ceiling", () => {
+    const brightYellow = hslToHex(52, 100, ACCENT_LIGHTNESS_MAX);
+    const normalized = normalizeAccentForTheme(brightYellow, "light");
+
+    assert.ok(
+      relativeLuminance(normalized) <= ACCENT_LUMINANCE_MAX_LIGHT_YELLOW + 1e-3,
+      `expected luminance <= ${ACCENT_LUMINANCE_MAX_LIGHT_YELLOW}, got ${relativeLuminance(normalized)}`
+    );
+    assert.ok(
+      relativeLuminance(normalized) < relativeLuminance(brightYellow),
+      "light-mode normalization should darken bright yellow colors"
+    );
+  });
+
+  it("keeps non-yellow bright colors on the general light-mode ceiling", () => {
+    const brightCyan = hslToHex(180, 100, ACCENT_LIGHTNESS_MAX);
+    const normalized = normalizeAccentForTheme(brightCyan, "light");
+
+    assert.ok(
+      relativeLuminance(normalized) <= ACCENT_LUMINANCE_MAX_LIGHT + 1e-3,
+      `expected luminance <= ${ACCENT_LUMINANCE_MAX_LIGHT}, got ${relativeLuminance(normalized)}`
+    );
+    assert.ok(
+      relativeLuminance(normalized) > ACCENT_LUMINANCE_MAX_LIGHT_YELLOW,
+      "non-yellow bright colors should not use the stronger yellow cap"
+    );
+  });
+
+  it("leaves readable mid-warm light-mode colors unchanged", () => {
+    const orange = "#f97316";
+    assert.equal(normalizeAccentForTheme(orange, "light"), orange);
+  });
+
+  it("keeps dark-mode behavior to the HSL lightness band only", () => {
+    const pastelYellow = hslToHex(60, 100, ACCENT_LIGHTNESS_MAX);
+    assert.equal(
+      normalizeAccentForTheme(pastelYellow, "dark"),
+      clampAccentLightness(pastelYellow, "dark")
+    );
   });
 });
 

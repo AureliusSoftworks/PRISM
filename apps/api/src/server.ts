@@ -6,7 +6,13 @@ import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, r
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import { processChatMessage } from "./chat.ts";
 import { deleteAllConversations, deleteConversation, rewindConversation } from "./conversations.ts";
-import { composeBotSystemPrompt, deleteBot } from "./bots.ts";
+import {
+  composeBotSystemPrompt,
+  deleteAllBots,
+  deleteBot,
+  deleteBots,
+  resolveBotChatEnabled,
+} from "./bots.ts";
 import { resolveNextSettings } from "./settings.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
@@ -333,21 +339,70 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/conversations", async (ctx) => {
       const userId = requireAuth(ctx);
+      // bot_id + incognito ride along in the list response so the sidebar
+      // can render private-chat markers and bot-colored accents without a
+      // second roundtrip per row.
+      //
+      // last_bot_id / last_bot_color come from the MOST RECENT assistant
+      // message on the conversation — no bot_id filter. That means when
+      // the user picks "Default" mid-thread in Sandbox, subsequent
+      // Default replies show up as last_bot_id = NULL, which the client
+      // interprets as "Default is the current bot" and paints the row
+      // WHITE. Before this change, Default replies were invisible to the
+      // sidebar and the row stayed colored by whichever bot had spoken
+      // previously — a lie about who's "active" in the thread.
+      //
+      // has_assistant_reply disambiguates "Default was last" (reply
+      // exists but has no bot_id) from "no reply yet" (conversation row
+      // exists but no assistant message — only reachable via a failed
+      // send that errored after the user msg was inserted). The first
+      // case wants WHITE; the second wants the locked-bot fallback. We
+      // can't tell them apart from last_bot_id alone.
+      //
+      // Correlated subqueries are cheap here: SQLite optimizes the
+      // LIMIT 1 DESC scan with the existing messages(conversation_id,
+      // created_at) locality, so ordering on updated_at doesn't force a
+      // full messages table scan per row.
       const rows = db
         .prepare(
-          "SELECT id, title, created_at, updated_at FROM conversations WHERE user_id = ? ORDER BY updated_at DESC"
+          `SELECT c.id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
+                  (SELECT m.bot_id FROM messages m
+                     WHERE m.conversation_id = c.id
+                       AND m.role = 'assistant'
+                     ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
+                  (SELECT b.color FROM messages m
+                     LEFT JOIN bots b ON b.id = m.bot_id
+                     WHERE m.conversation_id = c.id
+                       AND m.role = 'assistant'
+                     ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
+                  EXISTS (SELECT 1 FROM messages m
+                            WHERE m.conversation_id = c.id
+                              AND m.role = 'assistant') AS has_assistant_reply
+             FROM conversations c
+            WHERE c.user_id = ?
+         ORDER BY c.updated_at DESC`
         )
         .all(userId) as Array<{
         id: string;
         title: string;
+        bot_id: string | null;
+        incognito: number;
         created_at: string;
         updated_at: string;
+        last_bot_id: string | null;
+        last_bot_color: string | null;
+        has_assistant_reply: number;
       }>;
       json(ctx.res, 200, {
         ok: true,
         conversations: rows.map((row) => ({
           id: row.id,
           title: row.title,
+          botId: row.bot_id ?? null,
+          incognito: row.incognito === 1,
+          lastBotId: row.last_bot_id ?? null,
+          lastBotColor: row.last_bot_color ?? null,
+          hasAssistantReply: row.has_assistant_reply === 1,
           createdAt: row.created_at,
           updatedAt: row.updated_at
         }))
@@ -356,12 +411,40 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/conversations/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const conversationId = ctx.params.id;
+      // Same last_bot_* + has_assistant_reply triple as the list
+      // endpoint so the ConversationDetail payload stays in lockstep —
+      // client consumers can read either GET shape and resolve row tint
+      // + composer-dropdown sync the same way.
       const conversation = db
         .prepare(
-          "SELECT id, title, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
+          `SELECT c.id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
+                  (SELECT m.bot_id FROM messages m
+                     WHERE m.conversation_id = c.id
+                       AND m.role = 'assistant'
+                     ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
+                  (SELECT b.color FROM messages m
+                     LEFT JOIN bots b ON b.id = m.bot_id
+                     WHERE m.conversation_id = c.id
+                       AND m.role = 'assistant'
+                     ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
+                  EXISTS (SELECT 1 FROM messages m
+                            WHERE m.conversation_id = c.id
+                              AND m.role = 'assistant') AS has_assistant_reply
+             FROM conversations c
+            WHERE c.id = ? AND c.user_id = ?`
         )
         .get(conversationId, userId) as
-        | { id: string; title: string; created_at: string; updated_at: string }
+        | {
+            id: string;
+            title: string;
+            bot_id: string | null;
+            incognito: number;
+            created_at: string;
+            updated_at: string;
+            last_bot_id: string | null;
+            last_bot_color: string | null;
+            has_assistant_reply: number;
+          }
         | undefined;
       if (!conversation) {
         throw new Error("Conversation not found.");
@@ -405,6 +488,11 @@ function buildRoutes(): RouteDefinition[] {
         conversation: {
           id: conversation.id,
           title: conversation.title,
+          botId: conversation.bot_id ?? null,
+          incognito: conversation.incognito === 1,
+          lastBotId: conversation.last_bot_id ?? null,
+          lastBotColor: conversation.last_bot_color ?? null,
+          hasAssistantReply: conversation.has_assistant_reply === 1,
           createdAt: conversation.created_at,
           updatedAt: conversation.updated_at,
           messages,
@@ -431,7 +519,20 @@ function buildRoutes(): RouteDefinition[] {
       const message = readString(body.message, "message");
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
-      const botId = typeof body.botId === "string" ? body.botId : undefined;
+      // Three-valued parse so the server can distinguish:
+      //   - absent key           → leave conversation's bot alone
+      //   - explicit null        → switch to Default persona (no bot)
+      //   - string               → switch to that specific bot
+      // The Chat-mode client ALWAYS sends botId (string or null) so a
+      // mid-thread dropdown flip either persists a new bot or demotes
+      // the conversation back to Default. Sandbox callers still omit
+      // the key for the no-bot case; they get the legacy behavior.
+      const botId: string | null | undefined =
+        typeof body.botId === "string"
+          ? body.botId
+          : body.botId === null
+            ? null
+            : undefined;
       // Which post-auth surface this turn came from. Default to "sandbox"
       // so that any client that forgets to send `mode` gets the safer
       // no-side-effects posture (no memory writes) rather than silently
@@ -457,7 +558,7 @@ function buildRoutes(): RouteDefinition[] {
       if (botId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, model, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, model, temperature, max_tokens, chat_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(botId, userId) as
           | {
@@ -466,9 +567,23 @@ function buildRoutes(): RouteDefinition[] {
               model?: string | null;
               temperature?: number | null;
               max_tokens?: number | null;
+              chat_enabled?: number | null;
             }
           | undefined;
         if (bot) {
+          const alreadyLockedToConversation =
+            mode === "chat" &&
+            conversationId !== undefined &&
+            Boolean(
+              db
+                .prepare(
+                  "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND bot_id = ?"
+                )
+                .get(conversationId, userId, botId)
+            );
+          if (mode === "chat" && bot.chat_enabled !== 1 && !alreadyLockedToConversation) {
+            throw new Error("Bot is not enabled for Chat mode.");
+          }
           // Name is folded into the system prompt by composeBotSystemPrompt so
           // the model actually knows who it's supposed to be, even when the
           // user left the prompt field blank. Unit-tested in
@@ -713,20 +828,21 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.glyph === "string" && body.glyph.trim().length > 0
           ? body.glyph.trim()
           : null;
+      const chatEnabled = resolveBotChatEnabled(body.chatEnabled);
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, model, temperature, max_tokens, color, glyph, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
-      ).run(botId, userId, name, systemPrompt, model, temperature, maxTokens, color, glyph, now, now);
+        "INSERT INTO bots (id, user_id, name, system_prompt, model, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(botId, userId, name, systemPrompt, model, temperature, maxTokens, color, glyph, chatEnabled, now, now);
       json(ctx.res, 201, {
         ok: true,
-        bot: { id: botId, name, systemPrompt, model, temperature, maxTokens, color, glyph },
+        bot: { id: botId, name, systemPrompt, model, temperature, maxTokens, color, glyph, chat_enabled: chatEnabled },
       });
     }),
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, model, temperature, max_tokens, color, glyph, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, model, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -763,6 +879,10 @@ function buildRoutes(): RouteDefinition[] {
         fields.push("glyph = ?");
         values.push(null);
       }
+      if (typeof body.chatEnabled === "boolean") {
+        fields.push("chat_enabled = ?");
+        values.push(resolveBotChatEnabled(body.chatEnabled));
+      }
       if (fields.length > 0) {
         fields.push("updated_at = ?");
         values.push(new Date().toISOString());
@@ -780,6 +900,26 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(ctx.params.id, userId);
       json(ctx.res, 200, { ok: true });
+    }),
+    // Bulk-clear — removes every bot the caller owns in one atomic
+    // transaction, or the newest `limit` bots when the Developer Tools
+    // panel asks for a bounded cleanup. Historical messages/conversations
+    // keep their rows — only `bot_id` is nulled out, mirroring the
+    // single-bot delete contract.
+    route("DELETE", "/api/bots", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rawLimit = ctx.query.get("limit");
+      if (rawLimit !== null) {
+        const limit = Number(rawLimit);
+        if (!Number.isInteger(limit) || limit < 1) {
+          throw new Error("Bot delete limit must be a positive integer.");
+        }
+        const deleted = deleteBots(db, userId, limit);
+        json(ctx.res, 200, { ok: true, deleted });
+        return;
+      }
+      const deleted = deleteAllBots(db, userId);
+      json(ctx.res, 200, { ok: true, deleted });
     }),
     route("POST", "/api/conversations/:id/export", async (ctx) => {
       const userId = requireAuth(ctx);

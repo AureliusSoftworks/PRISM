@@ -133,6 +133,7 @@ export function createDatabase(): DatabaseSync {
       max_tokens INTEGER DEFAULT 2048,
       color TEXT,
       glyph TEXT,
+      chat_enabled INTEGER NOT NULL DEFAULT 0,
       visibility TEXT NOT NULL DEFAULT 'private',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -208,6 +209,12 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotGlyphColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN glyph TEXT;");
   }
+  const hasBotChatEnabledColumn = botColumns.some(
+    (column) => column.name === "chat_enabled"
+  );
+  if (!hasBotChatEnabledColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN chat_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
 
   return db;
 }
@@ -229,6 +236,11 @@ export function mapConversation(
     id: string;
     user_id: string;
     title: string;
+    bot_id: string | null;
+    incognito: number;
+    last_bot_id?: string | null;
+    last_bot_color?: string | null;
+    has_assistant_reply?: number;
     created_at: string;
     updated_at: string;
   },
@@ -238,6 +250,11 @@ export function mapConversation(
     id: row.id,
     userId: row.user_id,
     title: row.title,
+    botId: row.bot_id ?? null,
+    incognito: row.incognito === 1,
+    lastBotId: row.last_bot_id ?? null,
+    lastBotColor: row.last_bot_color ?? null,
+    hasAssistantReply: row.has_assistant_reply === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     messages

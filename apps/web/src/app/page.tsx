@@ -1,6 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState, useCallback, useRef } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import styles from "./page.module.css";
 
@@ -30,6 +38,90 @@ const DELETE_ALL_KEY = "__delete_all__";
 // Namespace bot-delete keys so they can share the same single "armed" state
 // slot used for conversation deletion without id collisions.
 const BOT_DELETE_KEY_PREFIX = "bot:";
+
+// Bot-list twin of DELETE_ALL_KEY — armed when a press-and-hold crosses the
+// threshold on any bot card ×. Kept separate so the confirmation modal can
+// tailor its copy and the bulk action routes to the bots endpoint instead
+// of conversations. Both all-delete sentinels live in the same
+// `pendingDeleteKey` slot, so outside-click / Escape / auto-disarm still
+// apply uniformly.
+const DELETE_ALL_BOTS_KEY = "__delete_all_bots__";
+
+// Gate for the in-app Developer Tools panel (floating key glyph in the dev
+// overlay corner). Off by default — opt in via `NEXT_PUBLIC_DEV_TOOLS=1` in `.env`.
+// Next.js inlines NEXT_PUBLIC_* at build time, so release builds that
+// don't set the flag never render the button OR the modal, and the
+// tree-shaker can drop the unused JSX entirely. Used on `main` as the
+// "do not ship" guardrail — the feature code lives in the repo but stays
+// dormant unless someone opts in.
+const DEV_TOOLS_ENABLED = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+
+// Bounds for the Developer Tools bot quantity control. The same number drives
+// add-N capacity testing feels like one small control surface. Zero is still
+// allowed as a blank/no-op input state, which keeps editing `10` down to `1`
+// or empty from fighting the user. The upper cap keeps accidental stress tests
+// bounded.
+const DEV_TOOLS_BOT_QUANTITY_MIN = 0;
+const DEV_TOOLS_BOT_QUANTITY_DEFAULT = 10;
+const DEV_TOOLS_BOT_QUANTITY_MAX = 2000;
+const DEV_TOOLS_BOT_QUANTITY_PRESETS = [1, 10, 25, 50, 100, 500, 1000, 2000] as const;
+const DEV_TOOLS_BOT_CREATE_CHUNK_SIZE = 100;
+const DEV_TOOLS_GHOST_COUNT_MIN = 1;
+const DEV_TOOLS_GHOST_COUNT_MAX = 99;
+const DEV_TOOLS_PANEL_DEFAULT_X = 14;
+const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
+const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
+
+type DevToolsBotQuantity = number | "";
+type DevToolsPanelPosition = { x: number; y: number };
+type DevToolsPanelDragState = {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+};
+
+function clampDevToolsBotQuantity(value: number): number {
+  if (!Number.isFinite(value)) return DEV_TOOLS_BOT_QUANTITY_MIN;
+  return Math.max(
+    DEV_TOOLS_BOT_QUANTITY_MIN,
+    Math.min(DEV_TOOLS_BOT_QUANTITY_MAX, Math.round(value))
+  );
+}
+
+function randomDevToolsGhostCount(): number {
+  const range = DEV_TOOLS_GHOST_COUNT_MAX - DEV_TOOLS_GHOST_COUNT_MIN + 1;
+  return DEV_TOOLS_GHOST_COUNT_MIN + Math.floor(Math.random() * range);
+}
+
+function randomDevToolsGhostMessage(): string {
+  const ghostCount = randomDevToolsGhostCount();
+  return ghostCount === 1
+    ? "1 ghost was added."
+    : `${ghostCount} ghosts were added.`;
+}
+
+function clampDevToolsPanelPosition(
+  x: number,
+  y: number,
+  panelWidth: number,
+  panelHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
+): DevToolsPanelPosition {
+  const maxX = Math.max(
+    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+    viewportWidth - panelWidth - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
+  );
+  const maxY = Math.max(
+    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+    viewportHeight - panelHeight - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
+  );
+
+  return {
+    x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
+    y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
+  };
+}
 
 // Messages whose content exceeds this character count get rendered with a
 // collapsible body: a max-height cap + bottom fade + "Show more" toggle.
@@ -77,6 +169,12 @@ const PRISM_WORDMARK_PALETTE = [
   PRISM_COLORS.m,
 ] as const;
 
+const PRISM_BOT_SEED_HUE_SPREAD_DEG = 28;
+const PRISM_BOT_SEED_SATURATION_MIN = 82;
+const PRISM_BOT_SEED_SATURATION_MAX = 100;
+const PRISM_BOT_SEED_LIGHTNESS_MIN = 38;
+const PRISM_BOT_SEED_LIGHTNESS_MAX = 60;
+
 // Fisher-Yates shuffle. Non-mutating: returns a new array so React state
 // updates remain referentially clean. Generic so future callers that
 // need to shuffle any 5-item palette (or other tuple) can reuse it.
@@ -102,7 +200,10 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
   const [colors, setColors] = useState<readonly string[]>(PRISM_WORDMARK_PALETTE);
 
   useEffect(() => {
-    setColors(shufflePalette(PRISM_WORDMARK_PALETTE));
+    const timeout = window.setTimeout(() => {
+      setColors(shufflePalette(PRISM_WORDMARK_PALETTE));
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, []);
 
   return (
@@ -126,22 +227,24 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
         <path
           stroke={colors[0]}
           d="M6,66V6h50c10.67,0,16,5.33,16,16s-5.33,16-16,16H18"
+          suppressHydrationWarning
         />
         {/* R — two subpaths grouped so both subpaths inherit the same
             shuffled color from a single <g stroke>. */}
-        <g stroke={colors[1]}>
+        <g stroke={colors[1]} suppressHydrationWarning>
           <path d="M134,66V6h50c10.67,0,16,5.33,16,16s-5.33,16-16,16h-38" />
           <path d="M162,38l44,28" />
         </g>
         {/* I */}
-        <path stroke={colors[2]} d="M282,6v60" />
+        <path stroke={colors[2]} d="M282,6v60" suppressHydrationWarning />
         {/* S */}
         <path
           stroke={colors[3]}
           d="M430,6h-48c-10.67,0-16,5.33-16,16,0,8,4,12.67,12,14l52,2c9.33,1.33,14,6,14,14,0,9.33-5.33,14-16,14h-48"
+          suppressHydrationWarning
         />
         {/* M — three subpaths (two uprights + the central chevron). */}
-        <g stroke={colors[4]}>
+        <g stroke={colors[4]} suppressHydrationWarning>
           <path d="M508,66V6" />
           <path d="M508,6l48,48,48-48" />
           <path d="M604,6v60" />
@@ -151,13 +254,760 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
   );
 }
 
+interface PrismTriangleMarkProps {
+  className?: string;
+}
+
+function PrismTriangleMark({ className }: PrismTriangleMarkProps): React.JSX.Element {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 56 56"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M28 6L48 43H8L28 6Z"
+        stroke="currentColor"
+        strokeLinecap="butt"
+        strokeLinejoin="miter"
+        strokeMiterlimit="10"
+        strokeWidth="7"
+      />
+    </svg>
+  );
+}
+
+// ── Chat-mode picker geometry ────────────────────────────────────────
+// Adaptive sizing for the start-of-chat bot picker. As the user's bot
+// library grows, individual tiles shrink so the whole picker stays
+// inside the empty-state column without ever pushing the composer off-
+// screen. Low counts stay capped so a single bot reads as a card, not a
+// wall; at the other extreme (~hundreds of bots)
+// it collapses into a dense palette wall.
+//
+// The math is intentionally piecewise rather than a smooth log curve —
+// each step lands on a rounded pixel size that pairs cleanly with stroke
+// widths and gap so adjacent tiles never look jittery. Mirrored CSS
+// custom properties (--tile-size / --tile-gap / --tile-hover-scale) are
+// what actually drive the layout; this function is the single source of
+// truth for that triple.
+
+interface PickerGeometry {
+  /** Width of the picker frame, in pixels. Mobile keeps this equal to height. */
+  pickerWidth: number;
+  /** Height of the picker frame, in pixels. */
+  pickerHeight: number;
+  /** Edge length of each square tile, in pixels. */
+  tileSize: number;
+  /** BotGlyph SVG `size` prop — tracks ~50% of the tile so the mark fills the avatar without crowding. */
+  glyphSize: number;
+  /** SVG stroke width — slightly thinner on big glyphs so heavy lines don't dominate at scale. */
+  glyphStroke: number;
+  /** Multiplier the hovered tile scales TO. Smaller for big base sizes so the magnified tile doesn't burst out of the picker. */
+  hoverScale: number;
+  /** Gap between tiles — proportional to tile size so the row's negative space stays balanced visually. */
+  tileGap: number;
+  /** Column count the grid renders with, biased toward the frame aspect ratio. */
+  gridCols: number;
+  /** Row count occupied inside the picker frame. */
+  gridRows: number;
+  /** Blank cells used to keep incomplete final rows from changing the grid footprint. */
+  fillerCells: number;
+  /** True when the picker is presenting a single featured bot card. */
+  singleBot: boolean;
+  /** True when three bots use the narrow/mobile pyramid composition. */
+  threeBotStack: boolean;
+  /** True when mobile low/mid counts use a taller compact column layout. */
+  mobileColumnStack: boolean;
+  /** True when an odd-count balancing cell should lead the bot buttons. */
+  leadingFillerCell: boolean;
+  /** True from level 2 onward: remove the tile gradient. */
+  flattenTile: boolean;
+  /** True from level 3 onward: increase the glyph-to-container ratio. */
+  enlargeGlyph: boolean;
+  /** True from level 4 onward: hide the bot glyph inside the tile. */
+  hideGlyphByDefault: boolean;
+  /** True late in level 2 onward: use a crosshair cursor for denser picking. */
+  crosshairCursor: boolean;
+  /** True shortly after crosshair in level 2: use a dot cursor before glyphs disappear. */
+  dotCursor: boolean;
+  /**
+   * Level 5: tiny pixel swatches with no border and no rounded corners.
+   */
+  solidSwatch: boolean;
+  /**
+   * Level 5: very large bot libraries render as a flat, gapless pixel grid.
+   */
+  compactPixelGrid: boolean;
+  /**
+   * Level 5 onward: selected glyph simplifies to an inverted dot.
+   */
+  selectedDotGlyph: boolean;
+  /**
+   * Level 6: fully dense picker collapses into a radial rainbow field.
+   */
+  radialRainbowGradient: boolean;
+}
+
+type PickerDensityStageId = 1 | 2 | 3 | 4 | 5 | 6;
+
+interface PickerDensityBreakpoints {
+  flatTileCountMin: number;
+  largeGlyphTileCountMin: number;
+  crosshairTileCountMin: number;
+  dotTileCountMin: number;
+  glyphlessCardCountMin: number;
+  compactPixelGridCountMin: number;
+  radialRainbowCountMin: number;
+}
+
+interface PickerDensityStageTarget {
+  id: PickerDensityStageId;
+  label: string;
+  description: string;
+  targetCount: number;
+}
+
+/**
+ * Density breakpoints for the start-of-chat picker.
+ *
+ * Counts are viewport-scaled below; stage 2 intentionally starts early so
+ * the larger glyph-to-box treatment appears before the grid feels crowded.
+ * Later stages simplify more slowly: remove glyph, then card chrome, then
+ * collapse into the pixel-grid states.
+ */
+const PICKER_MOBILE_MAX_SQUARE_SIZE = 320;
+const PICKER_LOW_COUNT_MAX = 10;
+const PICKER_MOBILE_LOW_COUNT_MAX_SIZE = 260;
+const PICKER_MOBILE_COLUMN_STACK_MAX_HEIGHT = 340;
+const PICKER_DESKTOP_LOW_COUNT_MAX_WIDTH = 460;
+const PICKER_DESKTOP_MAX_WIDTH = 1280;
+const PICKER_DESKTOP_MAX_HEIGHT = 260;
+const PICKER_DESKTOP_ASPECT_RATIO = 16 / 9;
+const PICKER_MAX_TILE_SIZE = 220;
+const PICKER_SINGLE_BOT_TILE_SIZE_MOBILE = 168;
+const PICKER_SINGLE_BOT_TILE_SIZE_DESKTOP = 128;
+const PICKER_FEW_BOT_TILE_SIZE_MOBILE = 124;
+const PICKER_FEW_BOT_TILE_SIZE_DESKTOP = 104;
+const PICKER_LOW_COUNT_TILE_SIZE_MOBILE = 72;
+const PICKER_LOW_COUNT_TILE_SIZE_DESKTOP = 76;
+const PICKER_THREE_STACK_TILE_SIZE_MOBILE = 128;
+const PICKER_DEFAULT_GLYPH_RATIO = 0.5;
+const PICKER_STAGE_TWO_GLYPH_RATIO = 0.82;
+const PICKER_PIXEL_GLYPH_RATIO = 0.86;
+const PICKER_PIXEL_GLYPH_MIN_SIZE = 9;
+const PICKER_PIXEL_GLYPH_STROKE = 0.9;
+const PICKER_CROSSHAIR_STAGE_TWO_PROGRESS = 0;
+const PICKER_DOT_STAGE_TWO_PROGRESS = 0.2;
+const PICKER_REFERENCE_SIZE = 480;
+const PICKER_MIN_AVAILABLE_WIDTH = 180;
+const PICKER_MIN_AVAILABLE_HEIGHT = 180;
+const PICKER_BREAKPOINT_SCALE_EXPONENT = 1.2;
+const PICKER_BREAKPOINT_SCALE_MIN = 0.45;
+const PICKER_BREAKPOINT_SCALE_MAX = 2.5;
+const PICKER_MOBILE_BREAKPOINT = 720;
+const DESKTOP_SIDEBAR_WIDTH = 280;
+const DESKTOP_MESSAGES_PADDING_X = 40;
+const MOBILE_MESSAGES_PADDING_X = 28;
+const PICKER_SIDE_GUTTER = 48;
+const FLAT_TILE_BASE_COUNT = 60;
+const LARGE_GLYPH_BASE_COUNT = 180;
+const GLYPHLESS_CARD_BASE_COUNT = 360;
+const COMPACT_PIXEL_GRID_BASE_COUNT = 480;
+const RADIAL_RAINBOW_BASE_COUNT = 720;
+const PICKER_PARALLAX_X = 3;
+const PICKER_PARALLAX_Y = 2;
+const CHAT_HEADER_HEIGHT_ESTIMATE = 64;
+const COMPOSE_HEIGHT_ESTIMATE = 138;
+const EMPTY_STATE_CHROME_HEIGHT_ESTIMATE = 220;
+
+const subscribeViewportWidth = (onStoreChange: () => void): (() => void) => {
+  window.addEventListener("resize", onStoreChange);
+  return () => window.removeEventListener("resize", onStoreChange);
+};
+
+const getViewportWidthSnapshot = (): number =>
+  typeof window === "undefined" ? PICKER_REFERENCE_SIZE : window.innerWidth;
+
+const getViewportHeightSnapshot = (): number =>
+  typeof window === "undefined" ? 900 : window.innerHeight;
+
+const getServerViewportWidthSnapshot = (): number => PICKER_REFERENCE_SIZE;
+const getServerViewportHeightSnapshot = (): number => 900;
+
+function useViewportWidth(): number {
+  return useSyncExternalStore(
+    subscribeViewportWidth,
+    getViewportWidthSnapshot,
+    getServerViewportWidthSnapshot
+  );
+}
+
+function useViewportHeight(): number {
+  return useSyncExternalStore(
+    subscribeViewportWidth,
+    getViewportHeightSnapshot,
+    getServerViewportHeightSnapshot
+  );
+}
+
+function pickerAvailableWidth(viewportWidth: number): number {
+  const isMobile = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
+  const chatPaneWidth = isMobile
+    ? viewportWidth
+    : Math.max(PICKER_MIN_AVAILABLE_WIDTH, viewportWidth - DESKTOP_SIDEBAR_WIDTH);
+  const messagesPadding = isMobile
+    ? MOBILE_MESSAGES_PADDING_X
+    : DESKTOP_MESSAGES_PADDING_X;
+  const availableWidth = chatPaneWidth - messagesPadding - PICKER_SIDE_GUTTER;
+
+  return Math.max(
+    PICKER_MIN_AVAILABLE_WIDTH,
+    Math.min(
+      isMobile ? PICKER_MOBILE_MAX_SQUARE_SIZE : PICKER_DESKTOP_MAX_WIDTH,
+      availableWidth
+    )
+  );
+}
+
+function pickerAvailableHeight(viewportHeight: number): number {
+  return Math.max(
+    PICKER_MIN_AVAILABLE_HEIGHT,
+    viewportHeight -
+      CHAT_HEADER_HEIGHT_ESTIMATE -
+      COMPOSE_HEIGHT_ESTIMATE -
+      EMPTY_STATE_CHROME_HEIGHT_ESTIMATE
+  );
+}
+
+function pickerFrameSize(
+  viewportWidth: number,
+  viewportHeight: number
+): { width: number; height: number } {
+  const isMobile = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
+  const availableWidth = pickerAvailableWidth(viewportWidth);
+  const availableHeight = pickerAvailableHeight(viewportHeight);
+
+  if (isMobile) {
+    const squareSize = Math.max(
+      PICKER_MIN_AVAILABLE_WIDTH,
+      Math.min(PICKER_MOBILE_MAX_SQUARE_SIZE, availableWidth, availableHeight)
+    );
+
+    return { width: squareSize, height: squareSize };
+  }
+
+  const width = Math.max(PICKER_MIN_AVAILABLE_WIDTH, availableWidth);
+  const height = Math.max(
+    PICKER_MIN_AVAILABLE_HEIGHT,
+    Math.min(
+      availableHeight,
+      PICKER_DESKTOP_MAX_HEIGHT,
+      width / PICKER_DESKTOP_ASPECT_RATIO
+    )
+  );
+
+  return { width, height };
+}
+
+function lowCountPickerFrameSize(
+  totalTiles: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  baseFrame: { width: number; height: number }
+): { width: number; height: number } {
+  if (totalTiles > PICKER_LOW_COUNT_MAX) return baseFrame;
+
+  const isDesktop = viewportWidth > PICKER_MOBILE_BREAKPOINT;
+  const availableHeight = pickerAvailableHeight(viewportHeight);
+
+  if (isDesktop) {
+    const width = Math.min(baseFrame.width, PICKER_DESKTOP_LOW_COUNT_MAX_WIDTH);
+    const height = Math.max(
+      PICKER_MIN_AVAILABLE_HEIGHT,
+      Math.min(
+        availableHeight,
+        PICKER_DESKTOP_MAX_HEIGHT,
+        width / PICKER_DESKTOP_ASPECT_RATIO
+      )
+    );
+
+    return { width, height };
+  }
+
+  const width = Math.min(baseFrame.width, PICKER_MOBILE_LOW_COUNT_MAX_SIZE);
+  const height =
+    totalTiles >= 5
+      ? Math.min(availableHeight, PICKER_MOBILE_COLUMN_STACK_MAX_HEIGHT)
+      : width;
+
+  return { width, height };
+}
+
+function pickerMaxTileSize(totalTiles: number, isDesktop: boolean): number {
+  if (totalTiles > PICKER_LOW_COUNT_MAX) return PICKER_MAX_TILE_SIZE;
+  if (totalTiles === 1) {
+    return isDesktop
+      ? PICKER_SINGLE_BOT_TILE_SIZE_DESKTOP
+      : PICKER_SINGLE_BOT_TILE_SIZE_MOBILE;
+  }
+  if (totalTiles <= 4) {
+    return isDesktop
+      ? PICKER_FEW_BOT_TILE_SIZE_DESKTOP
+      : PICKER_FEW_BOT_TILE_SIZE_MOBILE;
+  }
+
+  return isDesktop
+    ? PICKER_LOW_COUNT_TILE_SIZE_DESKTOP
+    : PICKER_LOW_COUNT_TILE_SIZE_MOBILE;
+}
+
+function scaledPickerBreakpoint(baseCount: number, pickerWidth: number): number {
+  const linearScale = pickerWidth / PICKER_REFERENCE_SIZE;
+  const scale = Math.max(
+    PICKER_BREAKPOINT_SCALE_MIN,
+    Math.min(
+      PICKER_BREAKPOINT_SCALE_MAX,
+      Math.pow(linearScale, PICKER_BREAKPOINT_SCALE_EXPONENT)
+    )
+  );
+  return Math.max(1, Math.round(baseCount * scale));
+}
+
+function pickerStageBreakpoint(
+  baseCount: number,
+  pickerWidth: number,
+  isDesktop: boolean
+): number {
+  const scaled = scaledPickerBreakpoint(baseCount, pickerWidth);
+  return isDesktop ? Math.max(1, scaled) : scaled;
+}
+
+function pickerDensityBreakpoints(
+  viewportWidth: number,
+  viewportHeight: number
+): PickerDensityBreakpoints {
+  const { width: pickerWidth, height: pickerHeight } = pickerFrameSize(
+    viewportWidth,
+    viewportHeight
+  );
+  const isDesktop = viewportWidth > PICKER_MOBILE_BREAKPOINT;
+  const densityWidth =
+    isDesktop
+      ? Math.min(pickerWidth, pickerHeight * PICKER_DESKTOP_ASPECT_RATIO)
+      : pickerWidth;
+  const flatTileCountMin = pickerStageBreakpoint(
+    FLAT_TILE_BASE_COUNT,
+    densityWidth,
+    isDesktop
+  );
+  const largeGlyphTileCountMin = pickerStageBreakpoint(
+    LARGE_GLYPH_BASE_COUNT,
+    densityWidth,
+    isDesktop
+  );
+  const crosshairTileCountMin =
+    flatTileCountMin +
+    Math.round(
+      (largeGlyphTileCountMin - flatTileCountMin) *
+        PICKER_CROSSHAIR_STAGE_TWO_PROGRESS
+    );
+  const dotTileCountMin =
+    flatTileCountMin +
+    Math.round(
+      (largeGlyphTileCountMin - flatTileCountMin) *
+        PICKER_DOT_STAGE_TWO_PROGRESS
+    );
+  const glyphlessCardCountMin = pickerStageBreakpoint(
+    GLYPHLESS_CARD_BASE_COUNT,
+    densityWidth,
+    isDesktop
+  );
+  const compactPixelGridCountMin = pickerStageBreakpoint(
+    COMPACT_PIXEL_GRID_BASE_COUNT,
+    densityWidth,
+    isDesktop
+  );
+  const radialRainbowCountMin = pickerStageBreakpoint(
+    RADIAL_RAINBOW_BASE_COUNT,
+    densityWidth,
+    isDesktop
+  );
+
+  return {
+    flatTileCountMin,
+    largeGlyphTileCountMin,
+    crosshairTileCountMin,
+    dotTileCountMin,
+    glyphlessCardCountMin,
+    compactPixelGridCountMin,
+    radialRainbowCountMin,
+  };
+}
+
+function pickerDensityStageTargets(
+  viewportWidth: number,
+  viewportHeight: number
+): PickerDensityStageTarget[] {
+  const breakpoints = pickerDensityBreakpoints(viewportWidth, viewportHeight);
+
+  return [
+    {
+      id: 1,
+      label: "Stage 1",
+      description: "full cards",
+      targetCount: Math.max(1, breakpoints.flatTileCountMin - 1),
+    },
+    {
+      id: 2,
+      label: "Stage 2",
+      description: "flat cards",
+      targetCount: breakpoints.flatTileCountMin,
+    },
+    {
+      id: 3,
+      label: "Stage 3",
+      description: "larger glyphs",
+      targetCount: breakpoints.largeGlyphTileCountMin,
+    },
+    {
+      id: 4,
+      label: "Stage 4",
+      description: "glyphless cards",
+      targetCount: breakpoints.glyphlessCardCountMin,
+    },
+    {
+      id: 5,
+      label: "Stage 5",
+      description: "pixel grid + dot",
+      targetCount: breakpoints.compactPixelGridCountMin,
+    },
+    {
+      id: 6,
+      label: "Stage 6",
+      description: "radial rainbow",
+      targetCount: breakpoints.radialRainbowCountMin,
+    },
+  ];
+}
+
+/**
+ * Trim a bot's system_prompt down to a compact preview suitable for the
+ * empty-state / conversation-intro hint. Preserves the first paragraph
+ * (treats `\n\n+` as a hard break), collapses intra-paragraph newlines,
+ * and truncates at a word boundary if the result would exceed
+ * `maxChars`. Empty input returns an empty string so the caller can
+ * decide whether to render a fallback hint or nothing at all.
+ */
+function firstLinesOf(text: string | null | undefined, maxChars = 140): string {
+  const raw = typeof text === "string" ? text.trim() : "";
+  if (!raw) return "";
+  const firstPara = raw.split(/\n\n+/)[0]?.replace(/\n/g, " ").trim() ?? "";
+  if (firstPara.length <= maxChars) return firstPara;
+  const sliced = firstPara.slice(0, maxChars);
+  const lastSpace = sliced.lastIndexOf(" ");
+  // Only snap back to the last space if it lands reasonably far from
+  // the start — otherwise mid-word truncation is better than a silly
+  // one-or-two-word preview.
+  const cut = lastSpace > maxChars * 0.6 ? sliced.slice(0, lastSpace) : sliced;
+  return `${cut.trim()}\u2026`;
+}
+
+/**
+ * Geometry for the Chat-mode bot picker.
+ *
+ * Strategy:
+ *   1. Claim a stable frame from the available viewport space.
+ *   2. Pick a grid shape that follows the frame's aspect ratio.
+ *   3. Fit each bot tile into that grid, shrinking tiles as count grows.
+ *
+ * Example outcomes:
+ *   N=1  → 1×1, one capped tile centered inside the frame.
+ *   Mobile N=9  → 3×3.
+ *   Desktop N=10 → 5×2-ish widescreen rows.
+ */
+function pickerGridShape(
+  totalTiles: number,
+  pickerWidth: number,
+  pickerHeight: number
+): { cols: number; rows: number } {
+  if (totalTiles <= 1) return { cols: 1, rows: 1 };
+  const aspectRatio = Math.max(1, pickerWidth / Math.max(1, pickerHeight));
+  if (aspectRatio > 1.2 && totalTiles <= 4) {
+    return { cols: totalTiles, rows: 1 };
+  }
+  if (totalTiles === 3) {
+    return { cols: 2, rows: 2 };
+  }
+  if (aspectRatio <= 1.2 && totalTiles >= 5 && totalTiles <= 10) {
+    return { cols: 2, rows: Math.ceil(totalTiles / 2) };
+  }
+  if (totalTiles <= 4) {
+    const side = Math.ceil(Math.sqrt(totalTiles));
+    return { cols: side, rows: side };
+  }
+  const cols = Math.max(1, Math.ceil(Math.sqrt(totalTiles * aspectRatio)));
+  const rows = Math.max(1, Math.ceil(totalTiles / cols));
+  return { cols, rows };
+}
+
+function pickerFormationCells<T>(
+  items: T[],
+  geom: PickerGeometry
+): Array<T | null> {
+  const cells = Array<T | null>(geom.gridCols * geom.gridRows).fill(null);
+  let cellIndex = geom.leadingFillerCell ? 1 : 0;
+
+  for (const item of items) {
+    cells[cellIndex] = item;
+    cellIndex += 1;
+    if (cellIndex >= cells.length) break;
+  }
+
+  return cells;
+}
+
+function pickerGeometry(
+  totalTiles: number,
+  viewportWidth: number,
+  viewportHeight: number
+): PickerGeometry {
+  // Mobile owns the old square frame; desktop owns a widescreen frame whose
+  // width scales with the available viewport. Density thresholds use the
+  // viewport-derived width on desktop so short windows don't prematurely
+  // collapse the visual treatment into later stages.
+  const baseFrame = pickerFrameSize(
+    viewportWidth,
+    viewportHeight
+  );
+  const { width: pickerWidth, height: basePickerHeight } = lowCountPickerFrameSize(
+    totalTiles,
+    viewportWidth,
+    viewportHeight,
+    baseFrame
+  );
+  const isDesktop = viewportWidth > PICKER_MOBILE_BREAKPOINT;
+  const pickerHeight =
+    !isDesktop && totalTiles >= 5 && totalTiles <= 10
+      ? Math.min(
+          pickerAvailableHeight(viewportHeight),
+          PICKER_MOBILE_COLUMN_STACK_MAX_HEIGHT
+        )
+      : basePickerHeight;
+  const {
+    flatTileCountMin,
+    largeGlyphTileCountMin,
+    crosshairTileCountMin,
+    dotTileCountMin,
+    glyphlessCardCountMin,
+    compactPixelGridCountMin,
+    radialRainbowCountMin,
+  } = pickerDensityBreakpoints(viewportWidth, viewportHeight);
+  const enlargeGlyph = totalTiles >= largeGlyphTileCountMin;
+  const hideGlyphByDefault = totalTiles >= glyphlessCardCountMin;
+  const isCompactPixelGrid = totalTiles >= compactPixelGridCountMin;
+  const selectedDotGlyph = isCompactPixelGrid;
+  const radialRainbowGradient =
+    isCompactPixelGrid && totalTiles >= radialRainbowCountMin;
+  const isSolidSwatch = isCompactPixelGrid;
+
+  if (totalTiles <= 0) {
+    return {
+      pickerWidth,
+      pickerHeight,
+      tileSize: 192,
+      glyphSize: 96,
+      glyphStroke: 1.6,
+      hoverScale: 1.06,
+      tileGap: 14,
+      gridCols: 1,
+      gridRows: 1,
+      fillerCells: 0,
+      singleBot: false,
+      threeBotStack: false,
+      mobileColumnStack: false,
+      leadingFillerCell: false,
+      flattenTile: false,
+      enlargeGlyph: false,
+      hideGlyphByDefault: false,
+      crosshairCursor: false,
+      dotCursor: false,
+      solidSwatch: false,
+      compactPixelGrid: false,
+      selectedDotGlyph: false,
+      radialRainbowGradient: false,
+    };
+  }
+
+  // Breakpoints scale with available width. The ladder now removes one
+  // visual affordance at a time: gradient, then larger glyphs, then glyphs,
+  // then card chrome/pixel gaps, then the fully abstract rainbow field.
+  const leadingFillerCell = totalTiles > 10 && totalTiles % 2 === 1;
+  const gridOccupancyCount = totalTiles + (leadingFillerCell ? 1 : 0);
+  const { cols, rows } = pickerGridShape(
+    gridOccupancyCount,
+    pickerWidth,
+    pickerHeight
+  );
+  const fillerCells = cols * rows - gridOccupancyCount;
+  const gap = isCompactPixelGrid
+    ? 0
+    : Math.max(
+        isSolidSwatch ? 2 : 4,
+        Math.min(
+          14,
+          Math.round(
+            Math.min(
+              pickerWidth * 0.018,
+              rows > 1 ? pickerHeight * 0.012 : pickerWidth * 0.018
+            )
+          )
+        )
+      );
+  const baseMaxTileSize = pickerMaxTileSize(totalTiles, isDesktop);
+  const maxTileSize =
+    !isDesktop && totalTiles === 3
+      ? Math.min(PICKER_THREE_STACK_TILE_SIZE_MOBILE, baseMaxTileSize)
+      : isDesktop && totalTiles > 1 && totalTiles <= 4
+        ? Math.min(
+            baseMaxTileSize,
+            Math.floor((pickerWidth - (cols - 1) * gap) / cols)
+          )
+        : baseMaxTileSize;
+  const tileSize = Math.min(
+    maxTileSize,
+    Math.floor(
+      Math.min(
+        (pickerWidth - (cols - 1) * gap) / cols,
+        (pickerHeight - (rows - 1) * gap) / rows
+      )
+    )
+  );
+
+  const glyphRatio = hideGlyphByDefault || isSolidSwatch
+    ? 0
+    : enlargeGlyph
+      ? PICKER_STAGE_TWO_GLYPH_RATIO
+      : PICKER_DEFAULT_GLYPH_RATIO;
+  const glyphSize = Math.max(14, Math.round(tileSize * glyphRatio));
+  const glyphStroke = botGlyphStrokeForSize(glyphSize);
+  // Magnification target: dramatic on tiny tiles (where the small pop
+  // still reads as a satisfying nudge), restrained on giant tiles (where
+  // the same multiplier would pop the tile clear out of the empty-state
+  // column). Break-points scale alongside the tile ladder: tiles sized
+  // for 1-4 bots land in the 120+ "restrained" band, 5-16 bots sit in
+  // the 80+ "medium" band, and denser packings get the strongest pop.
+  // Values were halved (relative to "amount over 1.0") to soften the
+  // first-stage zoom while keeping the relative shape across the ladder.
+  const hoverScale = isCompactPixelGrid
+    ? 1
+    : tileSize >= 120
+      ? 1.06
+      : tileSize >= 80
+        ? 1.1
+        : 1.16;
+
+  return {
+    pickerWidth,
+    pickerHeight,
+    tileSize,
+    glyphSize,
+    glyphStroke,
+    hoverScale,
+    tileGap: gap,
+    gridCols: cols,
+    gridRows: rows,
+    fillerCells,
+    singleBot: totalTiles === 1,
+    threeBotStack: !isDesktop && totalTiles === 3,
+    mobileColumnStack: !isDesktop && totalTiles >= 5 && totalTiles <= 10,
+    leadingFillerCell,
+    flattenTile: totalTiles >= flatTileCountMin,
+    enlargeGlyph,
+    hideGlyphByDefault,
+    crosshairCursor: totalTiles >= crosshairTileCountMin,
+    dotCursor: totalTiles >= dotTileCountMin,
+    solidSwatch: isSolidSwatch,
+    compactPixelGrid: isCompactPixelGrid,
+    selectedDotGlyph,
+    radialRainbowGradient,
+  };
+}
+
+function updatePickerParallax(
+  event: React.PointerEvent<HTMLButtonElement>
+): void {
+  if (event.pointerType !== "mouse") return;
+
+  const picker = event.currentTarget.closest("[data-bot-picker-frame='true']");
+  if (!(picker instanceof HTMLDivElement)) return;
+
+  const rect = picker.getBoundingClientRect();
+  const normalizedX = (event.clientX - rect.left) / rect.width - 0.5;
+  const normalizedY = (event.clientY - rect.top) / rect.height - 0.5;
+  const x = normalizedX * -2 * PICKER_PARALLAX_X;
+  const y = normalizedY * -2 * PICKER_PARALLAX_Y;
+
+  picker.style.setProperty(
+    "--picker-parallax-x",
+    `${x.toFixed(2)}px`
+  );
+  picker.style.setProperty(
+    "--picker-parallax-y",
+    `${y.toFixed(2)}px`
+  );
+}
+
+function resetPickerParallax(element: HTMLDivElement): void {
+  element.style.setProperty("--picker-parallax-x", "0px");
+  element.style.setProperty("--picker-parallax-y", "0px");
+}
+
+// Hit-test the picker grid at a viewport coordinate and return the bot id
+// of the tile under that point. Each tile button carries `data-bot-id`
+// (set in the JSX) so we can reuse the existing element layout instead
+// of recomputing grid coordinates against filler cells or the optional
+// leading filler. Returns null when the point misses every tile (e.g.
+// finger is over a placeholder, gap, or off the picker entirely) so
+// callers can park the preview in a "no target" state.
+function findBotIdAtPoint(x: number, y: number): string | null {
+  if (typeof document === "undefined") return null;
+  const target = document.elementFromPoint(x, y);
+  if (!(target instanceof Element)) return null;
+  const tile = target.closest("[data-bot-id]");
+  if (!(tile instanceof HTMLElement)) return null;
+  return tile.dataset.botId ?? null;
+}
+
 // ── Color math for the bot color wheel ────────────────────────────────
 // The wheel paints a HSL hue ring via conic-gradient with a white-centered
 // radial for saturation; these helpers map clicks on the wheel to/from hex.
 
 function randomHex(): string {
-  const n = Math.floor(Math.random() * 0x1000000);
-  return `#${n.toString(16).padStart(6, "0")}`;
+  // Seed from five PRISM wordmark hue families, not five exact hexes.
+  // This keeps the library constrained to P/R/I/S/M while preserving the
+  // subtle spectrum that makes large swatch grids readable.
+  const seed =
+    PRISM_WORDMARK_PALETTE[
+      Math.floor(Math.random() * PRISM_WORDMARK_PALETTE.length)
+    ];
+  const { h } = hexToHsl(seed);
+  const hue =
+    (h -
+      PRISM_BOT_SEED_HUE_SPREAD_DEG / 2 +
+      Math.random() * PRISM_BOT_SEED_HUE_SPREAD_DEG +
+      360) %
+    360;
+  const saturation =
+    PRISM_BOT_SEED_SATURATION_MIN +
+    Math.random() * (PRISM_BOT_SEED_SATURATION_MAX - PRISM_BOT_SEED_SATURATION_MIN);
+  const lightness =
+    PRISM_BOT_SEED_LIGHTNESS_MIN +
+    Math.random() * (PRISM_BOT_SEED_LIGHTNESS_MAX - PRISM_BOT_SEED_LIGHTNESS_MIN);
+  return hslToHex(hue, saturation, lightness);
 }
 
 function hslToHex(h: number, s: number, l: number): string {
@@ -278,9 +1128,17 @@ function ensureContrast(foreground: string, background: string, targetRatio = 4.
 // now?" doesn't have to duplicate literals. Mirrored in page.module.css
 // under .themeDark / .themeLight — keep these in sync.
 const THEME_BG: Record<"light" | "dark", string> = {
-  light: "#f1f1f4",
+  light: "#eee7dc",
   dark: "#0a0a0b",
 };
+
+// HSL lightness alone underestimates perceived brightness for warm yellows
+// and oranges on the light theme's ivory surface. After hue-preserving HSL
+// clamping, cap WCAG luminance so bot glyphs/tiles keep enough edge contrast.
+const ACCENT_LUMINANCE_MAX_LIGHT = 0.42;
+const ACCENT_LUMINANCE_MAX_LIGHT_YELLOW = 0.3;
+const YELLOW_HUE_MIN = 40;
+const YELLOW_HUE_MAX = 75;
 
 // Clamp a color's luminance into [min, max] by blending toward black (to
 // lower) or white (to raise). Used so light mode can't display eye-searing
@@ -390,13 +1248,41 @@ function clampAccentLightness(
   return hslToHex(h, s, clamped);
 }
 
+// Mirrors `normalizeAccentForTheme` in packages/shared/src/color.ts — keep
+// the two implementations in sync. This is the canonical render-time bot
+// accent normalizer for surfaces that paint user-chosen colors.
+function normalizeAccentForTheme(hex: string, theme?: "light" | "dark"): string {
+  const lightnessClamped = clampAccentLightness(hex, theme);
+  if (theme === "dark") return lightnessClamped;
+  const { h } = hexToHsl(lightnessClamped);
+  const max = h >= YELLOW_HUE_MIN && h <= YELLOW_HUE_MAX
+    ? ACCENT_LUMINANCE_MAX_LIGHT_YELLOW
+    : ACCENT_LUMINANCE_MAX_LIGHT;
+  return clampLuminance(lightnessClamped, { max });
+}
+
 // --bg-surface hex per theme. Mirrored from .themeDark / .themeLight in
 // page.module.css so the swatch-border compensator can reason about what
 // surface the swatch actually sits on.
 const THEME_SURFACE_BG: Record<"light" | "dark", string> = {
-  light: "#ffffff",
+  light: "#faf3e9",
   dark: "#121214",
 };
+const COMPOSE_BOT_LIGHT_INK_CONTRAST_RATIO = 5.8;
+
+function botAccentStyle(
+  rawHex: string | null | undefined,
+  resolvedTheme: "light" | "dark"
+): React.CSSProperties | undefined {
+  const raw = rawHex?.trim();
+  if (!raw) return undefined;
+  const accent = normalizeAccentForTheme(raw, resolvedTheme);
+  const ink = ensureContrast(accent, THEME_SURFACE_BG[resolvedTheme], 4.5);
+  return {
+    ["--bot-color" as string]: accent,
+    ["--bot-ink" as string]: ink,
+  } as React.CSSProperties;
+}
 
 // Build the inline `--swatch-border` custom property for the color-picker
 // swatch button so its border smoothly ramps from the theme's default
@@ -420,6 +1306,36 @@ function swatchBorderStyle(fillHex: string, resolvedTheme: "light" | "dark"): st
   return `color-mix(in srgb, var(--line) ${100 - pct}%, var(--fg) ${pct}%)`;
 }
 
+// Sidebar conversation row border shade compensation. Similar ramp to
+// swatchBorderStyle, but emits just a 0..100 integer percent so the
+// consumer can apply the blend in CSS (`color-mix(var(--row-color),
+// var(--fg) X%)`). Keeping the computation off the CSS side gives us
+// control over easing without shipping a bigger CSS expression per row.
+//
+// Semantics: a conversation tile fill is ~22% of the bot color over the
+// theme surface. When the bot color is bright on a light theme (or dark
+// on a dark theme), the effective fill reads very close to the surface
+// and the row border needs to lean toward --fg for visibility. When the
+// fill has healthy contrast already (mid-band pinks, teals, oranges),
+// the border stays close to the bot color itself so the row keeps its
+// brand identity.
+function rowBorderMixPercent(
+  fillHex: string,
+  resolvedTheme: "light" | "dark"
+): number {
+  const surface = THEME_SURFACE_BG[resolvedTheme];
+  const ratio = contrastRatio(fillHex, surface);
+  // Slightly higher `start` than swatchBorderStyle (2.5 vs 2.0) so
+  // mid-band bot colors get a gentle nudge toward --fg too — keeps the
+  // border readable over the actual 22% tint rather than the full-
+  // saturation swatch case swatchBorderStyle covers.
+  const START = 2.5;
+  const END = 1.05;
+  const raw = Math.max(0, Math.min(1, (START - ratio) / (START - END)));
+  const eased = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
+  return Math.round(eased * 100);
+}
+
 type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images";
@@ -431,7 +1347,21 @@ type PanelView = null | "settings" | "bots" | "images";
 type View = "hub" | "chat" | "sandbox";
 
 interface SessionUser { id: string; email: string; displayName: string; theme: Theme; preferredProvider: Provider; }
-interface ConversationSummary { id: string; title: string; updatedAt: string; }
+interface ConversationSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+  /** Bot locked to this chat when it was first created; `null` = default grayscale persona. */
+  botId: string | null;
+  /** Private chat flag — drives the sidebar privacy marker and, when opened, the grayscale-shell override. */
+  incognito: boolean;
+  /** Bot id of the most recent assistant message; null for Default-last OR no-reply-yet (disambiguate via hasAssistantReply). */
+  lastBotId: string | null;
+  /** Denormalized color of the last-spoken bot; null when lastBotId is null. */
+  lastBotColor: string | null;
+  /** True when the conversation has at least one assistant reply; distinguishes "Default was last" from "no reply yet". */
+  hasAssistantReply: boolean;
+}
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -458,7 +1388,21 @@ function getMessageStatus(msg: Message): StatusTag | null {
   // Pre-existing assistant messages without a provider record: no indicator.
   return null;
 }
-interface ConversationDetail { id: string; title: string; messages: Message[]; }
+interface ConversationDetail {
+  id: string;
+  title: string;
+  /** Bot locked to this conversation at start. Null = grayscale default / no persona. */
+  botId: string | null;
+  /** Private chat flag — pinned on the conversation row at creation, read here for accent + provider routing. */
+  incognito: boolean;
+  /** Bot id of the most recent assistant message; null for Default-last OR no-reply-yet. */
+  lastBotId: string | null;
+  /** Denormalized color of the last-spoken bot; mirrors the list-endpoint field for post-send UI consistency. */
+  lastBotColor: string | null;
+  /** True when the conversation has at least one assistant reply; see ConversationSummary for disambiguation semantics. */
+  hasAssistantReply: boolean;
+  messages: Message[];
+}
 interface UserSettings {
   theme: Theme;
   preferredProvider: Provider;
@@ -477,6 +1421,393 @@ interface Bot {
   max_tokens: number;
   color: string | null;
   glyph: string | null;
+  chat_enabled: number;
+}
+
+const BOT_COLOR_SORT_GRAYSCALE_SATURATION_MAX = 6;
+const BOT_COLOR_SORT_GRAYSCALE_GROUP = 10;
+const BOT_COLOR_SORT_COLORLESS_GROUP = 11;
+// Hue lens filter — refracts the visible bot population to a single
+// hue band so a 3000-bot grid can collapse back into a selectable
+// subset without paginating. The filter is inactive by default
+// (`hueFilterCenter === null`); moving the slider activates it.
+// The tolerance is measured in the compressed slider's 0..359 coordinate
+// space. This keeps filtering fluid across hard-stop track segments:
+// adjacent families overlap slightly near segment boundaries instead of
+// behaving like discrete pages.
+const HUE_LENS_FILTER_TOLERANCE = 42;
+const BOT_PICKER_RETURN_ANIMATION_MS = 360;
+const BOT_PANEL_DASHBOARD_MIN_BOTS = 1;
+const BOT_PANEL_COLOR_HARMONY_MIN_BOTS = 40;
+const BOT_PANEL_COLOR_HARMONY_STRENGTH = 0.42;
+const BOT_PANEL_COLOR_HARMONY_SATURATION_TARGET = 70;
+const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_DARK = 44;
+const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_LIGHT = 46;
+
+function botIsChatEnabled(bot: Bot): boolean {
+  return bot.chat_enabled === 1;
+}
+
+function blendToward(value: number, target: number, amount: number): number {
+  return value + (target - value) * amount;
+}
+
+function botColorFamilyGroup(hue: number): number {
+  if (hue < 15 || hue >= 345) return 0; // red
+  if (hue < 45) return 1; // orange
+  if (hue < 75) return 2; // yellow
+  if (hue < 110) return 3; // lime
+  if (hue < 155) return 4; // green
+  if (hue < 240) return 5; // cyan/blue
+  if (hue < 275) return 7; // indigo
+  if (hue < 315) return 8; // violet
+  return 9; // magenta
+}
+
+function botHueSortValue(hue: number): number {
+  return hue >= 345 ? hue - 360 : hue;
+}
+
+// Smallest angular distance between two hues on the 360° wheel. Both
+// inputs are normalized into [0, 360) first so callers don't have to
+// pre-clamp slider values that drift slightly outside the range.
+function circularHueDistance(a: number, b: number): number {
+  const wrap = (value: number): number => {
+    const mod = value % 360;
+    return mod < 0 ? mod + 360 : mod;
+  };
+  const diff = Math.abs(wrap(a) - wrap(b));
+  return Math.min(diff, 360 - diff);
+}
+
+// True when a bot has a usable, non-grayscale color the hue lens can
+// match against. Uncolored or near-grayscale bots intentionally fall
+// out of the filter so the lens reads as "show me bots in this hue
+// band" rather than "show me everything tinted at all".
+function botHasFilterableColor(bot: Bot): boolean {
+  const raw = bot.color?.trim();
+  if (!raw || !hexChannels(raw)) return false;
+  const { s } = hexToHsl(raw);
+  return s > BOT_COLOR_SORT_GRAYSCALE_SATURATION_MAX;
+}
+
+// Apply the hue lens to a bot list. Inactive filter (`hueCenter === null`)
+// returns the input untouched so callers can use the same downstream
+// rendering path. When active, only bots within the tolerance band
+// survive; uncolored/grayscale bots are dropped because they cannot
+// meaningfully sit in a hue band.
+// Hue availability buckets — the lens slider's gradient and the dense
+// color-map's snap behavior both need a histogram of which hue families
+// the user actually owns. Twelve 30° buckets keep adjacent families
+// (red/orange/yellow) visually distinct on the slider while still being
+// coarse enough that snapping to a region doesn't feel jittery near a
+// boundary.
+const HUE_BUCKET_COUNT = 12;
+const HUE_BUCKET_WIDTH_DEG = 360 / HUE_BUCKET_COUNT;
+
+interface HueBucket {
+  /** Hue (degrees) at the center of this bucket. */
+  center: number;
+  /** Number of filterable bots whose color falls in this bucket. */
+  count: number;
+}
+
+interface HueLensTrackSegment {
+  prismIndex: number;
+  color: string;
+}
+
+const EMPTY_HUE_LENS_TRACK_SEGMENTS: readonly HueLensTrackSegment[] = [];
+
+function hueBucketIndex(hue: number): number {
+  const wrapped = ((hue % 360) + 360) % 360;
+  return Math.min(
+    HUE_BUCKET_COUNT - 1,
+    Math.floor(wrapped / HUE_BUCKET_WIDTH_DEG)
+  );
+}
+
+function hueBucketCenter(index: number): number {
+  return index * HUE_BUCKET_WIDTH_DEG + HUE_BUCKET_WIDTH_DEG / 2;
+}
+
+// Tally bot hues into a fixed-width bucket histogram, ignoring
+// uncolored/grayscale bots so the lens reflects only the population it
+// can actually filter against.
+function computeHueBuckets(bots: readonly Bot[]): HueBucket[] {
+  const counts = new Array<number>(HUE_BUCKET_COUNT).fill(0);
+  for (const bot of bots) {
+    if (!botHasFilterableColor(bot)) continue;
+    const { h } = hexToHsl(bot.color!.trim());
+    counts[hueBucketIndex(h)] += 1;
+  }
+  return counts.map((count, i) => ({ center: hueBucketCenter(i), count }));
+}
+
+function hueLensSegmentIndexForHue(hue: number): number {
+  const prismHues = PRISM_WORDMARK_PALETTE.map((color) => hexToHsl(color).h);
+  let segmentIndex = 0;
+  let bestDistance = Infinity;
+  for (let i = 0; i < prismHues.length; i += 1) {
+    const distance = circularHueDistance(prismHues[i], hue);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      segmentIndex = i;
+    }
+  }
+  return segmentIndex;
+}
+
+function hueLensPositionForHue(hue: number): number {
+  const prismHues = PRISM_WORDMARK_PALETTE.map((color) => hexToHsl(color).h);
+  const segmentIndex = hueLensSegmentIndexForHue(hue);
+  const segmentWidth = 360 / prismHues.length;
+  const center = segmentIndex * segmentWidth + segmentWidth / 2;
+  const signedHueOffset =
+    (((hue - prismHues[segmentIndex] + 540) % 360) - 180) /
+    (PRISM_BOT_SEED_HUE_SPREAD_DEG / 2);
+  const maxOffset = segmentWidth / 2 - 1;
+  const offset = Math.max(-maxOffset, Math.min(maxOffset, signedHueOffset * maxOffset));
+  return Math.max(0, Math.min(359, center + offset));
+}
+
+function filterBotsByHue(bots: Bot[], hueCenter: number | null): Bot[] {
+  if (hueCenter === null) return bots;
+  return bots.filter((bot) => {
+    if (!botHasFilterableColor(bot)) return false;
+    const { h } = hexToHsl(bot.color!.trim());
+    const lensPosition = hueLensPositionForHue(h);
+    return Math.abs(lensPosition - hueCenter) <= HUE_LENS_FILTER_TOLERANCE;
+  });
+}
+
+function computeHueLensTrackSegments(bots: readonly Bot[]): HueLensTrackSegment[] {
+  const populatedSegments = new Array<boolean>(PRISM_WORDMARK_PALETTE.length).fill(false);
+  for (const bot of bots) {
+    if (!botHasFilterableColor(bot)) continue;
+    const { h } = hexToHsl(bot.color!.trim());
+    populatedSegments[hueLensSegmentIndexForHue(h)] = true;
+  }
+  return populatedSegments.flatMap((populated, prismIndex) =>
+    populated
+      ? [{ prismIndex, color: PRISM_WORDMARK_PALETTE[prismIndex] }]
+      : []
+  );
+}
+
+// Build the lens track from the bot colors that actually exist. Populated
+// families expand to fill the whole rail, so a one-green-bot library paints
+// one full-width green bar instead of a green island with empty gaps.
+function hueLensGradient(segments: readonly HueLensTrackSegment[]): string {
+  if (segments.length === 0) {
+    return "linear-gradient(to right, transparent 0%, transparent 100%)";
+  }
+  const stops: string[] = [];
+  for (let i = 0; i < segments.length; i += 1) {
+    const color = segments[i].color;
+    const start = (i / segments.length) * 100;
+    const end = ((i + 1) / segments.length) * 100;
+    stops.push(`${color} ${start.toFixed(2)}%`);
+    stops.push(`${color} ${end.toFixed(2)}%`);
+  }
+  return `linear-gradient(to right, ${stops.join(", ")})`;
+}
+
+function hueLensFilterCenterForSliderValue(
+  sliderValue: number,
+  segments: readonly HueLensTrackSegment[]
+): number {
+  if (segments.length === 0) return sliderValue;
+  const clamped = Math.max(0, Math.min(359, sliderValue));
+  const compactSegmentWidth = 360 / segments.length;
+  const compactIndex = Math.min(
+    segments.length - 1,
+    Math.floor(clamped / compactSegmentWidth)
+  );
+  const compactStart = compactIndex * compactSegmentWidth;
+  const progress = (clamped - compactStart) / compactSegmentWidth;
+  const prismSegmentWidth = 360 / PRISM_WORDMARK_PALETTE.length;
+  const prismStart = segments[compactIndex].prismIndex * prismSegmentWidth;
+  return Math.max(0, Math.min(359, prismStart + progress * prismSegmentWidth));
+}
+
+function hueLensSliderValueForFilterCenter(
+  hueCenter: number,
+  segments: readonly HueLensTrackSegment[]
+): number {
+  if (segments.length === 0) return hueCenter;
+  const prismSegmentWidth = 360 / PRISM_WORDMARK_PALETTE.length;
+  const compactSegmentWidth = 360 / segments.length;
+  const prismIndex = Math.min(
+    PRISM_WORDMARK_PALETTE.length - 1,
+    Math.floor(Math.max(0, Math.min(359, hueCenter)) / prismSegmentWidth)
+  );
+  let compactIndex = segments.findIndex((segment) => segment.prismIndex === prismIndex);
+  if (compactIndex < 0) {
+    compactIndex = 0;
+    let bestDistance = Infinity;
+    for (let i = 0; i < segments.length; i += 1) {
+      const center = segments[i].prismIndex * prismSegmentWidth + prismSegmentWidth / 2;
+      const distance = Math.abs(center - hueCenter);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        compactIndex = i;
+      }
+    }
+    return compactIndex * compactSegmentWidth + compactSegmentWidth / 2;
+  }
+  const prismStart = prismIndex * prismSegmentWidth;
+  const progress = (hueCenter - prismStart) / prismSegmentWidth;
+  return Math.max(
+    0,
+    Math.min(359, compactIndex * compactSegmentWidth + progress * compactSegmentWidth)
+  );
+}
+
+function panelBotDisplayAccent(
+  rawHex: string,
+  theme: "light" | "dark",
+  harmonyActive: boolean
+): string {
+  const normalized = normalizeAccentForTheme(rawHex, theme);
+  if (!harmonyActive) return normalized;
+
+  const { h, s, l } = hexToHsl(normalized);
+  const targetLightness = theme === "dark"
+    ? BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_DARK
+    : BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_LIGHT;
+  return normalizeAccentForTheme(
+    hslToHex(
+      h,
+      blendToward(s, BOT_PANEL_COLOR_HARMONY_SATURATION_TARGET, BOT_PANEL_COLOR_HARMONY_STRENGTH),
+      blendToward(l, targetLightness, BOT_PANEL_COLOR_HARMONY_STRENGTH)
+    ),
+    theme
+  );
+}
+
+function botColorSortKey(
+  bot: Bot,
+  theme: "light" | "dark",
+  harmonyActive: boolean
+): {
+  hueGroup: number;
+  hue: number;
+  luminance: number;
+  saturation: number;
+  name: string;
+} {
+  const rawColor = bot.color?.trim();
+  if (!rawColor || !hexChannels(rawColor)) {
+    return {
+      hueGroup: BOT_COLOR_SORT_COLORLESS_GROUP,
+      hue: 0,
+      luminance: 0,
+      saturation: 0,
+      name: bot.name,
+    };
+  }
+
+  const displayColor = panelBotDisplayAccent(rawColor, theme, harmonyActive);
+  const { h, s } = hexToHsl(displayColor);
+  const isGrayscale = s <= BOT_COLOR_SORT_GRAYSCALE_SATURATION_MAX;
+  return {
+    hueGroup: isGrayscale
+      ? BOT_COLOR_SORT_GRAYSCALE_GROUP
+      : botColorFamilyGroup(h),
+    hue: botHueSortValue(h),
+    luminance: relativeLuminance(displayColor),
+    saturation: s,
+    name: bot.name,
+  };
+}
+
+function compareBotsByColor(
+  a: Bot,
+  b: Bot,
+  theme: "light" | "dark",
+  harmonyActive: boolean
+): number {
+  const aKey = botColorSortKey(a, theme, harmonyActive);
+  const bKey = botColorSortKey(b, theme, harmonyActive);
+  if (aKey.hueGroup !== bKey.hueGroup) return aKey.hueGroup - bKey.hueGroup;
+  if (aKey.luminance !== bKey.luminance) return bKey.luminance - aKey.luminance;
+  if (aKey.hue !== bKey.hue) return aKey.hue - bKey.hue;
+  if (aKey.saturation !== bKey.saturation) return bKey.saturation - aKey.saturation;
+  return aKey.name.localeCompare(bKey.name, undefined, { sensitivity: "base" });
+}
+
+// At high bot counts the right drawer stops being a list and becomes a
+// Prism-colored dashboard. The five wordmark letters give us five
+// semantic buckets for the user's bots: P/R/I/S/M. randomHex() now
+// always seeds saturated colors inside the accent band, so every
+// newly generated bot lands in one of these five buckets — there is
+// no separate neutral group.
+type PrismGroupId = "p" | "r" | "i" | "s" | "m";
+
+interface PrismGroupDef {
+  id: PrismGroupId;
+  letter: string;
+  label: string;
+  swatch: string;
+}
+
+const PRISM_GROUPS: readonly PrismGroupDef[] = [
+  { id: "p", letter: "P", label: "Pink & red", swatch: PRISM_COLORS.p },
+  { id: "r", letter: "R", label: "Orange & yellow", swatch: PRISM_COLORS.r },
+  { id: "i", letter: "I", label: "Lime & green", swatch: PRISM_COLORS.i },
+  { id: "s", letter: "S", label: "Cyan & blue", swatch: PRISM_COLORS.s },
+  { id: "m", letter: "M", label: "Indigo & violet", swatch: PRISM_COLORS.m },
+] as const;
+
+// Build a left-to-right gradient from up to N bot colors in a group so
+// each editor dashboard button reads as an ordered slice of its bucket's
+// actual spectrum. Stops are color-mixed against `--bg` so the tile still
+// feels like a calm card.
+// Returns null when no bot has a usable color.
+function buildBotGroupGradient(
+  groupBots: readonly Bot[],
+  theme: "light" | "dark",
+  harmonyActive: boolean,
+  mixPercent: number
+): string | null {
+  if (groupBots.length === 0) return null;
+  const sampleSize = Math.min(groupBots.length, 6);
+  const stride = groupBots.length / sampleSize;
+  const stops: string[] = [];
+  for (let i = 0; i < sampleSize; i++) {
+    const idx = Math.min(groupBots.length - 1, Math.floor(i * stride));
+    const bot = groupBots[idx];
+    const accent = bot.color
+      ? panelBotDisplayAccent(bot.color, theme, harmonyActive)
+      : null;
+    if (!accent) continue;
+    stops.push(
+      `color-mix(in srgb, ${accent} ${mixPercent}%, var(--bg) ${100 - mixPercent}%)`
+    );
+  }
+  if (stops.length === 0) return null;
+  if (stops.length === 1) return stops[0];
+  return `linear-gradient(to right, ${stops.join(", ")})`;
+}
+
+// Map a hex color to one of the five Prism letter buckets. Hue cuts
+// mirror botColorFamilyGroup but collapse adjacent fine-grained
+// families into the closest wordmark letter so the dashboard reads
+// as the Prism color family the user already sees in the brand mark.
+// Invalid/grayscale legacy colors still classify by hue so every bot
+// can find a home in one of the five letters — randomHex() prevents
+// new bots from ever being grayscale in the first place.
+function botPrismGroup(hex: string | null | undefined): PrismGroupId {
+  const raw = hex?.trim();
+  if (!raw || !hexChannels(raw)) return "p";
+  const { h } = hexToHsl(raw);
+  if (h >= 315) return "p";
+  if (h < 15) return "p";
+  if (h < 75) return "r"; // orange + yellow
+  if (h < 165) return "i"; // lime + green
+  if (h < 245) return "s"; // cyan + blue
+  return "m"; // indigo + violet + magenta-leaning purple
 }
 
 // Accent color pre-selected in the bot creation picker. Users can change it
@@ -485,6 +1816,47 @@ interface Bot {
 // a fresh random hex on mount, every time the Bots panel opens, and every
 // time a bot is created — so opening the panel always feels generative.
 interface ImageRecord { id: string; prompt: string; url: string; created_at: string; }
+
+// Sentinel color used to paint Default-bot sidebar rows. Picking literal
+// white means "no hue" — on dark theme the 22% tint reads as a light
+// slate panel (a visible "this row is Default" signal), on light theme
+// the tint is barely perceptible, which is fine: Default is the absence
+// of a brand identity so looking "basically unpainted" is semantically
+// correct.
+const DEFAULT_ROW_COLOR = "#ffffff";
+
+// Resolve a sidebar conversation row's tint color from the server-side
+// denormalized `lastBotColor`, falling through a four-step chain so
+// each conversation paints the color of its CURRENT active bot — the
+// same signal that drives the composer dropdown and the editor accent.
+//
+// Order matters:
+//   1. Incognito wins — private rows never pick up a hue (grayscale
+//      styling comes from the private-row CSS, not from this resolver).
+//   2. `lastBotColor` is the server's denormalized color at the time it
+//      responded, so it stays correct even if the bot was later deleted
+//      or recolored.
+//   3. `hasAssistantReply && !lastBotColor` means the last reply came
+//      from the Default bot (no bot_id) — paint WHITE to match
+//      "Default has no brand color".
+//   4. `botId` → live bots[] lookup. Catches the pre-reply window where
+//      a conversation has a locked bot but no assistant message yet.
+//   5. WHITE fallback: no locked bot and no reply either — a brand-new
+//      empty conversation created with Default, or a ghost row from a
+//      failed send. Either way "no bot ever" = Default = WHITE.
+function resolveRowColor(
+  c: ConversationSummary,
+  bots: Bot[]
+): string | null {
+  if (c.incognito) return null;
+  if (c.lastBotColor) return c.lastBotColor;
+  if (c.hasAssistantReply) return DEFAULT_ROW_COLOR;
+  if (c.botId) {
+    const live = bots.find((b) => b.id === c.botId)?.color;
+    if (live) return live;
+  }
+  return DEFAULT_ROW_COLOR;
+}
 
 function ThemeGlyph({ mode }: { mode: Theme }): React.ReactElement {
   // Stroke-only 16x16 glyphs that take their color from currentColor, so the
@@ -499,23 +1871,30 @@ function ThemeGlyph({ mode }: { mode: Theme }): React.ReactElement {
       {mode === "light" && (
         <>
           {/* Sun: central disc + 8 radial rays. */}
-          <circle cx="8" cy="8" r="3" />
-          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5l1.5 1.5M3 13l1.5-1.5M11.5 4.5l1.5-1.5" />
+          <circle cx="8" cy="8" r="3" suppressHydrationWarning />
+          <path
+            d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5l1.5 1.5M3 13l1.5-1.5M11.5 4.5l1.5-1.5"
+            suppressHydrationWarning
+          />
         </>
       )}
       {mode === "dark" && (
         /* Crescent moon: one arc carved out of a larger one. */
-        <path d="M13 9A5.5 5.5 0 1 1 7 3a4.5 4.5 0 0 0 6 6Z" />
+        <path
+          d="M13 9A5.5 5.5 0 1 1 7 3a4.5 4.5 0 0 0 6 6Z"
+          suppressHydrationWarning
+        />
       )}
       {mode === "system" && (
         <>
           {/* Half-filled circle: outline the full disc, then fill the right
              hemisphere so it reads as "sun on one side, moon on the other". */}
-          <circle cx="8" cy="8" r="5.5" />
+          <circle cx="8" cy="8" r="5.5" suppressHydrationWarning />
           <path
             d="M8 2.5A5.5 5.5 0 0 1 8 13.5Z"
             fill="currentColor"
             stroke="none"
+            suppressHydrationWarning
           />
         </>
       )}
@@ -560,8 +1939,10 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // ── Inline SVG glyphs ─────────────────────────────────────────────────
-// Kept light-weight and uniform (14px, stroke 2, round caps) so the action
-// affordances on bot cards all feel like they belong to the same set.
+// Kept light-weight and uniform (14px, stroke 2, round caps) so any
+// action glyph we render in the shell feels like it belongs to the same
+// set. The bot card × / armed ✓ uses raw character glyphs (matching
+// .conversationDelete), so those intentionally don't live here.
 const ICON_PROPS = {
   width: 14,
   height: 14,
@@ -574,37 +1955,17 @@ const ICON_PROPS = {
   "aria-hidden": true,
 };
 
-function IconPlus(): React.JSX.Element {
+// Key glyph used by the Developer Tools launcher (top bar, left of the
+// theme toggle). A rounded bow + short-toothed shaft so it reads as
+// "unlocks a developer surface" even at 14px, distinct from the
+// theme/moon glyphs it sits beside.
+function IconKey(): React.JSX.Element {
   return (
     <svg {...ICON_PROPS}>
-      <path d="M12 5v14" />
-      <path d="M5 12h14" />
-    </svg>
-  );
-}
-
-function IconX(): React.JSX.Element {
-  return (
-    <svg {...ICON_PROPS}>
-      <path d="M18 6L6 18" />
-      <path d="M6 6l12 12" />
-    </svg>
-  );
-}
-
-function IconPencil(): React.JSX.Element {
-  return (
-    <svg {...ICON_PROPS}>
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-    </svg>
-  );
-}
-
-function IconCheck(): React.JSX.Element {
-  return (
-    <svg {...ICON_PROPS}>
-      <path d="M20 6L9 17l-5-5" />
+      <circle cx="7.5" cy="15.5" r="4" />
+      <path d="M10.5 12.5L20 3" />
+      <path d="M16 7l3 3" />
+      <path d="M18 5l2 2" />
     </svg>
   );
 }
@@ -796,6 +2157,12 @@ const BOT_GLYPH_ORDER = [
 ] as const;
 
 type BotGlyphName = (typeof BOT_GLYPH_ORDER)[number];
+
+// The triangle mark belongs to Prism/Default identity; custom bots choose
+// from the same registry minus that reserved glyph.
+const CUSTOM_BOT_GLYPH_ORDER = BOT_GLYPH_ORDER.filter(
+  (key) => key !== "triangle"
+);
 
 const BOT_GLYPHS: Record<BotGlyphName, BotGlyphDefinition> = {
   bot: {
@@ -2268,27 +3635,153 @@ function isBotGlyphName(value: string | null | undefined): value is BotGlyphName
 }
 
 function randomBotGlyph(): BotGlyphName {
-  const index = Math.floor(Math.random() * BOT_GLYPH_ORDER.length);
-  return BOT_GLYPH_ORDER[index];
+  const index = Math.floor(Math.random() * CUSTOM_BOT_GLYPH_ORDER.length);
+  return CUSTOM_BOT_GLYPH_ORDER[index] ?? DEFAULT_BOT_GLYPH;
+}
+
+// First-name pool for the Developer Tools "Add N random bots" action.
+// Kept flat (no adjective × noun combining, no numeric suffix) so each
+// generated bot reads like a person in the sidebar and bot picker grid.
+// The pool is large enough that common stress-test batches can sample
+// without replacement while still allowing repeats during huge density
+// tests where repetition is a useful signal, not a bug.
+const RANDOM_BOT_NAMES = [
+  "Alex", "Avery", "Bailey", "Blake", "Cameron", "Casey", "Charlie",
+  "Dakota", "Drew", "Eden", "Elliot", "Emerson", "Finley", "Harper",
+  "Hayden", "Jamie", "Jordan", "Kai", "Kendall", "Logan", "Morgan",
+  "Parker", "Quinn", "Reese", "Riley", "Robin", "Rowan", "Sage",
+  "Sam", "Skyler", "Taylor", "Terry", "Zion",
+  "Abigail", "Amelia", "Aria", "Audrey", "Aurora", "Bella", "Chloe",
+  "Clara", "Daisy", "Eleanor", "Elena", "Eliza", "Ella", "Emily",
+  "Emma", "Evelyn", "Fiona", "Grace", "Hazel", "Iris", "Isla", "Ivy",
+  "Jade", "Julia", "Lena", "Lila", "Lily", "Lucy", "Luna", "Maya",
+  "Mia", "Nina", "Nora", "Olivia", "Paige", "Ruby", "Sadie", "Sofia",
+  "Stella", "Violet", "Zoe",
+  "Aaron", "Adrian", "Andrew", "Asher", "Austin", "Benjamin", "Caleb",
+  "Daniel", "David", "Elias", "Ethan", "Ezra", "Felix", "Finn",
+  "Gabriel", "Henry", "Isaac", "Jack", "James", "Jonah", "Julian",
+  "Leo", "Liam", "Lucas", "Mateo", "Miles", "Nathan", "Noah", "Oliver",
+  "Owen", "Theo", "Thomas", "Wesley", "Wyatt",
+] as const;
+
+function randomBotName(): string {
+  return RANDOM_BOT_NAMES[Math.floor(Math.random() * RANDOM_BOT_NAMES.length)];
+}
+
+// Fisher–Yates shuffle on a COPY of the source pool, returning the
+// first `count` items. Used by the bulk-add flow so the 10 bots in a
+// single click always have distinct names, even though across clicks
+// the pool will inevitably start repeating. Falls back to sampling
+// with replacement when `count` exceeds the pool size so the caller
+// still gets the requested number of names (no silent truncation).
+function sampleBotNames(count: number): string[] {
+  if (count <= RANDOM_BOT_NAMES.length) {
+    const pool = [...RANDOM_BOT_NAMES];
+    for (let i = pool.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, count);
+  }
+  return Array.from({ length: count }, () => randomBotName());
+}
+
+// Classic lorem ipsum sentence pool for the "random system prompt"
+// feature of the bulk-add. Split into whole sentences (period included)
+// so the picker can concat a 2-5 sentence paragraph without having to
+// re-punctuate. Length variance is intentional — mixing short and long
+// sentences keeps the generated prompt from feeling templated.
+const LOREM_IPSUM_SENTENCES = [
+  "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+  "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
+  "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+  "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
+  "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
+  "Curabitur pretium tincidunt lacus.",
+  "Nulla gravida orci a odio.",
+  "Nullam varius, turpis et commodo pharetra, est eros bibendum elit.",
+  "Donec quis orci eget orci vehicula condimentum.",
+  "Curabitur tempor ultrices ipsum.",
+  "Vestibulum sit amet nulla et velit elementum viverra.",
+  "Praesent vestibulum molestie lacus.",
+  "Aenean nonummy hendrerit mauris.",
+  "Phasellus porta, fusce suscipit varius mi.",
+  "Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus.",
+  "Nulla dui, fusce feugiat malesuada odio.",
+  "Morbi nunc odio, gravida at, cursus nec, luctus a, lorem.",
+  "Maecenas tristique orci ac sem.",
+  "Duis ultricies pharetra magna, donec accumsan malesuada orci.",
+  "Aenean lectus, pellentesque eget nunc.",
+] as const;
+
+// Assemble a random lorem ipsum paragraph for a bot's system prompt:
+// 2 to 5 sentences picked WITHOUT replacement from LOREM_IPSUM_SENTENCES
+// (so a single paragraph never repeats itself) and joined with a single
+// space. Without-replacement keeps each prompt feeling organic; the
+// pool is big enough that cross-bot collisions are rare but expected.
+function randomLoremIpsum(): string {
+  const MIN_SENTENCES = 2;
+  const MAX_SENTENCES = 5;
+  const sentenceCount =
+    MIN_SENTENCES +
+    Math.floor(Math.random() * (MAX_SENTENCES - MIN_SENTENCES + 1));
+  const pool = [...LOREM_IPSUM_SENTENCES];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, sentenceCount).join(" ");
 }
 
 interface BotGlyphProps {
   name: string | null | undefined;
   size?: number;
   strokeWidth?: number;
+  className?: string;
 }
 
-function BotGlyph({ name, size = 18, strokeWidth = 2 }: BotGlyphProps): React.JSX.Element {
+const BOT_GLYPH_STANDARD_SIZE = 28;
+const BOT_GLYPH_STANDARD_STROKE_WIDTH = 1.45;
+const BOT_GLYPH_STROKE_MIN_SIZE = 14;
+const BOT_GLYPH_STROKE_MAX_SIZE = 56;
+const BOT_GLYPH_STROKE_HEAVY = 2.25;
+const BOT_GLYPH_STROKE_THIN = 1.1;
+
+function botGlyphStrokeForSize(size: number): number {
+  if (size === BOT_GLYPH_STANDARD_SIZE) return BOT_GLYPH_STANDARD_STROKE_WIDTH;
+
+  const clampedSize = Math.max(
+    BOT_GLYPH_STROKE_MIN_SIZE,
+    Math.min(BOT_GLYPH_STROKE_MAX_SIZE, size)
+  );
+  const t =
+    (clampedSize - BOT_GLYPH_STROKE_MIN_SIZE) /
+    (BOT_GLYPH_STROKE_MAX_SIZE - BOT_GLYPH_STROKE_MIN_SIZE);
+  const stroke =
+    BOT_GLYPH_STROKE_HEAVY +
+    (BOT_GLYPH_STROKE_THIN - BOT_GLYPH_STROKE_HEAVY) * t;
+
+  return Number(stroke.toFixed(2));
+}
+
+function BotGlyph({
+  name,
+  size = BOT_GLYPH_STANDARD_SIZE,
+  strokeWidth,
+  className,
+}: BotGlyphProps): React.JSX.Element {
   const key: BotGlyphName = isBotGlyphName(name) ? name : DEFAULT_BOT_GLYPH;
   const definition = BOT_GLYPHS[key];
+  const resolvedStrokeWidth = strokeWidth ?? botGlyphStrokeForSize(size);
   return (
     <svg
+      className={className}
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={strokeWidth}
+      strokeWidth={resolvedStrokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -2298,68 +3791,99 @@ function BotGlyph({ name, size = 18, strokeWidth = 2 }: BotGlyphProps): React.JS
   );
 }
 
+function EmptyStateBotGlyph({
+  bot,
+  resolvedTheme,
+}: {
+  bot: Bot;
+  resolvedTheme: "light" | "dark";
+}): React.JSX.Element {
+  const style = botAccentStyle(bot.color, resolvedTheme);
+
+  return (
+    <span
+      className={styles.emptyStateBotGlyph}
+      aria-hidden="true"
+      style={style}
+    >
+      <BotGlyph name={bot.glyph} />
+    </span>
+  );
+}
+
 // ── Empty-state icon ──────────────────────────────────────────────────
 // Rendered at the top of the "new conversation" placeholder in Chat and
-// Sandbox. Two rendering modes, picked on `bot`:
+// Sandbox. Three rendering modes, chosen by preview/commit state:
 //
-//   1. `bot` null  → theme-aware brand mark. Dark theme shows the boxed
-//      icon.jpg; light theme shows the rainbow triangle SVG. Same two-asset
-//      swap as the auth lockup, but deliberately WITHOUT the animated halos
-//      or hue-drift — this icon surfaces on every new chat, so a moving
-//      focal point would be distracting. The auth screen keeps the motion
-//      as the dedicated "entry" moment.
+//   1. No bot state → the same Prism mark used by the auth screen:
+//      dark mode gets the boxed static triangle with animated RGB halos;
+//      light mode gets the hue-rotating rainbow triangle with its static
+//      drop-shadow.
 //
-//   2. `bot` set   → scaled-up sibling of the .botCardGlyph tile so the
-//      same visual language (tinted bg + border, bot-color stroke) reads
-//      on the empty state, the bot card, the inline name glyph, and the
-//      message bubble. The stored color is clamped via
-//      clampAccentLightness so legacy bots whose picked hex drifted outside
-//      the current picker band still render inside it.
+//   2. `previewBot` set → Prism triangle, but tinted to the hovered bot's
+//      normalized color. This keeps hover feeling like Prism is focusing
+//      through the bot rather than replacing the hero with the bot profile.
 //
-// Both modes paint at the same 56×56 footprint so the layout never jumps
-// when the user switches bots.
+//   3. `bot` set → scaled-up sibling of the .botCardGlyph tile in the
+//      bot's full color. Same visual language (tinted bg + border,
+//      bot-color stroke) as every other place a bot is represented. The
+//      stored color is normalized so legacy bots whose picked hex drifted
+//      outside the current safe range still render readably. Used once the
+//      user commits the bot selection.
+//
+// All modes paint at the same 56×56 footprint so the layout never
+// jumps when the user scans across tiles.
 interface EmptyStateIconProps {
   bot: Bot | null;
+  previewBot?: Bot | null;
+  previewAsBotGlyph?: boolean;
   /**
    * Active theme, resolved upstream. The bot's stored color runs through
-   * `clampAccentLightness(_, resolvedTheme)` so a deep navy that's fine
-   * on the light shell lifts into the dark-mode safe band before it ever
-   * paints the glyph stroke. Without this the triangle/glyph stroke at
-   * L≈30 would vanish against `#0a0a0b`.
+   * `normalizeAccentForTheme(_, resolvedTheme)` so deep hues lift in dark
+   * mode and bright warm hues dim in light mode before painting glyphs.
    */
   resolvedTheme: "light" | "dark";
 }
 
-function EmptyStateIcon({ bot, resolvedTheme }: EmptyStateIconProps): React.JSX.Element {
-  if (bot) {
-    const rawColor = bot.color?.trim();
-    const accent = rawColor ? clampAccentLightness(rawColor, resolvedTheme) : null;
-    const style = accent
-      ? ({ "--bot-color": accent } as React.CSSProperties)
-      : undefined;
+function EmptyStateIcon({
+  bot,
+  previewBot = null,
+  previewAsBotGlyph = false,
+  resolvedTheme,
+}: EmptyStateIconProps): React.JSX.Element {
+  if (!bot && previewBot) {
+    if (previewAsBotGlyph) {
+      return (
+        <EmptyStateBotGlyph bot={previewBot} resolvedTheme={resolvedTheme} />
+      );
+    }
+
     return (
-      <span
-        className={styles.emptyStateBotGlyph}
+      <div
+        className={`${styles.emptyStateBrand} ${styles.emptyStateBrandPreview}`}
         aria-hidden="true"
-        style={style}
       >
-        <BotGlyph name={bot.glyph} size={32} strokeWidth={2} />
-      </span>
+        <PrismTriangleMark className={styles.emptyStateBrandTriangle} />
+      </div>
     );
   }
+
+  if (bot) {
+    return <EmptyStateBotGlyph bot={bot} resolvedTheme={resolvedTheme} />;
+  }
   return (
-    <div className={styles.emptyStateBrand} aria-hidden="true">
+    <div className={styles.brandIconShell} aria-hidden="true">
       <img
         src="/icon.jpg"
         alt=""
         aria-hidden="true"
-        className={styles.emptyStateBrandIconDark}
+        className={styles.brandIcon}
       />
       <img
         src="/icon-triangle.svg"
         alt=""
         aria-hidden="true"
-        className={styles.emptyStateBrandIconLight}
+        className={styles.brandIconLight}
       />
     </div>
   );
@@ -2370,11 +3894,14 @@ interface BotGlyphPickerProps {
   onChange: (next: BotGlyphName) => void;
 }
 
+const BOT_GLYPH_PICKER_GLYPH_SIZE = 56;
+const BOT_GLYPH_PICKER_STROKE_WIDTH = 0.85;
+
 function BotGlyphPicker({ value, onChange }: BotGlyphPickerProps): React.JSX.Element {
   const selected: BotGlyphName = isBotGlyphName(value) ? value : DEFAULT_BOT_GLYPH;
   return (
     <div className={styles.glyphPicker} role="radiogroup" aria-label="Bot glyph">
-      {BOT_GLYPH_ORDER.map((key) => {
+      {CUSTOM_BOT_GLYPH_ORDER.map((key) => {
         const isSelected = key === selected;
         return (
           <button
@@ -2387,10 +3914,601 @@ function BotGlyphPicker({ value, onChange }: BotGlyphPickerProps): React.JSX.Ele
             title={BOT_GLYPHS[key].label}
             aria-label={BOT_GLYPHS[key].label}
           >
-            <BotGlyph name={key} size={22} />
+            <BotGlyph
+              name={key}
+              size={BOT_GLYPH_PICKER_GLYPH_SIZE}
+              strokeWidth={BOT_GLYPH_PICKER_STROKE_WIDTH}
+              className={styles.glyphOptionIcon}
+            />
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// ── Composer bot picker (custom dropdown) ────────────────────────────
+// Replaces the native <select> in the composer rail so each option can
+// render with its bot's glyph + tinted background. The native <select>
+// can't show per-option glyphs or color tints on any OS — the options
+// are always plain text rendered by the system popup — so we build a
+// small CSS+React popover instead.
+//
+// Trigger states:
+//   - Default selected (value === ""): shows the "BOT" mono-caps label
+//     only. Communicates "no bot picked = Default" without repeating
+//     the word "Default" in the trigger, which would be redundant with
+//     the ever-present label.
+//   - Bot selected: shows the bot's glyph + name, both tinted in the
+//     bot's color. The surrounding pill also picks up a soft tint via
+//     `data-bot-selected` so the control reads as "this bot is active".
+//
+// Popover is absolutely positioned above the trigger (compose sits at
+// the bottom of the screen; opening downward would clip against the
+// viewport floor). Closes on outside click, on Escape, on selection,
+// and automatically if the trigger becomes disabled mid-open.
+//
+// Accessibility:
+//   - Trigger: role=combobox via aria-haspopup=listbox + aria-expanded.
+//   - Menu: role=listbox, each option role=option + aria-selected.
+//   - Full keyboard nav is left to browser defaults (Tab between
+//     options) for this pass — arrow-key nav can come later if needed.
+interface ComposerBotPickerProps {
+  /** Currently-selected bot id, or empty string for Default. */
+  value: string;
+  onChange: (nextValue: string) => void;
+  bots: Bot[];
+  resolvedTheme: "light" | "dark";
+  disabled?: boolean;
+  /** Native title tooltip — used to explain disabled states. */
+  title?: string;
+  /** Visible-label equivalent for screen readers. */
+  ariaLabel: string;
+  /**
+   * Whether the trigger should render the selected bot's NAME next to
+   * its glyph. Defaults to true (Sandbox behavior). Chat-mode sets this
+   * false until the conversation has at least one message so the
+   * pre-send trigger reads as a compact "glyph + color" preview and
+   * doesn't duplicate the name already shown on the hero title.
+   */
+  showName?: boolean;
+  /**
+   * Once a thread has actual messages, the picker becomes the main way
+   * to browse a large bot library mid-chat. These controls let that
+   * popout narrow by both name and color without moving the user into a
+   * separate management panel.
+   */
+  enableFilters?: boolean;
+  hueFilterCenter?: number | null;
+  onHueChange?: (next: number | null) => void;
+  hueLensAvailable?: boolean;
+  hueLensTrackGradient?: string;
+  hueLensTrackSegments?: readonly HueLensTrackSegment[];
+}
+
+function ComposerBotPicker({
+  value,
+  onChange,
+  bots,
+  resolvedTheme,
+  disabled,
+  title,
+  ariaLabel,
+  showName = true,
+  enableFilters = false,
+  hueFilterCenter = null,
+  onHueChange,
+  hueLensAvailable = false,
+  hueLensTrackGradient = "",
+  hueLensTrackSegments = EMPTY_HUE_LENS_TRACK_SEGMENTS,
+}: ComposerBotPickerProps): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [botNameFilter, setBotNameFilter] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  const selectedBot = value ? bots.find(b => b.id === value) ?? null : null;
+  const selectedAccent = selectedBot?.color
+    ? normalizeAccentForTheme(selectedBot.color, resolvedTheme)
+    : null;
+  const controlStyle: React.CSSProperties | undefined = selectedAccent
+    ? ({ "--bot-color": selectedAccent } as React.CSSProperties)
+    : undefined;
+  const filtersEnabled = enableFilters && !disabled;
+  const colorSortedBots = useMemo(
+    () => filtersEnabled
+      ? [...bots].sort((a, b) => compareBotsByColor(a, b, resolvedTheme, false))
+      : bots,
+    [bots, filtersEnabled, resolvedTheme]
+  );
+  const normalizedBotNameFilter = botNameFilter.trim().toLocaleLowerCase();
+  const visibleBots = useMemo(() => {
+    if (!filtersEnabled || normalizedBotNameFilter.length === 0) {
+      return colorSortedBots;
+    }
+    return colorSortedBots.filter((bot) =>
+      bot.name.toLocaleLowerCase().includes(normalizedBotNameFilter)
+    );
+  }, [colorSortedBots, filtersEnabled, normalizedBotNameFilter]);
+  const showFilterControls = filtersEnabled && bots.length > 0;
+  const showHueLensInMenu =
+    showFilterControls && !!onHueChange && hueLensAvailable;
+  const filterSummaryVisible =
+    showFilterControls &&
+    normalizedBotNameFilter.length > 0;
+  const hueFocusBotId = useMemo(() => {
+    if (!filtersEnabled || hueFilterCenter === null) return null;
+    let bestBotId: string | null = null;
+    let bestDistance = Infinity;
+    for (const bot of visibleBots) {
+      if (!botHasFilterableColor(bot)) continue;
+      const { h } = hexToHsl(bot.color!.trim());
+      const distance = Math.abs(hueLensPositionForHue(h) - hueFilterCenter);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestBotId = bot.id;
+      }
+    }
+    return bestBotId;
+  }, [filtersEnabled, hueFilterCenter, visibleBots]);
+  const menuOpen = open && !disabled;
+
+  const randomizeHueOnOpen = useCallback(() => {
+    if (!filtersEnabled || !onHueChange || !hueLensAvailable) {
+      return;
+    }
+    const populatedBuckets = computeHueBuckets(bots)
+      .filter((bucket) => bucket.count > 0);
+    if (populatedBuckets.length === 0) return;
+    const nextBucket =
+      populatedBuckets[Math.floor(Math.random() * populatedBuckets.length)];
+    onHueChange(hueLensPositionForHue(nextBucket.center));
+  }, [bots, filtersEnabled, hueLensAvailable, onHueChange]);
+
+  const toggleMenu = (): void => {
+    const opening = !open;
+    if (opening) {
+      randomizeHueOnOpen();
+    }
+    setOpen(opening);
+  };
+
+  // Outside-click closes. Using mousedown (not click) so a click that
+  // lands on a menu option isn't intercepted by this handler.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
+
+  // Escape closes and returns focus to the trigger so keyboard users
+  // stay oriented in the compose rail instead of dropping focus to
+  // the document body.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [menuOpen]);
+
+  // If the control becomes disabled while the menu is open (e.g.,
+  // send-in-flight disables mid-thread bot switching), close it so a
+  // stale floating popover isn't left stranded on screen.
+  useEffect(() => {
+    if (!disabled || !open) return;
+    const timeout = window.setTimeout(() => setOpen(false), 0);
+    return () => window.clearTimeout(timeout);
+  }, [disabled, open]);
+
+  useEffect(() => {
+    if (!menuOpen || !hueFocusBotId) return;
+    const timeout = window.setTimeout(() => {
+      optionRefs.current.get(hueFocusBotId)?.scrollIntoView({
+        block: "center",
+      });
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [hueFocusBotId, menuOpen]);
+
+  const pick = (nextValue: string): void => {
+    onChange(nextValue);
+    setBotNameFilter("");
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  return (
+    <div
+      className={styles.composeBotControl}
+      data-bot-selected={selectedBot ? "true" : undefined}
+      data-disabled={disabled ? "true" : undefined}
+      data-open={menuOpen ? "true" : undefined}
+      style={controlStyle}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        className={styles.composeBotTrigger}
+        onClick={toggleMenu}
+        disabled={disabled}
+        title={title}
+        aria-haspopup="listbox"
+        aria-expanded={menuOpen}
+        aria-label={ariaLabel}
+      >
+        {selectedBot ? (
+          <>
+            <span
+              className={styles.composeBotTriggerGlyph}
+              aria-hidden="true"
+            >
+              <BotGlyph
+                name={selectedBot.glyph}
+                size={14}
+                strokeWidth={2.25}
+              />
+            </span>
+            {showName && (
+              <span className={styles.composeBotTriggerName}>
+                {selectedBot.name}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className={styles.composeControlLabel}>Bot</span>
+        )}
+        <span
+          className={styles.composeBotTriggerChevron}
+          aria-hidden="true"
+        >
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M2 3.5 L5 6.5 L8 3.5" />
+          </svg>
+        </span>
+      </button>
+      {menuOpen && (
+        <div
+          ref={menuRef}
+          className={styles.composeBotMenu}
+        >
+          {showFilterControls && (
+            <div className={styles.composeBotFilters}>
+              <div className={styles.composeBotSearchRow}>
+                <input
+                  type="search"
+                  value={botNameFilter}
+                  onChange={(event) =>
+                    setBotNameFilter(event.currentTarget.value)
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                    }
+                  }}
+                  className={styles.composeBotSearch}
+                  placeholder="Filter bots..."
+                  aria-label="Filter bots by name"
+                />
+                {filterSummaryVisible && (
+                  <span
+                    className={styles.composeBotFilterCount}
+                    aria-live="polite"
+                  >
+                    {visibleBots.length}/{bots.length}
+                  </span>
+                )}
+              </div>
+              {showHueLensInMenu && onHueChange && (
+                <HueLensControl
+                  bots={bots}
+                  filteredBots={visibleBots}
+                  hueFilterCenter={hueFilterCenter}
+                  onHueChange={onHueChange}
+                  hueLensAvailable={hueLensAvailable}
+                  trackGradient={hueLensTrackGradient}
+                  trackSegments={hueLensTrackSegments}
+                  compact
+                  showCount={false}
+                  allowClear={false}
+                />
+              )}
+            </div>
+          )}
+          <div
+            className={styles.composeBotListbox}
+            role="listbox"
+            aria-label={ariaLabel}
+          >
+            <button
+              type="button"
+              className={`${styles.composeBotOption} ${styles.composeBotOptionDefault}`}
+              role="option"
+              aria-selected={value === ""}
+              onClick={() => pick("")}
+            >
+              {/* Empty glyph slot preserves the grid alignment with the
+                  bot rows below; no icon needed because Default has no
+                  brand identity. */}
+              <span
+                className={styles.composeBotOptionGlyph}
+                aria-hidden="true"
+              />
+              <span className={styles.composeBotOptionName}>Default</span>
+            </button>
+            {visibleBots.length === 0 && (
+              <div
+                className={styles.composeBotNoMatches}
+                role="option"
+                aria-selected="false"
+                aria-disabled="true"
+              >
+                No bots match.
+              </div>
+            )}
+            {visibleBots.map(b => {
+              const isSelected = value === b.id;
+              const accent = b.color
+                ? normalizeAccentForTheme(b.color, resolvedTheme)
+                : null;
+              const optionStyle: React.CSSProperties | undefined = accent
+                ? ({
+                    "--bot-color": accent,
+                    "--bot-menu-color":
+                      resolvedTheme === "light"
+                        ? ensureContrast(
+                            accent,
+                            THEME_SURFACE_BG.light,
+                            COMPOSE_BOT_LIGHT_INK_CONTRAST_RATIO
+                          )
+                        : accent,
+                  } as React.CSSProperties)
+                : undefined;
+              return (
+                <button
+                  key={b.id}
+                  ref={(node) => {
+                    if (node) {
+                      optionRefs.current.set(b.id, node);
+                    } else {
+                      optionRefs.current.delete(b.id);
+                    }
+                  }}
+                  type="button"
+                  className={styles.composeBotOption}
+                  role="option"
+                  aria-selected={isSelected}
+                  style={optionStyle}
+                  onClick={() => pick(b.id)}
+                >
+                  <span
+                    className={styles.composeBotOptionGlyph}
+                    aria-hidden="true"
+                  >
+                    <BotGlyph
+                      name={b.glyph}
+                      size={14}
+                      strokeWidth={2.25}
+                    />
+                  </span>
+                  <span className={styles.composeBotOptionName}>
+                    {b.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Hue lens (color filter) ──────────────────────────────────────────
+// Color-band filter for bot-heavy picking surfaces. Pre-chat it sits
+// above the compose tools so it can reshape the big starter grid; once a
+// chat has messages it embeds inside the bot popout alongside name
+// search. Moving the slider activates the filter at that hue; "All"
+// clears it. Active state exposes the visible-bot count so the user
+// knows exactly what slice of their library is showing.
+//
+// Renders only when at least two color families are available — otherwise
+// the lens has no meaningful choice to offer and would just be visual noise.
+interface HueLensControlProps {
+  /** Total bot library — drives the "of N" count. */
+  bots: Bot[];
+  /** Visible bots to count beside the slider when counts are enabled. */
+  filteredBots: Bot[];
+  /** Active PRISM lens position in the slider's 0..359 range, or null when inactive. */
+  hueFilterCenter: number | null;
+  /** Setter; receives a PRISM lens position to activate, or null to clear. */
+  onHueChange: (next: number | null) => void;
+  /** True when at least two populated color families are worth filtering. */
+  hueLensAvailable: boolean;
+  /** Pre-computed CSS `linear-gradient(...)` string for populated PRISM bars. */
+  trackGradient: string;
+  /** Populated PRISM families, ordered as they appear on the compacted track. */
+  trackSegments: readonly HueLensTrackSegment[];
+  /** Compact layout for embedding inside the bot popout. */
+  compact?: boolean;
+  /** Whether to render the active visible/total count next to the slider. */
+  showCount?: boolean;
+  /** Whether the active state can be cleared back to "All". */
+  allowClear?: boolean;
+}
+
+function HueLensControl({
+  bots,
+  filteredBots,
+  hueFilterCenter,
+  onHueChange,
+  hueLensAvailable,
+  trackGradient,
+  trackSegments,
+  compact = false,
+  showCount = true,
+  allowClear = true,
+}: HueLensControlProps): React.JSX.Element | null {
+  const handleSliderChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      onHueChange(
+        hueLensFilterCenterForSliderValue(
+          Number(event.currentTarget.value),
+          trackSegments
+        )
+      );
+    },
+    [onHueChange, trackSegments]
+  );
+  if (!hueLensAvailable) return null;
+  const active = hueFilterCenter !== null;
+  // Inactive state still parks the slider thumb at a neutral resting
+  // position so the control reads as "ready to use" rather than empty.
+  // The value is a presentation-only fallback; activation depends on
+  // `active`/`hueFilterCenter`, not on the slider's reported value.
+  const sliderValue = active
+    ? hueLensSliderValueForFilterCenter(hueFilterCenter, trackSegments)
+    : 180;
+  const lensStyle = {
+    "--lens-track-gradient": trackGradient,
+  } as React.CSSProperties;
+  return (
+    <div
+      className={`${styles.hueLensRow} ${compact ? styles.hueLensRowCompact : ""}`}
+      data-active={active ? "true" : undefined}
+      style={lensStyle}
+    >
+      <span className={styles.hueLensLabel} aria-hidden="true">
+        Lens
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={359}
+        step={1}
+        value={sliderValue}
+        onChange={handleSliderChange}
+        aria-label="Color lens — filter bots by hue"
+        title="Filter bots by hue"
+        className={styles.hueLensSlider}
+      />
+      {active && (
+        <>
+          {showCount && (
+            <span
+              className={styles.hueLensCount}
+              aria-live="polite"
+            >
+              {filteredBots.length}/{bots.length}
+            </span>
+          )}
+          {allowClear && (
+            <button
+              type="button"
+              className={styles.hueLensClear}
+              onClick={() => onHueChange(null)}
+              aria-label="Show all bots — clear color filter"
+              title="Show all bots"
+            >
+              All
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Touch preview balloon ────────────────────────────────────────────
+// Mobile keyboard-style "lifted key" preview that floats above the
+// user's finger when they touch the bot picker at high-density stages.
+// At those stages the tile under the finger is too small (or has lost
+// its glyph) to identify by sight, so we lift the visual feedback off
+// the touch point — the same trick iOS/Android keyboards use to show
+// the pressed key above the thumb.
+//
+// The balloon mirrors the resting visual identity of `.chatBotTile`
+// (rounded card, soft shadow, bot-color fill, glyph centered) but at a
+// readable size, plus the bot's name underneath. On the top edge of
+// the picker it auto-flips below the finger so it stays in view.
+//
+// Position is `fixed` so the balloon escapes any clipping / transform
+// container — the picker itself uses `transform: translate3d` and
+// `position: absolute`, both of which would otherwise cap or warp a
+// child. Coordinates come from the captured `clientX`/`clientY` so the
+// balloon tracks the finger directly without a re-layout.
+interface TouchPreviewBalloonProps {
+  bot: Bot | null;
+  x: number;
+  y: number;
+  resolvedTheme: "light" | "dark";
+}
+
+const TOUCH_PREVIEW_BALLOON_HEIGHT = 112;
+const TOUCH_PREVIEW_BALLOON_OFFSET = 24;
+
+function TouchPreviewBalloon({
+  bot,
+  x,
+  y,
+  resolvedTheme,
+}: TouchPreviewBalloonProps): React.JSX.Element | null {
+  if (!bot) return null;
+  // Auto-flip below the finger when the touch sits near the top of the
+  // viewport — without this, a user dragging across the top row would
+  // see the balloon escape upward and either clip or hide off-screen.
+  const flipBelow =
+    y < TOUCH_PREVIEW_BALLOON_HEIGHT + TOUCH_PREVIEW_BALLOON_OFFSET + 12;
+  const top = flipBelow
+    ? y + TOUCH_PREVIEW_BALLOON_OFFSET
+    : y - TOUCH_PREVIEW_BALLOON_HEIGHT - TOUCH_PREVIEW_BALLOON_OFFSET;
+  const accent = bot.color?.trim()
+    ? normalizeAccentForTheme(bot.color.trim(), resolvedTheme)
+    : null;
+  const balloonStyle: React.CSSProperties = {
+    left: `${x}px`,
+    top: `${top}px`,
+  };
+  if (accent) {
+    (balloonStyle as React.CSSProperties & Record<string, string>)[
+      "--bot-color"
+    ] = accent;
+  }
+  const glyphName: BotGlyphName = isBotGlyphName(bot.glyph)
+    ? bot.glyph
+    : DEFAULT_BOT_GLYPH;
+  return (
+    <div
+      className={styles.touchPreviewBalloon}
+      data-flip-below={flipBelow ? "true" : undefined}
+      style={balloonStyle}
+      aria-hidden="true"
+    >
+      <span className={styles.touchPreviewBalloonGlyph}>
+        <BotGlyph name={glyphName} size={56} strokeWidth={1.45} />
+      </span>
+      <span className={styles.touchPreviewBalloonName}>{bot.name}</span>
     </div>
   );
 }
@@ -2479,7 +4597,7 @@ function ColorGlyphPicker({
   // swatch always matches the accent bars and message bubbles the same
   // bot paints elsewhere. The band tightens in dark mode so deep hues
   // don't disappear against the shell (see `accentLightnessBand`).
-  const displayColor = clampAccentLightness(color, resolvedTheme);
+  const displayColor = normalizeAccentForTheme(color, resolvedTheme);
   const readable = pickReadableText(displayColor);
   const swatchBorder = swatchBorderStyle(displayColor, resolvedTheme);
   // Indicator position on the square tracks the current color so users
@@ -2760,7 +4878,11 @@ function ColorGlyphPicker({
         aria-expanded={open}
         title="Click to pick · right-click: random color + glyph"
       >
-        <BotGlyph name={glyph} size={28} />
+        <BotGlyph
+          name={glyph}
+          size={BOT_GLYPH_PICKER_GLYPH_SIZE}
+          strokeWidth={BOT_GLYPH_PICKER_STROKE_WIDTH}
+        />
       </button>
       {open && (
         // Popover is a pure picking surface — no reroll affordance lives
@@ -2817,6 +4939,7 @@ function ColorGlyphPicker({
             style={
               {
                 ["--picker-color" as string]: displayColor,
+                ["--picker-ink" as string]: readable,
               } as React.CSSProperties
             }
             onMouseMove={handleGridMouseMove}
@@ -3002,10 +5125,87 @@ function HomeContent(): React.JSX.Element {
     });
   }, []);
   const [panel, setPanel] = useState<PanelView>(null);
+  // Drill-in target for the high-count Prism color dashboard. Null at
+  // <40 bots OR while the user is on the dashboard root; set to a
+  // letter id while they have a specific group expanded.
+  const [botPanelGroup, setBotPanelGroup] = useState<PrismGroupId | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [rightMenuOpen, setRightMenuOpen] = useState(false);
+  // Developer Tools floating panel visibility. Launcher is the key-glyph button
+  // that sits to the left of the theme toggle on every logged-in
+  // surface, gated by `DEV_TOOLS_ENABLED`. The panel is intentionally
+  // non-modal so it can stay open while the underlying UI remains usable.
+  // It dismisses via Escape / explicit close. `devToolsBusy` is an
+  // independent busy slot so the main composer `busy` flag isn't pinned
+  // by a bulk add/delete (which can take a few hundred ms when the DB
+  // is warming up).
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [devToolsBusy, setDevToolsBusy] = useState(false);
+  const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
+  const [devToolsBotQuantity, setDevToolsBotQuantity] = useState<DevToolsBotQuantity>(
+    DEV_TOOLS_BOT_QUANTITY_DEFAULT
+  );
+  const [devToolsPanelPosition, setDevToolsPanelPosition] = useState<DevToolsPanelPosition>({
+    x: DEV_TOOLS_PANEL_DEFAULT_X,
+    y: DEV_TOOLS_PANEL_DEFAULT_Y,
+  });
+  const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
+  const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
+  const resolvedDevToolsBotQuantity =
+    devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
+  // Declared up here (instead of alongside the action handlers) so the
+  // Escape-key effect below can list it as a dependency without tripping
+  // TS's "used before declaration" rule for block-scoped `const`. The
+  // useCallback is still stable — nothing else depends on its identity.
+  const closeDevTools = useCallback(() => {
+    setDevToolsOpen(false);
+    setDevToolsMessage(null);
+  }, []);
   const [bots, setBots] = useState<Bot[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
-  const [incognito, setIncognito] = useState(false);
+  // Active hue lens center, in degrees on the 360° color wheel. `null`
+  // means "show all bots" for the pre-chat starter-grid filter. After a
+  // chat has messages, the compact bot popout seeds this to a random
+  // populated hue on open and uses it only as a non-destructive
+  // scroll/focus target; there is no "All" affordance in that popout.
+  const [hueFilterCenter, setHueFilterCenter] = useState<number | null>(null);
+  // Floating "keyboard balloon" preview for touch users at high-density
+  // picker stages. Tracks the bot under the user's finger plus the touch
+  // coordinates so the lifted tile can sit cleanly above the finger and
+  // follow drags. Mobile-keyboard pattern: tap-and-scrub previews each
+  // bot, lifting the visual feedback off the touch point so the finger
+  // doesn't occlude the target. Stays null on desktop and at low density.
+  const [touchPreview, setTouchPreview] = useState<{
+    botId: string | null;
+    x: number;
+    y: number;
+  } | null>(null);
+  // Tracks which pointer the touch preview captured. Subsequent move/up
+  // events that don't match this id are ignored so a second finger can't
+  // hijack the in-flight gesture.
+  const touchPreviewPointerIdRef = useRef<number | null>(null);
+  const [botPickerReturnAnimating, setBotPickerReturnAnimating] = useState(false);
+  const [emptyStateSearchOpen, setEmptyStateSearchOpen] = useState(false);
+  const [emptyStateBotNameFilter, setEmptyStateBotNameFilter] = useState("");
+  // Sticky "the next new chat is private" intent. Flipped on by the Chat-
+  // mode "Private chat" sidebar button and read by buildChatRequestBody so
+  // the FIRST send of a new conversation creates the row with
+  // `incognito = 1`. Once the server persists that flag on the conversation
+  // row, every subsequent read path derives privacy from detail.incognito
+  // and this pending flag is cleared. Never relevant in Sandbox — that
+  // surface has no cross-session memory to "hide from" in the first place.
+  const [pendingIncognito, setPendingIncognito] = useState(false);
+  // Pending mid-thread bot switch for the OPEN Chat-mode conversation.
+  // Three-valued so the dropdown can distinguish "match the server's
+  // current botId" (undefined) from "explicitly pick Default" (null)
+  // from "switch to this specific bot" (string). The value feeds
+  // `buildChatRequestBody` as the Chat-mode botId on the next send,
+  // and the server only persists the switch AFTER the new bot
+  // successfully produces a reply. Cleared whenever the user changes
+  // conversations (see the effect below) or after a successful send
+  // (in sendMessage, once server truth has caught up to the pick).
+  const [chatBotOverride, setChatBotOverride] =
+    useState<string | null | undefined>(undefined);
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [imagePrompt, setImagePrompt] = useState("");
   // Single bot-form state used for BOTH create and edit modes. The top
@@ -3018,14 +5218,15 @@ function HomeContent(): React.JSX.Element {
   // without re-randomizing on every re-render.
   const [newBotColor, setNewBotColor] = useState<string>(() => randomHex());
   const [newBotGlyph, setNewBotGlyph] = useState<BotGlyphName>(() => randomBotGlyph());
+  const [newBotChatEnabled, setNewBotChatEnabled] = useState(false);
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
-  // Two-layer action affordance on a bot card:
-  //   expandedBotKey → which card has revealed the [pencil] [×] bubbles
-  //   editingBotId   → which existing bot is currently loaded into the top
-  //                    form (null = create mode). Shown on the card as a
-  //                    subtle "being edited" highlight; the card itself
-  //                    no longer renders its own edit form.
-  const [expandedBotKey, setExpandedBotKey] = useState<string | null>(null);
+  // Single-slot "which existing bot is currently loaded into the top form"
+  // (null = create mode). The card itself renders a subtle highlight while
+  // it's the editing target; the form above hydrates the name / prompt /
+  // color / glyph fields from that bot. No inline per-card edit form, no
+  // layered bubble affordances — tapping a bot card is the one and only
+  // entry point into edit mode, and the × on the card handles delete
+  // (mirroring the chat-row two-stage + press-and-hold pattern).
   const [editingBotId, setEditingBotId] = useState<string | null>(null);
   // Two-stage delete confirmation. `pendingDeleteKey` holds either a
   // conversation id (sidebar ×), HEADER_DELETE_KEY (header button), or the
@@ -3057,26 +5258,157 @@ function HomeContent(): React.JSX.Element {
   // Stored so we can restore focus to it when the modal dismisses — a
   // screen-reader / keyboard-user's "where was I?" anchor.
   const preModalFocusRef = useRef<HTMLElement | null>(null);
+  // Pristine snapshot of the form values at the moment edit mode was
+  // entered. The primary button's `hasEditChanges` check compares
+  // `newBotName / newBotPrompt / newBotColor / newBotGlyph / chat toggle` against
+  // THIS snapshot rather than the raw bot row so legacy bots with no
+  // stored color (where we seed the picker with a random hex) don't
+  // immediately appear as "dirty". Cleared when edit mode exits.
+  const editOriginalRef = useRef<{
+    name: string;
+    prompt: string;
+    color: string;
+    glyph: BotGlyphName;
+    chatEnabled: boolean;
+  } | null>(null);
+  const botNameInputRef = useRef<HTMLInputElement | null>(null);
   // Sentinel at the tail of the message stream. The scroll effect brings it
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
+  // Bot currently being hover-PREVIEWED in the Chat-mode empty-state
+  // picker. Desktop-only: set by onPointerEnter with pointerType mouse,
+  // cleared when the cursor leaves the picker container or when the
+  // user arms a bot by clicking. Drives the transient "white/black
+  // monochrome glyph + real-time accent" preview — does NOT represent a
+  // armed selection. Null means "no tile under the cursor".
+  const [hoveredBotId, setHoveredBotId] = useState<string | null>(null);
+  // Dwell timer for the picker's hover preview. Without this, a fast
+  // mouse sweep across 50+ tiny tiles would fire 50+ preview state
+  // changes back-to-back — the shell accent, hero glyph, title, and
+  // hint would all strobe in lockstep. Debouncing the JS-driven preview
+  // (but NOT the CSS-driven per-tile magnification, which stays
+  // instant) means the preview only commits once the cursor lingers.
+  const hoverDwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const botPickerReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const botPickerReturnEndAtRef = useRef(0);
+  const lastBotPickerPointerTypeRef = useRef<string | null>(null);
+  const emptyStateSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const emptyStateSearchRef = useRef<HTMLDivElement | null>(null);
+  const draftInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const emptyStateSearchOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const HOVER_DWELL_MS = 180;
   // Theme preference used before a user has logged in (or when the user
   // explicitly logs out). Seeded from localStorage so the auth screen
   // respects the last choice across refreshes; defaults to "system" so
   // first-time visitors track OS dark/light preference automatically.
   const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
+  const viewportWidth = useViewportWidth();
+  const viewportHeight = useViewportHeight();
+  const startDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const panel = devToolsPanelRef.current;
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    devToolsPanelDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is missing in some test environments; dragging still
+      // works while the pointer remains over the handle.
+    }
+    event.preventDefault();
+  }, []);
+  const dragDevToolsPanel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = devToolsPanelDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    const panel = devToolsPanelRef.current;
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    const next = clampDevToolsPanelPosition(
+      event.clientX - dragState.offsetX,
+      event.clientY - dragState.offsetY,
+      rect.width,
+      rect.height,
+      window.innerWidth,
+      window.innerHeight
+    );
+    panel.style.left = `${next.x}px`;
+    panel.style.top = `${next.y}px`;
+    setDevToolsPanelPosition(next);
+  }, []);
+  const endDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = devToolsPanelDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    devToolsPanelDragRef.current = null;
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Safe no-op for environments without pointer capture support.
+    }
+  }, []);
   // Shared close helper for the right-hand panels. Also resets panel-specific
   // transient UI so reopening a panel doesn't resurrect stale state.
   const closePanel = useCallback(() => {
     setPanel(null);
+    setRightMenuOpen(false);
     setColorWheelOpen(false);
-    setExpandedBotKey(null);
     setEditingBotId(null);
+    editOriginalRef.current = null;
     // A stale "Save failed" shouldn't greet the user next time they open
     // the panel. The composer's `error` state is unaffected.
     setPanelError(null);
+    // Drop any selected color group so reopening the Bots drawer always
+    // starts on the dashboard root rather than a stale drilled-in view.
+    setBotPanelGroup(null);
   }, []);
+
+  const openRightPanel = useCallback((nextPanel: Exclude<PanelView, null>) => {
+    setPanel(nextPanel);
+    setSidebarOpen(false);
+    setRightMenuOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (panel !== "bots" || !editingBotId) return;
+    const input = botNameInputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+  }, [panel, editingBotId]);
+
+  useEffect(() => {
+    if (!devToolsOpen) return;
+    const panel = devToolsPanelRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+
+    setDevToolsPanelPosition((position) => {
+      const next = clampDevToolsPanelPosition(
+        position.x,
+        position.y,
+        rect.width,
+        rect.height,
+        viewportWidth,
+        viewportHeight
+      );
+      return next.x === position.x && next.y === position.y ? position : next;
+    });
+  }, [devToolsOpen, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    const panel = devToolsPanelRef.current;
+    if (!panel) return;
+    panel.style.left = `${devToolsPanelPosition.x}px`;
+    panel.style.top = `${devToolsPanelPosition.y}px`;
+  }, [devToolsPanelPosition]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -3089,6 +5421,100 @@ function HomeContent(): React.JSX.Element {
       media.removeListener?.(update);
     };
   }, []);
+
+  useEffect(() => {
+    if (!rightMenuOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("[data-right-panel-affordance='true']")
+      ) {
+        return;
+      }
+      setRightMenuOpen(false);
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setRightMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [rightMenuOpen]);
+
+  // Cancel any pending picker timers if the component tears down mid-preview
+  // or mid-return animation (route change, mode switch, logout).
+  useEffect(() => {
+    return () => {
+      if (hoverDwellTimerRef.current) {
+        clearTimeout(hoverDwellTimerRef.current);
+        hoverDwellTimerRef.current = null;
+      }
+      if (botPickerReturnTimerRef.current) {
+        clearTimeout(botPickerReturnTimerRef.current);
+        botPickerReturnTimerRef.current = null;
+      }
+      botPickerReturnEndAtRef.current = 0;
+      if (emptyStateSearchOpenTimerRef.current) {
+        clearTimeout(emptyStateSearchOpenTimerRef.current);
+        emptyStateSearchOpenTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!emptyStateSearchOpen) return;
+    const timeout = window.setTimeout(() => {
+      emptyStateSearchInputRef.current?.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [emptyStateSearchOpen]);
+
+  const cancelPendingEmptyStateSearchOpen = useCallback(() => {
+    if (emptyStateSearchOpenTimerRef.current) {
+      clearTimeout(emptyStateSearchOpenTimerRef.current);
+      emptyStateSearchOpenTimerRef.current = null;
+    }
+  }, []);
+
+  const startBotPickerReturnToAll = useCallback(() => {
+    if (botPickerReturnTimerRef.current) {
+      clearTimeout(botPickerReturnTimerRef.current);
+      botPickerReturnTimerRef.current = null;
+    }
+    setBotPickerReturnAnimating(true);
+    botPickerReturnEndAtRef.current = Date.now() + BOT_PICKER_RETURN_ANIMATION_MS;
+    botPickerReturnTimerRef.current = setTimeout(() => {
+      setBotPickerReturnAnimating(false);
+      botPickerReturnEndAtRef.current = 0;
+      botPickerReturnTimerRef.current = null;
+    }, BOT_PICKER_RETURN_ANIMATION_MS);
+    setHueFilterCenter(null);
+  }, []);
+
+  const showEmptyStateSearchAfterReturn = useCallback(() => {
+    cancelPendingEmptyStateSearchOpen();
+    const remainingReturnMs = Math.max(0, botPickerReturnEndAtRef.current - Date.now());
+    if (remainingReturnMs === 0) {
+      setEmptyStateSearchOpen(true);
+      return;
+    }
+    emptyStateSearchOpenTimerRef.current = setTimeout(() => {
+      setEmptyStateSearchOpen(true);
+      emptyStateSearchOpenTimerRef.current = null;
+    }, remainingReturnMs);
+  }, [cancelPendingEmptyStateSearchOpen]);
+
+  const focusEmptyStateSearchAfterReturn = useCallback(() => {
+    showEmptyStateSearchAfterReturn();
+    const remainingReturnMs = Math.max(0, botPickerReturnEndAtRef.current - Date.now());
+    window.setTimeout(() => {
+      emptyStateSearchInputRef.current?.focus({ preventScroll: true });
+    }, remainingReturnMs);
+  }, [showEmptyStateSearchAfterReturn]);
 
   // Hydrate the pre-auth theme choice from localStorage. We read it after
   // mount to avoid SSR / hydration mismatches — the initial paint uses the
@@ -3125,33 +5551,261 @@ function HomeContent(): React.JSX.Element {
   // the active bot is. When no bot is active, we return undefined and
   // the grayscale defaults from the theme block apply.
   //
-  // Chat mode currently has no per-conversation bot association, so it
-  // falls through to the grayscale default for now. Once the "lock a
-  // bot per conversation at chat start" feature lands, Chat mode will
-  // read its locked bot's color here the same way Sandbox already
-  // does. Either way, the bot's color runs through clampAccentLightness
-  // first so the shell accent (New chat button, BOT pill, user bubble,
-  // ambient glow) never washes out for pale picks nor fades away for
-  // inky ones.
-  // Resolve the bot currently driving the app shell's accent triad AND
-  // the empty-state icon. Sandbox follows the user's pick; Chat has no
-  // bot picker yet so it always resolves to null, which both consumers
-  // treat as the "Default" fallback (grayscale shell + rainbow brand
-  // icon). Hoisted out of shellStyle so EmptyStateIcon can reuse the
-  // same resolution rather than duplicating the find().
+  // Chat-mode resolution order (checked below):
+  //   1. The OPEN conversation's `detail.lastBotId` — the bot who most
+  //      recently SPOKE in this chat. Takes top priority so the editor
+  //      accent stays in lockstep with the sidebar row tint (which
+  //      also keys off lastBotColor). In Chat mode this equals botId
+  //      after the first reply (bot is locked at start); in Sandbox
+  //      mode this can drift from botId as the user switches bots
+  //      per-send, and the editor follows each reply.
+  //   2. The OPEN conversation's `detail.botId` — falls back to the
+  //      conversation's initially-locked bot for the pre-first-reply
+  //      window where lastBotId hasn't been populated yet.
+  //   3. The empty-state picker's `selectedBotId` — the committed
+  //      pre-chat pick. Once a user clicks a bot, it owns the empty
+  //      state until the hero deselects it; hover previews must not
+  //      change who a message will be sent to.
+  //   4. The empty-state picker's `hoveredBotId` — the mouse-preview
+  //      bot, drives the real-time accent shift and the mono hero
+  //      glyph only before a bot is committed. Used by BOTH Chat and
+  //      Sandbox empty states (Sandbox now mirrors Chat's tile grid
+  //      for "start a new chat" parity).
+  //   5. Null — falls through to the grayscale default + brand mark.
+  //
+  // Private chats (`detail.incognito === true`) force the accent OFF by
+  // resolving `activeBot` to null regardless of the persisted bot. This
+  // is the "B&W only" clause of the private-chat spec — the bot glyph is
+  // still available to the empty state via the brand-mark fallback, but
+  // no hue ever bleeds into the shell variables.
+  //
+  // Note for Sandbox: the composer's "next bot to speak" pick
+  // (selectedBotId) no longer directly repaints the editor once a
+  // conversation is open — that would decouple the editor from its
+  // sidebar tile. The preview happens implicitly on send via the
+  // optimistic `setDetail` which threads selectedBotId through as
+  // `optimisticLastBotId`, so pressing Send still flips the accent
+  // before the server reply lands.
   const activeBot = useMemo<Bot | null>(() => {
-    const activeBotId = view === "sandbox" ? selectedBotId : null;
+    const armedFallback = selectedBotId;
+    let activeBotId: string | null = null;
+    if (view === "sandbox") {
+      activeBotId =
+        detail?.lastBotId ?? detail?.botId ?? armedFallback ?? hoveredBotId;
+    } else if (view === "chat") {
+      // Private chats always render grayscale — do NOT resolve the bot
+      // color even if one is persisted on the conversation.
+      if (detail?.incognito === true) return null;
+      if (pendingIncognito) return null;
+      activeBotId =
+        detail?.lastBotId
+        ?? detail?.botId
+        ?? armedFallback
+        ?? hoveredBotId;
+    }
     return bots.find(b => b.id === activeBotId) ?? null;
-  }, [view, bots, selectedBotId]);
+  }, [
+    view,
+    bots,
+    selectedBotId,
+    hoveredBotId,
+    detail,
+    detail?.botId,
+    detail?.lastBotId,
+    detail?.incognito,
+    pendingIncognito,
+  ]);
 
   const shellStyle = useMemo<React.CSSProperties | undefined>(() => {
     const raw = activeBot?.color?.trim();
     if (!raw) return undefined;
     return deriveAccentStyle(
-      clampAccentLightness(raw, resolvedTheme),
+      normalizeAccentForTheme(raw, resolvedTheme),
       resolvedTheme
     );
   }, [activeBot, resolvedTheme]);
+
+  const selectedComposeBotAccent = useMemo<string | null>(() => {
+    const raw = selectedBotId
+      ? bots.find((bot) => bot.id === selectedBotId)?.color?.trim()
+      : null;
+    return raw ? normalizeAccentForTheme(raw, resolvedTheme) : null;
+  }, [bots, resolvedTheme, selectedBotId]);
+
+  const composeStyle = selectedComposeBotAccent
+    ? ({ "--compose-bot-color": selectedComposeBotAccent } as React.CSSProperties)
+    : undefined;
+
+  // Bot that "owns" the currently-open Chat-mode conversation — used to
+  // render the in-stream intro (glyph + name + description) that sits
+  // above the first message and scrolls out naturally as messages pile
+  // up. Prefer the live bot row (gives us system_prompt for the
+  // description preview), and fall back to whatever bot metadata the
+  // first assistant message was joined with so deleted bots still show
+  // a usable intro instead of a ghost row.
+  const conversationBot = useMemo<Bot | null>(() => {
+    if (view !== "chat") return null;
+    if (!detail?.botId) return null;
+    if (detail.incognito) return null;
+    const live = bots.find(b => b.id === detail.botId);
+    if (live) return live;
+    const firstAssistant = detail.messages.find(
+      m => m.role === "assistant" && (m.botName || m.botColor || m.botGlyph)
+    );
+    if (!firstAssistant?.botName) return null;
+    return {
+      id: detail.botId,
+      name: firstAssistant.botName,
+      system_prompt: "",
+      model: null,
+      temperature: 0,
+      max_tokens: 0,
+      chat_enabled: 1,
+      color: firstAssistant.botColor ?? null,
+      glyph: firstAssistant.botGlyph ?? null,
+    };
+  }, [view, detail?.botId, detail?.incognito, detail?.messages, bots]);
+
+  // The sidebar is a place to leave the current chat, not mirror it.
+  // Keep the active conversation persisted in `conversations`, but hide
+  // its row until the user starts another chat or opens a different one.
+  const visibleConversations = useMemo(
+    () => conversations.filter(c => c.id !== selectedId),
+    [conversations, selectedId]
+  );
+
+  const panelColorHarmonyActive = bots.length >= BOT_PANEL_COLOR_HARMONY_MIN_BOTS;
+  const sortedPanelBots = useMemo(
+    () => [...bots].sort((a, b) => (
+      compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
+    )),
+    [bots, resolvedTheme, panelColorHarmonyActive]
+  );
+  const chatAvailableBots = useMemo(
+    () => bots.filter(botIsChatEnabled),
+    [bots]
+  );
+  const pickerSourceBots = view === "chat" ? chatAvailableBots : bots;
+
+  // Hue lens filters the large empty-state picker before a thread begins.
+  // Once a chat has messages, the composer popout receives the raw bot
+  // list and treats the hue value as a scroll/focus target instead, so
+  // other colors remain visible.
+  const normalizedEmptyStateBotNameFilter =
+    emptyStateBotNameFilter.trim().toLocaleLowerCase();
+  const filteredBots = useMemo(
+    () => {
+      const hueFilteredBots = filterBotsByHue(pickerSourceBots, hueFilterCenter);
+      if (normalizedEmptyStateBotNameFilter.length === 0) {
+        return hueFilteredBots;
+      }
+      return hueFilteredBots.filter((bot) =>
+        bot.name.toLocaleLowerCase().includes(normalizedEmptyStateBotNameFilter)
+      );
+    },
+    [pickerSourceBots, hueFilterCenter, normalizedEmptyStateBotNameFilter]
+  );
+  const emptyStateSearchActive =
+    emptyStateSearchOpen || normalizedEmptyStateBotNameFilter.length > 0;
+  const emptyStateTypingSearchAvailable =
+    pickerSourceBots.length > 0 &&
+    (!detail || detail.messages.length === 0) &&
+    (view === "sandbox" || (view === "chat" && !pendingIncognito));
+  const hueLensTrackSegments = useMemo(
+    () => computeHueLensTrackSegments(pickerSourceBots),
+    [pickerSourceBots]
+  );
+  // A single color category has nothing useful to filter between, even
+  // when several bots sit inside that category. Hide the lens until at
+  // least two PRISM families are represented.
+  const hueLensAvailable = hueLensTrackSegments.length > 1;
+  const hueFilterActive = hueFilterCenter !== null;
+  const hueLensTrackGradient = useMemo(
+    () => hueLensGradient(hueLensTrackSegments),
+    [hueLensTrackSegments]
+  );
+
+  useEffect(() => {
+    if (!hueLensAvailable && hueFilterCenter !== null) {
+      setHueFilterCenter(null);
+    }
+  }, [hueLensAvailable, hueFilterCenter]);
+
+  useEffect(() => {
+    if (view !== "chat") return;
+    const enabledIds = new Set(chatAvailableBots.map((bot) => bot.id));
+    if (!detail && selectedBotId && !enabledIds.has(selectedBotId)) {
+      setSelectedBotId(null);
+    }
+    if (!detail && hoveredBotId && !enabledIds.has(hoveredBotId)) {
+      setHoveredBotId(null);
+    }
+    if (chatBotOverride && !enabledIds.has(chatBotOverride)) {
+      setChatBotOverride(undefined);
+    }
+  }, [view, detail, selectedBotId, hoveredBotId, chatBotOverride, chatAvailableBots]);
+
+  // Empty-state picker (Chat + Sandbox) renders bots in color order so
+  // the unfiltered grid trends toward a color-wheel/color-square map.
+  // Sorted off `filteredBots` so the lens stays the source of truth for
+  // which bots are visible; only the ORDER is recomputed here. Reuse
+  // `panelColorHarmonyActive` so the visual harmony of the dashboard
+  // matches the empty-state grid in dense libraries.
+  const pickerBots = useMemo(
+    () => [...filteredBots].sort((a, b) => (
+      compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
+    )),
+    [filteredBots, resolvedTheme, panelColorHarmonyActive]
+  );
+
+  // Bucket the already color-sorted list into the five Prism letters
+  // (plus an `other` bucket for grayscale/colorless bots). Rendered
+  // only at high bot counts; the underlying sortedPanelBots ordering
+  // is preserved inside each bucket so drilling into a group still
+  // reads light-to-dark.
+  const botGroupBuckets = useMemo(() => {
+    const buckets: Record<PrismGroupId, Bot[]> = {
+      p: [], r: [], i: [], s: [], m: [],
+    };
+    for (const bot of sortedPanelBots) {
+      buckets[botPrismGroup(bot.color)].push(bot);
+    }
+    return buckets;
+  }, [sortedPanelBots]);
+
+  // Always five tiles, mirroring the wordmark. No conditional sixth
+  // bucket — randomHex() guarantees new bots fall into one of the
+  // five, and legacy grayscale bots classify by hue.
+  const botGroupOrder = useMemo<readonly PrismGroupDef[]>(() => PRISM_GROUPS, []);
+
+  // PRISM categories are the default collapsed browsing surface for the
+  // Bots drawer. Color harmony still waits for high-count libraries, but
+  // the category dashboard itself appears as soon as the user has bots.
+  const botPanelDashboardActive = bots.length >= BOT_PANEL_DASHBOARD_MIN_BOTS;
+
+  // Drill-in safety: if the active group disappears (count dropped
+  // below threshold OR the only bot in that group was deleted), bounce
+  // the user back to the dashboard root instead of leaving them on a
+  // ghost view.
+  useEffect(() => {
+    if (!botPanelDashboardActive) {
+      if (botPanelGroup !== null) setBotPanelGroup(null);
+      return;
+    }
+    if (botPanelGroup && botGroupBuckets[botPanelGroup].length === 0) {
+      setBotPanelGroup(null);
+    }
+  }, [botPanelDashboardActive, botPanelGroup, botGroupBuckets]);
+
+  const visibleBotPanelBots = useMemo<readonly Bot[]>(() => {
+    if (!botPanelDashboardActive) return sortedPanelBots;
+    if (!botPanelGroup) return [];
+    return botGroupBuckets[botPanelGroup];
+  }, [botPanelDashboardActive, botPanelGroup, botGroupBuckets, sortedPanelBots]);
+
+  const activeBotPanelGroup = botPanelGroup
+    ? PRISM_GROUPS.find(g => g.id === botPanelGroup) ?? null
+    : null;
 
   const bootstrap = useCallback(async () => {
     const controller = new AbortController();
@@ -3179,9 +5833,67 @@ function HomeContent(): React.JSX.Element {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [detail?.id, detail?.messages.length, pendingReply]);
 
+  // Drop any pending mid-thread bot override whenever the open
+  // conversation changes OR the post-auth surface flips. Without this,
+  // a user who half-picked "try Bot B" in Chat, clicked New Chat, and
+  // came back would see their stale pending pick linger on the
+  // replacement thread — the opposite of "the override is tied to THIS
+  // chat". `view` is in the dep list so switching to Sandbox/Hub also
+  // clears it; the state has no meaning outside Chat.
+  useEffect(() => {
+    setChatBotOverride(undefined);
+  }, [selectedId, view]);
+
+  // Every entrance into Sandbox lands on a fresh, empty chat. Sandbox
+  // is a playground — users expect each visit to start from zero, not
+  // resume whatever thread was last open. Fires on:
+  //   • Hub → Sandbox transitions (Hub tile click).
+  //   • Direct URL loads at `/?view=sandbox` (effect runs on mount).
+  //   • Chat → Sandbox via URL / back-forward nav.
+  // Clicking a conversation row IN the Sandbox sidebar does NOT re-fire
+  // this effect — `view` stays "sandbox" while `refreshConversation`
+  // repopulates detail/selectedId — so loading past chats still works
+  // as expected. Chat mode is intentionally unaffected: its bot and
+  // privacy flags are conversation-level commitments, so remembering
+  // the last open thread is the right default there.
+  useEffect(() => {
+    if (view !== "sandbox") return;
+    setSelectedId(null);
+    setDetail(null);
+    setSelectedBotId(null);
+    setHoveredBotId(null);
+    if (hoverDwellTimerRef.current) {
+      clearTimeout(hoverDwellTimerRef.current);
+      hoverDwellTimerRef.current = null;
+    }
+    setError(null);
+  }, [view]);
+
   async function refreshAll() { await Promise.all([refreshConversations(), refreshSettings(), refreshMemories(), refreshBots(), refreshImages()]); }
   async function refreshConversations() { const d = await api<{ conversations: ConversationSummary[] }>("/api/conversations"); setConversations(d.conversations); }
-  async function refreshConversation(id: string) { const d = await api<{ conversation: ConversationDetail }>(`/api/conversations/${id}`); setDetail(d.conversation); setSelectedId(id); }
+  async function refreshConversation(id: string): Promise<void> {
+    const d = await api<{ conversation: ConversationDetail }>(
+      `/api/conversations/${id}`
+    );
+    setDetail(d.conversation);
+    setSelectedId(id);
+    // Sync the composer's bot dropdown to match whoever was last active
+    // in the chat we're switching into. Without this, picking a chat
+    // where Spongebob last spoke still shows "Default" in the dropdown,
+    // and the user's next send goes to Default by accident.
+    //
+    // Priority order:
+    //   - hasAssistantReply: the conversation has a real history; use
+    //     lastBotId (which is null when Default was the last to speak,
+    //     collapsing the dropdown to "Default" — correct).
+    //   - else: no replies yet (edge case from a failed send), fall
+    //     back to the locked botId so the dropdown reflects the user's
+    //     original intent.
+    const nextPickedBotId = d.conversation.hasAssistantReply
+      ? d.conversation.lastBotId
+      : d.conversation.botId;
+    setSelectedBotId(nextPickedBotId);
+  }
   async function refreshSettings() { const d = await api<{ settings: UserSettings }>("/api/settings"); setSettings(d.settings); }
   async function refreshMemories() { const d = await api<{ memories: UserMemory[] }>("/api/memories"); setMemories(d.memories); }
   async function refreshBots() { const d = await api<{ bots: Bot[] }>("/api/bots"); setBots(d.bots); }
@@ -3245,17 +5957,41 @@ function HomeContent(): React.JSX.Element {
   // That's the whole point of "play with bot settings and rerun".
   //
   // Mode semantics (kept aligned with the server-side contract):
-  //   - Chat: no bot picker, so `botId` is always omitted. `incognito`
-  //     is surfaced in the composer and doubles as the online/offline
-  //     toggle — when it's on, the provider is pinned LOCAL so a
-  //     single tap takes the user fully offline for that send.
-  //   - Sandbox: bot picker + memory are the point of the surface.
-  //     Cross-session memory is disabled server-side for sandbox, so
-  //     we never send an `incognito` flag from here.
+  //   - Chat: bot + privacy are CONVERSATION-LEVEL settings chosen at
+  //     chat start. For an existing conversation, both fields are read
+  //     from `detail` (the server owns them). For a brand-new chat
+  //     (`detail === null`), the bot comes from the empty-state picker
+  //     via `selectedBotId` and the privacy flag comes from
+  //     `pendingIncognito` (flipped on by the sidebar "Private chat"
+  //     button). Once the first send resolves, the server's returned
+  //     detail supersedes these pending values and the pending flag is
+  //     cleared in sendMessage.
+  //   - Sandbox: bot picker in the composer remains the source; cross-
+  //     session memory is disabled server-side anyway, so the
+  //     `incognito` flag is never sent from here.
   function buildChatRequestBody(message: string): Record<string, unknown> {
     const isChatMode = view === "chat";
     const mode: "chat" | "sandbox" = isChatMode ? "chat" : "sandbox";
-    const chatIncognito = isChatMode && incognito;
+    // Resolve effective bot. Chat-mode priority is:
+    //   1. chatBotOverride (mid-thread dropdown pick; string = specific,
+    //      null = "Default persona"). `undefined` means "no pending
+    //      pick, just use whatever the conversation already resolves
+    //      to", which keeps the send idempotent on bot_id when the
+    //      user hasn't touched the dropdown.
+    //   2. detail.botId (the conversation's persisted bot, if any).
+    //   3. selectedBotId (empty-state picker for brand-new chats).
+    //   4. null — sent explicitly so the server's three-valued botId
+    //      parse can persist a demotion to Default. Contrast with
+    //      Sandbox below, which still drops the key (legacy behavior:
+    //      Sandbox doesn't touch conversation.bot_id persistence).
+    const chatBotId: string | null =
+      chatBotOverride !== undefined
+        ? chatBotOverride
+        : (detail?.botId ?? selectedBotId ?? null);
+    // Resolve effective privacy: prefer the persisted flag, then the
+    // pending intent for a brand-new chat.
+    const chatIncognito =
+      isChatMode && (detail?.incognito === true || pendingIncognito);
     const providerForSend = chatIncognito
       ? "local"
       : settings?.preferredProvider;
@@ -3263,7 +5999,11 @@ function HomeContent(): React.JSX.Element {
       conversationId: selectedId ?? undefined,
       message,
       mode,
-      botId: isChatMode ? undefined : (selectedBotId ?? undefined),
+      // Chat mode ALWAYS sends botId (string or null) so the server can
+      // persist mid-thread switches. Sandbox keeps the legacy "undefined
+      // drops the key" behavior since its bot picks never write back to
+      // conversations.bot_id.
+      botId: isChatMode ? chatBotId : (selectedBotId ?? undefined),
       ...(isChatMode ? { incognito: chatIncognito } : {}),
       preferredProvider: providerForSend,
     };
@@ -3273,10 +6013,12 @@ function HomeContent(): React.JSX.Element {
     e.preventDefault();
     const trimmed = draft.trim();
     if (!trimmed || pendingReply) return;
+    setHoveredBotId(null);
     setPendingReply(true);
     setError(null);
 
     const previousDetail = detail;
+    const previousPendingIncognito = pendingIncognito;
     const optimisticMessage: Message = {
       id: `pending-${Date.now()}`,
       role: "user",
@@ -3285,9 +6027,40 @@ function HomeContent(): React.JSX.Element {
     };
     const optimisticTitle =
       detail?.title ?? (trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed);
+    // Forward the chat-mode conversation-level settings (bot + privacy)
+    // into the optimistic detail so the shell accent + privacy affordances
+    // don't flicker between send and server reply. Once the server answers
+    // with the persisted row, this optimistic detail is replaced.
+    const optimisticBotId =
+      detail?.botId ?? (view === "chat" ? selectedBotId ?? null : null);
+    const optimisticIncognito =
+      detail?.incognito === true || (view === "chat" && pendingIncognito);
+    // For lastBot*, keep whatever the current detail had. Our optimistic
+    // update adds a USER message, not an assistant one, so "last bot to
+    // speak" hasn't changed — the real update lands when the server's
+    // assistant reply comes back. In Sandbox where the user can switch
+    // bots per-send, we preview the new pick via the "about to speak"
+    // selectedBotId so the sidebar row hints at the next color before
+    // the reply lands; the server value overrides on response.
+    const optimisticLastBotId =
+      detail?.lastBotId ?? (view === "sandbox" ? selectedBotId ?? null : optimisticBotId);
+    const optimisticLastBotColor =
+      detail?.lastBotColor
+      ?? (optimisticLastBotId
+            ? bots.find(b => b.id === optimisticLastBotId)?.color ?? null
+            : null);
     setDetail({
       id: detail?.id ?? "pending",
       title: optimisticTitle,
+      botId: optimisticBotId,
+      incognito: optimisticIncognito,
+      lastBotId: optimisticLastBotId,
+      lastBotColor: optimisticLastBotColor,
+      // hasAssistantReply reflects the PRE-SEND state (whatever detail
+      // already had) — the optimistic update only inserts a USER
+      // message, not an assistant one. The server's real response
+      // flips this to true once the assistant reply is in the db.
+      hasAssistantReply: detail?.hasAssistantReply ?? false,
       messages: [...(detail?.messages ?? []), optimisticMessage],
     });
     setDraft("");
@@ -3299,10 +6072,19 @@ function HomeContent(): React.JSX.Element {
       });
       setDetail(d.conversation);
       setSelectedId(d.conversation.id);
+      // Pending chat-level flag has now been persisted on the conversation
+      // row by the server; the next read derives privacy from detail.
+      if (pendingIncognito) setPendingIncognito(false);
+      // Server truth now reflects the user's pick, so the mid-thread
+      // override is redundant — drop it so the dropdown goes back to
+      // mirroring detail.botId cleanly. Only fires when an override was
+      // actually set (keeps the state update a no-op in the common case).
+      if (chatBotOverride !== undefined) setChatBotOverride(undefined);
       await refreshConversations();
       await refreshMemories();
     } catch (err) {
       setDetail(previousDetail);
+      setPendingIncognito(previousPendingIncognito);
       setDraft(trimmed);
       setError(
         err instanceof Error
@@ -3514,6 +6296,317 @@ function HomeContent(): React.JSX.Element {
     const a = document.createElement("a"); a.href = url; a.download = `chat-${selectedId}.md`; a.click(); URL.revokeObjectURL(url);
   }
 
+  const resetEmptyStateBotSelection = useCallback(() => {
+    cancelPendingEmptyStateSearchOpen();
+    setSelectedBotId(null);
+    setHoveredBotId(null);
+    if (hoverDwellTimerRef.current) {
+      clearTimeout(hoverDwellTimerRef.current);
+      hoverDwellTimerRef.current = null;
+    }
+    if (hueFilterCenter !== null) {
+      startBotPickerReturnToAll();
+    } else {
+      setHueFilterCenter(null);
+    }
+  }, [cancelPendingEmptyStateSearchOpen, hueFilterCenter, startBotPickerReturnToAll]);
+
+  const openEmptyStateBotSearch = useCallback(() => {
+    cancelPendingEmptyStateSearchOpen();
+    setSelectedBotId(null);
+    setHoveredBotId(null);
+    if (hoverDwellTimerRef.current) {
+      clearTimeout(hoverDwellTimerRef.current);
+      hoverDwellTimerRef.current = null;
+    }
+    if (botPickerReturnEndAtRef.current > Date.now()) return;
+    if (emptyStateSearchActive) {
+      setEmptyStateSearchOpen(false);
+      setEmptyStateBotNameFilter("");
+      return;
+    }
+    if (hueFilterCenter !== null) {
+      setEmptyStateSearchOpen(false);
+      setEmptyStateBotNameFilter("");
+      startBotPickerReturnToAll();
+      return;
+    }
+    setHueFilterCenter(null);
+    setEmptyStateSearchOpen(true);
+  }, [cancelPendingEmptyStateSearchOpen, emptyStateSearchActive, hueFilterCenter, startBotPickerReturnToAll]);
+
+  const closeEmptyStateBotSearch = useCallback(() => {
+    cancelPendingEmptyStateSearchOpen();
+    setEmptyStateSearchOpen(false);
+    setEmptyStateBotNameFilter("");
+  }, [cancelPendingEmptyStateSearchOpen]);
+
+  const focusDraftInput = useCallback(() => {
+    setHoveredBotId(null);
+    window.setTimeout(() => {
+      draftInputRef.current?.focus({ preventScroll: true });
+    }, 0);
+  }, []);
+
+  const closeEmptyStateBotSearchAndFocusDraft = useCallback(() => {
+    closeEmptyStateBotSearch();
+    focusDraftInput();
+  }, [closeEmptyStateBotSearch, focusDraftInput]);
+
+  const commitEmptyStateBotSelection = useCallback((botId: string) => {
+    cancelPendingEmptyStateSearchOpen();
+    const bot = bots.find((candidate) => candidate.id === botId);
+    if (emptyStateSearchActive && bot && botHasFilterableColor(bot)) {
+      const { h } = hexToHsl(bot.color!.trim());
+      setHueFilterCenter(hueLensPositionForHue(h));
+    }
+    setSelectedBotId(botId);
+    setHoveredBotId(null);
+    setEmptyStateSearchOpen(false);
+    setEmptyStateBotNameFilter("");
+    focusDraftInput();
+  }, [bots, cancelPendingEmptyStateSearchOpen, emptyStateSearchActive, focusDraftInput]);
+
+  const openEmptyStateBotSearchFromTyping = useCallback((typedCharacter: string) => {
+    cancelPendingEmptyStateSearchOpen();
+    setSelectedBotId(null);
+    setHoveredBotId(null);
+    if (hoverDwellTimerRef.current) {
+      clearTimeout(hoverDwellTimerRef.current);
+      hoverDwellTimerRef.current = null;
+    }
+    setEmptyStateBotNameFilter((current) =>
+      current.length > 0 ? `${current}${typedCharacter}` : typedCharacter
+    );
+    if (hueFilterCenter !== null) {
+      setEmptyStateSearchOpen(false);
+      startBotPickerReturnToAll();
+      showEmptyStateSearchAfterReturn();
+      return;
+    }
+    setHueFilterCenter(null);
+    showEmptyStateSearchAfterReturn();
+  }, [
+    cancelPendingEmptyStateSearchOpen,
+    hueFilterCenter,
+    showEmptyStateSearchAfterReturn,
+    startBotPickerReturnToAll,
+  ]);
+
+  useEffect(() => {
+    if (!emptyStateTypingSearchAvailable) return;
+    function handlePageTyping(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      const activeElement = document.activeElement;
+      if (event.key === "Tab") {
+        const spotlightInput = emptyStateSearchInputRef.current;
+        const focusSpotlight = () => {
+          if (hueFilterCenter !== null) {
+            setEmptyStateSearchOpen(false);
+            startBotPickerReturnToAll();
+            focusEmptyStateSearchAfterReturn();
+            return;
+          }
+          setHueFilterCenter(null);
+          setEmptyStateSearchOpen(true);
+          window.setTimeout(() => {
+            spotlightInput?.focus({ preventScroll: true });
+          }, 0);
+        };
+
+        event.preventDefault();
+        if (!emptyStateSearchActive) {
+          focusSpotlight();
+          return;
+        }
+        if (activeElement === spotlightInput) {
+          closeEmptyStateBotSearchAndFocusDraft();
+          return;
+        }
+        spotlightInput?.focus({ preventScroll: true });
+        return;
+      }
+      const activeElementIsEditable =
+        activeElement instanceof HTMLElement &&
+        (
+          activeElement.isContentEditable ||
+          activeElement instanceof HTMLInputElement ||
+          activeElement instanceof HTMLTextAreaElement ||
+          activeElement instanceof HTMLSelectElement
+        );
+      if (activeElementIsEditable) return;
+      const pageHasFocus =
+        !activeElement ||
+        activeElement === document.body ||
+        activeElement === document.documentElement;
+      const spotlightHasFocusFallback = emptyStateSearchActive || pageHasFocus;
+      if (!spotlightHasFocusFallback) return;
+
+      if (event.key === "Backspace" && emptyStateSearchActive) {
+        event.preventDefault();
+        setEmptyStateBotNameFilter((current) => {
+          if (current.length <= 1) {
+            window.setTimeout(closeEmptyStateBotSearchAndFocusDraft, 0);
+            return "";
+          }
+          return current.slice(0, -1);
+        });
+        return;
+      }
+      if (event.key === "Escape" && emptyStateSearchActive) {
+        event.preventDefault();
+        closeEmptyStateBotSearch();
+        return;
+      }
+      if (event.key.length !== 1 || event.key.trim().length === 0) return;
+      if (!emptyStateSearchActive && !pageHasFocus) return;
+      event.preventDefault();
+      openEmptyStateBotSearchFromTyping(event.key);
+    }
+    window.addEventListener("keydown", handlePageTyping);
+    return () => window.removeEventListener("keydown", handlePageTyping);
+  }, [
+    closeEmptyStateBotSearchAndFocusDraft,
+    closeEmptyStateBotSearch,
+    emptyStateSearchActive,
+    emptyStateTypingSearchAvailable,
+    focusEmptyStateSearchAfterReturn,
+    hueFilterCenter,
+    openEmptyStateBotSearchFromTyping,
+    startBotPickerReturnToAll,
+  ]);
+
+  useEffect(() => {
+    if (!emptyStateSearchActive) return;
+    function handleDocumentClick(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (emptyStateSearchRef.current?.contains(target)) return;
+      closeEmptyStateBotSearch();
+    }
+    document.addEventListener("click", handleDocumentClick);
+    return () => document.removeEventListener("click", handleDocumentClick);
+  }, [closeEmptyStateBotSearch, emptyStateSearchActive]);
+
+  // Touch keyboard-balloon handlers. Shared by both the Chat-mode and
+  // Sandbox-mode empty-state picker frames. Active only when the gesture
+  // is genuine touch input AND the picker is at a high-density stage
+  // (`hideGlyphByDefault` true, i.e. stage 4 onward) where the glyph
+  // would normally be hidden and the user can't identify a tile by sight
+  // anymore. Below that stage the existing per-tile onClick path handles
+  // selection unchanged.
+  const handleTouchPickerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>, geom: PickerGeometry) => {
+      if (event.pointerType !== "touch") return;
+      if (!geom.hideGlyphByDefault) return;
+      // Capture so subsequent move/up events route here even if the
+      // finger drifts off this element. Without capture, the user's
+      // finger crossing into a child tile would lose the gesture.
+      event.currentTarget.setPointerCapture(event.pointerId);
+      touchPreviewPointerIdRef.current = event.pointerId;
+      const botId = findBotIdAtPoint(event.clientX, event.clientY);
+      setTouchPreview({ botId, x: event.clientX, y: event.clientY });
+      if (botId) {
+        setHoveredBotId(botId);
+      }
+    },
+    []
+  );
+
+  const handleTouchPickerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.pointerId !== touchPreviewPointerIdRef.current) return;
+      const botId = findBotIdAtPoint(event.clientX, event.clientY);
+      setTouchPreview({ botId, x: event.clientX, y: event.clientY });
+      setHoveredBotId(botId);
+    },
+    []
+  );
+
+  const handleTouchPickerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.pointerId !== touchPreviewPointerIdRef.current) return;
+      const botId = findBotIdAtPoint(event.clientX, event.clientY);
+      if (botId) {
+        commitEmptyStateBotSelection(botId);
+      } else {
+        // Released over a gap or off the picker — clear hover preview
+        // so the hero/title don't keep showing the last touched bot.
+        setHoveredBotId(null);
+      }
+      setTouchPreview(null);
+      touchPreviewPointerIdRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [commitEmptyStateBotSelection]
+  );
+
+  const handleTouchPickerCancel = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.pointerId !== touchPreviewPointerIdRef.current) return;
+      setTouchPreview(null);
+      setHoveredBotId(null);
+      touchPreviewPointerIdRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    []
+  );
+
+  const renderEmptyStateBotSearch = (): React.JSX.Element | null => {
+    if (!emptyStateSearchActive || pickerSourceBots.length === 0) return null;
+    const resultLabel =
+      normalizedEmptyStateBotNameFilter.length === 0
+        ? "Start typing to filter bots by name."
+        : filteredBots.length === 1
+          ? "1 bot found"
+          : `${filteredBots.length} bots found`;
+    return (
+      <div
+        ref={emptyStateSearchRef}
+        className={styles.emptyStateSearch}
+        role="search"
+        onBlur={(event) => {
+          const nextFocus = event.relatedTarget;
+          if (nextFocus instanceof Node && event.currentTarget.contains(nextFocus)) return;
+          closeEmptyStateBotSearch();
+        }}
+      >
+        <div className={styles.emptyStateSearchField}>
+          <span className={styles.emptyStateSearchGlyph} aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            ref={emptyStateSearchInputRef}
+            type="search"
+            value={emptyStateBotNameFilter}
+            onChange={(event) => setEmptyStateBotNameFilter(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                closeEmptyStateBotSearch();
+                return;
+              }
+              if (event.key === "Backspace" && emptyStateBotNameFilter.length <= 1) {
+                event.preventDefault();
+                closeEmptyStateBotSearchAndFocusDraft();
+              }
+            }}
+            className={styles.emptyStateSearchInput}
+            placeholder="Search bots"
+            aria-label="Search bots by name"
+          />
+        </div>
+        <div className={styles.emptyStateSearchMeta} aria-live="polite">
+          {resultLabel}
+        </div>
+      </div>
+    );
+  };
+
   const disarmDelete = useCallback(() => {
     if (pendingDeleteTimerRef.current) {
       clearTimeout(pendingDeleteTimerRef.current);
@@ -3528,21 +6621,15 @@ function HomeContent(): React.JSX.Element {
       pendingDeleteTimerRef.current = null;
     }
     setPendingDeleteKey(key);
-    // DELETE_ALL_KEY is special: its confirm surface is a centered modal,
-    // and the 3.5 s window that makes the inline "Are you sure?" pill
-    // feel snappy would instead pull the modal out from under the user
-    // mid-read. We skip auto-disarm for it and rely on Cancel / backdrop
-    // / Esc to dismiss explicitly.
-    if (key === DELETE_ALL_KEY) return;
+    // DELETE_ALL_KEY / DELETE_ALL_BOTS_KEY are special: their confirm
+    // surface is a centered modal, and the 3.5 s window that makes the
+    // inline "Are you sure?" pill feel snappy would instead pull the
+    // modal out from under the user mid-read. We skip auto-disarm for
+    // them and rely on Cancel / backdrop / Esc to dismiss explicitly.
+    if (key === DELETE_ALL_KEY || key === DELETE_ALL_BOTS_KEY) return;
     pendingDeleteTimerRef.current = setTimeout(() => {
       setPendingDeleteKey(null);
       pendingDeleteTimerRef.current = null;
-      // For bot delete, auto-disarm also collapses the pencil/× bubbles so
-      // the user has to open the layered menu again for another action —
-      // matching the "dismiss = close everything" contract.
-      if (key.startsWith(BOT_DELETE_KEY_PREFIX)) {
-        setExpandedBotKey(null);
-      }
     }, DELETE_CONFIRM_WINDOW_MS);
   }, []);
 
@@ -3612,15 +6699,22 @@ function HomeContent(): React.JSX.Element {
     }
     holdCompletedRef.current = false;
     setHoldingKey(key);
+    // Route to the bots sentinel when the holding key is a bot × so the
+    // confirmation modal asks the right question and the bulk action
+    // wipes the right dataset. Any non-bot key (sidebar chat ×, header
+    // Delete) stays on the original DELETE_ALL_KEY path.
+    const allKey = key.startsWith(BOT_DELETE_KEY_PREFIX)
+      ? DELETE_ALL_BOTS_KEY
+      : DELETE_ALL_KEY;
     holdTimerRef.current = setTimeout(() => {
       // Threshold crossed — snap out of "holding" visuals and into the
       // armed-all state. The list-level data attribute flip takes the
       // ×'s from tilted-and-glowing straight into iOS jiggle, and
-      // `armDelete(DELETE_ALL_KEY)` renders the confirmation modal.
+      // `armDelete` renders the confirmation modal.
       holdCompletedRef.current = true;
       setHoldingKey(null);
       holdTimerRef.current = null;
-      armDelete(DELETE_ALL_KEY);
+      armDelete(allKey);
     }, DELETE_ALL_HOLD_MS);
   }, [armDelete, pendingDeleteKey]);
 
@@ -3635,8 +6729,12 @@ function HomeContent(): React.JSX.Element {
   // focus (usually the × / header Delete the user was holding) so we can
   // restore focus to it on dismiss. While the modal is open, Escape
   // cancels — keeping the keyboard escape hatch consistent with every
-  // other confirm surface in the app.
-  const isDeleteAllActive = pendingDeleteKey === DELETE_ALL_KEY;
+  // other confirm surface in the app. Both the chat-scoped and bot-scoped
+  // armed-all states share this contract so the two modals behave
+  // identically from the keyboard / screen-reader side.
+  const isDeleteAllActive =
+    pendingDeleteKey === DELETE_ALL_KEY ||
+    pendingDeleteKey === DELETE_ALL_BOTS_KEY;
   useEffect(() => {
     if (!isDeleteAllActive) {
       // On close, return focus to the element that opened the modal
@@ -3667,6 +6765,21 @@ function HomeContent(): React.JSX.Element {
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [isDeleteAllActive, disarmDelete]);
+
+  // Developer Tools floating panel — Escape key dismiss. No focus-restore pass
+  // (unlike the delete-all modal) because this is a gated dev affordance
+  // rather than a destructive user flow; the simpler handler is fine.
+  useEffect(() => {
+    if (!devToolsOpen) return;
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        closeDevTools();
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [devToolsOpen, closeDevTools]);
 
   // Clicking anywhere outside the delete / confirm affordance should disarm it.
   // This prevents the confirm pill from lingering in an awkward in-between
@@ -3727,15 +6840,17 @@ function HomeContent(): React.JSX.Element {
     };
   }, [pendingResendId, disarmResend]);
 
-  // Every time the Bots panel opens, seed the color picker with a fresh
-  // random hex AND pick a random glyph so the create form feels
-  // generative instead of always showing the same default.
+  // In create mode, each Bots-panel open gets a fresh color/glyph seed
+  // and returns the Chat availability toggle to its default-off state.
+  // When a deep link opens the panel directly into edit mode, preserve the
+  // selected bot's saved values so the random create seed cannot overwrite
+  // the customizer fields.
   useEffect(() => {
-    if (panel === "bots") {
-      setNewBotColor(randomHex());
-      setNewBotGlyph(randomBotGlyph());
-    }
-  }, [panel]);
+    if (panel !== "bots" || editingBotId) return;
+    setNewBotColor(randomHex());
+    setNewBotGlyph(randomBotGlyph());
+    setNewBotChatEnabled(false);
+  }, [panel, editingBotId]);
 
   // Close the color/glyph popover on any outside click or Escape. Only
   // one picker ever lives on screen (the top form in the Bots panel), so
@@ -3768,38 +6883,6 @@ function HomeContent(): React.JSX.Element {
       document.removeEventListener("keydown", handleKey);
     };
   }, [colorWheelOpen]);
-
-  // Close the layered bot-card bubbles (pencil + ×) on outside click or
-  // Escape. The bubbles and the armed "Are you sure?" pill both live on
-  // `[data-delete-affordance='true']` elements (so the existing disarm
-  // handler treats them as inside too), plus each bot card's entire right
-  // side shares this attribute to keep clicks on the bubbles themselves
-  // from collapsing the layer.
-  useEffect(() => {
-    if (!expandedBotKey) return;
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      // Element (not HTMLElement) — see color-popover handler above for
-      // the full SVG-target rationale. Bot cards use inline SVG glyphs,
-      // so the same bug would apply here.
-      if (
-        target instanceof Element &&
-        target.closest("[data-delete-affordance='true']")
-      ) {
-        return;
-      }
-      setExpandedBotKey(null);
-    }
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setExpandedBotKey(null);
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [expandedBotKey]);
 
   async function deleteConversation(id: string) {
     setError(null);
@@ -3861,7 +6944,13 @@ function HomeContent(): React.JSX.Element {
     setNewBotPrompt("");
     setNewBotColor(randomHex());
     setNewBotGlyph(randomBotGlyph());
+    setNewBotChatEnabled(false);
     setColorWheelOpen(false);
+    // Drop any stashed edit-mode snapshot so the next edit compares
+    // against the correct starting state. Safe to always clear here:
+    // the only places that hold a snapshot are paths that also call
+    // resetBotForm on exit.
+    editOriginalRef.current = null;
   }, []);
 
   async function createBot() {
@@ -3874,6 +6963,7 @@ function HomeContent(): React.JSX.Element {
           systemPrompt: newBotPrompt,
           color: newBotColor,
           glyph: newBotGlyph,
+          chatEnabled: newBotChatEnabled,
         }),
       });
       resetBotForm();
@@ -3886,7 +6976,13 @@ function HomeContent(): React.JSX.Element {
   async function deleteBot(id: string) {
     setPanelError(null);
     disarmDelete();
-    setExpandedBotKey(null);
+    // If the deleted bot was the one loaded into the top form, collapse
+    // back to create mode so the editor doesn't keep pointing at a row
+    // that no longer exists.
+    if (editingBotId === id) {
+      setEditingBotId(null);
+      resetBotForm();
+    }
     // Optimistic update: drop the bot from the panel immediately, and if the
     // user had it selected in the sidebar clear that too so subsequent chats
     // don't try to reference a bot that's already gone. Roll back on failure.
@@ -3906,27 +7002,252 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  // User-facing bulk wipe reached via press-and-hold on any bot card ×.
+  // Mirrors `deleteAllConversations` exactly: optimistic clear, best-effort
+  // server sync, snapshot rollback on failure. Lives separately from the
+  // dev-tools variant (which routes errors to `devToolsMessage` and uses a
+  // different `busy` flag); this one belongs to the normal panel UX and
+  // surfaces errors inside `panelError` so they render beside the bot list.
+  async function deleteAllBots() {
+    setPanelError(null);
+    disarmDelete();
+    const previousBots = bots;
+    const previousSelectedBotId = selectedBotId;
+    // Nothing to clear — short-circuit rather than fire a no-op request.
+    // Tapping into the empty state via hold-from-nothing is unreachable in
+    // practice, but the guard keeps the function safe to call from any
+    // future entry point.
+    if (previousBots.length === 0) return;
+    // Bail out of any in-progress edit so the form doesn't keep pointing at
+    // a row that's about to vanish. resetBotForm reseeds the color/glyph
+    // so the reopened form still feels generative.
+    setEditingBotId(null);
+    resetBotForm();
+    setBots([]);
+    setSelectedBotId(null);
+    try {
+      await api("/api/bots", { method: "DELETE" });
+      await refreshBots();
+    } catch (err) {
+      setBots(previousBots);
+      setSelectedBotId(previousSelectedBotId);
+      setPanelError(err instanceof Error ? err.message : "Delete all bots failed.");
+    }
+  }
+
+  // ── Developer Tools actions ──────────────────────────────────────────
+  // Both helpers live behind `DEV_TOOLS_ENABLED` at the UI level, but the
+  // functions themselves are safe to call unconditionally — the server
+  // enforces per-user scoping on DELETE /api/bots and POST /api/bots.
+  //
+  // Errors route to `devToolsMessage` (the inline status line in the
+  // modal) rather than `panelError` because the modal is the active
+  // surface; `panelError` belongs to the sidebar drawers.
+  async function devToolsDeleteAllBots() {
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    const previousBots = bots;
+    const previousSelectedBotId = selectedBotId;
+    // Optimistic wipe mirrors the single-bot delete: clear the panel and
+    // any sidebar selection instantly, then sync with the server. On
+    // failure we roll back both so the UI stays truthful.
+    setBots([]);
+    setSelectedBotId(null);
+    try {
+      const result = await api<{ deleted?: number }>("/api/bots", {
+        method: "DELETE",
+      });
+      await refreshBots();
+      const deleted = typeof result?.deleted === "number" ? result.deleted : 0;
+      setDevToolsMessage(
+        deleted === 0
+          ? "No bots to delete."
+          : deleted === 1
+            ? "Deleted 1 bot."
+            : `Deleted ${deleted} bots.`
+      );
+    } catch (err) {
+      setBots(previousBots);
+      setSelectedBotId(previousSelectedBotId);
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Delete all bots failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  async function devToolsCreateRandomBotBatch(batchSize: number) {
+    if (batchSize <= 0) return;
+
+    const names = sampleBotNames(batchSize);
+    for (let start = 0; start < names.length; start += DEV_TOOLS_BOT_CREATE_CHUNK_SIZE) {
+      const chunk = names.slice(start, start + DEV_TOOLS_BOT_CREATE_CHUNK_SIZE);
+      await Promise.all(
+        chunk.map((name) =>
+          api("/api/bots", {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              systemPrompt: randomLoremIpsum(),
+              color: randomHex(),
+              glyph: randomBotGlyph(),
+            }),
+          })
+        )
+      );
+    }
+  }
+
+  // Fires the selected number of POST /api/bots requests in parallel. The
+  // helper chunks large batches so viewport-derived stage jumps can reach
+  // the dense picker states without flooding the local API in one burst.
+  // Names are sampled without replacement while the selected batch fits
+  // inside the name pool; prompts use throwaway lorem ipsum so generated
+  // rows carry realistic-looking content for UI stress testing. On
+  // partial failure we still refresh so the list reflects whatever made
+  // it through.
+  async function devToolsAddRandomBots() {
+    const batchSize = resolvedDevToolsBotQuantity;
+    if (batchSize <= 0) {
+      setDevToolsMessage(randomDevToolsGhostMessage());
+      return;
+    }
+
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    try {
+      await devToolsCreateRandomBotBatch(batchSize);
+      await refreshBots();
+      setDevToolsMessage(
+        batchSize === 1 ? "Added 1 random bot." : `Added ${batchSize} random bots.`
+      );
+    } catch (err) {
+      // Refresh even on failure so the partial batch (if any) shows up.
+      try { await refreshBots(); } catch { /* list refresh is best-effort */ }
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Add random bots failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  async function devToolsSetBotDensityStage(stageId: PickerDensityStageId) {
+    const liveViewportWidth =
+      typeof window === "undefined" ? viewportWidth : window.innerWidth;
+    const liveViewportHeight =
+      typeof window === "undefined" ? viewportHeight : window.innerHeight;
+    const stage = pickerDensityStageTargets(
+      liveViewportWidth,
+      liveViewportHeight
+    ).find((target) => target.id === stageId);
+    if (!stage) return;
+
+    const targetCount = clampDevToolsBotQuantity(stage.targetCount);
+    const delta = targetCount - bots.length;
+    setDevToolsBotQuantity(targetCount);
+
+    if (delta === 0) {
+      setDevToolsMessage(
+        `${stage.label} (${stage.description}) is already active at ${targetCount} bots for ${liveViewportWidth}×${liveViewportHeight}.`
+      );
+      return;
+    }
+
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    const previousBots = bots;
+    const previousSelectedBotId = selectedBotId;
+
+    try {
+      if (delta > 0) {
+        await devToolsCreateRandomBotBatch(delta);
+        await refreshBots();
+        setDevToolsMessage(
+          `${stage.label} (${stage.description}) target: ${targetCount} bots for ${liveViewportWidth}×${liveViewportHeight}. Added ${delta} bots.`
+        );
+        return;
+      }
+
+      const deleteCount = Math.abs(delta);
+      const optimisticDeletedIds = new Set(
+        previousBots.slice(0, deleteCount).map((bot) => bot.id)
+      );
+      setBots((list) => list.filter((bot) => !optimisticDeletedIds.has(bot.id)));
+      if (selectedBotId && optimisticDeletedIds.has(selectedBotId)) {
+        setSelectedBotId(null);
+      }
+
+      const result = await api<{ deleted?: number }>(
+        `/api/bots?limit=${deleteCount}`,
+        { method: "DELETE" }
+      );
+      await refreshBots();
+      const deleted = typeof result?.deleted === "number" ? result.deleted : deleteCount;
+      setDevToolsMessage(
+        `${stage.label} (${stage.description}) target: ${targetCount} bots for ${liveViewportWidth}×${liveViewportHeight}. Deleted ${deleted} bots.`
+      );
+    } catch (err) {
+      setBots(previousBots);
+      setSelectedBotId(previousSelectedBotId);
+      try { await refreshBots(); } catch { /* list refresh is best-effort */ }
+      setDevToolsMessage(
+        err instanceof Error ? err.message : `Set ${stage.label} failed.`
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
   // Load a specific bot into the top form for editing. The form itself
   // doesn't change shape — it just flips from "create" to "edit" mode
-  // via editingBotId, and the name/prompt/color/glyph fields are
-  // hydrated from the bot. Any other layered UI (delete arm, expanded
-  // card bubbles, open picker) is collapsed so the user's attention
-  // rests squarely on the one active form.
+  // via editingBotId, and the name / prompt / color / glyph fields are
+  // hydrated from the bot. Any other layered UI (armed delete pill, open
+  // color picker) is collapsed so the user's attention rests squarely on
+  // the one active form.
+  //
+  // We also stash the seeded values into editOriginalRef so the primary
+  // button can ask "did the user change anything?" against the ACTUAL
+  // starting state — this matters for bots with no stored color, where
+  // we seed the picker with a random hex and would otherwise read as
+  // "dirty" on the very first frame.
+  //
+  // Swapping targets (edit Bot A → click Bot B) just replaces the
+  // hydrated values: the previous unsaved edits on Bot A are dropped,
+  // which is one of the three advertised "cancel" paths (alongside the
+  // panel backdrop and the × in the panel header).
   function startEditBot(bot: Bot) {
     disarmDelete();
-    setExpandedBotKey(null);
     setColorWheelOpen(false);
-    setNewBotName(bot.name);
-    setNewBotPrompt(bot.system_prompt ?? "");
-    setNewBotColor(bot.color?.trim() || randomHex());
-    setNewBotGlyph(isBotGlyphName(bot.glyph) ? bot.glyph : DEFAULT_BOT_GLYPH);
+    const seededName = bot.name;
+    const seededPrompt = bot.system_prompt ?? "";
+    const seededColor = bot.color?.trim() || randomHex();
+    const seededGlyph: BotGlyphName = isBotGlyphName(bot.glyph)
+      ? bot.glyph
+      : DEFAULT_BOT_GLYPH;
+    const seededChatEnabled = botIsChatEnabled(bot);
+    setNewBotName(seededName);
+    setNewBotPrompt(seededPrompt);
+    setNewBotColor(seededColor);
+    setNewBotGlyph(seededGlyph);
+    setNewBotChatEnabled(seededChatEnabled);
     setEditingBotId(bot.id);
+    editOriginalRef.current = {
+      name: seededName,
+      prompt: seededPrompt,
+      color: seededColor,
+      glyph: seededGlyph,
+      chatEnabled: seededChatEnabled,
+    };
     setPanelError(null);
   }
 
-  function cancelEditBot() {
-    setEditingBotId(null);
-    resetBotForm();
+  function openActiveBotCustomizer() {
+    if (!activeBot) return;
+    setBotPanelGroup(null);
+    startEditBot(activeBot);
+    openRightPanel("bots");
   }
 
   async function saveBot(id: string) {
@@ -3942,6 +7263,7 @@ function HomeContent(): React.JSX.Element {
           systemPrompt: newBotPrompt,
           color: newBotColor,
           glyph: newBotGlyph,
+          chatEnabled: newBotChatEnabled,
         }),
       });
       setEditingBotId(null);
@@ -4149,14 +7471,35 @@ function HomeContent(): React.JSX.Element {
   // Escape: handled globally in the same effect, so any focus target
   // (including the jiggling ×'s behind the backdrop) can cancel.
   const renderDeleteAllModal = () => {
-    if (pendingDeleteKey !== DELETE_ALL_KEY) return null;
-    const count = conversations.length;
-    // Tailor the body copy to the actual chat count — nothing reads
-    // worse than "all 1 conversations" on a fresh account.
-    const body =
-      count === 1
+    const isChats = pendingDeleteKey === DELETE_ALL_KEY;
+    const isBots = pendingDeleteKey === DELETE_ALL_BOTS_KEY;
+    if (!isChats && !isBots) return null;
+    // One component, two modes. The chat hold (sidebar × / header Delete)
+    // targets conversations; the bot hold (bot card ×) targets bots. We
+    // derive every user-visible string + the confirm action from the
+    // armed key so both contexts share every a11y / focus / dismissal
+    // affordance without forking the JSX.
+    const count = isChats ? conversations.length : bots.length;
+    const noun = isChats
+      ? count === 1 ? "conversation" : "conversations"
+      : count === 1 ? "bot" : "bots";
+    const title = isChats ? "Delete all chats?" : "Delete all bots?";
+    const body = isChats
+      ? count === 1
         ? "This will permanently remove your only conversation."
-        : `This will permanently remove all ${count} conversations.`;
+        : `This will permanently remove all ${count} conversations.`
+      : count === 1
+        ? "This will permanently remove your only bot."
+        : `This will permanently remove all ${count} bots.`;
+    // What stays behind after the wipe — different trailing copy because
+    // the two scopes have different "untouched" surfaces.
+    const coda = isChats
+      ? " Images and memories stay."
+      : " Chats using these bots stay (they fall back to Default).";
+    const onConfirm = () => {
+      if (isChats) void deleteAllConversations();
+      else void deleteAllBots();
+    };
     return (
       <div
         className={styles.deleteAllModalBackdrop}
@@ -4177,10 +7520,10 @@ function HomeContent(): React.JSX.Element {
           onClick={(event) => event.stopPropagation()}
         >
           <h2 id="delete-all-title" className={styles.deleteAllModalTitle}>
-            Delete all chats?
+            {title}
           </h2>
           <p id="delete-all-desc" className={styles.deleteAllModalBody}>
-            {body} Images and memories stay.
+            {body}{coda}
           </p>
           <div className={styles.deleteAllModalActions}>
             <button
@@ -4201,7 +7544,8 @@ function HomeContent(): React.JSX.Element {
             <button
               type="button"
               className={styles.deleteAllModalConfirm}
-              onClick={() => void deleteAllConversations()}
+              onClick={onConfirm}
+              aria-label={`Delete all ${noun}`}
             >
               Delete all
             </button>
@@ -4266,6 +7610,758 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  // ── Bot card × delete button ────────────────────────────────────────
+  // Bot panel twin of `renderChatDeleteButton`. Same four visual states —
+  // idle (muted × glyph), hover (embossed red), holding (immediate glow
+  // via `data-holding`), and armed-single ("Are you sure? ✓" pill) — plus
+  // the same bulk-wipe escape hatch: press and hold for 900 ms to arm
+  // `DELETE_ALL_BOTS_KEY`, which surfaces the shared alertdialog modal.
+  //
+  // The click handler lives on the button itself so it can `stopPropagation`
+  // and keep a tap from bubbling up to the card body, which now listens
+  // for "tap anywhere to start editing this bot" via
+  // `startEditBot`. Without that guard, a single × tap would arm delete
+  // AND hydrate the form at the same time.
+  const renderBotDeleteButton = (bot: Bot) => {
+    const botKey = `${BOT_DELETE_KEY_PREFIX}${bot.id}`;
+    const isArmedSingle = pendingDeleteKey === botKey;
+    const isHolding = holdingKey === botKey;
+    const armedAll = pendingDeleteKey === DELETE_ALL_BOTS_KEY;
+
+    const className = [
+      styles.botCardDelete,
+      isArmedSingle ? styles.botCardDeleteArmed : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return (
+      <button
+        type="button"
+        className={className}
+        data-delete-affordance="true"
+        data-holding={isHolding ? "true" : undefined}
+        aria-label={
+          isArmedSingle
+            ? `Confirm delete ${bot.name}`
+            : `Delete ${bot.name} — click to remove this bot, or press and hold to clear all bots`
+        }
+        title={isArmedSingle ? undefined : "Delete bot · hold for all"}
+        onPointerDown={(e) => {
+          // Only primary-button presses kick off the hold; right-click
+          // (contextmenu) stays out of the gesture entirely.
+          if (e.button !== 0) return;
+          // Pointer capture guarantees pointerup/pointercancel even if the
+          // finger drags off the target mid-hold — without it, a touch
+          // sliding off would orphan the 900 ms timer.
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            // Some headless / jsdom environments don't implement pointer
+            // capture; we silently fall back to the timer-only path.
+          }
+          startHoldDelete(botKey);
+        }}
+        onPointerUp={cancelHoldDelete}
+        onPointerCancel={cancelHoldDelete}
+        onClick={(e) => {
+          // Keep the tap from bubbling to the card body's "tap to edit"
+          // handler — × and edit are mutually exclusive intents.
+          e.stopPropagation();
+          // A completed hold just armed delete-all; swallow the trailing
+          // click so it doesn't also arm the single-bot confirm on this
+          // same button.
+          if (holdCompletedRef.current) {
+            holdCompletedRef.current = false;
+            return;
+          }
+          // Delete-all modal is live — the ×'s are visually present but
+          // behind the backdrop. Treat clicks as no-ops (the modal's own
+          // Cancel / backdrop / Esc handle dismissal).
+          if (armedAll) return;
+          if (isArmedSingle) {
+            void deleteBot(bot.id);
+          } else {
+            armDelete(botKey);
+          }
+        }}
+      >
+        {isArmedSingle && (
+          <span className={styles.conversationDeletePrompt}>Are you sure?</span>
+        )}
+        <span className={styles.conversationDeleteGlyph}>
+          {isArmedSingle ? "✓" : "×"}
+        </span>
+      </button>
+    );
+  };
+
+  // ── Developer Tools launcher + floating panel ───────────────────────
+  // Launcher is the inline key-glyph button rendered immediately after the
+  // PRISM wordmark on logged-in surfaces. It renders
+  // only when `DEV_TOOLS_ENABLED` is true — any prod build without the
+  // NEXT_PUBLIC_DEV_TOOLS flag set at build time gets null back and the
+  // JSX is eliminated at compile time.
+  //
+  // The panel itself is fixed-position and deliberately non-modal: no
+  // backdrop, no focus trap, no click-away close. That keeps it useful
+  // while testing density/layout changes in the UI underneath.
+  const renderDevToolsButton = (): React.JSX.Element | null => {
+    if (!DEV_TOOLS_ENABLED) return null;
+    return (
+      <button
+        type="button"
+        className={`${styles.themeToggleButton} ${styles.devToolsButton}`}
+        onClick={() => {
+          setDevToolsMessage(null);
+          setDevToolsOpen((open) => !open);
+        }}
+        aria-label="Open developer tools"
+        title="Developer tools"
+      >
+        <IconKey />
+      </button>
+    );
+  };
+
+  const renderDevToolsPanel = (): React.JSX.Element | null => {
+    if (!DEV_TOOLS_ENABLED || !devToolsOpen) return null;
+    const densityStageTargets = pickerDensityStageTargets(
+      viewportWidth,
+      viewportHeight
+    );
+    return (
+      <div
+        ref={devToolsPanelRef}
+        className={styles.devToolsFloatingPanel}
+        role="dialog"
+        aria-labelledby="dev-tools-title"
+      >
+        <div
+          className={styles.devToolsHeader}
+          onPointerDown={startDevToolsPanelDrag}
+          onPointerMove={dragDevToolsPanel}
+          onPointerUp={endDevToolsPanelDrag}
+          onPointerCancel={endDevToolsPanelDrag}
+        >
+          <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
+            Developer tools
+          </h2>
+          <span className={styles.devToolsDragHint} aria-hidden="true">
+            ⋮⋮
+          </span>
+        </div>
+        <div className={styles.devToolsSection}>
+          <h3 className={styles.devToolsSectionTitle}>Viewport</h3>
+          <p className={styles.devToolsViewportStatus} aria-live="polite">
+            <span>
+              Width <strong>{viewportWidth}px</strong>
+            </span>
+            <span>
+              Height <strong>{viewportHeight}px</strong>
+            </span>
+          </p>
+        </div>
+
+        <div className={styles.devToolsSection}>
+          <h3 className={styles.devToolsSectionTitle}>Bots</h3>
+          <p className={styles.devToolsSectionHint}>
+            Current count: <strong>{bots.length}</strong>
+          </p>
+          <label className={styles.devToolsCountControl}>
+            <span>Bot quantity</span>
+            <input
+              type="number"
+              min={DEV_TOOLS_BOT_QUANTITY_MIN}
+              max={DEV_TOOLS_BOT_QUANTITY_MAX}
+              step={1}
+              value={devToolsBotQuantity}
+              aria-label="Bot quantity to add or delete"
+              onChange={(event) => {
+                const next = event.currentTarget.value;
+                setDevToolsBotQuantity(
+                  next === "" ? "" : clampDevToolsBotQuantity(Number(next))
+                );
+              }}
+              disabled={devToolsBusy}
+            />
+          </label>
+          <div className={styles.devToolsQuantityRail} aria-label="Quick bot quantities">
+            {DEV_TOOLS_BOT_QUANTITY_PRESETS.map((quantity) => (
+              <button
+                key={quantity}
+                type="button"
+                className={`${styles.devToolsPresetButton} ${
+                  resolvedDevToolsBotQuantity === quantity ? styles.devToolsPresetButtonActive : ""
+                }`}
+                onClick={() => setDevToolsBotQuantity(quantity)}
+                disabled={devToolsBusy}
+              >
+                {quantity}
+              </button>
+            ))}
+          </div>
+          <p className={styles.devToolsSectionHint}>
+            Stage buttons set total bots for the current viewport. The target
+            is recalculated on click/tap before bots are added or deleted.
+          </p>
+          <div
+            className={styles.devToolsStageRail}
+            aria-label="Bot picker density stages"
+          >
+            {densityStageTargets.map((stage) => {
+              const isCurrentTarget = bots.length === stage.targetCount;
+              return (
+                <button
+                  key={stage.id}
+                  type="button"
+                  className={`${styles.devToolsStageButton} ${
+                    isCurrentTarget ? styles.devToolsStageButtonActive : ""
+                  }`}
+                  onClick={() => void devToolsSetBotDensityStage(stage.id)}
+                  disabled={devToolsBusy}
+                >
+                  <span>{stage.label}</span>
+                  <strong>{stage.targetCount}</strong>
+                  <small>{stage.description}</small>
+                </button>
+              );
+            })}
+          </div>
+          <div className={styles.devToolsActions}>
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() => void devToolsAddRandomBots()}
+              disabled={devToolsBusy}
+            >
+              Add {resolvedDevToolsBotQuantity} random{" "}
+              {resolvedDevToolsBotQuantity === 1 ? "bot" : "bots"}
+            </button>
+            <button
+              type="button"
+              className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+              onClick={() => void devToolsDeleteAllBots()}
+              disabled={devToolsBusy || bots.length === 0}
+            >
+              Delete all bots
+            </button>
+          </div>
+        </div>
+
+        {devToolsMessage && (
+          <p className={styles.devToolsStatus} role="status">
+            {devToolsMessage}
+          </p>
+        )}
+
+        <div className={styles.deleteAllModalActions}>
+          <button
+            type="button"
+            className={styles.deleteAllModalCancel}
+            onClick={closeDevTools}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // ── Mobile right-panel launcher ─────────────────────────────────────
+  // Mirrors the left hamburger now that Settings / Bots / Images are
+  // spatially right-side drawers on mobile instead of full-screen sheets.
+  const renderMobilePanelLauncher = (): React.JSX.Element => {
+    const launcherHidden = sidebarOpen || panel !== null;
+    return (
+      <>
+        <button
+          type="button"
+          className={`${styles.panelMenuToggle} ${launcherHidden ? styles.menuToggleHidden : ""}`}
+          data-right-panel-affordance="true"
+          onClick={() => {
+            setSidebarOpen(false);
+            setRightMenuOpen(open => !open);
+          }}
+          aria-label="Open Settings, Bots, and Images"
+          aria-haspopup="menu"
+          tabIndex={launcherHidden ? -1 : 0}
+        >
+          ☰
+        </button>
+        {rightMenuOpen && !launcherHidden && (
+          <div
+            className={styles.panelQuickMenu}
+            data-right-panel-affordance="true"
+            role="menu"
+            aria-label="Right-side panels"
+          >
+            <button type="button" role="menuitem" onClick={() => openRightPanel("settings")}>
+              Settings
+            </button>
+            <button type="button" role="menuitem" onClick={() => openRightPanel("bots")}>
+              Bots
+            </button>
+            <button type="button" role="menuitem" onClick={() => openRightPanel("images")}>
+              Images
+            </button>
+          </div>
+        )}
+      </>
+    );
+  };
+
+  // ── Shared right-hand panels (Settings / Bots / Images) ─────────────
+  // Both the Chat shell and the Sandbox shell reach these three drawers
+  // via the sidebar footer. Extracted into a single helper so the
+  // surfaces stay in lockstep — a fix to the Bots panel shouldn't need
+  // to be applied twice, and the shell backdrop click behaviour must
+  // match in both modes so the overlay feels like one system, not two
+  // parallel implementations.
+  //
+  // Returned JSX is a fragment so the helper plugs straight into the
+  // existing render tree without introducing a wrapper element that
+  // would perturb CSS grid/flex layout in the parent <main>.
+  const renderSharedPanels = (): React.JSX.Element => (
+    <>
+      {panel && (
+        <div
+          className={styles.panelOverlay}
+          onClick={closePanel}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* ── Settings panel ── */}
+      {panel === "settings" && (
+        <div className={styles.panel}>
+          <div className={styles.panelHeader}><h3>Settings</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
+          {settings && (
+            <form className={styles.form} onSubmit={saveSettings}>
+              <label>Theme<select value={settings.theme} onChange={e => setSettings(p => p ? { ...p, theme: e.target.value as Theme } : p)}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Auto (system)</option></select></label>
+              <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
+              {settings.hasOpenAiApiKey && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={() => void clearSavedKey()}
+                  disabled={busy}
+                >
+                  Clear saved key
+                </button>
+              )}
+              <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
+              <button type="submit" disabled={busy}>Save</button>
+            </form>
+          )}
+          <div className={styles.dangerZone}>
+            <h4>Danger Zone</h4>
+            <p className={styles.muted}>Accounts inactive for over 60 days are removed automatically. You can also permanently delete this account right now.</p>
+            <button
+              type="button"
+              className={styles.dangerButton}
+              onClick={() => void deleteAccount()}
+              disabled={busy}
+            >
+              Delete account
+            </button>
+          </div>
+          <h4 className={styles.sectionLabel}>Memories</h4>
+          <ul className={styles.memoryList}>
+            {memories.map(m => (
+              <li key={m.id}><p>{m.text}</p><small className={styles.muted}>confidence {m.confidence.toFixed(2)}</small><button type="button" onClick={() => void deleteMemory(m.id)}>Delete</button></li>
+            ))}
+          </ul>
+          {/* Scoped to panelError so a chat-send 401 doesn't render a
+              duplicate error on top of the Settings drawer. */}
+          {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+        </div>
+      )}
+
+      {/* ── Bots panel ── */}
+      {panel === "bots" && (() => {
+        // `panelBots` neutralises the shell --accent triad that bleeds
+        // in from the active bot's color. See .panelBots in
+        // page.module.css for the override; without it, every button
+        // and focus ring inside the panel would paint in whichever
+        // bot's hue is driving the app shell right now.
+        //
+        // The form's primary button is the one exception that OPTS
+        // BACK IN to a color — see primaryStyle below — so it can
+        // preview the bot's picked color ("Like the new-chat button")
+        // exactly when pressing it will do something useful. In every
+        // other state we keep the panelBots B/W override in place so
+        // the button reads as inert.
+
+        // ── Primary button state machine ───────────────────────────
+        //   create + disabled (no name)        → B/W "Create bot"
+        //   create + enabled  (name filled)    → bot-color "Create bot"
+        //   edit   + no changes                → B/W "Update" (disabled)
+        //   edit   + has changes               → bot-color "Update"
+        const editingBot = editingBotId
+          ? bots.find(b => b.id === editingBotId) ?? null
+          : null;
+        const trimmedName = newBotName.trim();
+        const nameIsPresent = trimmedName.length > 0;
+
+        // Normalize colors to lower-case hex so comparison isn't tripped
+        // up by the picker returning "#ABCDEF" while the DB stored
+        // "#abcdef" (or vice versa). Everything downstream in the
+        // form already tolerates either case.
+        const normalizeColor = (hex: string | null | undefined) =>
+          (hex ?? "").trim().toLowerCase();
+        // Compare against the seeded snapshot (startEditBot stored the
+        // hydrated values into editOriginalRef.current) rather than the
+        // raw bot row. This keeps legacy bots with no stored color from
+        // reading as "dirty" the instant edit mode opens, since the
+        // picker's random seed color matches the seed we captured.
+        const editPristine = editingBot ? editOriginalRef.current : null;
+        const hasEditChanges = editPristine
+          ? trimmedName !== editPristine.name
+            || newBotPrompt !== editPristine.prompt
+            || normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
+            || newBotGlyph !== editPristine.glyph
+            || newBotChatEnabled !== editPristine.chatEnabled
+          : false;
+
+        // "Active" = pressing the button commits something useful.
+        // Drives BOTH the enabled/disabled flag AND whether the bot
+        // color leaks into the button styling (so the picker feels
+        // live as you type a name / tweak the swatch).
+        const primaryActive = editingBotId
+          ? (nameIsPresent && hasEditChanges && !busy)
+          : (nameIsPresent && !busy);
+
+        // Edit mode locks the label to "Update" from the moment edit
+        // starts (even before any field changes) so the user's intent
+        // reads correctly: you're editing, not creating. The B/W vs.
+        // bot-color styling still hinges on hasEditChanges below, so
+        // the inert "Update" button remains visually identical to the
+        // inert "Create bot" button — same chrome, different word.
+        const primaryLabel = editingBotId ? "Update" : "Create bot";
+
+        // Derive the inline --accent / --accent-text / --accent-ink
+        // triad from the currently-picked color so the primary button
+        // paints in the bot's hue whenever it would do something
+        // useful. We also set --accent-hover because the panelBots
+        // scope otherwise pulls it back to a B/W mix; without this,
+        // hovering a bot-colored button would snap to grayscale for
+        // one animation frame.
+        const primaryStyle = primaryActive
+          ? (() => {
+              const accentNormalized = normalizeAccentForTheme(newBotColor, resolvedTheme);
+              const base = deriveAccentStyle(accentNormalized, resolvedTheme);
+              const hoverMix = resolvedTheme === "light"
+                ? `color-mix(in srgb, ${accentNormalized} 85%, #000000 15%)`
+                : `color-mix(in srgb, ${accentNormalized} 88%, #ffffff 12%)`;
+              return { ...base, ["--accent-hover" as string]: hoverMix } as React.CSSProperties;
+            })()
+          : undefined;
+
+        return (
+          <div
+            className={`${styles.panel} ${styles.panelBots}`}
+            data-color-picker-open={colorWheelOpen ? "true" : undefined}
+          >
+            <div className={styles.panelHeader}><h3>Bots</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
+            {/* One form, two modes. editingBotId hydrates the fields
+                with the target bot's values but the layout itself
+                doesn't fork — the primary button simply switches
+                label + color based on hasEditChanges above. */}
+            <form
+              className={styles.form}
+              onSubmit={(e) => void submitBotForm(e)}
+            >
+              {editingBotId && (
+                <div className={styles.formEditingBanner} role="status">
+                  <span className={styles.formEditingBannerLabel}>Editing</span>
+                  <strong className={styles.formEditingBannerName}>
+                    {editingBot?.name ?? "bot"}
+                  </strong>
+                </div>
+              )}
+              <div className={styles.botNameRow}>
+                <ColorGlyphPicker
+                  color={newBotColor}
+                  glyph={newBotGlyph}
+                  onColorChange={setNewBotColor}
+                  onGlyphChange={setNewBotGlyph}
+                  open={colorWheelOpen}
+                  onToggle={() => setColorWheelOpen(o => !o)}
+                  resolvedTheme={resolvedTheme}
+                />
+                <input ref={botNameInputRef} required placeholder="Bot name" value={newBotName} onChange={e => setNewBotName(e.target.value)} />
+              </div>
+              <textarea placeholder="System prompt" value={newBotPrompt} onChange={e => setNewBotPrompt(e.target.value)} />
+              <label className={styles.botChatToggle}>
+                <input
+                  type="checkbox"
+                  checked={newBotChatEnabled}
+                  onChange={event => setNewBotChatEnabled(event.currentTarget.checked)}
+                />
+                <span className={styles.botChatToggleCopy}>
+                  <strong>Available in Chat mode</strong>
+                  <small>
+                    Off by default. Disabled bots stay editable here and usable in Sandbox,
+                    but do not appear in Chat.
+                  </small>
+                </span>
+              </label>
+              <button
+                type="submit"
+                disabled={!primaryActive}
+                style={primaryStyle}
+              >
+                {primaryLabel}
+              </button>
+            </form>
+
+            <div className={styles.botsScrollArea}>
+              <h4 className={styles.sectionLabel}>Built-in</h4>
+              <div
+                className={`${styles.botCard} ${styles.botCardDefault}`}
+                aria-label="Default bot: always available, cannot be deleted"
+              >
+                <span className={styles.botCardGlyph} aria-hidden="true">
+                  <BotGlyph name="bot" />
+                </span>
+                <div className={styles.botCardBody}>
+                  <div className={styles.botCardDefaultHeader}>
+                    <strong>Default</strong>
+                    <span className={styles.botCardBadge}>Always on</span>
+                  </div>
+                  <small>
+                    Plain chat with no custom system prompt. Kept as a permanent fallback so you can always talk to your model, even if every other bot is deleted.
+                  </small>
+                </div>
+              </div>
+
+              {bots.length > 0 && botPanelDashboardActive && !botPanelGroup && (
+                // Collapsed PRISM dashboard root: render five color tiles
+                // instead of the long bot list. Each tile drills into that
+                // color group, keeping the customizer above as the primary
+                // drawer surface even for small bot libraries.
+                <div className={styles.botGroupGrid} role="list" aria-label="Bot color groups">
+                  {botGroupOrder.map(group => {
+                    const groupBots = botGroupBuckets[group.id];
+                    const count = groupBots.length;
+                    // Build the rest/hover gradients from the actual
+                    // bot colors in this bucket so each tile reads as
+                    // its own spectrum slice while the prism border
+                    // still anchors the letter identity.
+                    const gradientRest = buildBotGroupGradient(
+                      groupBots, resolvedTheme, panelColorHarmonyActive, 22
+                    );
+                    const gradientHover = buildBotGroupGradient(
+                      groupBots, resolvedTheme, panelColorHarmonyActive, 32
+                    );
+                    const tileStyle: React.CSSProperties = {
+                      ["--group-color" as string]: group.swatch,
+                      ...(gradientRest
+                        ? { ["--group-gradient" as string]: gradientRest }
+                        : {}),
+                      ...(gradientHover
+                        ? { ["--group-gradient-hover" as string]: gradientHover }
+                        : {}),
+                    };
+                    return (
+                      <button
+                        key={group.id}
+                        type="button"
+                        role="listitem"
+                        className={styles.botGroupTile}
+                        style={tileStyle}
+                        onClick={() => setBotPanelGroup(group.id)}
+                        disabled={count === 0}
+                        aria-label={`Open ${group.label} bots (${count})`}
+                      >
+                        <span className={styles.botGroupTileLetter} aria-hidden="true">
+                          {group.letter}
+                        </span>
+                        <span className={styles.botGroupTileCount}>
+                          {count === 1 ? "1 bot" : `${count} bots`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {bots.length > 0 && botPanelDashboardActive && botPanelGroup && (
+                // Drill-in header. Sits above the filtered list and
+                // gives the user an obvious way back to the dashboard
+                // root without hunting for the panel close affordance.
+                <div className={styles.botGroupDrilldown}>
+                  <button
+                    type="button"
+                    className={styles.botGroupBack}
+                    onClick={() => setBotPanelGroup(null)}
+                    aria-label="Back to all color groups"
+                  >
+                    <span aria-hidden="true">←</span>
+                    <span>All colors</span>
+                  </button>
+                  {activeBotPanelGroup && (
+                    <span
+                      className={styles.botGroupDrilldownTitle}
+                      style={{ ["--group-color" as string]: activeBotPanelGroup.swatch } as React.CSSProperties}
+                    >
+                      <span className={styles.botGroupDrilldownLetter} aria-hidden="true">
+                        {activeBotPanelGroup.letter}
+                      </span>
+                      <strong>{activeBotPanelGroup.label}</strong>
+                      <span className={styles.botGroupDrilldownCount}>
+                        {visibleBotPanelBots.length === 1
+                          ? "1 bot"
+                          : `${visibleBotPanelBots.length} bots`}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {bots.length > 0 && !(botPanelDashboardActive && !botPanelGroup) && (
+                <>
+                  {!botPanelDashboardActive && (
+                    <h4 className={styles.sectionLabel}>Your bots</h4>
+                  )}
+                  {/* List-level data attrs mirror the sidebar conversation list:
+                      `data-delete-holding` during a press-and-hold on any card ×,
+                      `data-delete-armed-all` once the threshold crosses. The CSS
+                      keys off both to drive the glow / tilt / iOS-jiggle visuals
+                      across every card's × in parallel. Wrapping the map in a
+                      div is what gives us a single element to hang those on. */}
+                  <div
+                    className={styles.botList}
+                    data-delete-holding={
+                      holdingKey && holdingKey.startsWith(BOT_DELETE_KEY_PREFIX)
+                        ? "true"
+                        : undefined
+                    }
+                    data-delete-armed-all={
+                      pendingDeleteKey === DELETE_ALL_BOTS_KEY ? "true" : undefined
+                    }
+                  >
+                    {visibleBotPanelBots.map(b => {
+                      const isEditing = editingBotId === b.id;
+                      // Live preview during editing — the card mirrors the
+                      // values currently in the top form so color/glyph
+                      // changes are visible on the card itself before
+                      // "Update" commits.
+                      const liveColor = isEditing ? newBotColor : b.color;
+                      const liveGlyph = isEditing
+                        ? newBotGlyph
+                        : (isBotGlyphName(b.glyph) ? b.glyph : DEFAULT_BOT_GLYPH);
+                      const liveChatEnabled = isEditing
+                        ? newBotChatEnabled
+                        : botIsChatEnabled(b);
+                      // Adornments use a display-only harmony pass at large
+                      // counts so stacked card accents read as one spectrum;
+                      // the saved bot color and edit swatch stay exact.
+                      const cardAccent = liveColor
+                        ? panelBotDisplayAccent(
+                            liveColor,
+                            resolvedTheme,
+                            panelColorHarmonyActive
+                          )
+                        : null;
+                      const cardStyle = cardAccent
+                        ? ({ "--bot-color": cardAccent } as React.CSSProperties)
+                        : undefined;
+                      const cardClassName = isEditing
+                        ? `${styles.botCard} ${styles.botCardEditing}`
+                        : styles.botCard;
+
+                      return (
+                        // Two siblings inside a plain wrapper: the tile area
+                        // (a real <button> so keyboard + screen-reader tap
+                        // parity works) and the × delete affordance. Nesting
+                        // <button> inside <button> is invalid HTML, which is
+                        // why the card itself is a div — matches the sidebar
+                        // conversation row's "title-button + delete-button"
+                        // pattern exactly. `draggable` lifts the wrapper for
+                        // reorder; nested <button> children are drag-inert
+                        // by default so the × and the edit-tap still work.
+                        <div key={b.id} className={cardClassName} style={cardStyle}>
+                          <button
+                            type="button"
+                            className={styles.botCardTile}
+                            onClick={() => startEditBot(b)}
+                            aria-label={`Edit ${b.name}`}
+                            aria-pressed={isEditing}
+                          >
+                            <span className={styles.botCardGlyph} aria-hidden="true">
+                              <BotGlyph name={liveGlyph} />
+                            </span>
+                            <div className={styles.botCardBody}>
+                              <div className={styles.botCardTitleRow}>
+                                <strong>{b.name}</strong>
+                                <span
+                                  className={styles.botCardChatBadge}
+                                  data-enabled={liveChatEnabled ? "true" : undefined}
+                                >
+                                  {liveChatEnabled ? "Chat on" : "Chat off"}
+                                </span>
+                              </div>
+                              <small>{b.system_prompt ? b.system_prompt.slice(0, 80) + "..." : "No system prompt"}</small>
+                            </div>
+                          </button>
+                          {renderBotDeleteButton(b)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+            {/* Errors from createBot / deleteBot / saveBot used to silently
+                surface in the composer behind the drawer overlay. They now
+                live inside the panel next to the action that triggered
+                them. */}
+            {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+          </div>
+        );
+      })()}
+
+      {/* ── Images panel ── */}
+      {panel === "images" && (() => {
+        // Image generation always calls OpenAI DALL-E. Honor the LOCAL
+        // invariant by hiding the form when LOCAL is selected; past images
+        // stay visible so the gallery remains useful.
+        const canGenerate = settings?.preferredProvider === "openai";
+        return (
+          <div className={styles.panel}>
+            <div className={styles.panelHeader}><h3>Images</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
+            {canGenerate ? (
+              <form className={styles.form} onSubmit={generateImg}>
+                <input required placeholder="Describe an image..." value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} />
+                <button type="submit" disabled={busy}>{busy ? "Generating..." : "Generate"}</button>
+              </form>
+            ) : (
+              <div className={styles.imagesGate} role="note">
+                <div className={styles.imagesGateTitle}>Online mode required</div>
+                <p className={styles.muted}>
+                  Image generation uses OpenAI DALL-E, so it only runs when the response
+                  mode is set to <strong>ONLINE</strong>. Flip the toggle above the composer
+                  (or in the sidebar) to enable it.
+                </p>
+              </div>
+            )}
+            {images.length > 0 && <h4 className={styles.sectionLabel}>Recent</h4>}
+            <div className={styles.imageGrid}>
+              {images.map(img => (
+                <a key={img.id} href={img.url} target="_blank" rel="noreferrer"><img src={img.url} alt={img.prompt} /></a>
+              ))}
+            </div>
+            {/* Scoped to panelError so a chat-send 401 from the composer
+                doesn't double up inside the Images drawer. */}
+            {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+          </div>
+        );
+      })()}
+    </>
+  );
+
   // ── Hub ──
   // Landing screen shown immediately after login. Reuses the auth
   // background verbatim so the visual transition from login to hub feels
@@ -4293,6 +8389,7 @@ function HomeContent(): React.JSX.Element {
             />
           </div>
           <PrismWordmark className={styles.brandWordmark} />
+          {renderDevToolsButton()}
         </div>
         <p className={styles.hubGreeting}>
           Welcome back, <span className={styles.hubGreetingName}>{user.displayName}</span>.
@@ -4346,6 +8443,7 @@ function HomeContent(): React.JSX.Element {
           <button type="button" onClick={() => void logout()}>Logout</button>
         </div>
       </div>
+      {renderDevToolsPanel()}
     </main>
   );
 
@@ -4364,10 +8462,14 @@ function HomeContent(): React.JSX.Element {
       <button
         type="button"
         className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
-        onClick={() => setSidebarOpen(o => !o)}
+        onClick={() => {
+          setRightMenuOpen(false);
+          setSidebarOpen(o => !o);
+        }}
         aria-hidden={sidebarOpen || panel !== null}
         tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
       >☰</button>
+      {renderMobilePanelLauncher()}
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       <aside className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}>
@@ -4381,24 +8483,110 @@ function HomeContent(): React.JSX.Element {
           </div>
         </div>
 
-        <button
-          type="button"
-          className={styles.newChatButton}
-          onClick={() => { setSelectedId(null); setDetail(null); setSidebarOpen(false); }}
-        >
-          New chat
-        </button>
+        <div className={styles.newChatGroup}>
+          <button
+            type="button"
+            className={styles.newChatButton}
+            onClick={() => {
+              setSelectedId(null);
+              setDetail(null);
+              // Clear the last-picked bot AND any stale hover preview
+              // so every fresh chat starts at the neutral "no
+              // selection = default" state. Also cancel any pending
+              // hover-dwell timer so a stale preview doesn't commit
+              // after the picker re-mounts.
+              setSelectedBotId(null);
+              setHoveredBotId(null);
+              closeEmptyStateBotSearch();
+              if (hoverDwellTimerRef.current) {
+                clearTimeout(hoverDwellTimerRef.current);
+                hoverDwellTimerRef.current = null;
+              }
+              setPendingIncognito(false);
+              setSidebarOpen(false);
+            }}
+          >
+            New chat
+          </button>
+          {/* Private chat = chat-mode-only sibling. One click seeds the
+              next send as { provider: local, incognito: true } + clears
+              any pending bot pick so the default grayscale Prism persona
+              renders. The conversation row created by the first send
+              carries the incognito flag forever after (not flippable),
+              which the sidebar list and the loaded-detail accent logic
+              both key off. */}
+          <button
+            type="button"
+            className={`${styles.privateChatButton} ${pendingIncognito ? styles.privateChatButtonActive : ""}`}
+            onClick={() => {
+              setSelectedId(null);
+              setDetail(null);
+              setSelectedBotId(null);
+              setHoveredBotId(null);
+              closeEmptyStateBotSearch();
+              if (hoverDwellTimerRef.current) {
+                clearTimeout(hoverDwellTimerRef.current);
+                hoverDwellTimerRef.current = null;
+              }
+              setPendingIncognito(true);
+              setSidebarOpen(false);
+            }}
+            aria-pressed={pendingIncognito}
+            title="Private chat — local only, no memory"
+          >
+            <span className={styles.privateChatButtonIcon} aria-hidden="true">
+              {/* Stroke-only lock glyph so it inherits currentColor and
+                  stays crisp in both themes without a separate asset. */}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="4" y="11" width="16" height="9" rx="2" />
+                <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+              </svg>
+            </span>
+            Private chat
+          </button>
+        </div>
 
-        <span className={styles.sectionLabel}>Conversations</span>
+        {visibleConversations.length > 0 && (
+          <span className={styles.sectionLabel}>Conversations</span>
+        )}
         <ul
           className={styles.conversationList}
           data-delete-holding={holdingKey ? "true" : undefined}
           data-delete-armed-all={pendingDeleteKey === DELETE_ALL_KEY ? "true" : undefined}
         >
-          {conversations.map(c => {
+          {visibleConversations.map(c => {
             const isSelected = c.id === selectedId;
+            // Row color comes from the server-denormalized last-bot
+            // color (or falls back to the live bots list for the
+            // empty-conversation case). Passing --row-color and
+            // --row-border-mix as inline CSS vars lets the CSS side
+            // do the actual fill/border math with color-mix().
+            const rawRowColor = resolveRowColor(c, bots);
+            const rowAccent = rawRowColor
+              ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
+              : null;
+            const rowStyle: React.CSSProperties | undefined = rowAccent
+              ? ({
+                  "--row-color": rowAccent,
+                  "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
+                } as React.CSSProperties)
+              : undefined;
             return (
-              <li key={c.id} className={styles.conversationRow}>
+              <li
+                key={c.id}
+                className={styles.conversationRow}
+                data-private={c.incognito ? "true" : undefined}
+                style={rowStyle}
+              >
                 <button
                   type="button"
                   className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
@@ -4413,7 +8601,9 @@ function HomeContent(): React.JSX.Element {
         </ul>
 
         <div className={styles.sidebarFooter}>
-          <button type="button" onClick={() => { setPanel("settings"); setSidebarOpen(false); }}>Settings</button>
+          <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
+          <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
+          <button type="button" onClick={() => openRightPanel("images")}>Images</button>
           <button type="button" onClick={() => void logout()}>Logout</button>
         </div>
       </aside>
@@ -4429,6 +8619,7 @@ function HomeContent(): React.JSX.Element {
           >
             <PrismWordmark className={styles.hubHomeWordmark} />
           </button>
+          {renderDevToolsButton()}
           <h2>{detail?.title ?? "New conversation"}</h2>
           <div className={styles.headerActions}>
             <button
@@ -4453,30 +8644,408 @@ function HomeContent(): React.JSX.Element {
         </header>
 
         <div className={styles.messages}>
-          {!detail && !pendingReply && (
-            <div className={styles.emptyState}>
-              <EmptyStateIcon bot={activeBot} resolvedTheme={resolvedTheme} />
-              <div className={styles.emptyStateTitle}>What&apos;s on your mind?</div>
-              <p className={styles.emptyStateHint}>
-                Say anything. Prism keeps what matters and lets the rest go.
-              </p>
-            </div>
-          )}
+          {!detail && !pendingReply && (() => {
+            // Chat-mode empty state:
+            //   • DEFAULT — no hover, no commit: rainbow brand mark,
+            //     grayscale shell, generic title/hint, full picker grid.
+            //   • HOVER PREVIEW — hero stays the Prism triangle, tinted
+            //     to the hovered bot's normalized color. Title still
+            //     previews the bot, and the shell accent swaps to that bot.
+            //   • ARMED — hero becomes the bot's full-color glyph, the
+            //     selected tile stays visible, and the hero turns into
+            //     click-to-deselect until the first message sends.
+            // `activeBot` resolves the right bot (hover > armed >
+            // persisted), so title/hint/shell just read from it. The hero
+            // receives the hovered bot as a separate preview input so it
+            // can stay Prism-branded until a click arms the bot.
+            // Density math runs against the FILTERED bot subset, not the
+            // full library. That's what lets the hue lens collapse a
+            // 3000-bot wall back into a low-density grid as soon as the
+            // user picks a hue band — the active stage follows what's
+            // visible, not what exists. Tiles are also placed in color
+            // order via `pickerBots` so the unfiltered grid trends
+            // toward a navigable color map.
+            const pickerGeom =
+              !pendingIncognito && pickerBots.length > 0
+                ? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight)
+                : null;
+            const isArmed =
+              !pendingIncognito &&
+              selectedBotId !== null &&
+              activeBot?.id === selectedBotId;
+            const isPreviewing =
+              !pendingIncognito && hoveredBotId !== null && activeBot?.id === hoveredBotId;
+            const heroBot = pendingIncognito ? null : activeBot;
+            const title = pendingIncognito
+              ? "Private chat"
+              : heroBot?.name?.trim() || "What\u2019s on your mind?";
+            const descriptionPreview = heroBot
+              ? firstLinesOf(heroBot.system_prompt)
+              : "";
+            const hint = pendingIncognito
+              ? "Local only. Nothing from this chat is remembered."
+              : descriptionPreview ||
+                (chatAvailableBots.length > 0
+                  ? "Pick a bot below, or just start typing."
+                  : bots.length > 0
+                    ? "Enable a bot for Chat in the Bots panel, or start with Default."
+                  : "Say anything. Prism keeps what matters and lets the rest go.");
+            const emptyStateStyle = heroBot
+              ? botAccentStyle(heroBot.color, resolvedTheme)
+              : undefined;
+            const emptyStateClassName = [
+              styles.emptyState,
+              emptyStateSearchActive ? styles.emptyStateSearching : null,
+            ].filter(Boolean).join(" ");
+            const renderHero = () => (
+              <EmptyStateIcon
+                bot={isPreviewing ? null : heroBot}
+                previewBot={isPreviewing ? heroBot : null}
+                previewAsBotGlyph={isPreviewing}
+                resolvedTheme={resolvedTheme}
+              />
+            );
+            return (
+              <div className={emptyStateClassName} style={emptyStateStyle}>
+                {/* Hero is non-interactive until the user has armed
+                    a pick — then it becomes the single deselect
+                    affordance (click / tap returns to default). */}
+                {isArmed ? (
+                  <button
+                    type="button"
+                    className={styles.emptyStateIconButton}
+                    onClick={resetEmptyStateBotSelection}
+                    title="Change bot"
+                    aria-label={`Change bot \u2014 currently ${heroBot?.name ?? "selected"}`}
+                  >
+                    {renderHero()}
+                  </button>
+                ) : !pendingIncognito && chatAvailableBots.length > 0 ? (
+                  <button
+                    type="button"
+                    className={`${styles.emptyStateIconButton} ${styles.emptyStateSearchTrigger}`}
+                    onClick={openEmptyStateBotSearch}
+                    title="Search bots"
+                    aria-label="Search bots"
+                  >
+                    {renderHero()}
+                  </button>
+                ) : (
+                  renderHero()
+                )}
+                <div className={styles.emptyStateTitle}>{title}</div>
+                {emptyStateSearchActive ? (
+                  renderEmptyStateBotSearch()
+                ) : (
+                  <p className={styles.emptyStateHint}>{hint}</p>
+                )}
+                {/* Chat-mode start-of-conversation bot picker. Absent in
+                    private chats (the "stripped down further" spec),
+                    absent when the user has no bots yet. Clicking any
+                    bot only arms/highlights the selection; the grid
+                    stays visible until the first message sends.
+
+                    Interaction model:
+                      • Desktop (mouse): onPointerEnter sets
+                        hoveredBotId for a transient preview. The
+                        picker container's onPointerLeave clears it
+                        when the cursor crosses back out. Click arms
+                        via setSelectedBotId.
+                      • Final compact-pixel stage: hover preview is
+                        disabled. Tap/click only arms the selected bot,
+                        updates the interface color, and follows the
+                        same "visible until Send" contract.
+                      • Touch: onPointerEnter is filtered to mouse-only
+                        so a stray touch-generated pointerenter doesn't
+                        double-fire. Click fires normally on tap and
+                        arms the selection.
+
+                    Either way, "Default" is not a tile — it's the
+                    no-selection state. Sending with nothing armed
+                    routes to the grayscale Prism persona (botId
+                    omitted from the request). To go back to default
+                    after arming, click the hero. */}
+                {!pendingIncognito && pickerBots.length > 0 && (() => {
+                  const geom =
+                    pickerGeom ?? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight);
+                  // Outer frame is square on mobile and widescreen on
+                  // desktop; inner picker is pinned to the computed grid
+                  // width so the formation stays centered inside it.
+                  const rowWidth =
+                    geom.gridCols * geom.tileSize +
+                    (geom.gridCols - 1) * geom.tileGap;
+                  const frameStyle: React.CSSProperties = {
+                    "--picker-width": `${geom.pickerWidth}px`,
+                    "--picker-height": `${geom.pickerHeight}px`,
+                    "--picker-parallax-x": "0px",
+                    "--picker-parallax-y": "0px",
+                    "--picker-return-duration": `${BOT_PICKER_RETURN_ANIMATION_MS}ms`,
+                  } as React.CSSProperties;
+                  const pickerStyle: React.CSSProperties = {
+                    "--tile-size": `${geom.tileSize}px`,
+                    "--tile-gap": `${geom.tileGap}px`,
+                    "--tile-hover-scale": String(geom.hoverScale),
+                    "--grid-cols": geom.gridCols,
+                    width: `${rowWidth}px`,
+                  } as React.CSSProperties;
+                  const pickerClassName = [
+                    styles.chatBotPicker,
+                    geom.singleBot ? styles.chatBotPickerSingle : null,
+                    geom.threeBotStack ? styles.chatBotPickerThreeStack : null,
+                    geom.mobileColumnStack ? styles.chatBotPickerMobileColumnStack : null,
+                    geom.crosshairCursor ? styles.chatBotPickerCrosshair : null,
+                    geom.dotCursor ? styles.chatBotPickerDotCursor : null,
+                    geom.solidSwatch ? styles.chatBotPickerSolidSwatch : null,
+                    geom.compactPixelGrid ? styles.chatBotPickerPixelGrid : null,
+                    geom.radialRainbowGradient ? styles.chatBotPickerRainbowGradient : null,
+                  ].filter(Boolean).join(" ");
+                  const pickerCells = pickerFormationCells(pickerBots, geom);
+                  return (
+                    <div
+                      className={styles.chatBotPickerFrame}
+                      data-bot-picker-frame="true"
+                      data-returning-all={botPickerReturnAnimating ? "true" : undefined}
+                      data-search-active={emptyStateSearchActive ? "true" : undefined}
+                      data-touch-active={touchPreview ? "true" : undefined}
+                      style={frameStyle}
+                      onPointerLeave={e => {
+                        // Leaving the picker cancels any pending dwell
+                        // and clears the preview IMMEDIATELY — no
+                        // debounce here. If the user has already
+                        // armed a bot with their eyes, we shouldn't make
+                        // them wait for the preview to fade.
+                        if (e.pointerType === "mouse") {
+                          if (hoverDwellTimerRef.current) {
+                            clearTimeout(hoverDwellTimerRef.current);
+                            hoverDwellTimerRef.current = null;
+                          }
+                          if (!geom.compactPixelGrid) {
+                            resetPickerParallax(e.currentTarget);
+                          }
+                          setHoveredBotId(null);
+                        }
+                      }}
+                      onPointerDown={e => handleTouchPickerDown(e, geom)}
+                      onPointerMove={handleTouchPickerMove}
+                      onPointerUp={handleTouchPickerUp}
+                      onPointerCancel={handleTouchPickerCancel}
+                    >
+                      <div
+                        className={pickerClassName}
+                        role="radiogroup"
+                        aria-label="Bot for this chat"
+                        style={pickerStyle}
+                      >
+                        {pickerCells.map((b, cellIndex) => {
+                        if (!b) {
+                          if (geom.threeBotStack || geom.mobileColumnStack) return null;
+                          return (
+                            <span
+                              key={`blank-${cellIndex}`}
+                              className={styles.chatBotTilePlaceholder}
+                              aria-hidden="true"
+                            />
+                          );
+                        }
+                        const isSelected = selectedBotId === b.id;
+                        const rawColor = b.color?.trim();
+                        const accent = rawColor
+                          ? normalizeAccentForTheme(rawColor, resolvedTheme)
+                          : null;
+                        const tileStyle = accent
+                          ? ({ "--bot-color": accent } as React.CSSProperties)
+                          : undefined;
+                        // Six density levels: full card, flat card,
+                        // larger glyph, glyphless card, selected-dot pixel
+                        // grid, then radial-rainbow abstraction.
+                        let tileClassName = styles.chatBotTile;
+                        if (isSelected) {
+                          tileClassName += ` ${styles.chatBotTileSelected}`;
+                        }
+                        if (geom.flattenTile) {
+                          tileClassName += ` ${styles.chatBotTileFlat}`;
+                        }
+                        if (geom.solidSwatch) {
+                          tileClassName += ` ${styles.chatBotTileSolidSwatch}`;
+                        } else if (geom.hideGlyphByDefault) {
+                          tileClassName += ` ${styles.chatBotTileSwatchOnly}`;
+                        }
+                        const showPixelGridGlyph = geom.compactPixelGrid;
+                        const showSelectedDotGlyph =
+                          geom.selectedDotGlyph && isSelected;
+                        const showTileGlyph =
+                          !geom.hideGlyphByDefault || showPixelGridGlyph;
+                        const showFeaturedName = geom.singleBot;
+                        const tileGlyphSize = showPixelGridGlyph
+                          ? Math.max(
+                              PICKER_PIXEL_GLYPH_MIN_SIZE,
+                              Math.round(geom.tileSize * PICKER_PIXEL_GLYPH_RATIO)
+                            )
+                          : geom.glyphSize;
+                        const tileGlyphStroke = showPixelGridGlyph
+                          ? PICKER_PIXEL_GLYPH_STROKE
+                          : geom.glyphStroke;
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={isSelected}
+                            aria-label={b.name}
+                            className={tileClassName}
+                            data-bot-id={b.id}
+                            onPointerDown={e => {
+                              lastBotPickerPointerTypeRef.current = e.pointerType;
+                            }}
+                            onPointerEnter={e => {
+                              // Debounce the JS-driven preview (hero
+                              // glyph, title/hint, shell accent) so a
+                              // fast sweep across many tiles doesn't
+                              // strobe. The CSS-driven per-tile
+                              // magnification stays instant via pure
+                              // :hover. Any pending timer from the
+                              // previous tile is cancelled — only the
+                              // CURRENT dwell target commits.
+                              if (e.pointerType !== "mouse" || geom.compactPixelGrid) return;
+                              updatePickerParallax(e);
+                              if (hoverDwellTimerRef.current) {
+                                clearTimeout(hoverDwellTimerRef.current);
+                              }
+                              hoverDwellTimerRef.current = setTimeout(() => {
+                                setHoveredBotId(b.id);
+                                hoverDwellTimerRef.current = null;
+                              }, HOVER_DWELL_MS);
+                            }}
+                            onPointerMove={e => {
+                              if (geom.compactPixelGrid) return;
+                              updatePickerParallax(e);
+                            }}
+                            onClick={(e) => {
+                              // Explicit click beats the dwell timer —
+                              // the user made a deliberate choice, no
+                              // reason to wait the 180ms dwell window.
+                              if (hoverDwellTimerRef.current) {
+                                clearTimeout(hoverDwellTimerRef.current);
+                                hoverDwellTimerRef.current = null;
+                              }
+                              // Dense color-map mode starts at Stage 4
+                              // (glyphless cards): the first click snaps
+                              // the hue lens to this bot's color group
+                              // instead of selecting the individual bot.
+                              // Once the lens narrows the visible set,
+                              // normal per-tile selection resumes.
+                              // Grayscale/colorless bots still fall
+                              // through because the lens cannot
+                              // meaningfully target them.
+                              const isDesktopMousePixelClick =
+                                geom.compactPixelGrid &&
+                                e.detail > 0 &&
+                                lastBotPickerPointerTypeRef.current === "mouse";
+                              const shouldRelocateHue =
+                                !emptyStateSearchActive &&
+                                botHasFilterableColor(b) &&
+                                (isDesktopMousePixelClick ||
+                                  (!hueFilterActive &&
+                                    (geom.hideGlyphByDefault ||
+                                      geom.solidSwatch ||
+                                      geom.compactPixelGrid)));
+                              if (
+                                shouldRelocateHue
+                              ) {
+                                const { h } = hexToHsl(b.color!.trim());
+                                const lensPosition = hueLensPositionForHue(h);
+                                setHueFilterCenter(lensPosition);
+                                if (isDesktopMousePixelClick) {
+                                  commitEmptyStateBotSelection(b.id);
+                                  return;
+                                }
+                                setSelectedBotId(null);
+                                setHoveredBotId(null);
+                                return;
+                              }
+                              commitEmptyStateBotSelection(b.id);
+                            }}
+                            title={b.name}
+                            style={tileStyle}
+                          >
+                            {showTileGlyph && (
+                              <span className={styles.chatBotTileBotGlyph}>
+                                {showSelectedDotGlyph ? (
+                                  <>
+                                    <span
+                                      className={styles.chatBotTileSelectedDotGlyph}
+                                      aria-hidden="true"
+                                    />
+                                    <BotGlyph
+                                      name={b.glyph}
+                                      size={tileGlyphSize}
+                                      strokeWidth={tileGlyphStroke}
+                                      className={styles.chatBotTileSelectedHoverGlyph}
+                                    />
+                                  </>
+                                ) : (
+                                  <BotGlyph
+                                    name={b.glyph}
+                                    size={tileGlyphSize}
+                                    strokeWidth={tileGlyphStroke}
+                                  />
+                                )}
+                              </span>
+                            )}
+                            {showFeaturedName && (
+                              <span className={styles.chatBotTileFeaturedName}>
+                                {b.name}
+                              </span>
+                            )}
+                          </button>
+                        );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+          {/* Conversation intro — surfaces AFTER the first message is
+              sent, sits above the message list, and scrolls naturally
+              out of view as the thread grows. Gives the user a "who
+              am I talking to" anchor without pinning it to the viewport.
+              Only rendered when the open conversation has a persisted
+              bot (no bot = default persona, which has no name/glyph of
+              its own to show). */}
+          {detail && conversationBot && (() => {
+            const introStyle = botAccentStyle(conversationBot.color, resolvedTheme);
+            const description = firstLinesOf(conversationBot.system_prompt, 220);
+            return (
+              <div className={styles.conversationIntro} style={introStyle}>
+                <EmptyStateIcon
+                  bot={conversationBot}
+                  resolvedTheme={resolvedTheme}
+                />
+                <div className={styles.conversationIntroName}>
+                  {conversationBot.name}
+                </div>
+                {description && (
+                  <p className={styles.conversationIntroDescription}>
+                    {description}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
           {detail?.messages.map(msg => {
             const status = getMessageStatus(msg);
-            // Historical messages keep their original bot accent bar
-            // even though Chat mode itself doesn't let the user pick a
-            // bot. The accent is pulled into the safe lightness band
-            // via clampAccentLightness so legacy bots whose stored
-            // color drifted outside the picker's current range still
-            // render at a usable fill against the bubble background —
-            // and so two bots differing only slightly in shade still
-            // read as distinct bars, rather than getting flattened to
-            // one accent.
+            // Historical messages keep their original bot accent bar.
+            // The accent is normalized for the active theme so legacy bots
+            // whose stored color drifted outside the current safe range still
+            // render at a usable fill against the bubble background. Private
+            // chats (detail.incognito) suppress the bar entirely so the whole
+            // conversation reads B&W.
             const messageStyle =
-              msg.role === "assistant" && msg.botColor
+              msg.role === "assistant" && msg.botColor && !detail?.incognito
                 ? ({
-                    "--message-accent": clampAccentLightness(
+                    "--message-accent": normalizeAccentForTheme(
                       msg.botColor,
                       resolvedTheme
                     ),
@@ -4519,8 +9088,51 @@ function HomeContent(): React.JSX.Element {
                   expanded={expandedMessageIds.has(msg.id)}
                   onToggle={toggleMessageExpand}
                 />
-                {/* No per-message "Fork here" in Chat mode — forking is a
-                    Sandbox power feature. */}
+                {(() => {
+                  // Chat-mode per-message actions. Identical behavior to
+                  // Sandbox: assistant bubbles get a one-click "Fork here"
+                  // (non-destructive branch), user bubbles get two-stage
+                  // Resend → "Confirm resend?" → rewind+resubmit. Both
+                  // flows funnel through `buildChatRequestBody`, which
+                  // forces incognito turns to LOCAL and otherwise honors
+                  // whatever provider is currently live — so the toggle
+                  // below the textarea and the Resend button compose
+                  // naturally.
+                  const isUser = msg.role === "user";
+                  const armed = isUser && pendingResendId === msg.id;
+                  return (
+                    <div
+                      className={styles.messageActionsSlot}
+                      data-armed={armed ? "true" : undefined}
+                      data-resend-affordance={isUser ? "true" : undefined}
+                    >
+                      <div className={styles.messageActions}>
+                        {isUser ? (
+                          <button
+                            type="button"
+                            className={armed ? styles.messageActionArmed : undefined}
+                            onClick={() => {
+                              if (armed) {
+                                void resendFromMessage(msg);
+                              } else {
+                                armResend(msg.id);
+                              }
+                            }}
+                          >
+                            {armed ? "Confirm resend?" : "Resend"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void forkChat(msg.id)}
+                          >
+                            Fork here
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </article>
             );
           })}
@@ -4537,42 +9149,188 @@ function HomeContent(): React.JSX.Element {
           <div ref={messagesEndRef} aria-hidden="true" />
         </div>
 
-        <form className={styles.compose} onSubmit={sendMessage}>
+        <form
+          className={styles.compose}
+          data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
+          style={composeStyle}
+          onSubmit={sendMessage}
+        >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
-          {/* Incognito is Chat's single compose-adjacent control. It
-              doubles as the online/offline toggle: on = this send goes
-              local-only and isn't remembered; off = use saved provider
-              and let memory capture its usual hints. One pill, one job,
-              no drop-downs — matches the "stripped-down personal Prism"
-              philosophy of this mode. */}
-          <div className={styles.composeTools}>
-            <button
-              type="button"
-              className={`${styles.incognitoToggle} ${incognito ? styles.incognitoToggleActive : ""}`}
-              onClick={() => setIncognito(v => !v)}
-              aria-pressed={incognito}
-              aria-label={
-                incognito
-                  ? "Incognito is on. This send stays local and isn't remembered. Click to turn off."
-                  : "Incognito is off. Click to route the next send local-only and skip memory."
-              }
-              title={
-                incognito
-                  ? "Incognito ON — local only, memory off"
-                  : "Incognito OFF — tap to go offline for the next send"
-              }
-            >
-              <span
-                className={`${styles.incognitoDot} ${incognito ? styles.incognitoDotActive : ""}`}
-                aria-hidden="true"
-              />
-              Incognito
-            </button>
-          </div>
+          {(!detail || detail.messages.length === 0) && (
+            <HueLensControl
+              bots={pickerSourceBots}
+              filteredBots={filteredBots}
+              hueFilterCenter={hueFilterCenter}
+              onHueChange={setHueFilterCenter}
+              hueLensAvailable={hueLensAvailable}
+              trackGradient={hueLensTrackGradient}
+              trackSegments={hueLensTrackSegments}
+            />
+          )}
+          {/* Chat-mode compose carries two knobs now:
+               1. Bot picker — mid-thread override of the conversation's
+                  bot. The dropdown reflects a "pending" pick instantly
+                  (chatBotOverride state), but the shell accent and
+                  conversation intro keep following detail.botId (server
+                  truth) until the NEXT successful send — which is when
+                  chat.ts persists the switch on conversations.bot_id.
+                  That's the "only stick after the new bot replies" UX.
+               2. LOCAL/ONLINE provider toggle — swap between local
+                  Ollama and remote ChatGPT without leaving the chat.
+             Privacy stays conversation-level (sidebar "Private chat"
+             button at chat start). If the open chat is private
+             (detail.incognito) or a brand-new chat is armed as private
+             (pendingIncognito), BOTH controls are disabled — private
+             chats always run as the Default persona on LOCAL per the
+             chat.ts contract. The global "providerLocked" setting
+             still applies to the provider toggle so a user who locked
+             the rail from Sandbox doesn't get a silent override here.
+             No lock dock in this surface: Chat already has Private
+             chat for the "don't leave local" guarantee, and piling a
+             second lock on top would re-introduce the Sandbox-style
+             knob density this mode is supposed to avoid. */}
+          {(() => {
+            const isLocal = settings?.preferredProvider === "local";
+            const globalLocked = settings?.providerLocked ?? false;
+            const chatLocked =
+              detail?.incognito === true || pendingIncognito;
+            const pinnedLocal = chatLocked;
+            const displayLocal = pinnedLocal ? true : isLocal;
+            const providerDisabled = !settings || globalLocked || chatLocked;
+            const lockReason = pinnedLocal
+              ? "Private chats always run on LOCAL."
+              : globalLocked
+                ? `Response mode locked to ${isLocal ? "Local" : "Online"} in Settings.`
+                : null;
+            // Bot-dropdown value resolves in priority order:
+            //   1. chatBotOverride (string | null) — post-detail dropdown
+            //      pick; the pending mid-thread switch.
+            //   2. detail.botId — the conversation's persisted bot
+            //      (authoritative once a thread exists; null = Default
+            //      and must NOT fall through to selectedBotId, which
+            //      could be a stale sync value from an earlier chat).
+            //   3. selectedBotId — only when there's NO conversation yet.
+            //      This makes the dropdown trigger mirror whatever the
+            //      user armed via the empty-state tile picker, so
+            //      its color + glyph match the hero icon.
+            //   4. "" — maps to the Default option.
+            const botSelectValue =
+              chatBotOverride !== undefined
+                ? (chatBotOverride ?? "")
+                : detail
+                  ? (detail.botId ?? "")
+                  : (selectedBotId ?? "");
+            // `showName` gates whether the trigger renders the bot's
+            // NAME next to its glyph. Pre-first-message, the glyph +
+            // pill tint communicate "this bot is armed" without
+            // duplicating the name that's already prominent on the
+            // hero title above. Once the conversation has any message
+            // (optimistic user message counts — the name stays visible
+            // through the first reply), the dropdown becomes a full
+            // "[glyph] [name]" identity pill.
+            const botShowName =
+              !!detail && detail.messages.length > 0;
+            const botFiltersEnabled = botShowName;
+            // The dropdown is deliberately gated until the chat is
+            // actually underway. Rationale: the empty-state tile
+            // picker is already the "starter bot" affordance, so
+            // surfacing a second picker that does the same thing just
+            // dilutes the UI. Flipping this dropdown only becomes
+            // meaningful once there's an existing thread to steer
+            // onto a different bot.
+            const botDisabled =
+              !settings ||
+              chatLocked ||
+              pendingReply ||
+              !detail ||
+              chatAvailableBots.length === 0;
+            const botTitle = chatLocked
+              ? "Private chats always run as the Default persona."
+              : !detail
+                ? "Send your first message to change bots mid-thread."
+                : pendingReply
+                  ? "Wait for the current reply before switching bots."
+                  : chatAvailableBots.length === 0
+                    ? "Default is the only Chat option until you enable a custom bot."
+                    : undefined;
+            // Dropdown is disabled pre-detail, so onChange only fires
+            // once the thread exists. Set the override directly; the
+            // server persists the switch after the new bot's reply.
+            const handleBotSelectChange = (value: string) => {
+              setChatBotOverride(value === "" ? null : value);
+            };
+            return (
+              <div className={styles.composeTools}>
+                <ComposerBotPicker
+                  value={botSelectValue}
+                  onChange={handleBotSelectChange}
+                  bots={botFiltersEnabled ? chatAvailableBots : filteredBots}
+                  resolvedTheme={resolvedTheme}
+                  disabled={botDisabled}
+                  title={botTitle}
+                  ariaLabel="Bot for this chat"
+                  showName={botShowName}
+                  enableFilters={botFiltersEnabled}
+                  hueFilterCenter={hueFilterCenter}
+                  onHueChange={setHueFilterCenter}
+                  hueLensAvailable={hueLensAvailable}
+                  hueLensTrackGradient={hueLensTrackGradient}
+                  hueLensTrackSegments={hueLensTrackSegments}
+                />
+                <div
+                  className={`${styles.modeControl} ${providerDisabled ? styles.modeControlLocked : ""}`}
+                >
+                  <button
+                    type="button"
+                    className={`${styles.modeToggleTrack} ${providerDisabled ? styles.modeToggleTrackLocked : ""}`}
+                    onClick={() => {
+                      if (providerDisabled) return;
+                      void switchProvider(isLocal ? "openai" : "local");
+                    }}
+                    aria-label={
+                      lockReason
+                        ? `${lockReason} (currently ${displayLocal ? "LOCAL" : "ONLINE"})`
+                        : displayLocal
+                          ? "Response mode: Local. Click to switch to Online."
+                          : "Response mode: Online. Click to switch to Local."
+                    }
+                    aria-pressed={!displayLocal}
+                    aria-disabled={providerDisabled}
+                    title={
+                      lockReason
+                        ? lockReason
+                        : displayLocal
+                          ? "Switch to Online"
+                          : "Switch to Local"
+                    }
+                    disabled={providerDisabled}
+                  >
+                    <span
+                      className={`${styles.modeThumb} ${
+                        displayLocal ? styles.modeThumbLocal : styles.modeThumbOnline
+                      }`}
+                    >
+                      <span
+                        className={`${styles.providerDot} ${
+                          displayLocal ? styles.providerDotLocal : styles.providerDotOnline
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <span className={styles.modeThumbLabel}>
+                        {displayLocal ? "LOCAL" : "ONLINE"}
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
           <div className={styles.composeInner}>
             <textarea
+              ref={draftInputRef}
               value={draft}
               onChange={e => setDraft(e.target.value)}
+              onFocus={() => setHoveredBotId(null)}
               placeholder="Say something..."
               spellCheck
               autoCorrect="on"
@@ -4586,61 +9344,21 @@ function HomeContent(): React.JSX.Element {
         </form>
       </section>
 
-      {panel && (
-        <div
-          className={styles.panelOverlay}
-          onClick={closePanel}
-          aria-hidden="true"
+      {renderSharedPanels()}
+      {renderDeleteAllModal()}
+      {renderDevToolsPanel()}
+      {touchPreview && (
+        <TouchPreviewBalloon
+          bot={
+            touchPreview.botId
+              ? bots.find((candidate) => candidate.id === touchPreview.botId) ?? null
+              : null
+          }
+          x={touchPreview.x}
+          y={touchPreview.y}
+          resolvedTheme={resolvedTheme}
         />
       )}
-
-      {/* Settings is the only panel reachable from Chat — Bots/Images
-          are Sandbox-only affordances. */}
-      {panel === "settings" && (
-        <div className={styles.panel}>
-          <div className={styles.panelHeader}><h3>Settings</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
-          {settings && (
-            <form className={styles.form} onSubmit={saveSettings}>
-              <label>Theme<select value={settings.theme} onChange={e => setSettings(p => p ? { ...p, theme: e.target.value as Theme } : p)}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Auto (system)</option></select></label>
-              <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
-              {settings.hasOpenAiApiKey && (
-                <button
-                  type="button"
-                  className={styles.linkButton}
-                  onClick={() => void clearSavedKey()}
-                  disabled={busy}
-                >
-                  Clear saved key
-                </button>
-              )}
-              <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
-              <button type="submit" disabled={busy}>Save</button>
-            </form>
-          )}
-          <div className={styles.dangerZone}>
-            <h4>Danger Zone</h4>
-            <p className={styles.muted}>Accounts inactive for over 60 days are removed automatically. You can also permanently delete this account right now.</p>
-            <button
-              type="button"
-              className={styles.dangerButton}
-              onClick={() => void deleteAccount()}
-              disabled={busy}
-            >
-              Delete account
-            </button>
-          </div>
-          <h4 className={styles.sectionLabel}>Memories</h4>
-          <ul className={styles.memoryList}>
-            {memories.map(m => (
-              <li key={m.id}><p>{m.text}</p><small className={styles.muted}>confidence {m.confidence.toFixed(2)}</small><button type="button" onClick={() => void deleteMemory(m.id)}>Delete</button></li>
-            ))}
-          </ul>
-          {/* Scoped to panelError so a chat-send 401 doesn't render a
-              duplicate error on top of the Settings drawer. */}
-          {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-        </div>
-      )}
-      {renderDeleteAllModal()}
     </main>
   );
 
@@ -4657,10 +9375,14 @@ function HomeContent(): React.JSX.Element {
       <button
         type="button"
         className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
-        onClick={() => setSidebarOpen(o => !o)}
+        onClick={() => {
+          setRightMenuOpen(false);
+          setSidebarOpen(o => !o);
+        }}
         aria-hidden={sidebarOpen || panel !== null}
         tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
       >☰</button>
+      {renderMobilePanelLauncher()}
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
@@ -4675,7 +9397,28 @@ function HomeContent(): React.JSX.Element {
           </div>
         </div>
 
-        <button type="button" className={styles.newChatButton} onClick={() => { setSelectedId(null); setDetail(null); setSidebarOpen(false); }}>New chat</button>
+        <button
+          type="button"
+          className={styles.newChatButton}
+          onClick={() => {
+            setSelectedId(null);
+            setDetail(null);
+            // Match Chat-mode semantics: every fresh Sandbox chat lands
+            // on the default-unselected state with the tile grid
+            // visible, so the user always starts from a clean pick.
+            // Also cancel any pending hover dwell so a stale preview
+            // doesn't commit after the picker re-mounts.
+            setSelectedBotId(null);
+            setHoveredBotId(null);
+            if (hoverDwellTimerRef.current) {
+              clearTimeout(hoverDwellTimerRef.current);
+              hoverDwellTimerRef.current = null;
+            }
+            setSidebarOpen(false);
+          }}
+        >
+          New chat
+        </button>
 
         <div className={styles.sidebarField}>
           <span className={styles.sectionLabel}>Online provider</span>
@@ -4701,16 +9444,38 @@ function HomeContent(): React.JSX.Element {
             online/offline toggle there, and Sandbox deliberately has no
             cross-session memory to "hide from" in the first place. */}
 
-        <span className={styles.sectionLabel}>Conversations</span>
+        {visibleConversations.length > 0 && (
+          <span className={styles.sectionLabel}>Conversations</span>
+        )}
         <ul
           className={styles.conversationList}
           data-delete-holding={holdingKey ? "true" : undefined}
           data-delete-armed-all={pendingDeleteKey === DELETE_ALL_KEY ? "true" : undefined}
         >
-          {conversations.map(c => {
+          {visibleConversations.map(c => {
             const isSelected = c.id === selectedId;
+            // Same row-tint resolution as the Chat-mode sidebar — shared
+            // CSS tokens do the actual painting, we just push the vars.
+            // Sandbox rows "live-update" on each reply because the
+            // server's lastBotColor reflects whoever just spoke, and
+            // refreshConversations() fires after every send.
+            const rawRowColor = resolveRowColor(c, bots);
+            const rowAccent = rawRowColor
+              ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
+              : null;
+            const rowStyle: React.CSSProperties | undefined = rowAccent
+              ? ({
+                  "--row-color": rowAccent,
+                  "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
+                } as React.CSSProperties)
+              : undefined;
             return (
-              <li key={c.id} className={styles.conversationRow}>
+              <li
+                key={c.id}
+                className={styles.conversationRow}
+                data-private={c.incognito ? "true" : undefined}
+                style={rowStyle}
+              >
                 <button
                   type="button"
                   className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
@@ -4718,9 +9483,6 @@ function HomeContent(): React.JSX.Element {
                 >
                   {c.title}
                 </button>
-                {/* The active chat uses the header-level Delete button instead, so
-                    the sidebar × is suppressed for it to avoid two controls for
-                    the same action. */}
                 {!isSelected && renderChatDeleteButton(c)}
               </li>
             );
@@ -4728,9 +9490,9 @@ function HomeContent(): React.JSX.Element {
         </ul>
 
         <div className={styles.sidebarFooter}>
-          <button type="button" onClick={() => { setPanel("settings"); setSidebarOpen(false); }}>Settings</button>
-          <button type="button" onClick={() => { setPanel("bots"); setSidebarOpen(false); }}>Bots</button>
-          <button type="button" onClick={() => { setPanel("images"); setSidebarOpen(false); }}>Images</button>
+          <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
+          <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
+          <button type="button" onClick={() => openRightPanel("images")}>Images</button>
           <button type="button" onClick={() => void logout()}>Logout</button>
         </div>
       </aside>
@@ -4747,8 +9509,20 @@ function HomeContent(): React.JSX.Element {
           >
             <PrismWordmark className={styles.hubHomeWordmark} />
           </button>
+          {renderDevToolsButton()}
           <h2>{detail?.title ?? "New conversation"}</h2>
-          {selectedBotId && <span className={styles.badge}>Bot</span>}
+          {activeBot && (
+            <button
+              type="button"
+              className={styles.badge}
+              onClick={openActiveBotCustomizer}
+              aria-label={`Edit ${activeBot.name}`}
+              title={`Edit ${activeBot.name}`}
+            >
+              <span>EDIT</span>
+              <span>BOT</span>
+            </button>
+          )}
           <div className={styles.headerActions}>
             <button
               type="button"
@@ -4778,30 +9552,355 @@ function HomeContent(): React.JSX.Element {
         </header>
 
         <div className={styles.messages}>
-          {!detail && !pendingReply && (
-            <div className={styles.emptyState}>
-              <EmptyStateIcon bot={activeBot} resolvedTheme={resolvedTheme} />
-              <div className={styles.emptyStateTitle}>Start a new conversation</div>
-              <p className={styles.emptyStateHint}>
-                {selectedBotId
-                  ? "You're chatting with a custom bot. Ask it anything."
-                  : "Type a message below to begin. Hover any bubble to fork a reply or resend your own. Exports and custom bots live in the header."}
-              </p>
-            </div>
-          )}
+          {!detail && !pendingReply && (() => {
+            // Sandbox empty state — mirrors the Chat-mode empty state so
+            // both modes feel like the same "start a new chat" surface:
+            //   • DEFAULT — no hover, no armed bot: brand mark hero, full
+            //     picker grid, generic title/hint.
+            //   • HOVER PREVIEW — hero stays the Prism triangle, tinted
+            //     to the hovered bot's normalized color. Title/hint still
+            //     preview the bot, and the shell accent swaps to that bot.
+            //   • ARMED — hero becomes the bot's full-color glyph, the
+            //     selected tile stays visible, compose dropdown
+            //     auto-populates, and the hero turns into
+            //     click-to-deselect until a message sends.
+            //
+            // The compose bot dropdown stays DISABLED while !detail so
+            // the tile picker is the single arming path pre-chat;
+            // once the first send lands, detail exists and the dropdown
+            // takes over as the mid-thread bot switcher.
+            //
+            // Picker geometry runs against the FILTERED subset so the
+            // hue lens can step the density stage back when the band
+            // contains far fewer bots than the full library.
+            const pickerGeom =
+              pickerBots.length > 0
+                ? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight)
+                : null;
+            const isArmed =
+              selectedBotId !== null &&
+              activeBot?.id === selectedBotId;
+            const isPreviewing =
+              hoveredBotId !== null && activeBot?.id === hoveredBotId;
+            const heroBot = activeBot;
+            const title =
+              heroBot?.name?.trim() || "Start a new conversation";
+            const descriptionPreview = heroBot
+              ? firstLinesOf(heroBot.system_prompt)
+              : "";
+            const hint =
+              descriptionPreview ||
+              (bots.length > 0
+                ? "Pick a bot below, or just start typing. You can swap bots between sends."
+                : "Type a message below to begin. Hover any bubble to fork a reply or resend your own. Exports and custom bots live in the header.");
+            const emptyStateStyle = heroBot
+              ? botAccentStyle(heroBot.color, resolvedTheme)
+              : undefined;
+            const emptyStateClassName = [
+              styles.emptyState,
+              emptyStateSearchActive ? styles.emptyStateSearching : null,
+            ].filter(Boolean).join(" ");
+            const renderHero = () => (
+              <EmptyStateIcon
+                bot={isPreviewing ? null : heroBot}
+                previewBot={isPreviewing ? heroBot : null}
+                previewAsBotGlyph={isPreviewing}
+                resolvedTheme={resolvedTheme}
+              />
+            );
+            return (
+              <div className={emptyStateClassName} style={emptyStateStyle}>
+                {/* Hero becomes a deselect button once a bot is armed —
+                    click it to drop back to Default while keeping the
+                    grid available until a message sends. */}
+                {isArmed ? (
+                  <button
+                    type="button"
+                    className={styles.emptyStateIconButton}
+                    onClick={resetEmptyStateBotSelection}
+                    title="Change bot"
+                    aria-label={`Change bot \u2014 currently ${heroBot?.name ?? "selected"}`}
+                  >
+                    {renderHero()}
+                  </button>
+                ) : bots.length > 0 ? (
+                  <button
+                    type="button"
+                    className={`${styles.emptyStateIconButton} ${styles.emptyStateSearchTrigger}`}
+                    onClick={openEmptyStateBotSearch}
+                    title="Search bots"
+                    aria-label="Search bots"
+                  >
+                    {renderHero()}
+                  </button>
+                ) : (
+                  renderHero()
+                )}
+                <div className={styles.emptyStateTitle}>{title}</div>
+                {emptyStateSearchActive ? (
+                  renderEmptyStateBotSearch()
+                ) : (
+                  <p className={styles.emptyStateHint}>{hint}</p>
+                )}
+                {pickerBots.length > 0 && (() => {
+                  // Same geometry math as the Chat-mode picker: mobile
+                  // stays square, desktop goes widescreen, and density
+                  // stages scale from the viewport-driven frame width.
+                  // Sourced from `pickerBots` (color-sorted view of the
+                  // hue-lens-filtered library) so the unfiltered grid
+                  // reads as a navigable color map.
+                  const geom =
+                    pickerGeom ?? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight);
+                  const rowWidth =
+                    geom.gridCols * geom.tileSize +
+                    (geom.gridCols - 1) * geom.tileGap;
+                  const frameStyle: React.CSSProperties = {
+                    "--picker-width": `${geom.pickerWidth}px`,
+                    "--picker-height": `${geom.pickerHeight}px`,
+                    "--picker-parallax-x": "0px",
+                    "--picker-parallax-y": "0px",
+                    "--picker-return-duration": `${BOT_PICKER_RETURN_ANIMATION_MS}ms`,
+                  } as React.CSSProperties;
+                  const pickerStyle: React.CSSProperties = {
+                    "--tile-size": `${geom.tileSize}px`,
+                    "--tile-gap": `${geom.tileGap}px`,
+                    "--tile-hover-scale": String(geom.hoverScale),
+                    "--grid-cols": geom.gridCols,
+                    width: `${rowWidth}px`,
+                  } as React.CSSProperties;
+                  const pickerClassName = [
+                    styles.chatBotPicker,
+                    geom.singleBot ? styles.chatBotPickerSingle : null,
+                    geom.threeBotStack ? styles.chatBotPickerThreeStack : null,
+                    geom.mobileColumnStack ? styles.chatBotPickerMobileColumnStack : null,
+                    geom.crosshairCursor ? styles.chatBotPickerCrosshair : null,
+                    geom.dotCursor ? styles.chatBotPickerDotCursor : null,
+                    geom.solidSwatch ? styles.chatBotPickerSolidSwatch : null,
+                    geom.compactPixelGrid ? styles.chatBotPickerPixelGrid : null,
+                    geom.radialRainbowGradient ? styles.chatBotPickerRainbowGradient : null,
+                  ].filter(Boolean).join(" ");
+                  const pickerCells = pickerFormationCells(pickerBots, geom);
+                  return (
+                    <div
+                      className={styles.chatBotPickerFrame}
+                      data-bot-picker-frame="true"
+                      data-returning-all={botPickerReturnAnimating ? "true" : undefined}
+                      data-search-active={emptyStateSearchActive ? "true" : undefined}
+                      data-touch-active={touchPreview ? "true" : undefined}
+                      style={frameStyle}
+                      onPointerLeave={e => {
+                        // Cursor out → cancel any pending dwell and
+                        // clear preview immediately. No debounce on
+                        // leave — we don't want the preview to
+                        // linger once the cursor has moved on.
+                        if (e.pointerType === "mouse") {
+                          if (hoverDwellTimerRef.current) {
+                            clearTimeout(hoverDwellTimerRef.current);
+                            hoverDwellTimerRef.current = null;
+                          }
+                          if (!geom.compactPixelGrid) {
+                            resetPickerParallax(e.currentTarget);
+                          }
+                          setHoveredBotId(null);
+                        }
+                      }}
+                      onPointerDown={e => handleTouchPickerDown(e, geom)}
+                      onPointerMove={handleTouchPickerMove}
+                      onPointerUp={handleTouchPickerUp}
+                      onPointerCancel={handleTouchPickerCancel}
+                    >
+                      <div
+                        className={pickerClassName}
+                        role="radiogroup"
+                        aria-label="Bot for this chat"
+                        style={pickerStyle}
+                      >
+                        {pickerCells.map((b, cellIndex) => {
+                        if (!b) {
+                          if (geom.threeBotStack || geom.mobileColumnStack) return null;
+                          return (
+                            <span
+                              key={`blank-${cellIndex}`}
+                              className={styles.chatBotTilePlaceholder}
+                              aria-hidden="true"
+                            />
+                          );
+                        }
+                        const isSelected = selectedBotId === b.id;
+                        const rawColor = b.color?.trim();
+                        const accent = rawColor
+                          ? normalizeAccentForTheme(rawColor, resolvedTheme)
+                          : null;
+                        const tileStyle = accent
+                          ? ({ "--bot-color": accent } as React.CSSProperties)
+                          : undefined;
+                        // Six density levels: full card, flat card,
+                        // glyphless card, borderless square pixel, compact
+                        // gapless pixel grid, then selected-dot pixel grid.
+                        let tileClassName = styles.chatBotTile;
+                        if (isSelected) {
+                          tileClassName += ` ${styles.chatBotTileSelected}`;
+                        }
+                        if (geom.flattenTile) {
+                          tileClassName += ` ${styles.chatBotTileFlat}`;
+                        }
+                        if (geom.solidSwatch) {
+                          tileClassName += ` ${styles.chatBotTileSolidSwatch}`;
+                        } else if (geom.hideGlyphByDefault) {
+                          tileClassName += ` ${styles.chatBotTileSwatchOnly}`;
+                        }
+                        const showPixelGridGlyph = geom.compactPixelGrid;
+                        const showSelectedDotGlyph =
+                          geom.selectedDotGlyph && isSelected;
+                        const showTileGlyph =
+                          !geom.hideGlyphByDefault || showPixelGridGlyph;
+                        const showFeaturedName = geom.singleBot;
+                        const tileGlyphSize = showPixelGridGlyph
+                          ? Math.max(
+                              PICKER_PIXEL_GLYPH_MIN_SIZE,
+                              Math.round(geom.tileSize * PICKER_PIXEL_GLYPH_RATIO)
+                            )
+                          : geom.glyphSize;
+                        const tileGlyphStroke = showPixelGridGlyph
+                          ? PICKER_PIXEL_GLYPH_STROKE
+                          : geom.glyphStroke;
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={isSelected}
+                            aria-label={b.name}
+                            className={tileClassName}
+                            data-bot-id={b.id}
+                            onPointerDown={e => {
+                              lastBotPickerPointerTypeRef.current = e.pointerType;
+                            }}
+                            onPointerEnter={e => {
+                              // Debounce the JS-driven preview (hero
+                              // glyph, title/hint, shell accent) so a
+                              // fast sweep across tiles doesn't strobe.
+                              // The CSS-driven per-tile magnification
+                              // stays instant via pure :hover. Any
+                              // pending timer from the previous tile is
+                              // cancelled — only the CURRENT dwell
+                              // target commits.
+                              if (e.pointerType !== "mouse" || geom.compactPixelGrid) return;
+                              updatePickerParallax(e);
+                              if (hoverDwellTimerRef.current) {
+                                clearTimeout(hoverDwellTimerRef.current);
+                              }
+                              hoverDwellTimerRef.current = setTimeout(() => {
+                                setHoveredBotId(b.id);
+                                hoverDwellTimerRef.current = null;
+                              }, HOVER_DWELL_MS);
+                            }}
+                            onPointerMove={e => {
+                              if (geom.compactPixelGrid) return;
+                              updatePickerParallax(e);
+                            }}
+                            onClick={(e) => {
+                              // Explicit click beats the dwell timer —
+                              // the user made a deliberate choice, no
+                              // reason to wait the 180ms dwell window.
+                              // Setting selectedBotId also makes the
+                              // compose dropdown auto-populate (both
+                              // read from the same state).
+                              if (hoverDwellTimerRef.current) {
+                                clearTimeout(hoverDwellTimerRef.current);
+                                hoverDwellTimerRef.current = null;
+                              }
+                              // Dense color-map mode mirrors the Chat
+                              // picker. Stage 4 snaps to a hue region
+                              // before individual selection; Stage 5+
+                              // desktop mouse clicks select the exact
+                              // pixel and also move the hue lens there.
+                              // Grayscale bots fall through to direct
+                              // selection because the lens cannot target
+                              // them.
+                              const isDesktopMousePixelClick =
+                                geom.compactPixelGrid &&
+                                e.detail > 0 &&
+                                lastBotPickerPointerTypeRef.current === "mouse";
+                              const shouldRelocateHue =
+                                !emptyStateSearchActive &&
+                                botHasFilterableColor(b) &&
+                                (isDesktopMousePixelClick ||
+                                  (!hueFilterActive &&
+                                    (geom.hideGlyphByDefault ||
+                                      geom.solidSwatch ||
+                                      geom.compactPixelGrid)));
+                              if (
+                                shouldRelocateHue
+                              ) {
+                                const { h } = hexToHsl(b.color!.trim());
+                                const lensPosition = hueLensPositionForHue(h);
+                                setHueFilterCenter(lensPosition);
+                                if (isDesktopMousePixelClick) {
+                                  commitEmptyStateBotSelection(b.id);
+                                  return;
+                                }
+                                setSelectedBotId(null);
+                                setHoveredBotId(null);
+                                return;
+                              }
+                              commitEmptyStateBotSelection(b.id);
+                            }}
+                            title={b.name}
+                            style={tileStyle}
+                          >
+                            {showTileGlyph && (
+                              <span className={styles.chatBotTileBotGlyph}>
+                                {showSelectedDotGlyph ? (
+                                  <>
+                                    <span
+                                      className={styles.chatBotTileSelectedDotGlyph}
+                                      aria-hidden="true"
+                                    />
+                                    <BotGlyph
+                                      name={b.glyph}
+                                      size={tileGlyphSize}
+                                      strokeWidth={tileGlyphStroke}
+                                      className={styles.chatBotTileSelectedHoverGlyph}
+                                    />
+                                  </>
+                                ) : (
+                                  <BotGlyph
+                                    name={b.glyph}
+                                    size={tileGlyphSize}
+                                    strokeWidth={tileGlyphStroke}
+                                  />
+                                )}
+                              </span>
+                            )}
+                            {showFeaturedName && (
+                              <span className={styles.chatBotTileFeaturedName}>
+                                {b.name}
+                              </span>
+                            )}
+                          </button>
+                        );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
           {detail?.messages.map(msg => {
             const status = getMessageStatus(msg);
             // Push the bot's color into the assistant bubble itself so
             // the message owns the accent visually, leaving the header
             // dots free for HUMAN / LOCAL / ONLINE status only. The
-            // color runs through clampAccentLightness so any legacy
-            // shade outside the picker's safe band gets pulled into it
-            // at render time — the bubble never paints a near-black or
-            // near-white stripe that'd blend into the chat bg, and the
-            // inline name glyph inherits the same in-range hex.
+            // color runs through normalizeAccentForTheme so any legacy
+            // shade outside the theme's safe range gets pulled into it
+            // at render time — the bubble never paints a near-black,
+            // near-white, or over-bright stripe, and the inline name glyph
+            // inherits the same in-range hex.
             const normalizedBotColor =
               msg.role === "assistant" && msg.botColor
-                ? clampAccentLightness(msg.botColor, resolvedTheme)
+                ? normalizeAccentForTheme(msg.botColor, resolvedTheme)
                 : null;
             const messageStyle = normalizedBotColor
               ? ({ "--message-accent": normalizedBotColor } as React.CSSProperties)
@@ -4911,26 +10010,67 @@ function HomeContent(): React.JSX.Element {
           <div ref={messagesEndRef} aria-hidden="true" />
         </div>
 
-        <form className={styles.compose} onSubmit={sendMessage}>
+        <form
+          className={styles.compose}
+          data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
+          style={composeStyle}
+          onSubmit={sendMessage}
+        >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
+          {(!detail || detail.messages.length === 0) && (
+            <HueLensControl
+              bots={pickerSourceBots}
+              filteredBots={filteredBots}
+              hueFilterCenter={hueFilterCenter}
+              onHueChange={setHueFilterCenter}
+              hueLensAvailable={hueLensAvailable}
+              trackGradient={hueLensTrackGradient}
+              trackSegments={hueLensTrackSegments}
+            />
+          )}
           <div className={styles.composeTools}>
-            <div className={styles.composeBotControl}>
-              <span className={styles.composeControlLabel}>Bot</span>
-              <select
-                className={styles.composeBotSelect}
-                value={selectedBotId ?? ""}
-                onChange={e => setSelectedBotId(e.target.value || null)}
-                disabled={bots.length === 0}
-                title={
-                  bots.length === 0
-                    ? "Default is the only option until you create a custom bot."
-                    : undefined
-                }
-              >
-                <option value="">Default</option>
-                {bots.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </div>
+            {(() => {
+              const botHasCommenced = !!detail && detail.messages.length > 0;
+              return (
+                <>
+                  {/* Pre-chat (!detail): dropdown is disabled so the tile
+                      picker above is the sole bot-arming path. The dropdown
+                      still mirrors selectedBotId visually — clicking a tile
+                      populates it automatically.
+                      Post-chat (detail set): dropdown becomes the mid-thread
+                      bot switcher. Consecutive sends reuse whatever bot is
+                      currently in selectedBotId; the user explicitly switches
+                      by changing this dropdown. */}
+                  <ComposerBotPicker
+                    value={selectedBotId ?? ""}
+                    onChange={next => setSelectedBotId(next || null)}
+                    bots={botHasCommenced ? bots : filteredBots}
+                    resolvedTheme={resolvedTheme}
+                    disabled={!detail || bots.length === 0}
+                    title={
+                      !detail
+                        ? "Pick a bot from the grid above to start the chat. You can swap here between sends once it begins."
+                        : bots.length === 0
+                          ? "Default is the only option until you create a custom bot."
+                          : undefined
+                    }
+                    ariaLabel="Bot for the next message"
+                    // Same "hide name until a message exists" policy as Chat
+                    // mode. The grid picker above is the loud identity
+                    // affordance pre-send; the compose rail just reflects the
+                    // choice as a tinted glyph. Once a message is in the
+                    // thread, the pill becomes a full "[glyph] [name]" pick.
+                    showName={botHasCommenced}
+                    enableFilters={botHasCommenced}
+                    hueFilterCenter={hueFilterCenter}
+                    onHueChange={setHueFilterCenter}
+                    hueLensAvailable={hueLensAvailable}
+                    hueLensTrackGradient={hueLensTrackGradient}
+                    hueLensTrackSegments={hueLensTrackSegments}
+                  />
+                </>
+              );
+            })()}
             {(() => {
               const isLocal = settings?.preferredProvider === "local";
               const providerLocked = settings?.providerLocked ?? false;
@@ -5019,8 +10159,10 @@ function HomeContent(): React.JSX.Element {
           </div>
           <div className={styles.composeInner}>
             <textarea
+              ref={draftInputRef}
               value={draft}
               onChange={e => setDraft(e.target.value)}
+              onFocus={() => setHoveredBotId(null)}
               placeholder="Ask anything..."
               spellCheck
               autoCorrect="on"
@@ -5034,282 +10176,21 @@ function HomeContent(): React.JSX.Element {
         </form>
       </section>
 
-      {panel && (
-        <div
-          className={styles.panelOverlay}
-          onClick={closePanel}
-          aria-hidden="true"
+      {renderSharedPanels()}
+      {renderDeleteAllModal()}
+      {renderDevToolsPanel()}
+      {touchPreview && (
+        <TouchPreviewBalloon
+          bot={
+            touchPreview.botId
+              ? bots.find((candidate) => candidate.id === touchPreview.botId) ?? null
+              : null
+          }
+          x={touchPreview.x}
+          y={touchPreview.y}
+          resolvedTheme={resolvedTheme}
         />
       )}
-
-      {/* ── Settings panel ── */}
-      {panel === "settings" && (
-        <div className={styles.panel}>
-          <div className={styles.panelHeader}><h3>Settings</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
-          {settings && (
-            <form className={styles.form} onSubmit={saveSettings}>
-              <label>Theme<select value={settings.theme} onChange={e => setSettings(p => p ? { ...p, theme: e.target.value as Theme } : p)}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Auto (system)</option></select></label>
-              <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
-              {settings.hasOpenAiApiKey && (
-                <button
-                  type="button"
-                  className={styles.linkButton}
-                  onClick={() => void clearSavedKey()}
-                  disabled={busy}
-                >
-                  Clear saved key
-                </button>
-              )}
-              <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
-              <button type="submit" disabled={busy}>Save</button>
-            </form>
-          )}
-          <div className={styles.dangerZone}>
-            <h4>Danger Zone</h4>
-            <p className={styles.muted}>Accounts inactive for over 60 days are removed automatically. You can also permanently delete this account right now.</p>
-            <button
-              type="button"
-              className={styles.dangerButton}
-              onClick={() => void deleteAccount()}
-              disabled={busy}
-            >
-              Delete account
-            </button>
-          </div>
-          <h4 className={styles.sectionLabel}>Memories</h4>
-          <ul className={styles.memoryList}>
-            {memories.map(m => (
-              <li key={m.id}><p>{m.text}</p><small className={styles.muted}>confidence {m.confidence.toFixed(2)}</small><button type="button" onClick={() => void deleteMemory(m.id)}>Delete</button></li>
-            ))}
-          </ul>
-          {/* Scoped to panelError so a chat-send 401 doesn't render a
-              duplicate error on top of the Settings drawer. */}
-          {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-        </div>
-      )}
-
-      {/* ── Bots panel ── */}
-      {panel === "bots" && (
-        <div className={styles.panel}>
-          <div className={styles.panelHeader}><h3>Bots</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
-          {/* One form, two modes. editingBotId flips the whole template
-              between "create new bot" and "edit <existing>" — same
-              inputs, same ColorGlyphPicker, same layout. No second
-              picker ever mounts. */}
-          <form
-            className={`${styles.form} ${editingBotId ? styles.formEditing : ""}`}
-            onSubmit={(e) => void submitBotForm(e)}
-          >
-            {editingBotId && (
-              <div className={styles.formEditingBanner} role="status">
-                <span className={styles.formEditingBannerLabel}>Editing</span>
-                <strong className={styles.formEditingBannerName}>
-                  {bots.find(b => b.id === editingBotId)?.name ?? "bot"}
-                </strong>
-              </div>
-            )}
-            <div className={styles.botNameRow}>
-              <ColorGlyphPicker
-                color={newBotColor}
-                glyph={newBotGlyph}
-                onColorChange={setNewBotColor}
-                onGlyphChange={setNewBotGlyph}
-                open={colorWheelOpen}
-                onToggle={() => setColorWheelOpen(o => !o)}
-                resolvedTheme={resolvedTheme}
-              />
-              <input required placeholder="Bot name" value={newBotName} onChange={e => setNewBotName(e.target.value)} />
-            </div>
-            <textarea placeholder="System prompt" value={newBotPrompt} onChange={e => setNewBotPrompt(e.target.value)} />
-            {editingBotId ? (
-              <div className={styles.formActions}>
-                <button type="button" onClick={cancelEditBot} disabled={busy}>
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className={styles.formPrimary}
-                  disabled={busy || !newBotName.trim()}
-                >
-                  Save changes
-                </button>
-              </div>
-            ) : (
-              <button type="submit" disabled={busy || !newBotName.trim()}>
-                Create bot
-              </button>
-            )}
-          </form>
-
-          <h4 className={styles.sectionLabel}>Built-in</h4>
-          <div
-            className={`${styles.botCard} ${styles.botCardDefault}`}
-            aria-label="Default bot: always available, cannot be deleted"
-          >
-            <span className={styles.botCardGlyph} aria-hidden="true">
-              <BotGlyph name="bot" size={20} />
-            </span>
-            <div className={styles.botCardBody}>
-              <div className={styles.botCardDefaultHeader}>
-                <strong>Default</strong>
-                <span className={styles.botCardBadge}>Always on</span>
-              </div>
-              <small>
-                Plain chat with no custom system prompt. Kept as a permanent fallback so you can always talk to your model, even if every other bot is deleted.
-              </small>
-            </div>
-          </div>
-
-          {bots.length > 0 && <h4 className={styles.sectionLabel}>Your bots</h4>}
-          {bots.map(b => {
-            const botKey = `${BOT_DELETE_KEY_PREFIX}${b.id}`;
-            const isArmed = pendingDeleteKey === botKey;
-            const isExpanded = expandedBotKey === botKey;
-            const isEditing = editingBotId === b.id;
-            // Live preview during editing — the card mirrors the values
-            // currently in the top form so changes to color/glyph are
-            // visible on the card itself before "Save changes" is hit.
-            const liveColor = isEditing ? newBotColor : b.color;
-            const liveGlyph = isEditing ? newBotGlyph : b.glyph;
-            // Card adornments (accent bar + glyph tile) run the bot's
-            // stored color through clampAccentLightness so legacy bots
-            // whose color drifted outside the picker's current band
-            // still render inside it — and so the card accent exactly
-            // matches the swatch at the top of the panel (which applies
-            // the same clamp). Shade variation inside the band is
-            // preserved; we only pull extremes back in.
-            const cardAccent = liveColor
-              ? clampAccentLightness(liveColor, resolvedTheme)
-              : null;
-            const cardStyle = cardAccent
-              ? ({ "--bot-color": cardAccent } as React.CSSProperties)
-              : undefined;
-            const cardClassName = isEditing
-              ? `${styles.botCard} ${styles.botCardEditing}`
-              : styles.botCard;
-
-            return (
-              <div key={b.id} className={cardClassName} style={cardStyle}>
-                <span className={styles.botCardGlyph} aria-hidden="true">
-                  <BotGlyph name={liveGlyph} size={20} />
-                </span>
-                <div className={styles.botCardBody}>
-                  <strong>{b.name}</strong>
-                  <small>{b.system_prompt ? b.system_prompt.slice(0, 80) + "..." : "No system prompt"}</small>
-                </div>
-                {isArmed ? (
-                  // Armed confirmation pill: full-width overlay on the right,
-                  // clicking it again confirms the delete.
-                  <button
-                    type="button"
-                    className={`${styles.botCardDelete} ${styles.botCardDeleteArmed}`}
-                    data-delete-affordance="true"
-                    aria-label={`Confirm delete ${b.name}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void deleteBot(b.id);
-                    }}
-                  >
-                    <span className={styles.conversationDeletePrompt}>Are you sure?</span>
-                    <span className={styles.conversationDeleteGlyph}>✓</span>
-                  </button>
-                ) : isExpanded ? (
-                  // Layered action bubbles: edit (pencil) + delete (red ×).
-                  <div
-                    className={styles.botCardBubbles}
-                    data-delete-affordance="true"
-                    role="group"
-                    aria-label={`${b.name} actions`}
-                  >
-                    <button
-                      type="button"
-                      className={styles.botCardBubble}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        startEditBot(b);
-                      }}
-                      aria-label={`Edit ${b.name}`}
-                      title="Edit bot"
-                    >
-                      <IconPencil />
-                    </button>
-                    <button
-                      type="button"
-                      className={`${styles.botCardBubble} ${styles.botCardBubbleDelete}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        armDelete(botKey);
-                      }}
-                      aria-label={`Delete ${b.name}`}
-                      title="Delete bot"
-                    >
-                      <IconX />
-                    </button>
-                  </div>
-                ) : (
-                  // Idle: the + affordance that fades in on card hover / focus.
-                  <button
-                    type="button"
-                    className={styles.botCardAction}
-                    data-delete-affordance="true"
-                    aria-label={`Open actions for ${b.name}`}
-                    title="Actions"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setExpandedBotKey(botKey);
-                    }}
-                  >
-                    <IconPlus />
-                  </button>
-                )}
-              </div>
-            );
-          })}
-          {/* Errors from createBot / deleteBot / saveBot used to silently
-              surface in the composer behind the drawer overlay. They now
-              live inside the panel next to the action that triggered
-              them. */}
-          {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-        </div>
-      )}
-
-      {/* ── Images panel ── */}
-      {panel === "images" && (() => {
-        // Image generation always calls OpenAI DALL-E. Honor the LOCAL
-        // invariant by hiding the form when LOCAL is selected; past images
-        // stay visible so the gallery remains useful.
-        const canGenerate = settings?.preferredProvider === "openai";
-        return (
-          <div className={styles.panel}>
-            <div className={styles.panelHeader}><h3>Images</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
-            {canGenerate ? (
-              <form className={styles.form} onSubmit={generateImg}>
-                <input required placeholder="Describe an image..." value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} />
-                <button type="submit" disabled={busy}>{busy ? "Generating..." : "Generate"}</button>
-              </form>
-            ) : (
-              <div className={styles.imagesGate} role="note">
-                <div className={styles.imagesGateTitle}>Online mode required</div>
-                <p className={styles.muted}>
-                  Image generation uses OpenAI DALL-E, so it only runs when the response
-                  mode is set to <strong>ONLINE</strong>. Flip the toggle above the composer
-                  (or in the sidebar) to enable it.
-                </p>
-              </div>
-            )}
-            {images.length > 0 && <h4 className={styles.sectionLabel}>Recent</h4>}
-            <div className={styles.imageGrid}>
-              {images.map(img => (
-                <a key={img.id} href={img.url} target="_blank" rel="noreferrer"><img src={img.url} alt={img.prompt} /></a>
-              ))}
-            </div>
-            {/* Scoped to panelError so a chat-send 401 from the composer
-                doesn't double up inside the Images drawer. */}
-            {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-          </div>
-        );
-      })()}
-      {renderDeleteAllModal()}
     </main>
   );
 }

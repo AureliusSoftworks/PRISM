@@ -44,6 +44,19 @@ else
     echo "[2/5] .env already exists."
 fi
 
+# Source the root .env into this shell so every child process inherits it.
+# The API already picks up .env via `node --env-file-if-exists=.env`, but
+# `next dev` runs from apps/web/ and Next.js only reads .env files from
+# its own working directory — it never sees the repo-root .env. Sourcing
+# here is how NEXT_PUBLIC_* vars (DEV_TOOLS, API_BASE_URL, etc.) defined
+# once at the repo root actually reach the web dev server.
+if [ -f ".env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+fi
+
 # ── [3/5] Dependencies ───────────────────────────────────────────────────────
 echo "[3/5] Installing dependencies (first run may take a minute)..."
 (cd packages/shared && npm install --prefer-offline 2>/dev/null && npm run build)
