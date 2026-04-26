@@ -13,6 +13,23 @@ markdown export.
 development happens on `dev`. Every release is a merge of `dev` into `main`
 with a matching `CHANGELOG.md` entry and a semver tag.
 
+### Local `dev` push guardrail (temporary)
+
+To reduce accidental branch damage without paid GitHub branch-protection
+features, this repo currently uses a local `pre-push` hook at
+`.git/hooks/pre-push` that blocks:
+
+- deleting `dev` (`git push origin :dev`)
+- non-fast-forward updates to `dev` (force-style history rewrites)
+
+This is a **local safety net only** (per clone/machine), not server-side
+enforcement. If you clone the repo to a new machine, re-install this hook
+there as well.
+
+**Local safety guardrails:** no-cost `dev` safeguards are available
+via `bash scripts/install_git_safeguards.sh`. See
+[docs/git-safeguards.md](docs/git-safeguards.md).
+
 ## App Store Split Roadmap
 
 Prism's planned Apple distribution model is a two-binary split:

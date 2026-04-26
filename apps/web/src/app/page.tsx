@@ -573,6 +573,7 @@ function pickerDensityBreakpoints(
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function pickerDensityStageTargets(
   viewportWidth: number,
   viewportHeight: number
@@ -2106,6 +2107,7 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
 // action glyph we render in the shell feels like it belongs to the same
 // set. The bot card × / armed ✓ uses raw character glyphs (matching
 // .conversationDelete), so those intentionally don't live here.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const ICON_PROPS = {
   width: 14,
   height: 14,
@@ -3930,6 +3932,8 @@ function EmptyStateIcon({
         className={`${styles.brandIconShell} ${styles.userHeroAvatar} ${styles.emptyStatePrivateHero}`}
         aria-hidden="true"
       >
+        {/* Decorative shell art; keeping native img avoids layout shifts in this icon stack. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/icon.jpg"
           alt=""
@@ -3973,12 +3977,14 @@ function EmptyStateIcon({
   }
   return (
     <div className={styles.brandIconShell} aria-hidden="true">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/icon.jpg"
         alt=""
         aria-hidden="true"
         className={styles.brandIcon}
       />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/icon-triangle.svg"
         alt=""
@@ -5285,9 +5291,8 @@ function ColorGlyphPicker({
             onPointerMove={handleSquarePointerMove}
             onPointerUp={handleSquarePointerUp}
             onPointerCancel={handleSquarePointerCancel}
-            role="slider"
+            role="group"
             aria-label="Bot color. Horizontal axis: hue; vertical axis: lightness."
-            aria-valuetext={color}
           >
             <div
               className={styles.colorPickerIndicator}
@@ -6159,8 +6164,6 @@ function HomeContent(): React.JSX.Element {
     selectedBotId,
     hoveredBotId,
     detail,
-    detail?.botId,
-    detail?.lastBotId,
     chatBotOverride,
     privateChatActive,
   ]);
@@ -6196,7 +6199,6 @@ function HomeContent(): React.JSX.Element {
   }, [
     view,
     detail,
-    detail?.botId,
     chatBotOverride,
     privateChatActive,
     selectedBotId,
@@ -6650,6 +6652,9 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+  // refreshAll is intentionally a local function declaration in this component.
+  // This effect should run on auth transitions, not on every render identity churn.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (!user) return; void refreshAll(); }, [user]);
   useEffect(() => {
     return () => {
@@ -8418,12 +8423,14 @@ function HomeContent(): React.JSX.Element {
                 - .brandIconLight (light): a clean rainbow-stroke triangle,
                   no tile, no halos, just a soft drop-shadow. */}
           <div className={styles.brandIconShell} aria-hidden="true">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/icon.jpg"
               alt=""
               aria-hidden="true"
               className={styles.brandIcon}
             />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/icon-triangle.svg"
               alt=""
@@ -9532,7 +9539,11 @@ function HomeContent(): React.JSX.Element {
             {images.length > 0 && <h4 className={styles.sectionLabel}>Recent</h4>}
             <div className={styles.imageGrid}>
               {images.map(img => (
-                <a key={img.id} href={img.url} target="_blank" rel="noreferrer"><img src={img.url} alt={img.prompt} /></a>
+                <a key={img.id} href={img.url} target="_blank" rel="noreferrer">
+                  {/* User-generated remote URLs are rendered directly in the gallery surface. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img.url} alt={img.prompt} />
+                </a>
               ))}
             </div>
             {/* Scoped to panelError so a chat-send 401 from the composer
@@ -9560,12 +9571,14 @@ function HomeContent(): React.JSX.Element {
           {/* See note on the auth-screen lockup: dark theme uses the boxed
               JPG with animated halos, light theme uses the bare triangle. */}
           <div className={`${styles.brandIconShell} ${styles.userHeroAvatar}`}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/icon.jpg"
               alt=""
               aria-hidden="true"
               className={styles.brandIcon}
             />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/icon-triangle.svg"
               alt=""

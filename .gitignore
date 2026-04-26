@@ -11,10 +11,14 @@ apps/api/data/
 *.log
 
 # Local Overseer operational artifacts
+.cursor/agents/
 .cursor/agents/🤖*.md
 .cursor/subagents/
 .cursor/commands/🤖 overseers.md
 .cursor/runbooks/
+.cursor/output/
+.cursor/todo.md
+.githooks/
 
 # Apple signing and distribution secrets
 *.p12
