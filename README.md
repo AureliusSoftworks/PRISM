@@ -80,6 +80,7 @@ npm run dev
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_PORT` | `8787` | API server port |
+| `PRISM_SERVER_NAME` | `Prism Server` | Friendly name returned by readiness checks and future pairing/discovery flows |
 | `SESSION_COOKIE_NAME` | `localai_session` | Session cookie key |
 | `SESSION_TTL_HOURS` | `24` | Session lifetime |
 | `ENCRYPTION_MASTER_KEY` | (dev default) | Master key for per-user key wrapping |

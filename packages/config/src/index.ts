@@ -52,6 +52,7 @@ function normalizeOllamaHost(value: string | undefined): string {
 
 export interface AppConfig {
   apiPort: number;
+  serverName: string;
   sessionCookieName: string;
   sessionTtlHours: number;
   encryptionMasterKey: string;
@@ -64,6 +65,7 @@ export interface AppConfig {
 export function getAppConfig(): AppConfig {
   return {
     apiPort: Number(process.env.API_PORT ?? "8787"),
+    serverName: process.env.PRISM_SERVER_NAME ?? "Prism Server",
     sessionCookieName: process.env.SESSION_COOKIE_NAME ?? "localai_session",
     sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? "24"),
     encryptionMasterKey: readEnv(

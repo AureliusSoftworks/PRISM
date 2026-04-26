@@ -1,9 +1,12 @@
 import { createServer } from "node:http";
 import { getAppConfig } from "@localai/config";
 import { createDatabase } from "./db.ts";
-import { clearCookie, json, parseCookies, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
+import { clearCookie, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
+import { requireValidSession, resolveSessionToken } from "./auth.ts";
+import { buildHealthResponse } from "./health.ts";
+import { consumePairingCode, createPairingCode } from "./pairing.ts";
 import { processChatMessage } from "./chat.ts";
 import { createDevSeedConversations, deleteAllConversations, deleteConversation, listConversationSummaries, rewindConversation } from "./conversations.ts";
 import {
@@ -81,29 +84,16 @@ function parseParams(definition: RouteDefinition, pathname: string): Record<stri
 }
 
 function getSessionToken(ctx: RequestContext): string | null {
-  const cookies = parseCookies(ctx.req.headers.cookie);
-  return cookies[config.sessionCookieName] ?? null;
+  return resolveSessionToken(ctx.req.headers, config.sessionCookieName);
 }
 
 function requireAuth(ctx: RequestContext): string {
   const sessionToken = getSessionToken(ctx);
-  if (!sessionToken) {
-    throw new Error("Authentication required.");
-  }
-  const session = db
-    .prepare("SELECT user_id, expires_at FROM sessions WHERE token = ?")
-    .get(sessionToken) as { user_id?: string; expires_at?: string } | undefined;
-  if (!session?.user_id || !session.expires_at) {
-    throw new Error("Invalid session.");
-  }
-  if (new Date(session.expires_at).getTime() < Date.now()) {
-    db.prepare("DELETE FROM sessions WHERE token = ?").run(sessionToken);
-    throw new Error("Session expired.");
-  }
-  ctx.sessionToken = sessionToken;
-  ctx.userId = session.user_id;
-  touchUserActivity(session.user_id);
-  return session.user_id;
+  const session = requireValidSession(db, sessionToken);
+  ctx.sessionToken = session.token;
+  ctx.userId = session.userId;
+  touchUserActivity(session.userId);
+  return session.userId;
 }
 
 function getUserRow(userId: string): UserDbRow {
@@ -116,6 +106,18 @@ function getUserRow(userId: string): UserDbRow {
     throw new Error("User not found.");
   }
   return row;
+}
+
+function toUserProfile(row: UserDbRow): Record<string, unknown> {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    role: "user",
+    createdAt: row.created_at,
+    theme: row.theme,
+    preferredProvider: row.preferred_provider,
+  };
 }
 
 function decryptUserKey(userId: string): Buffer {
@@ -333,15 +335,26 @@ function buildRoutes(): RouteDefinition[] {
       const row = getUserRow(userId);
       json(ctx.res, 200, {
         ok: true,
-        user: {
-          id: row.id,
-          email: row.email,
-          displayName: row.display_name,
-          role: "user",
-          createdAt: row.created_at,
-          theme: row.theme,
-          preferredProvider: row.preferred_provider
-        }
+        user: toUserProfile(row)
+      });
+    }),
+    route("POST", "/api/pairing/codes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const pairingCode = createPairingCode(db, userId);
+      json(ctx.res, 201, { ok: true, pairingCode });
+    }),
+    route("POST", "/api/pairing/exchange", async (ctx) => {
+      const body = ctx.body as Record<string, unknown>;
+      const code = readString(body.code, "code");
+      const { userId } = consumePairingCode(db, code);
+      const { token, expiresAt } = createSession(userId);
+      touchUserActivity(userId);
+      const row = getUserRow(userId);
+      json(ctx.res, 200, {
+        ok: true,
+        token,
+        expiresAt,
+        user: toUserProfile(row)
       });
     }),
     route("GET", "/api/conversations", async (ctx) => {
@@ -1038,7 +1051,7 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 201, { ok: true, conversationId: forkId });
     }),
     route("GET", "/api/health", async (ctx) => {
-      json(ctx.res, 200, { ok: true, uptime: process.uptime() });
+      json(ctx.res, 200, buildHealthResponse(db, config, process.uptime()));
     })
   ];
 }

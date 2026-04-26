@@ -24,6 +24,7 @@ The current route inventory is:
 | --- | --- |
 | Health | `GET /api/health` |
 | Auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `DELETE /api/account` |
+| Pairing | `POST /api/pairing/codes`, `POST /api/pairing/exchange` |
 | Conversations | `GET /api/conversations`, `GET /api/conversations/:id`, `DELETE /api/conversations/:id`, `DELETE /api/conversations`, `POST /api/conversations/:id/rewind`, `POST /api/conversations/:id/fork` |
 | Chat | `POST /api/chat` |
 | Memories | `GET /api/memories`, `DELETE /api/memories/:id` |
@@ -47,21 +48,20 @@ a parallel bearer-session path:
 Authorization: Bearer <session-token>
 ```
 
-Rules:
+Implemented rules:
 
 - Cookie sessions remain the browser/web contract.
 - Bearer sessions are for native clients and are stored in the Keychain.
-- `requireAuth()` should accept either the existing cookie token or the bearer
-  token, resolving both through the same `sessions` table.
+- Protected routes accept either the existing cookie token or the bearer token,
+  resolving both through the same `sessions` table. Bearer takes precedence if
+  both are supplied.
 - Logout should invalidate the server-side session token regardless of transport.
-- CORS should allow `authorization` if any browser-based tooling needs to test
-  the mobile transport.
+- CORS allows `authorization` for browser-based mobile-auth testing.
 
 ## Readiness Endpoint
 
-`GET /api/health` currently returns a basic process health payload. The mobile
-contract should expand it into a readiness endpoint before the native client
-depends on it.
+`GET /api/health` returns mobile readiness metadata. `ok` and `uptime` remain
+available for older health checks.
 
 Target response shape:
 
@@ -75,15 +75,16 @@ Target response shape:
   "serverName": "Jared's Prism",
   "services": {
     "sqlite": "ready",
-    "qdrant": "ready",
-    "ollama": "ready",
+    "qdrant": "configured",
+    "ollama": "configured",
     "openai": "not_configured"
   }
 }
 ```
 
 The iOS/Mac app should treat `ok: true` as "the server process is reachable"
-and inspect `services` to show more specific setup guidance.
+and inspect `services` to show more specific setup guidance. `serverName` comes
+from `PRISM_SERVER_NAME` and defaults to `Prism Server`.
 
 ## Local-Network Discovery
 
@@ -114,11 +115,65 @@ Target flow:
 
 1. Prism Server displays a short-lived pairing code and QR code.
 2. The iOS/Mac client discovers the server or accepts a manual URL.
-3. The client sends the pairing nonce to a future endpoint such as
-   `POST /api/pairing/exchange`.
-4. The server validates the nonce, creates a normal session row, and returns a
+3. The authenticated web/server session calls `POST /api/pairing/codes` to
+   create a short-lived code.
+4. The client sends the pairing code to `POST /api/pairing/exchange`.
+5. The server validates the code, creates a normal session row, and returns a
    bearer session token plus the authenticated user profile.
-5. The client stores the token in the Keychain and uses it for future requests.
+6. The client stores the token in the Keychain and uses it for future requests.
+
+Pairing code creation:
+
+```http
+POST /api/pairing/codes
+Cookie: localai_session=<web-session>
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "pairingCode": {
+    "code": "ABCD-EFGH-JKLM",
+    "expiresAt": "2026-01-01T00:05:00.000Z"
+  }
+}
+```
+
+Pairing exchange:
+
+```http
+POST /api/pairing/exchange
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "code": "ABCD-EFGH-JKLM"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "token": "<session-token>",
+  "expiresAt": "2026-01-02T00:00:00.000Z",
+  "user": {
+    "id": "<user-id>",
+    "email": "user@example.com",
+    "displayName": "User",
+    "role": "user",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "theme": "system",
+    "preferredProvider": "local"
+  }
+}
+```
 
 The device starts with no local Prism account. Accounts remain server-owned.
 If the server has not been configured yet, the server app should handle first
@@ -131,7 +186,7 @@ The first official client slice only needs:
 | Need | Endpoint |
 | --- | --- |
 | Verify server | `GET /api/health` |
-| Pair or log in | Future pairing endpoint, then `GET /api/auth/me` |
+| Pair or log in | `POST /api/pairing/exchange`, then `GET /api/auth/me` |
 | List conversations | `GET /api/conversations` |
 | Open conversation | `GET /api/conversations/:id` |
 | Send chat | `POST /api/chat` |
