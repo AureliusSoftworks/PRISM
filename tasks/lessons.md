@@ -5,6 +5,51 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-04-25 · [UX]
+**Trigger**: The header-launched active bot editor hid the Bot library correctly, but still looked too much like the neutral all-bots drawer instead of the selected bot's customizer.
+**Lesson**: Contextual edit surfaces should carry the active entity's accent variables directly. For LocalAI, `EDIT BOT` should open an editor-only Bots panel that uses the active bot color in the panel wash, parameter card, and edit banner, while the sidebar Bots entry remains neutral and library-capable.
+**Applies to**: `apps/web/src/app/page.tsx` contextual bot-panel entry state and `apps/web/src/app/page.module.css` `.panelBots[data-editor-only="true"]`.
+
+### 2026-04-25 · [UX]
+**Trigger**: The active bot editor was opened from the chat header, but still exposed the full Bot library drawer even though the user expected focused editing for only that bot.
+**Lesson**: Distinguish entry points into shared panels. The sidebar Bots button owns broad library browsing; a contextual `EDIT BOT` action should open an editor-only version scoped to the active bot, with bot-colored affordance styling and no library drawer.
+**Applies to**: `apps/web/src/app/page.tsx` bot panel entry state and `apps/web/src/app/page.module.css` header badge/panel styling.
+
+### 2026-04-25 · [UX]
+**Trigger**: Bot-memory drawer styling looked good, but the user clarified that the strong bot-specific treatment should not become the default for every right-side panel.
+**Lesson**: Keep strong bot-colored chrome scoped to surfaces that are explicitly about one bot, such as that bot's memory drawer and the main left app sidebar when a bot is active. Generic right panels like Settings, Bots, all Memories, and Images should retain the default neutral panel style.
+**Applies to**: `apps/web/src/app/page.tsx` right-panel scope selection and `apps/web/src/app/page.module.css` sidebar/panel memory styling.
+
+### 2026-04-25 · [UX]
+**Trigger**: A background assistant reply could return after the user switched chats, pulling the UI back to the old conversation and hiding that a different row had new content.
+**Lesson**: Chat send completion must respect the user's current location. If the originating chat is no longer open when a reply returns, do not call `setDetail`/`setSelectedId`; refresh the sidebar and mark that conversation unread. Conversation rows should layer their visuals: first a scroll-position base fill from full row color at the top to 0% transparent at the bottom, then diagonal glow on top (bright top-right, lighter bottom-left), while preserving the normalized border color.
+**Applies to**: `apps/web/src/app/page.tsx` async send flow/sidebar unread state and `apps/web/src/app/page.module.css` conversation row unread styling.
+
+### 2026-04-25 · [UX]
+**Trigger**: The chat header kept showing the PRISM wordmark after a conversation was opened, even though the active identity was now a bot/default persona.
+**Lesson**: Keep PRISM wordmark for empty/new-chat state. Once a chat is opened or a message is sent, replace the wordmark with the active bot identity (glyph + name), falling back to a neutral Default/Private identity when no custom bot is attached.
+**Applies to**: `apps/web/src/app/page.tsx` Chat/Sandbox headers and `apps/web/src/app/page.module.css` header identity styling.
+
+### 2026-04-25 · [UX]
+**Trigger**: Message headers only showed LOCAL/ONLINE provider status, but not the concrete model that generated an assistant reply; putting the model in action-row/button chrome made it feel too heavy.
+**Lesson**: Per-message generation metadata should store and expose both provider and model. The provider dot is enough to communicate LOCAL/ONLINE; on hover/tap, reveal only the concrete model name beside that dot without extra "assistant" label text.
+**Applies to**: `apps/api/src/db.ts` message metadata, `apps/api/src/chat.ts` reply persistence, and `apps/web/src/app/page.tsx` / `apps/web/src/app/page.module.css` message action rows.
+
+### 2026-04-25 · [UX]
+**Trigger**: Default bot mode forced model selection back to Auto even though the user expected model choice to be independent of bot/persona choice.
+**Lesson**: Treat provider/model choice as a reply-routing control, not a custom-bot-only parameter. Default persona chats should still allow explicit model selection and forward that override to the provider.
+**Applies to**: `apps/web/src/app/page.tsx` composer model controls and `apps/api/src/server.ts` chat generation overrides.
+
+### 2026-04-25 · [UX]
+**Trigger**: Per-bot "Available in Chat mode" toggles made the simple Chat surface harder to reason about and hid otherwise valid bots.
+**Lesson**: All user-created bots should be available in Chat mode by default. Avoid per-bot Chat eligibility gates unless there is a strong safety or privacy reason; mode complexity should live in the mode design, not in hidden bot assignment flags.
+**Applies to**: `apps/web/src/app/page.tsx` Chat bot picker/Bots panel and `apps/api/src/server.ts` bot routing.
+
+### 2026-04-25 · [UX]
+**Trigger**: A Bot library drawer handle toggled state and flipped its arrow, but the bot library stayed hidden because the customizer form still consumed the panel height.
+**Lesson**: Drawer expansions inside the Bots panel should become a true alternate panel body when content needs real vertical space. Hide or collapse the customizer while the library drawer is expanded so the handle moves under the panel header and the library gets the remaining height.
+**Applies to**: `apps/web/src/app/page.tsx` Bots panel drawer state and `apps/web/src/app/page.module.css` `.panelBots` layout.
+
+### 2026-04-25 · [UX]
 **Trigger**: The stage-4+ bot picker used center-out/radial population ordering, and PRISM category dashboard tiles used radial/conic color treatment.
 **Lesson**: Bot picker grid population should stay row-major left-to-right across all density stages. PRISM category dashboard gradients should read left-to-right, not radial/conic.
 **Applies to**: `apps/web/src/app/page.tsx` `pickerFormationCells()` and `buildBotGroupGradient()`.

@@ -71,12 +71,13 @@ npm run dev
 - **Per-user auth** with encrypted session cookies
 - **Post-auth Hub** with two mode tiles, each carrying a 5-colour prism glyph:
   - **Chat** — a calm, stripped-down "personal Prism" surface (sidebar + history + typing + send). The only compose-adjacent control is an **Incognito** pill that doubles as an online/offline toggle: on = this send is local-only and bypasses memory; off = saved provider + normal memory pipeline.
-  - **Sandbox** — the full command-center experience (bots, provider toggle + lock, fork/export, images, advanced settings). No Incognito, no cross-session memory — the thread is its own memory.
+  - **Sandbox** — the full command-center experience (bots, provider toggle + lock, fork/export, images, advanced settings). No Incognito; bot-scoped memories can still grow across sessions while long-thread context is handled by silent compaction.
   Mode is mirrored to the URL (`?view=chat` / `?view=sandbox`) so refreshes preserve the current surface.
 - **Strict data isolation** — every query is tenant-scoped by `user_id`
-- **Mode-specific memory model**:
-  - Chat gets cross-thread personal-fact memory (extracted preferences in the `memories` table + Qdrant similarity recall across conversations), surfaced in the Settings sidebar.
-  - Sandbox gets a silent, thread-scoped **rolling compaction summary** that kicks in when a thread outgrows the 30-message live window. Stored only in SQLite, never indexed into Qdrant, never surfaced in the sidebar — pure context plumbing so long Sandbox threads don't go amnesiac. Nothing ever crosses between threads.
+- **Hybrid memory model**:
+  - Global user memories preserve Prism-level preferences.
+  - Bot-scoped memories let each bot build its own continuity across Chat and Sandbox; the header **Memories** drawer shows the active bot's memories, while the sidebar **Memories** drawer shows everything.
+  - Sandbox also gets a silent, thread-scoped **rolling compaction summary** that kicks in when a thread outgrows the 30-message live window. Stored only in SQLite, never indexed into Qdrant, never surfaced in the sidebar — pure context plumbing so long Sandbox threads don't go amnesiac.
   - Incognito opts out of both paths for the turn and forces the provider to LOCAL.
 - **Customizable chatbots** with system prompts, temperature, and model overrides
 - **Forkable chats** — branch from any message in a conversation (Sandbox)
