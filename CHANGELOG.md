@@ -22,6 +22,8 @@ Active development happens on the `dev` branch; every release is a merge into
 - Release automation foundation for `dev -> main` promotion and two release
   lanes (server draft artifacts + private TestFlight client lane reference).
 
+## [0.1.1] - 2026-04-26
+
 ### Added
 
 - **Per-mode memory model.** Memory behavior now splits cleanly by
@@ -181,4 +183,5 @@ command-center UI.
   in `DESIGN.md`.
 
 [0.2.0]: https://github.com/prism/prism/releases/tag/v0.2.0
+[0.1.1]: https://github.com/prism/prism/releases/tag/v0.1.1
 [0.1.0]: https://github.com/prism/prism/releases/tag/v0.1.0

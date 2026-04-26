@@ -50,7 +50,7 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Applies to**: `apps/web/src/app/page.module.css` `.composeBotMenu`, `.composeBotOptionGlyph`, and `.composeBotOptionName` light-mode styling.
 
 ### 2026-04-25 · [UX]
-**Trigger**: The bot-picker density ladder was corrected after developer-tools stage buttons exposed the stage labels directly.
+**Trigger**: The bot-picker density ladder was corrected after dense-library test controls exposed the stage labels directly.
 **Lesson**: The six bot-picker stages are now: Stage 1 full cards, Stage 2 flat cards, Stage 3 larger glyph-to-container ratio, Stage 4 glyphless cards and the first stage where clicking relocates the user to that color grouping on the hue slider, Stage 5 solid swatches/pixel grid with selected-dot treatment active, and Stage 6 radial rainbow gradient as the fully abstract high-density state. In the pixel-grid stages, desktop mouse clicks should select the exact bot and also move the hue slider to that bot's color scope. Treat the Stage 6 bot ceiling as provisional until it is explicitly tuned.
 **Applies to**: `apps/web/src/app/page.tsx` and `apps/web/src/app/page.module.css` bot picker density states.
 

@@ -9,12 +9,11 @@ import { buildHealthResponse } from "./health.ts";
 import { consumePairingCode, createPairingCode } from "./pairing.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage } from "./chat.ts";
-import { createDevSeedConversations, deleteAllConversations, deleteConversation, listConversationSummaries, rewindConversation } from "./conversations.ts";
+import { deleteAllConversations, deleteConversation, listConversationSummaries, rewindConversation } from "./conversations.ts";
 import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
-  deleteBots,
 } from "./bots.ts";
 import { resolveNextSettings } from "./settings.ts";
 import { buildModelCatalog } from "./providers.ts";
@@ -472,16 +471,6 @@ function buildRoutes(): RouteDefinition[] {
       const deleted = deleteAllConversations(db, userId);
       json(ctx.res, 200, { ok: true, deleted });
     }),
-    route("POST", "/api/conversations/dev-seed", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const count = Number(body.count);
-      if (!Number.isInteger(count) || count < 1 || count > 2000) {
-        throw new Error("Chat seed count must be between 1 and 2000.");
-      }
-      const created = createDevSeedConversations(db, userId, count);
-      json(ctx.res, 200, { ok: true, created });
-    }),
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -919,28 +908,11 @@ function buildRoutes(): RouteDefinition[] {
       deleteBot(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true });
     }),
-    route("DELETE", "/api/bots/:id", async (ctx) => {
-      const userId = requireAuth(ctx);
-      db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(ctx.params.id, userId);
-      json(ctx.res, 200, { ok: true });
-    }),
-    // Bulk-clear — removes every bot the caller owns in one atomic
-    // transaction, or the newest `limit` bots when the Developer Tools
-    // panel asks for a bounded cleanup. Historical messages/conversations
-    // keep their rows — only `bot_id` is nulled out, mirroring the
-    // single-bot delete contract.
+    // User-facing bulk-clear — removes every bot the caller owns in one
+    // atomic transaction. Historical messages/conversations keep their rows;
+    // only `bot_id` is nulled out, mirroring the single-bot delete contract.
     route("DELETE", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
-      const rawLimit = ctx.query.get("limit");
-      if (rawLimit !== null) {
-        const limit = Number(rawLimit);
-        if (!Number.isInteger(limit) || limit < 1) {
-          throw new Error("Bot delete limit must be a positive integer.");
-        }
-        const deleted = deleteBots(db, userId, limit);
-        json(ctx.res, 200, { ok: true, deleted });
-        return;
-      }
       const deleted = deleteAllBots(db, userId);
       json(ctx.res, 200, { ok: true, deleted });
     }),

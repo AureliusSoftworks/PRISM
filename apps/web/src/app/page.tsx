@@ -48,82 +48,6 @@ const BOT_DELETE_KEY_PREFIX = "bot:";
 // apply uniformly.
 const DELETE_ALL_BOTS_KEY = "__delete_all_bots__";
 
-// Gate for the in-app Developer Tools panel (floating key glyph in the dev
-// overlay corner). Off by default — opt in via `NEXT_PUBLIC_DEV_TOOLS=1` in `.env`.
-// Next.js inlines NEXT_PUBLIC_* at build time, so release builds that
-// don't set the flag never render the button OR the modal, and the
-// tree-shaker can drop the unused JSX entirely. Used on `main` as the
-// "do not ship" guardrail — the feature code lives in the repo but stays
-// dormant unless someone opts in.
-const DEV_TOOLS_ENABLED = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-
-// Bounds for the Developer Tools bot quantity control. The same number drives
-// add-N capacity testing feels like one small control surface. Zero is still
-// allowed as a blank/no-op input state, which keeps editing `10` down to `1`
-// or empty from fighting the user. The upper cap keeps accidental stress tests
-// bounded.
-const DEV_TOOLS_BOT_QUANTITY_MIN = 0;
-const DEV_TOOLS_BOT_QUANTITY_DEFAULT = 10;
-const DEV_TOOLS_BOT_QUANTITY_MAX = 2000;
-const DEV_TOOLS_BOT_QUANTITY_PRESETS = [1, 10, 25, 50, 100, 500, 1000, 2000] as const;
-const DEV_TOOLS_BOT_CREATE_CHUNK_SIZE = 100;
-const DEV_TOOLS_GHOST_COUNT_MIN = 1;
-const DEV_TOOLS_GHOST_COUNT_MAX = 99;
-const DEV_TOOLS_PANEL_DEFAULT_X = 14;
-const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
-const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
-
-type DevToolsBotQuantity = number | "";
-type DevToolsPanelPosition = { x: number; y: number };
-type DevToolsPanelDragState = {
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
-};
-
-function clampDevToolsBotQuantity(value: number): number {
-  if (!Number.isFinite(value)) return DEV_TOOLS_BOT_QUANTITY_MIN;
-  return Math.max(
-    DEV_TOOLS_BOT_QUANTITY_MIN,
-    Math.min(DEV_TOOLS_BOT_QUANTITY_MAX, Math.round(value))
-  );
-}
-
-function randomDevToolsGhostCount(): number {
-  const range = DEV_TOOLS_GHOST_COUNT_MAX - DEV_TOOLS_GHOST_COUNT_MIN + 1;
-  return DEV_TOOLS_GHOST_COUNT_MIN + Math.floor(Math.random() * range);
-}
-
-function randomDevToolsGhostMessage(): string {
-  const ghostCount = randomDevToolsGhostCount();
-  return ghostCount === 1
-    ? "1 ghost was added."
-    : `${ghostCount} ghosts were added.`;
-}
-
-function clampDevToolsPanelPosition(
-  x: number,
-  y: number,
-  panelWidth: number,
-  panelHeight: number,
-  viewportWidth: number,
-  viewportHeight: number
-): DevToolsPanelPosition {
-  const maxX = Math.max(
-    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-    viewportWidth - panelWidth - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
-  );
-  const maxY = Math.max(
-    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-    viewportHeight - panelHeight - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
-  );
-
-  return {
-    x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
-    y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
-  };
-}
-
 // Messages whose content exceeds this character count get rendered with a
 // collapsible body: a max-height cap + bottom fade + "Show more" toggle.
 // Chosen so ~12 lines of typical prose fit comfortably; under it, there is
@@ -2194,21 +2118,6 @@ const ICON_PROPS = {
   "aria-hidden": true,
 };
 
-// Key glyph used by the Developer Tools launcher (top bar, left of the
-// theme toggle). A rounded bow + short-toothed shaft so it reads as
-// "unlocks a developer surface" even at 14px, distinct from the
-// theme/moon glyphs it sits beside.
-function IconKey(): React.JSX.Element {
-  return (
-    <svg {...ICON_PROPS}>
-      <circle cx="7.5" cy="15.5" r="4" />
-      <path d="M10.5 12.5L20 3" />
-      <path d="M16 7l3 3" />
-      <path d="M18 5l2 2" />
-    </svg>
-  );
-}
-
 // ── Bot glyph registry ────────────────────────────────────────────────
 // Sixteen distinct stroke-only icons drawn on a 24x24 viewBox. These are
 // the options a user can pick from when creating or editing a bot. The
@@ -3876,100 +3785,6 @@ function isBotGlyphName(value: string | null | undefined): value is BotGlyphName
 function randomBotGlyph(): BotGlyphName {
   const index = Math.floor(Math.random() * CUSTOM_BOT_GLYPH_ORDER.length);
   return CUSTOM_BOT_GLYPH_ORDER[index] ?? DEFAULT_BOT_GLYPH;
-}
-
-// First-name pool for the Developer Tools "Add N random bots" action.
-// Kept flat (no adjective × noun combining, no numeric suffix) so each
-// generated bot reads like a person in the sidebar and bot picker grid.
-// The pool is large enough that common stress-test batches can sample
-// without replacement while still allowing repeats during huge density
-// tests where repetition is a useful signal, not a bug.
-const RANDOM_BOT_NAMES = [
-  "Alex", "Avery", "Bailey", "Blake", "Cameron", "Casey", "Charlie",
-  "Dakota", "Drew", "Eden", "Elliot", "Emerson", "Finley", "Harper",
-  "Hayden", "Jamie", "Jordan", "Kai", "Kendall", "Logan", "Morgan",
-  "Parker", "Quinn", "Reese", "Riley", "Robin", "Rowan", "Sage",
-  "Sam", "Skyler", "Taylor", "Terry", "Zion",
-  "Abigail", "Amelia", "Aria", "Audrey", "Aurora", "Bella", "Chloe",
-  "Clara", "Daisy", "Eleanor", "Elena", "Eliza", "Ella", "Emily",
-  "Emma", "Evelyn", "Fiona", "Grace", "Hazel", "Iris", "Isla", "Ivy",
-  "Jade", "Julia", "Lena", "Lila", "Lily", "Lucy", "Luna", "Maya",
-  "Mia", "Nina", "Nora", "Olivia", "Paige", "Ruby", "Sadie", "Sofia",
-  "Stella", "Violet", "Zoe",
-  "Aaron", "Adrian", "Andrew", "Asher", "Austin", "Benjamin", "Caleb",
-  "Daniel", "David", "Elias", "Ethan", "Ezra", "Felix", "Finn",
-  "Gabriel", "Henry", "Isaac", "Jack", "James", "Jonah", "Julian",
-  "Leo", "Liam", "Lucas", "Mateo", "Miles", "Nathan", "Noah", "Oliver",
-  "Owen", "Theo", "Thomas", "Wesley", "Wyatt",
-] as const;
-
-function randomBotName(): string {
-  return RANDOM_BOT_NAMES[Math.floor(Math.random() * RANDOM_BOT_NAMES.length)];
-}
-
-// Fisher–Yates shuffle on a COPY of the source pool, returning the
-// first `count` items. Used by the bulk-add flow so the 10 bots in a
-// single click always have distinct names, even though across clicks
-// the pool will inevitably start repeating. Falls back to sampling
-// with replacement when `count` exceeds the pool size so the caller
-// still gets the requested number of names (no silent truncation).
-function sampleBotNames(count: number): string[] {
-  if (count <= RANDOM_BOT_NAMES.length) {
-    const pool = [...RANDOM_BOT_NAMES];
-    for (let i = pool.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    return pool.slice(0, count);
-  }
-  return Array.from({ length: count }, () => randomBotName());
-}
-
-// Classic lorem ipsum sentence pool for the "random system prompt"
-// feature of the bulk-add. Split into whole sentences (period included)
-// so the picker can concat a 2-5 sentence paragraph without having to
-// re-punctuate. Length variance is intentional — mixing short and long
-// sentences keeps the generated prompt from feeling templated.
-const LOREM_IPSUM_SENTENCES = [
-  "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
-  "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
-  "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-  "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
-  "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
-  "Curabitur pretium tincidunt lacus.",
-  "Nulla gravida orci a odio.",
-  "Nullam varius, turpis et commodo pharetra, est eros bibendum elit.",
-  "Donec quis orci eget orci vehicula condimentum.",
-  "Curabitur tempor ultrices ipsum.",
-  "Vestibulum sit amet nulla et velit elementum viverra.",
-  "Praesent vestibulum molestie lacus.",
-  "Aenean nonummy hendrerit mauris.",
-  "Phasellus porta, fusce suscipit varius mi.",
-  "Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus.",
-  "Nulla dui, fusce feugiat malesuada odio.",
-  "Morbi nunc odio, gravida at, cursus nec, luctus a, lorem.",
-  "Maecenas tristique orci ac sem.",
-  "Duis ultricies pharetra magna, donec accumsan malesuada orci.",
-  "Aenean lectus, pellentesque eget nunc.",
-] as const;
-
-// Assemble a random lorem ipsum paragraph for a bot's system prompt:
-// 2 to 5 sentences picked WITHOUT replacement from LOREM_IPSUM_SENTENCES
-// (so a single paragraph never repeats itself) and joined with a single
-// space. Without-replacement keeps each prompt feeling organic; the
-// pool is big enough that cross-bot collisions are rare but expected.
-function randomLoremIpsum(): string {
-  const MIN_SENTENCES = 2;
-  const MAX_SENTENCES = 5;
-  const sentenceCount =
-    MIN_SENTENCES +
-    Math.floor(Math.random() * (MAX_SENTENCES - MIN_SENTENCES + 1));
-  const pool = [...LOREM_IPSUM_SENTENCES];
-  for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool.slice(0, sentenceCount).join(" ");
 }
 
 interface BotGlyphProps {
@@ -5863,36 +5678,6 @@ function HomeContent(): React.JSX.Element {
   const botLibraryCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rightMenuOpen, setRightMenuOpen] = useState(false);
-  // Developer Tools floating panel visibility. Launcher is the key-glyph button
-  // that sits to the left of the theme toggle on every logged-in
-  // surface, gated by `DEV_TOOLS_ENABLED`. The panel is intentionally
-  // non-modal so it can stay open while the underlying UI remains usable.
-  // It dismisses via Escape / explicit close. `devToolsBusy` is an
-  // independent busy slot so the main composer `busy` flag isn't pinned
-  // by a bulk add/delete (which can take a few hundred ms when the DB
-  // is warming up).
-  const [devToolsOpen, setDevToolsOpen] = useState(false);
-  const [devToolsBusy, setDevToolsBusy] = useState(false);
-  const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
-  const [devToolsBotQuantity, setDevToolsBotQuantity] = useState<DevToolsBotQuantity>(
-    DEV_TOOLS_BOT_QUANTITY_DEFAULT
-  );
-  const [devToolsPanelPosition, setDevToolsPanelPosition] = useState<DevToolsPanelPosition>({
-    x: DEV_TOOLS_PANEL_DEFAULT_X,
-    y: DEV_TOOLS_PANEL_DEFAULT_Y,
-  });
-  const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
-  const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
-  const resolvedDevToolsBotQuantity =
-    devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
-  // Declared up here (instead of alongside the action handlers) so the
-  // Escape-key effect below can list it as a dependency without tripping
-  // TS's "used before declaration" rule for block-scoped `const`. The
-  // useCallback is still stable — nothing else depends on its identity.
-  const closeDevTools = useCallback(() => {
-    setDevToolsOpen(false);
-    setDevToolsMessage(null);
-  }, []);
   const [bots, setBots] = useState<Bot[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [chatModelChoiceByProvider, setChatModelChoiceByProvider] =
@@ -6075,56 +5860,6 @@ function HomeContent(): React.JSX.Element {
   const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
   const viewportWidth = useViewportWidth();
   const viewportHeight = useViewportHeight();
-  const startDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    const panel = devToolsPanelRef.current;
-    if (!panel) return;
-
-    const rect = panel.getBoundingClientRect();
-    devToolsPanelDragRef.current = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-    };
-
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture is missing in some test environments; dragging still
-      // works while the pointer remains over the handle.
-    }
-    event.preventDefault();
-  }, []);
-  const dragDevToolsPanel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    const dragState = devToolsPanelDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    const panel = devToolsPanelRef.current;
-    if (!panel) return;
-
-    const rect = panel.getBoundingClientRect();
-    const next = clampDevToolsPanelPosition(
-      event.clientX - dragState.offsetX,
-      event.clientY - dragState.offsetY,
-      rect.width,
-      rect.height,
-      window.innerWidth,
-      window.innerHeight
-    );
-    panel.style.left = `${next.x}px`;
-    panel.style.top = `${next.y}px`;
-    setDevToolsPanelPosition(next);
-  }, []);
-  const endDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    const dragState = devToolsPanelDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    devToolsPanelDragRef.current = null;
-
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Safe no-op for environments without pointer capture support.
-    }
-  }, []);
   // Shared close helper for the right-hand panels. Also resets panel-specific
   // transient UI so reopening a panel doesn't resurrect stale state.
   const closePanel = useCallback(() => {
@@ -6197,32 +5932,6 @@ function HomeContent(): React.JSX.Element {
     if (!input) return;
     input.focus({ preventScroll: true });
   }, [panel, editingBotId]);
-
-  useEffect(() => {
-    if (!devToolsOpen) return;
-    const panel = devToolsPanelRef.current;
-    if (!panel) return;
-    const rect = panel.getBoundingClientRect();
-
-    setDevToolsPanelPosition((position) => {
-      const next = clampDevToolsPanelPosition(
-        position.x,
-        position.y,
-        rect.width,
-        rect.height,
-        viewportWidth,
-        viewportHeight
-      );
-      return next.x === position.x && next.y === position.y ? position : next;
-    });
-  }, [devToolsOpen, viewportHeight, viewportWidth]);
-
-  useEffect(() => {
-    const panel = devToolsPanelRef.current;
-    if (!panel) return;
-    panel.style.left = `${devToolsPanelPosition.x}px`;
-    panel.style.top = `${devToolsPanelPosition.y}px`;
-  }, [devToolsPanelPosition]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -8210,21 +7919,6 @@ function HomeContent(): React.JSX.Element {
     return () => document.removeEventListener("keydown", handleKey);
   }, [isDeleteAllActive, disarmDelete]);
 
-  // Developer Tools floating panel — Escape key dismiss. No focus-restore pass
-  // (unlike the delete-all modal) because this is a gated dev affordance
-  // rather than a destructive user flow; the simpler handler is fine.
-  useEffect(() => {
-    if (!devToolsOpen) return;
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        closeDevTools();
-      }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [devToolsOpen, closeDevTools]);
-
   // Clicking anywhere outside the delete / confirm affordance should disarm it.
   // This prevents the confirm pill from lingering in an awkward in-between
   // state after focus moves elsewhere in the sidebar.
@@ -8452,10 +8146,9 @@ function HomeContent(): React.JSX.Element {
 
   // User-facing bulk wipe reached via press-and-hold on any bot card ×.
   // Mirrors `deleteAllConversations` exactly: optimistic clear, best-effort
-  // server sync, snapshot rollback on failure. Lives separately from the
-  // dev-tools variant (which routes errors to `devToolsMessage` and uses a
-  // different `busy` flag); this one belongs to the normal panel UX and
-  // surfaces errors inside `panelError` so they render beside the bot list.
+  // server sync, snapshot rollback on failure. This belongs to the normal
+  // panel UX and surfaces errors inside `panelError` so they render beside
+  // the bot list.
   async function deleteAllBots() {
     setPanelError(null);
     disarmDelete();
@@ -8480,200 +8173,6 @@ function HomeContent(): React.JSX.Element {
       setBots(previousBots);
       setSelectedBotId(previousSelectedBotId);
       setPanelError(err instanceof Error ? err.message : "Delete all bots failed.");
-    }
-  }
-
-  // ── Developer Tools actions ──────────────────────────────────────────
-  // Both helpers live behind `DEV_TOOLS_ENABLED` at the UI level, but the
-  // functions themselves are safe to call unconditionally — the server
-  // enforces per-user scoping on DELETE /api/bots and POST /api/bots.
-  //
-  // Errors route to `devToolsMessage` (the inline status line in the
-  // modal) rather than `panelError` because the modal is the active
-  // surface; `panelError` belongs to the sidebar drawers.
-  async function devToolsDeleteAllBots() {
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    const previousBots = bots;
-    const previousSelectedBotId = selectedBotId;
-    // Optimistic wipe mirrors the single-bot delete: clear the panel and
-    // any sidebar selection instantly, then sync with the server. On
-    // failure we roll back both so the UI stays truthful.
-    setBots([]);
-    setSelectedBotId(null);
-    try {
-      const result = await api<{ deleted?: number }>("/api/bots", {
-        method: "DELETE",
-      });
-      await refreshBots();
-      const deleted = typeof result?.deleted === "number" ? result.deleted : 0;
-      setDevToolsMessage(
-        deleted === 0
-          ? "No bots to delete."
-          : deleted === 1
-            ? "Deleted 1 bot."
-            : `Deleted ${deleted} bots.`
-      );
-    } catch (err) {
-      setBots(previousBots);
-      setSelectedBotId(previousSelectedBotId);
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Delete all bots failed."
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsCreateRandomBotBatch(batchSize: number) {
-    if (batchSize <= 0) return;
-
-    const names = sampleBotNames(batchSize);
-    for (let start = 0; start < names.length; start += DEV_TOOLS_BOT_CREATE_CHUNK_SIZE) {
-      const chunk = names.slice(start, start + DEV_TOOLS_BOT_CREATE_CHUNK_SIZE);
-      await Promise.all(
-        chunk.map((name) =>
-          api("/api/bots", {
-            method: "POST",
-            body: JSON.stringify({
-              name,
-              systemPrompt: randomLoremIpsum(),
-              color: randomHex(),
-              glyph: randomBotGlyph(),
-            }),
-          })
-        )
-      );
-    }
-  }
-
-  // Fires the selected number of POST /api/bots requests in parallel. The
-  // helper chunks large batches so viewport-derived stage jumps can reach
-  // the dense picker states without flooding the local API in one burst.
-  // Names are sampled without replacement while the selected batch fits
-  // inside the name pool; prompts use throwaway lorem ipsum so generated
-  // rows carry realistic-looking content for UI stress testing. On
-  // partial failure we still refresh so the list reflects whatever made
-  // it through.
-  async function devToolsAddRandomBots() {
-    const batchSize = resolvedDevToolsBotQuantity;
-    if (batchSize <= 0) {
-      setDevToolsMessage(randomDevToolsGhostMessage());
-      return;
-    }
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    try {
-      await devToolsCreateRandomBotBatch(batchSize);
-      await refreshBots();
-      setDevToolsMessage(
-        batchSize === 1 ? "Added 1 random bot." : `Added ${batchSize} random bots.`
-      );
-    } catch (err) {
-      // Refresh even on failure so the partial batch (if any) shows up.
-      try { await refreshBots(); } catch { /* list refresh is best-effort */ }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Add random bots failed."
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsAddSeedChats() {
-    const batchSize = resolvedDevToolsBotQuantity;
-    if (batchSize <= 0) {
-      setDevToolsMessage(randomDevToolsGhostMessage());
-      return;
-    }
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    try {
-      const result = await api<{ created?: number }>("/api/conversations/dev-seed", {
-        method: "POST",
-        body: JSON.stringify({ count: batchSize }),
-      });
-      await refreshConversations();
-      const created = typeof result?.created === "number" ? result.created : batchSize;
-      setDevToolsMessage(
-        created === 1 ? "Added 1 chat." : `Added ${created} chats.`
-      );
-    } catch (err) {
-      try { await refreshConversations(); } catch { /* list refresh is best-effort */ }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Add chats failed."
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsSetBotDensityStage(stageId: PickerDensityStageId) {
-    const liveViewportWidth =
-      typeof window === "undefined" ? viewportWidth : window.innerWidth;
-    const liveViewportHeight =
-      typeof window === "undefined" ? viewportHeight : window.innerHeight;
-    const stage = pickerDensityStageTargets(
-      liveViewportWidth,
-      liveViewportHeight
-    ).find((target) => target.id === stageId);
-    if (!stage) return;
-
-    const targetCount = clampDevToolsBotQuantity(stage.targetCount);
-    const delta = targetCount - bots.length;
-    setDevToolsBotQuantity(targetCount);
-
-    if (delta === 0) {
-      setDevToolsMessage(
-        `${stage.label} (${stage.description}) is already active at ${targetCount} bots for ${liveViewportWidth}×${liveViewportHeight}.`
-      );
-      return;
-    }
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    const previousBots = bots;
-    const previousSelectedBotId = selectedBotId;
-
-    try {
-      if (delta > 0) {
-        await devToolsCreateRandomBotBatch(delta);
-        await refreshBots();
-        setDevToolsMessage(
-          `${stage.label} (${stage.description}) target: ${targetCount} bots for ${liveViewportWidth}×${liveViewportHeight}. Added ${delta} bots.`
-        );
-        return;
-      }
-
-      const deleteCount = Math.abs(delta);
-      const optimisticDeletedIds = new Set(
-        previousBots.slice(0, deleteCount).map((bot) => bot.id)
-      );
-      setBots((list) => list.filter((bot) => !optimisticDeletedIds.has(bot.id)));
-      if (selectedBotId && optimisticDeletedIds.has(selectedBotId)) {
-        setSelectedBotId(null);
-      }
-
-      const result = await api<{ deleted?: number }>(
-        `/api/bots?limit=${deleteCount}`,
-        { method: "DELETE" }
-      );
-      await refreshBots();
-      const deleted = typeof result?.deleted === "number" ? result.deleted : deleteCount;
-      setDevToolsMessage(
-        `${stage.label} (${stage.description}) target: ${targetCount} bots for ${liveViewportWidth}×${liveViewportHeight}. Deleted ${deleted} bots.`
-      );
-    } catch (err) {
-      setBots(previousBots);
-      setSelectedBotId(previousSelectedBotId);
-      try { await refreshBots(); } catch { /* list refresh is best-effort */ }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : `Set ${stage.label} failed.`
-      );
-    } finally {
-      setDevToolsBusy(false);
     }
   }
 
@@ -8837,7 +8336,6 @@ function HomeContent(): React.JSX.Element {
         >
           <ThemeGlyph mode={effectiveThemeMode} />
         </button>
-        {renderDevToolsButton()}
       </div>
     );
   }
@@ -9251,185 +8749,6 @@ function HomeContent(): React.JSX.Element {
           {isArmedSingle ? "✓" : "×"}
         </span>
       </button>
-    );
-  };
-
-  // ── Developer Tools launcher + floating panel ───────────────────────
-  // Launcher is rendered inside the compose utility cluster next to the
-  // theme toggle. It renders only when `DEV_TOOLS_ENABLED` is true — any
-  // prod build without the NEXT_PUBLIC_DEV_TOOLS flag set at build time
-  // gets null back and the JSX is eliminated at compile time.
-  //
-  // The panel itself is fixed-position and deliberately non-modal: no
-  // backdrop, no focus trap, no click-away close. That keeps it useful
-  // while testing density/layout changes in the UI underneath.
-  const renderDevToolsButton = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED) return null;
-    return (
-      <button
-        type="button"
-        className={`${styles.headerIconButton} ${styles.composeUtilityButton} ${styles.devToolsButton}`}
-        onClick={() => {
-          setDevToolsMessage(null);
-          setDevToolsOpen((open) => !open);
-        }}
-        aria-label="Open developer tools"
-        title="Developer tools"
-      >
-        <IconKey />
-      </button>
-    );
-  };
-
-  const renderDevToolsPanel = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED || !devToolsOpen) return null;
-    const densityStageTargets = pickerDensityStageTargets(
-      viewportWidth,
-      viewportHeight
-    );
-    return (
-      <div
-        ref={devToolsPanelRef}
-        className={styles.devToolsFloatingPanel}
-        role="dialog"
-        aria-labelledby="dev-tools-title"
-      >
-        <div
-          className={styles.devToolsHeader}
-          onPointerDown={startDevToolsPanelDrag}
-          onPointerMove={dragDevToolsPanel}
-          onPointerUp={endDevToolsPanelDrag}
-          onPointerCancel={endDevToolsPanelDrag}
-        >
-          <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
-            Developer tools
-          </h2>
-          <span className={styles.devToolsDragHint} aria-hidden="true">
-            ⋮⋮
-          </span>
-        </div>
-        <div className={styles.devToolsSection}>
-          <h3 className={styles.devToolsSectionTitle}>Viewport</h3>
-          <p className={styles.devToolsViewportStatus} aria-live="polite">
-            <span>
-              Width <strong>{viewportWidth}px</strong>
-            </span>
-            <span>
-              Height <strong>{viewportHeight}px</strong>
-            </span>
-          </p>
-        </div>
-
-        <div className={styles.devToolsSection}>
-          <h3 className={styles.devToolsSectionTitle}>Seed data</h3>
-          <p className={styles.devToolsSectionHint}>
-            Bots: <strong>{bots.length}</strong> · Sidebar chats:{" "}
-            <strong>{visibleConversations.length}</strong>
-          </p>
-          <label className={styles.devToolsCountControl}>
-            <span>Quantity</span>
-            <input
-              type="number"
-              min={DEV_TOOLS_BOT_QUANTITY_MIN}
-              max={DEV_TOOLS_BOT_QUANTITY_MAX}
-              step={1}
-              value={devToolsBotQuantity}
-              aria-label="Quantity for developer tools add actions"
-              onChange={(event) => {
-                const next = event.currentTarget.value;
-                setDevToolsBotQuantity(
-                  next === "" ? "" : clampDevToolsBotQuantity(Number(next))
-                );
-              }}
-              disabled={devToolsBusy}
-            />
-          </label>
-          <div className={styles.devToolsQuantityRail} aria-label="Quick quantities">
-            {DEV_TOOLS_BOT_QUANTITY_PRESETS.map((quantity) => (
-              <button
-                key={quantity}
-                type="button"
-                className={`${styles.devToolsPresetButton} ${
-                  resolvedDevToolsBotQuantity === quantity ? styles.devToolsPresetButtonActive : ""
-                }`}
-                onClick={() => setDevToolsBotQuantity(quantity)}
-                disabled={devToolsBusy}
-              >
-                {quantity}
-              </button>
-            ))}
-          </div>
-          <p className={styles.devToolsSectionHint}>
-            Stage buttons set total bots for the current viewport. The target
-            is recalculated on click/tap before bots are added or deleted.
-          </p>
-          <div
-            className={styles.devToolsStageRail}
-            aria-label="Bot picker density stages"
-          >
-            {densityStageTargets.map((stage) => {
-              const isCurrentTarget = bots.length === stage.targetCount;
-              return (
-                <button
-                  key={stage.id}
-                  type="button"
-                  className={`${styles.devToolsStageButton} ${
-                    isCurrentTarget ? styles.devToolsStageButtonActive : ""
-                  }`}
-                  onClick={() => void devToolsSetBotDensityStage(stage.id)}
-                  disabled={devToolsBusy}
-                >
-                  <span>{stage.label}</span>
-                  <strong>{stage.targetCount}</strong>
-                  <small>{stage.description}</small>
-                </button>
-              );
-            })}
-          </div>
-          <div className={styles.devToolsActions}>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsAddRandomBots()}
-              disabled={devToolsBusy}
-            >
-              Add bots
-            </button>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsAddSeedChats()}
-              disabled={devToolsBusy}
-            >
-              Add chats
-            </button>
-            <button
-              type="button"
-              className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-              onClick={() => void devToolsDeleteAllBots()}
-              disabled={devToolsBusy || bots.length === 0}
-            >
-              Delete all bots
-            </button>
-          </div>
-        </div>
-
-        {devToolsMessage && (
-          <p className={styles.devToolsStatus} role="status">
-            {devToolsMessage}
-          </p>
-        )}
-
-        <div className={styles.deleteAllModalActions}>
-          <button
-            type="button"
-            className={styles.deleteAllModalCancel}
-            onClick={closeDevTools}
-          >
-            Close
-          </button>
-        </div>
-      </div>
     );
   };
 
@@ -10384,7 +9703,6 @@ function HomeContent(): React.JSX.Element {
         </div>
       </div>
       {renderSharedPanels()}
-      {renderDevToolsPanel()}
     </main>
   );
 
@@ -11369,7 +10687,6 @@ function HomeContent(): React.JSX.Element {
 
       {renderSharedPanels()}
       {renderDeleteAllModal()}
-      {renderDevToolsPanel()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={
@@ -12282,7 +11599,6 @@ function HomeContent(): React.JSX.Element {
 
       {renderSharedPanels()}
       {renderDeleteAllModal()}
-      {renderDevToolsPanel()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={
