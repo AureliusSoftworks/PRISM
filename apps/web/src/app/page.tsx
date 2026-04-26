@@ -3,6 +3,7 @@
 import {
   Suspense,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useCallback,
@@ -189,14 +190,26 @@ function shufflePalette<T>(source: readonly T[]): T[] {
 
 interface PrismWordmarkProps {
   className?: string;
+  /**
+   * When true, all five letters use `currentColor` for their stroke
+   * instead of the shuffled PRISM palette. The consumer drives the
+   * displayed color via the wrapper's `color` (either via inline
+   * style or a CSS rule keyed off `[data-mono="true"]`). Used in
+   * non-home / private / mid-thread surfaces so the wordmark reads
+   * as a calm theme-color mark instead of competing with the bot
+   * accent or the engaged hue.
+   */
+  mono?: boolean;
 }
 
-function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
+function PrismWordmark({ className, mono = false }: PrismWordmarkProps): React.JSX.Element {
   // Initial state = canonical P/R/I/S/M ordering so the server-rendered
   // markup and the client's first paint are byte-identical. The shuffle
   // only runs inside useEffect, which React guarantees not to execute
   // during SSR; this means no hydration warning AND each mount produces
-  // its own independent random permutation.
+  // its own independent random permutation. The shuffle still runs in
+  // mono mode (its result is just unused at render time) so toggling
+  // `mono` on/off doesn't cost a re-shuffle.
   const [colors, setColors] = useState<readonly string[]>(PRISM_WORDMARK_PALETTE);
 
   useEffect(() => {
@@ -206,9 +219,13 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
     return () => window.clearTimeout(timeout);
   }, []);
 
+  const strokeFor = (index: number): string =>
+    mono ? "currentColor" : colors[index];
+
   return (
     <svg
       className={className}
+      data-mono={mono ? "true" : undefined}
       viewBox="0 0 610 72"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
@@ -225,26 +242,26 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
       >
         {/* P */}
         <path
-          stroke={colors[0]}
+          stroke={strokeFor(0)}
           d="M6,66V6h50c10.67,0,16,5.33,16,16s-5.33,16-16,16H18"
           suppressHydrationWarning
         />
         {/* R — two subpaths grouped so both subpaths inherit the same
             shuffled color from a single <g stroke>. */}
-        <g stroke={colors[1]} suppressHydrationWarning>
+        <g stroke={strokeFor(1)} suppressHydrationWarning>
           <path d="M134,66V6h50c10.67,0,16,5.33,16,16s-5.33,16-16,16h-38" />
           <path d="M162,38l44,28" />
         </g>
         {/* I */}
-        <path stroke={colors[2]} d="M282,6v60" suppressHydrationWarning />
+        <path stroke={strokeFor(2)} d="M282,6v60" suppressHydrationWarning />
         {/* S */}
         <path
-          stroke={colors[3]}
+          stroke={strokeFor(3)}
           d="M430,6h-48c-10.67,0-16,5.33-16,16,0,8,4,12.67,12,14l52,2c9.33,1.33,14,6,14,14,0,9.33-5.33,14-16,14h-48"
           suppressHydrationWarning
         />
         {/* M — three subpaths (two uprights + the central chevron). */}
-        <g stroke={colors[4]} suppressHydrationWarning>
+        <g stroke={strokeFor(4)} suppressHydrationWarning>
           <path d="M508,66V6" />
           <path d="M508,6l48,48,48-48" />
           <path d="M604,6v60" />
@@ -1284,33 +1301,11 @@ function botAccentStyle(
   } as React.CSSProperties;
 }
 
-// Build the inline `--swatch-border` custom property for the color-picker
-// swatch button so its border smoothly ramps from the theme's default
-// --line stroke to a near-foreground stroke as the swatch fill approaches
-// the surface luminance. Returns a `color-mix()` expression that is
-// resolved at paint time against whichever theme (light/dark) the shell
-// is currently painting — that way the same math covers both directions
-// of the "too dark on dark" / "too light on light" problem without
-// hard-coding hex tokens.
-function swatchBorderStyle(fillHex: string, resolvedTheme: "light" | "dark"): string {
-  const surface = THEME_SURFACE_BG[resolvedTheme];
-  const ratio = contrastRatio(fillHex, surface);
-  // Ramp bounds (WCAG contrast ratio units). Above `start` the border
-  // stays at the default --line; below `end` it flips fully to --fg.
-  const START = 2.0;
-  const END = 1.05;
-  const raw = Math.max(0, Math.min(1, (START - ratio) / (START - END)));
-  // Quadratic ease-in-out so the visual crossover doesn't pop.
-  const eased = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
-  const pct = Math.round(eased * 100);
-  return `color-mix(in srgb, var(--line) ${100 - pct}%, var(--fg) ${pct}%)`;
-}
-
-// Sidebar conversation row border shade compensation. Similar ramp to
-// swatchBorderStyle, but emits just a 0..100 integer percent so the
-// consumer can apply the blend in CSS (`color-mix(var(--row-color),
-// var(--fg) X%)`). Keeping the computation off the CSS side gives us
-// control over easing without shipping a bigger CSS expression per row.
+// Sidebar conversation row border shade compensation. Emits a 0..100
+// integer percent so the consumer can apply the blend in CSS
+// (`color-mix(var(--row-color), var(--fg) X%)`). Keeping the computation
+// off the CSS side gives us control over easing without shipping a bigger
+// CSS expression per row.
 //
 // Semantics: a conversation tile fill is ~22% of the bot color over the
 // theme surface. When the bot color is bright on a light theme (or dark
@@ -1325,10 +1320,8 @@ function rowBorderMixPercent(
 ): number {
   const surface = THEME_SURFACE_BG[resolvedTheme];
   const ratio = contrastRatio(fillHex, surface);
-  // Slightly higher `start` than swatchBorderStyle (2.5 vs 2.0) so
-  // mid-band bot colors get a gentle nudge toward --fg too — keeps the
-  // border readable over the actual 22% tint rather than the full-
-  // saturation swatch case swatchBorderStyle covers.
+  // Mid-band bot colors get a gentle nudge toward --fg too — keeps the
+  // border readable over the actual 22% tint rather than the raw color.
   const START = 2.5;
   const END = 1.05;
   const raw = Math.max(0, Math.min(1, (START - ratio) / (START - END)));
@@ -1338,12 +1331,12 @@ function rowBorderMixPercent(
 
 type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
-type PanelView = null | "settings" | "bots" | "images";
+type PanelView = null | "settings" | "bots" | "images" | "memories";
+type MemoryPanelScope = "bot" | "session" | "all";
 // Which post-auth surface is currently rendered. "hub" is the landing
 // screen shown after login; each mode tile navigates to a specific
-// experience. The "chat" mode is scaffolded for a follow-up phase; until
-// then, its Hub tile stays disabled and stray ?view=chat URLs fall
-// through to the Sandbox shell.
+// experience. Future modes can be advertised as disabled Hub tiles
+// without entering this route union until their shells actually exist.
 type View = "hub" | "chat" | "sandbox";
 
 interface SessionUser { id: string; email: string; displayName: string; theme: Theme; preferredProvider: Provider; }
@@ -1368,6 +1361,7 @@ interface Message {
   content: string;
   createdAt: string;
   provider?: Provider;
+  model?: string;
   botName?: string;
   botColor?: string;
   botGlyph?: string;
@@ -1411,12 +1405,35 @@ interface UserSettings {
   hasOpenAiApiKey: boolean;
   ollamaModel: string;
 }
-interface UserMemory { id: string; confidence: number; text: string; }
+interface UserMemory {
+  id: string;
+  conversationId?: string;
+  botId?: string;
+  createdAt: string;
+  confidence: number;
+  text: string;
+}
+interface ModelCatalogEntry {
+  id: string;
+  label: string;
+  provider: Provider;
+  isDefault?: boolean;
+}
+interface ModelCatalog {
+  local: ModelCatalogEntry[];
+  online: ModelCatalogEntry[];
+  defaults: {
+    local: string;
+    online: string;
+  };
+}
 interface Bot {
   id: string;
   name: string;
   system_prompt: string;
   model: string | null;
+  local_model: string | null;
+  online_model: string | null;
   temperature: number;
   max_tokens: number;
   color: string | null;
@@ -1444,8 +1461,110 @@ const BOT_PANEL_COLOR_HARMONY_SATURATION_TARGET = 70;
 const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_DARK = 44;
 const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_LIGHT = 46;
 
-function botIsChatEnabled(bot: Bot): boolean {
-  return bot.chat_enabled === 1;
+const AUTO_MODEL_CHOICE = "auto";
+const ONLINE_MODEL_FALLBACK_ID = "gpt-4o-mini";
+const BOT_TEMPERATURE_DEFAULT = 0.7;
+const BOT_TEMPERATURE_MIN = 0;
+const BOT_TEMPERATURE_MAX = 1.2;
+const BOT_TEMPERATURE_STEP = 0.1;
+const BOT_REPLY_LENGTH_PRESETS = [
+  {
+    id: "short",
+    label: "Quick",
+    tokens: 768,
+    description: "Best for fast, low-friction replies.",
+  },
+  {
+    id: "medium",
+    label: "Roomy",
+    tokens: 2048,
+    description: "Enough space for detail without turning every answer into an essay.",
+  },
+  {
+    id: "long",
+    label: "Deep dive",
+    tokens: 4096,
+    description: "Gives the bot room to reason, explain, and explore.",
+  },
+] as const;
+const BOT_REPLY_LENGTH_DEFAULT_TOKENS = 2048;
+
+function normalizeBotTemperature(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return BOT_TEMPERATURE_DEFAULT;
+  }
+  const clamped = Math.min(
+    BOT_TEMPERATURE_MAX,
+    Math.max(BOT_TEMPERATURE_MIN, value)
+  );
+  return Number(clamped.toFixed(1));
+}
+
+function botTemperatureLabel(value: number): string {
+  if (value <= 0.35) return "Focused";
+  if (value >= 0.9) return "Adventurous";
+  return "Balanced";
+}
+
+function botTemperatureDescription(value: number): string {
+  if (value <= 0.35) {
+    return "Stays close to your instructions and repeats itself less.";
+  }
+  if (value >= 0.9) {
+    return "More willing to riff, surprise you, and try unusual phrasing.";
+  }
+  return "A middle path: steady enough for usefulness, lively enough for personality.";
+}
+
+function normalizeBotMaxTokens(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return BOT_REPLY_LENGTH_DEFAULT_TOKENS;
+  }
+  return Math.round(value);
+}
+
+function botReplyLengthPresetForTokens(tokens: number) {
+  return BOT_REPLY_LENGTH_PRESETS.find((preset) => preset.tokens === tokens) ?? null;
+}
+
+function normalizeModelChoice(value: string | null | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : AUTO_MODEL_CHOICE;
+}
+
+function modelOptionsForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider
+): ModelCatalogEntry[] {
+  if (provider === "local") {
+    const fallbackId = settings?.ollamaModel?.trim() || "Local default";
+    return catalog?.local.length
+      ? catalog.local
+      : [{ id: fallbackId, label: fallbackId, provider: "local", isDefault: true }];
+  }
+  return catalog?.online.length
+    ? catalog.online
+    : [{
+        id: ONLINE_MODEL_FALLBACK_ID,
+        label: "GPT 4o Mini",
+        provider: "openai",
+        isDefault: true,
+      }];
+}
+
+function includeSelectedModelOption(
+  options: ModelCatalogEntry[],
+  choice: string,
+  provider: Provider
+): ModelCatalogEntry[] {
+  if (choice === AUTO_MODEL_CHOICE || options.some((model) => model.id === choice)) {
+    return options;
+  }
+  return [
+    ...options,
+    { id: choice, label: choice, provider },
+  ];
 }
 
 function blendToward(value: number, target: number, amount: number): number {
@@ -1664,6 +1783,52 @@ function hueLensSliderValueForFilterCenter(
   );
 }
 
+// Slider's native [0..359] range maps linearly to a 0..100 percentage that
+// approximates the thumb's center as a fraction of the track. The native
+// thumb has a small inset relative to the track ends, so this isn't pixel-
+// perfect at the extremes — but the orb it drives in `.messagesFrame::after`
+// is a wide, soft radial gradient masked at the rails, so visually 1px of
+// thumb-vs-orb offset reads as zero. `null` filter parks the orb at 50%,
+// which lines up with the slider's 180-resting position.
+const HUE_LENS_SLIDER_RANGE = 359;
+function hueLensSliderPercent(
+  hueCenter: number | null,
+  segments: readonly HueLensTrackSegment[]
+): number {
+  if (hueCenter === null) return 50;
+  const sliderValue = hueLensSliderValueForFilterCenter(hueCenter, segments);
+  return Math.max(0, Math.min(100, (sliderValue / HUE_LENS_SLIDER_RANGE) * 100));
+}
+
+// Saturation/lightness for the continuous-hue tint the slider drives onto
+// the page accent. Vivid enough to read as "the lens is doing something"
+// but inside a band that `normalizeAccentForTheme` can safely pull into
+// either light or dark mode. The hue itself is the only variable across
+// the slider's full travel — S/L are constant — which is what gives the
+// orb its smooth RGB-cycle feel as the user drags.
+const HUE_LENS_ACCENT_SATURATION_PCT = 70;
+const HUE_LENS_ACCENT_LIGHTNESS_PCT = 55;
+
+// Map the slider's raw 0..359 position onto the full color wheel so the
+// orb cycles through a TRUE RGB hue as the user drags — distinct from the
+// meter track's compacted Prism stops, which only color the spans where
+// bots actually live. The slider position is the master input here; the
+// filter center is a derived "snap to the closest populated family"
+// signal used by the bot list, not by this preview color.
+function hueLensSliderTintHex(
+  hueCenter: number | null,
+  segments: readonly HueLensTrackSegment[]
+): string | null {
+  if (hueCenter === null) return null;
+  const sliderValue = hueLensSliderValueForFilterCenter(hueCenter, segments);
+  const hueDeg = ((sliderValue % 360) + 360) % 360;
+  return hslToHex(
+    hueDeg,
+    HUE_LENS_ACCENT_SATURATION_PCT,
+    HUE_LENS_ACCENT_LIGHTNESS_PCT
+  );
+}
+
 function panelBotDisplayAccent(
   rawHex: string,
   theme: "light" | "dark",
@@ -1744,6 +1909,9 @@ function compareBotsByColor(
 // newly generated bot lands in one of these five buckets — there is
 // no separate neutral group.
 type PrismGroupId = "p" | "r" | "i" | "s" | "m";
+type BotLibraryFilterId = "all" | PrismGroupId;
+const BOT_LIBRARY_FILTER_ALL = "all" as const;
+const BOT_LIBRARY_DRAWER_ANIMATION_MS = 220;
 
 interface PrismGroupDef {
   id: PrismGroupId;
@@ -1759,6 +1927,24 @@ const PRISM_GROUPS: readonly PrismGroupDef[] = [
   { id: "s", letter: "S", label: "Cyan & blue", swatch: PRISM_COLORS.s },
   { id: "m", letter: "M", label: "Indigo & violet", swatch: PRISM_COLORS.m },
 ] as const;
+
+// The bot-library color-group dashboard renders the All-bots △ tile in
+// row 1 col 1, then the five PRISM_GROUPS in iteration order across a
+// 2-column grid: pink/red (r1c2), orange/yellow (r2c1), lime/green
+// (r2c2), cyan/blue (r3c1), indigo/violet (r3c2). Read column-major
+// (left col r2→r3, then right col r1→r3) the five color tiles arrive
+// in the sequence orange, cyan, pink, green, violet — so we override
+// each tile's displayed glyph below to spell the PRISM brand wordmark
+// in that reading order. The underlying group ids, labels, swatches,
+// and aria-labels still carry the canonical color identity; only the
+// visible letter glyph is remapped for the wordmark layout.
+const GROUP_LETTER_OVERRIDES: Record<PrismGroupId, string> = {
+  r: "P", // orange/yellow → 1st in column-major reading
+  s: "R", // cyan/blue     → 2nd
+  p: "I", // pink/red      → 3rd
+  i: "S", // lime/green    → 4th
+  m: "M", // indigo/violet → 5th
+};
 
 // Build a left-to-right gradient from up to N bot colors in a group so
 // each editor dashboard button reads as an ordered slice of its bucket's
@@ -3838,6 +4024,14 @@ interface EmptyStateIconProps {
   previewBot?: Bot | null;
   previewAsBotGlyph?: boolean;
   /**
+   * Force the bare Prism-triangle preview regardless of bot/previewBot.
+   * Used by the empty-state surface during an active hue-lens drag so the
+   * hero collapses to a single tintable triangle while the slider is
+   * being engaged — the triangle's stroke inherits `--accent`, so any
+   * shell-level lens tint flows through automatically.
+   */
+  forceTrianglePreview?: boolean;
+  /**
    * Active theme, resolved upstream. The bot's stored color runs through
    * `normalizeAccentForTheme(_, resolvedTheme)` so deep hues lift in dark
    * mode and bright warm hues dim in light mode before painting glyphs.
@@ -3849,8 +4043,20 @@ function EmptyStateIcon({
   bot,
   previewBot = null,
   previewAsBotGlyph = false,
+  forceTrianglePreview = false,
   resolvedTheme,
 }: EmptyStateIconProps): React.JSX.Element {
+  if (forceTrianglePreview) {
+    return (
+      <div
+        className={`${styles.emptyStateBrand} ${styles.emptyStateBrandPreview}`}
+        aria-hidden="true"
+      >
+        <PrismTriangleMark className={styles.emptyStateBrandTriangle} />
+      </div>
+    );
+  }
+
   if (!bot && previewBot) {
     if (previewAsBotGlyph) {
       return (
@@ -4325,6 +4531,170 @@ function ComposerBotPicker({
   );
 }
 
+interface ComposerModelPickerProps {
+  value: string;
+  onChange: (nextValue: string) => void;
+  options: ModelCatalogEntry[];
+  provider: Provider;
+  disabled?: boolean;
+  title?: string;
+  ariaLabel: string;
+}
+
+function ComposerModelPicker({
+  value,
+  onChange,
+  options,
+  provider,
+  disabled,
+  title,
+  ariaLabel,
+}: ComposerModelPickerProps): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const selectedModel =
+    value === AUTO_MODEL_CHOICE
+      ? null
+      : options.find((model) => model.id === value) ?? null;
+  const selectedLabel =
+    value === AUTO_MODEL_CHOICE
+      ? "Auto"
+      : selectedModel?.label ?? value;
+  const menuOpen = open && !disabled;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!disabled || !open) return;
+    const timeout = window.setTimeout(() => setOpen(false), 0);
+    return () => window.clearTimeout(timeout);
+  }, [disabled, open]);
+
+  const pick = (nextValue: string): void => {
+    onChange(nextValue);
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  return (
+    <div
+      className={styles.composeModelControl}
+      data-disabled={disabled ? "true" : undefined}
+      data-open={menuOpen ? "true" : undefined}
+      data-provider={provider}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        className={styles.composeModelTrigger}
+        onClick={() => setOpen((current) => !current)}
+        disabled={disabled}
+        title={title}
+        aria-haspopup="listbox"
+        aria-expanded={menuOpen}
+        aria-label={ariaLabel}
+      >
+        <span className={styles.composeControlLabel}>Model</span>
+        <span className={styles.composeModelTriggerName}>
+          {selectedLabel}
+        </span>
+        <span
+          className={styles.composeModelTriggerChevron}
+          aria-hidden="true"
+        >
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M2 3.5 L5 6.5 L8 3.5" />
+          </svg>
+        </span>
+      </button>
+      {menuOpen && (
+        <div
+          ref={menuRef}
+          className={`${styles.composeBotMenu} ${styles.composeModelMenu}`}
+        >
+          <div
+            className={styles.composeBotListbox}
+            role="listbox"
+            aria-label={ariaLabel}
+          >
+            <button
+              type="button"
+              className={`${styles.composeBotOption} ${styles.composeModelOption}`}
+              role="option"
+              aria-selected={value === AUTO_MODEL_CHOICE}
+              onClick={() => pick(AUTO_MODEL_CHOICE)}
+            >
+              <span className={styles.composeModelOptionMain}>
+                <span className={styles.composeModelOptionName}>Auto</span>
+                <span className={styles.composeModelOptionMeta}>
+                  Uses default routing
+                </span>
+              </span>
+            </button>
+            {options.map((model) => {
+              const isSelected = value === model.id;
+              return (
+                <button
+                  key={model.id}
+                  type="button"
+                  className={`${styles.composeBotOption} ${styles.composeModelOption}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => pick(model.id)}
+                >
+                  <span className={styles.composeModelOptionMain}>
+                    <span className={styles.composeModelOptionName}>
+                      {model.label}
+                    </span>
+                  </span>
+                  {model.isDefault && (
+                    <span className={styles.composeModelDefaultBadge}>
+                      Default
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Hue lens (color filter) ──────────────────────────────────────────
 // Color-band filter for bot-heavy picking surfaces. Pre-chat it sits
 // above the compose tools so it can reshape the big starter grid; once a
@@ -4356,6 +4726,15 @@ interface HueLensControlProps {
   showCount?: boolean;
   /** Whether the active state can be cleared back to "All". */
   allowClear?: boolean;
+  /**
+   * Notifies the parent shell when the user is actively pressing/touching
+   * the slider thumb. The empty-state surface uses this to drive a
+   * "drag-only preview" mode (hero collapses to a Prism triangle, shell
+   * accent tints to the lens hue) while keeping the control's filter
+   * commit semantics unchanged. Optional — embedders that don't care
+   * about drag state (e.g. the popout) can omit it.
+   */
+  onInteractionChange?: (active: boolean) => void;
 }
 
 function HueLensControl({
@@ -4369,6 +4748,7 @@ function HueLensControl({
   compact = false,
   showCount = true,
   allowClear = true,
+  onInteractionChange,
 }: HueLensControlProps): React.JSX.Element | null {
   const handleSliderChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -4380,6 +4760,19 @@ function HueLensControl({
       );
     },
     [onHueChange, trackSegments]
+  );
+  // Pointer + touch start/end fire the drag-state callback so the shell
+  // can flip preview UI on for the duration of an active drag without
+  // the lens itself owning any of that surrounding state. Pointer events
+  // cover both mouse and stylus on modern browsers; touch handlers stay
+  // as a fallback for legacy mobile webviews that gate pointer events.
+  const handleInteractionStart = useCallback(
+    () => onInteractionChange?.(true),
+    [onInteractionChange]
+  );
+  const handleInteractionEnd = useCallback(
+    () => onInteractionChange?.(false),
+    [onInteractionChange]
   );
   if (!hueLensAvailable) return null;
   const active = hueFilterCenter !== null;
@@ -4409,6 +4802,12 @@ function HueLensControl({
         step={1}
         value={sliderValue}
         onChange={handleSliderChange}
+        onPointerDown={handleInteractionStart}
+        onPointerUp={handleInteractionEnd}
+        onPointerCancel={handleInteractionEnd}
+        onTouchStart={handleInteractionStart}
+        onTouchEnd={handleInteractionEnd}
+        onTouchCancel={handleInteractionEnd}
         aria-label="Color lens — filter bots by hue"
         title="Filter bots by hue"
         className={styles.hueLensSlider}
@@ -4590,16 +4989,12 @@ function ColorGlyphPicker({
   ariaLabel = "Bot color and glyph. Click to open the picker, right-click for random.",
   resolvedTheme,
 }: ColorGlyphPickerProps): React.JSX.Element {
-  // Everything the swatch actually paints — fill, text-contrast glyph,
-  // and the border compensator — keys off the band-clamped color, not
-  // the raw hex. Legacy bots whose stored color drifts outside the
-  // picker's current band still render inside it automatically, and the
-  // swatch always matches the accent bars and message bubbles the same
-  // bot paints elsewhere. The band tightens in dark mode so deep hues
-  // don't disappear against the shell (see `accentLightnessBand`).
+  // Everything the swatch paints keys off the band-clamped color, not the
+  // raw hex. That keeps the editor profile picture visually identical to
+  // the main editor's committed bot hero, including the readable glyph ink.
   const displayColor = normalizeAccentForTheme(color, resolvedTheme);
   const readable = pickReadableText(displayColor);
-  const swatchBorder = swatchBorderStyle(displayColor, resolvedTheme);
+  const swatchInk = ensureContrast(displayColor, THEME_SURFACE_BG[resolvedTheme], 4.5);
   // Indicator position on the square tracks the current color so users
   // see where they are without a sliders UI. X → hue, Y → lightness
   // (inverted: top = lighter). The Y axis is bounded to the safe
@@ -4620,6 +5015,38 @@ function ColorGlyphPicker({
   // lazily, so the refs are null until `open` flips to true.
   const parallaxRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  // The .colorPickerWrapper itself. Its viewport rect is the anchor
+  // for the floating popover — we read it on open (and on resize)
+  // and feed an inline `top`/`left` (already projected into the
+  // dimmed area to the LEFT of the panel) so the popover can render
+  // with `position: fixed` and escape the panel's overflow clip,
+  // mirroring the parameter-help tooltip pattern. Without this, the
+  // popover would fall back to `position: absolute` inside the panel
+  // (where it overlaps the system-prompt textarea + parameter card
+  // and intercepts clicks).
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  // Final viewport coords for the popover's top-left corner (NOT the
+  // raw swatch rect — the leftward shift is folded in here so the
+  // inline style is self-sufficient and doesn't depend on a CSS
+  // `transform`). `null` while the popover is closed OR while the
+  // viewport is narrow enough that the popover should fall back to
+  // the centered-modal mobile layout (the `@media (max-width: 799px)`
+  // override in the stylesheet ignores inline top/left only when we
+  // skip setting them, hence the explicit null on mobile).
+  const [popoverAnchor, setPopoverAnchor] =
+    useState<{ top: number; left: number } | null>(null);
+  // Below this width, the popover renders as a centered modal
+  // (the existing mobile fallback). Mirrors the @media breakpoint
+  // in page.module.css so JS and CSS agree on when the side-anchored
+  // layout is active.
+  const POPOVER_WIDE_BREAKPOINT_PX = 800;
+  // Popover footprint: width (matches the CSS `width: 320px`) and the
+  // gap between the popover's right edge and the swatch's left edge
+  // when projecting the anchor leftward. Hoisting these as constants
+  // keeps the JS-side projection in lockstep with the CSS — change
+  // both together if the popover's footprint ever moves.
+  const POPOVER_WIDTH_PX = 320;
+  const POPOVER_GAP_FROM_SWATCH_PX = 32;
 
   // ── Drag state for the color square ───────────────────────────────
   // Pointer drag wiring (mouse / touch / stylus, unified via the
@@ -4811,6 +5238,49 @@ function ColorGlyphPicker({
     updateGlyphCamera(shell, parallaxRef.current, nx, ny);
   }, []);
 
+  // Floating-popover anchor driver. Captures the swatch wrapper's
+  // viewport rect synchronously before paint (useLayoutEffect) and
+  // projects it leftward by (popover width + gap) so the popover's
+  // right edge lands a clean POPOVER_GAP_FROM_SWATCH_PX from the
+  // swatch — placing it cleanly outside the panel chrome in the
+  // dimmed area. The projection happens here in JS rather than via
+  // a CSS `transform` so the inline style is fully self-sufficient
+  // (immune to CSS HMR oddities and ancestor stacking-context
+  // surprises). Re-measures on resize so the popover stays glued
+  // to the swatch when the viewport changes. On narrow viewports
+  // (< POPOVER_WIDE_BREAKPOINT_PX) we leave anchor `null` so the
+  // `@media (max-width: 799px)` centered-modal fallback in
+  // page.module.css can take over.
+  useLayoutEffect(() => {
+    if (!open) {
+      // Resetting the anchor when the popover closes is the intended
+      // synchronization between component-state and the projected
+      // viewport-rect cache; the cascading-render concern the lint rule
+      // raises doesn't apply here because `popoverAnchor` is not in the
+      // effect's dep array, so this never re-fires the effect.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPopoverAnchor(null);
+      return;
+    }
+    function measure() {
+      if (typeof window === "undefined") return;
+      if (window.innerWidth < POPOVER_WIDE_BREAKPOINT_PX) {
+        setPopoverAnchor(null);
+        return;
+      }
+      const wrapper = wrapperRef.current;
+      if (!wrapper) return;
+      const rect = wrapper.getBoundingClientRect();
+      setPopoverAnchor({
+        top: rect.top,
+        left: rect.left - POPOVER_WIDTH_PX - POPOVER_GAP_FROM_SWATCH_PX,
+      });
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [open]);
+
   // Wire the position driver only while the popover is open (the DOM
   // doesn't exist until then, and leaving listeners attached to window
   // after unmount leaks). Window scroll + resize both move the shell
@@ -4853,20 +5323,15 @@ function ColorGlyphPicker({
   }, [positionCamera]);
 
   return (
-    <div className={styles.colorPickerWrapper} data-color-affordance="true">
+    <div ref={wrapperRef} className={styles.colorPickerWrapper} data-color-affordance="true">
       <button
         type="button"
         className={styles.colorSwatchButton}
         style={{
-          // `displayColor` is the band-clamped variant of `color`, so
-          // the swatch always reads at a usable fill even when the
-          // stored bot color drifts outside the picker's current band.
-          background: displayColor,
-          color: readable,
-          // Typed-as-string because React's CSSProperties doesn't know
-          // about app custom properties; the value is a color-mix()
-          // expression that resolves live against the current theme.
-          ["--swatch-border" as string]: swatchBorder,
+          // Match EmptyStateBotGlyph exactly: the button is the same
+          // soft bot-colored hero tile, just made interactive.
+          ["--bot-color" as string]: displayColor,
+          ["--bot-ink" as string]: swatchInk,
         } as React.CSSProperties}
         onClick={onToggle}
         onContextMenu={(e) => {
@@ -4878,19 +5343,32 @@ function ColorGlyphPicker({
         aria-expanded={open}
         title="Click to pick · right-click: random color + glyph"
       >
-        <BotGlyph
-          name={glyph}
-          size={BOT_GLYPH_PICKER_GLYPH_SIZE}
-          strokeWidth={BOT_GLYPH_PICKER_STROKE_WIDTH}
-        />
+        <BotGlyph name={glyph} />
       </button>
       {open && (
         // Popover is a pure picking surface — no reroll affordance lives
         // here. Randomization is exclusively the swatch's right-click,
         // keeping the popover's two jobs (pick color, pick glyph)
         // unambiguous.
+        //
+        // Inline `position`/`top`/`left` only fire on wide viewports —
+        // `popoverAnchor` already encodes the leftward shift into the
+        // dimmed area beside the panel (see useLayoutEffect above).
+        // We force `position: fixed` inline because (a) the popover
+        // MUST escape the panel's overflow clip to render in the
+        // dimmed area, and (b) inlining the position keeps us robust
+        // against any CSS HMR / cascade weirdness in dev. On narrow
+        // viewports we leave the style off entirely so the
+        // `@media (max-width: 799px)` rule in page.module.css wins
+        // and the popover recenters as a modal.
         <div
           className={styles.colorGlyphPopover}
+          style={popoverAnchor ? {
+            position: "fixed",
+            top: `${popoverAnchor.top}px`,
+            left: `${popoverAnchor.left}px`,
+            transform: "none",
+          } : undefined}
           role="dialog"
           aria-label="Bot color and glyph picker"
         >
@@ -5035,6 +5513,135 @@ function GlyphSandbox({ size = 88 }: GlyphProps): React.JSX.Element {
   );
 }
 
+function GlyphArena({ size = 88 }: GlyphProps): React.JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 38 H42" stroke="currentColor" strokeWidth={2.5} opacity="0.45" />
+      <path d="M10 20 H20 L18 38 H12 Z" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      <path d="M28 20 H38 L36 38 H30 Z" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      <path d="M16 14 C18 10 22 8 24 8 C26 8 30 10 32 14" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      <path d="M20 17 L24 21 L28 17" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      <path d="M24 22 V31" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
+function GlyphPolling({ size = 88 }: GlyphProps): React.JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M8 40 H40" stroke="currentColor" strokeWidth={2.5} opacity="0.45" />
+      <path d="M12 40 V25" stroke={PRISM_COLORS.p} strokeWidth={5} />
+      <path d="M20 40 V16" stroke={PRISM_COLORS.r} strokeWidth={5} />
+      <path d="M28 40 V22" stroke={PRISM_COLORS.i} strokeWidth={5} />
+      <path d="M36 40 V10" stroke={PRISM_COLORS.s} strokeWidth={5} />
+      <circle cx="13" cy="14" r="3" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+      <circle cx="27" cy="10" r="3" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+      <circle cx="39" cy="21" r="3" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
+function GlyphCoffee({ size = 88 }: GlyphProps): React.JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14 21 H31 V31 C31 36 27 39 22 39 H20 C15 39 12 36 12 31 V23 C12 22 13 21 14 21 Z" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      <path d="M31 25 H35 C38 25 40 27 40 30 C40 33 38 35 35 35 H31" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      <path d="M16 14 C14 11 17 9 16 6" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      <path d="M24 14 C22 11 25 9 24 6" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      <path d="M8 42 H37" stroke="currentColor" strokeWidth={2.5} opacity="0.45" />
+      <circle cx="35" cy="11" r="3" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+      <circle cx="41" cy="17" r="2.5" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
+function GlyphGames({ size = 88 }: GlyphProps): React.JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 9 H39 V39 H9 Z" stroke="currentColor" strokeWidth={2.5} opacity="0.45" />
+      <path d="M9 19 H39" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      <path d="M9 29 H39" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      <path d="M19 9 V39" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      <path d="M29 9 V39" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      <circle cx="14" cy="14" r="3" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+      <path d="M31 33 H37" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+      <path d="M34 30 V36" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
+function GlyphSlate({ size = 88 }: GlyphProps): React.JSX.Element {
+  // Document-with-folded-corner silhouette housing three text lines and
+  // a blinking-cursor caret. Each PRISM letter gets exactly one element
+  // so the tile reads as a refracted "page in progress":
+  //   P → folded top-right corner crease
+  //   R → first (longest) text line
+  //   I → second text line
+  //   S → third text line
+  //   M → vertical cursor caret hanging at the end of the last line
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Page outline (neutral, like the prism body in GlyphSandbox) */}
+      <path
+        d="M11 6 H30 L37 13 V42 H11 Z"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        opacity="0.45"
+      />
+      {/* Folded corner crease (P) */}
+      <path d="M30 6 V13 H37" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      {/* Text line 1 — longest (R) */}
+      <path d="M16 20 H32" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      {/* Text line 2 — medium (I) */}
+      <path d="M16 26 H29" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      {/* Text line 3 — shortest (S) */}
+      <path d="M16 32 H24" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      {/* Cursor caret at end of last line (M) */}
+      <path d="M27 30 V35" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
 // ── Message body with collapsible long content ────────────────────────
 // Wraps the <p> text so we can cap the rendered height on long messages
 // and reveal a "Show more" toggle. Messages under MESSAGE_COLLAPSE_THRESHOLD
@@ -5107,10 +5714,26 @@ function HomeContent(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [draft, setDraft] = useState("");
+  const [composerPrimed, setComposerPrimed] = useState(false);
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [openAiKey, setOpenAiKey] = useState("");
   const [memories, setMemories] = useState<UserMemory[]>([]);
+  const [botMemories, setBotMemories] = useState<UserMemory[]>([]);
+  const [memoryPanelScope, setMemoryPanelScope] = useState<MemoryPanelScope>("bot");
+  const [logoutArmed, setLogoutArmed] = useState(false);
   const [pendingReply, setPendingReply] = useState(false);
+  const [pendingReplyConversationId, setPendingReplyConversationId] =
+    useState<string | null>(null);
+  const [pendingReplyIsNewConversation, setPendingReplyIsNewConversation] =
+    useState(false);
+  const [unreadConversationIds, setUnreadConversationIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [unreadConversationOrder, setUnreadConversationOrder] = useState<string[]>([]);
+  const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
+  const selectedIdRef = useRef<string | null>(null);
+  const detailIdRef = useRef<string | null>(null);
   // IDs of messages the user has explicitly expanded past the
   // collapse-long-content cap. Kept as a Set so toggling is O(1) and
   // independent of message order. Lives in-memory only — reloading a
@@ -5124,11 +5747,31 @@ function HomeContent(): React.JSX.Element {
       return next;
     });
   }, []);
+  const [modelRevealMessageId, setModelRevealMessageId] = useState<string | null>(null);
+  const modelRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealMessageModel = useCallback((id: string) => {
+    if (modelRevealTimerRef.current) {
+      clearTimeout(modelRevealTimerRef.current);
+    }
+    setModelRevealMessageId(id);
+    modelRevealTimerRef.current = setTimeout(() => {
+      setModelRevealMessageId(current => current === id ? null : current);
+      modelRevealTimerRef.current = null;
+    }, 3200);
+  }, []);
   const [panel, setPanel] = useState<PanelView>(null);
+  selectedIdRef.current = selectedId;
+  detailIdRef.current = detail?.id ?? null;
   // Drill-in target for the high-count Prism color dashboard. Null at
   // <40 bots OR while the user is on the dashboard root; set to a
   // letter id while they have a specific group expanded.
-  const [botPanelGroup, setBotPanelGroup] = useState<PrismGroupId | null>(null);
+  const [botPanelGroup, setBotPanelGroup] = useState<BotLibraryFilterId>(
+    BOT_LIBRARY_FILTER_ALL
+  );
+  const [botLibraryExpanded, setBotLibraryExpanded] = useState(false);
+  const [botLibraryClosing, setBotLibraryClosing] = useState(false);
+  const [botPanelLibraryEnabled, setBotPanelLibraryEnabled] = useState(true);
+  const botLibraryCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rightMenuOpen, setRightMenuOpen] = useState(false);
   // Developer Tools floating panel visibility. Launcher is the key-glyph button
@@ -5163,6 +5806,11 @@ function HomeContent(): React.JSX.Element {
   }, []);
   const [bots, setBots] = useState<Bot[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+  const [chatModelChoiceByProvider, setChatModelChoiceByProvider] =
+    useState<Record<Provider, string>>({
+      local: AUTO_MODEL_CHOICE,
+      openai: AUTO_MODEL_CHOICE,
+    });
   // Active hue lens center, in degrees on the 360° color wheel. `null`
   // means "show all bots" for the pre-chat starter-grid filter. After a
   // chat has messages, the compact bot popout seeds this to a random
@@ -5192,8 +5840,9 @@ function HomeContent(): React.JSX.Element {
   // the FIRST send of a new conversation creates the row with
   // `incognito = 1`. Once the server persists that flag on the conversation
   // row, every subsequent read path derives privacy from detail.incognito
-  // and this pending flag is cleared. Never relevant in Sandbox — that
-  // surface has no cross-session memory to "hide from" in the first place.
+  // and this pending flag is cleared. Sandbox can arm the same path from
+  // its sidebar, but private sends route through the Chat-mode server
+  // contract so they still mean forced LOCAL + no memory + Default persona.
   const [pendingIncognito, setPendingIncognito] = useState(false);
   // Pending mid-thread bot switch for the OPEN Chat-mode conversation.
   // Three-valued so the dropdown can distinguish "match the server's
@@ -5214,12 +5863,42 @@ function HomeContent(): React.JSX.Element {
   // fields with that bot's values and set `editingBotId` to flip the form
   // into edit mode. No inline per-card edit form, no duplicated picker.
   const [newBotName, setNewBotName] = useState(""); const [newBotPrompt, setNewBotPrompt] = useState("");
+  const [newBotLocalModel, setNewBotLocalModel] = useState(AUTO_MODEL_CHOICE);
+  const [newBotOnlineModel, setNewBotOnlineModel] = useState(AUTO_MODEL_CHOICE);
+  const [newBotTemperature, setNewBotTemperature] = useState(BOT_TEMPERATURE_DEFAULT);
+  const [newBotMaxTokens, setNewBotMaxTokens] = useState(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
   // Lazy initializers so the very first render already picks a random seed
   // without re-randomizing on every re-render.
   const [newBotColor, setNewBotColor] = useState<string>(() => randomHex());
   const [newBotGlyph, setNewBotGlyph] = useState<BotGlyphName>(() => randomBotGlyph());
-  const [newBotChatEnabled, setNewBotChatEnabled] = useState(false);
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
+  // Side-tooltip state for the bot editor's parameter help text. The
+  // form panel sits flush against the right edge of the screen with
+  // overflow: hidden, so any in-DOM tooltip would be clipped. We
+  // instead capture the hovered/focused field's bounding rect and
+  // render a single fixed-positioned tooltip into the blurred area
+  // to the LEFT of the panel.
+  const [activeFieldHelp, setActiveFieldHelp] = useState<
+    { text: string; top: number; left: number } | null
+  >(null);
+  const fieldHelpHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showFieldHelp = useCallback((text: string, target: HTMLElement) => {
+    if (fieldHelpHideTimerRef.current) {
+      clearTimeout(fieldHelpHideTimerRef.current);
+      fieldHelpHideTimerRef.current = null;
+    }
+    const rect = target.getBoundingClientRect();
+    setActiveFieldHelp({ text, top: rect.top, left: rect.left });
+  }, []);
+  const hideFieldHelp = useCallback(() => {
+    if (fieldHelpHideTimerRef.current) {
+      clearTimeout(fieldHelpHideTimerRef.current);
+    }
+    fieldHelpHideTimerRef.current = setTimeout(() => {
+      setActiveFieldHelp(null);
+      fieldHelpHideTimerRef.current = null;
+    }, 80);
+  }, []);
   // Single-slot "which existing bot is currently loaded into the top form"
   // (null = create mode). The card itself renders a subtle highlight while
   // it's the editing target; the form above hydrates the name / prompt /
@@ -5260,16 +5939,19 @@ function HomeContent(): React.JSX.Element {
   const preModalFocusRef = useRef<HTMLElement | null>(null);
   // Pristine snapshot of the form values at the moment edit mode was
   // entered. The primary button's `hasEditChanges` check compares
-  // `newBotName / newBotPrompt / newBotColor / newBotGlyph / chat toggle` against
+  // `newBotName / newBotPrompt / newBotColor / newBotGlyph` against
   // THIS snapshot rather than the raw bot row so legacy bots with no
   // stored color (where we seed the picker with a random hex) don't
   // immediately appear as "dirty". Cleared when edit mode exits.
   const editOriginalRef = useRef<{
     name: string;
     prompt: string;
+    localModel: string;
+    onlineModel: string;
+    temperature: number;
+    maxTokens: number;
     color: string;
     glyph: BotGlyphName;
-    chatEnabled: boolean;
   } | null>(null);
   const botNameInputRef = useRef<HTMLInputElement | null>(null);
   // Sentinel at the tail of the message stream. The scroll effect brings it
@@ -5362,20 +6044,65 @@ function HomeContent(): React.JSX.Element {
     setRightMenuOpen(false);
     setColorWheelOpen(false);
     setEditingBotId(null);
+    if (botLibraryCloseTimerRef.current) {
+      clearTimeout(botLibraryCloseTimerRef.current);
+      botLibraryCloseTimerRef.current = null;
+    }
+    setBotLibraryClosing(false);
     editOriginalRef.current = null;
     // A stale "Save failed" shouldn't greet the user next time they open
     // the panel. The composer's `error` state is unaffected.
     setPanelError(null);
     // Drop any selected color group so reopening the Bots drawer always
     // starts on the dashboard root rather than a stale drilled-in view.
-    setBotPanelGroup(null);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    setBotLibraryExpanded(false);
+    setBotPanelLibraryEnabled(true);
   }, []);
 
   const openRightPanel = useCallback((nextPanel: Exclude<PanelView, null>) => {
     setPanel(nextPanel);
     setSidebarOpen(false);
     setRightMenuOpen(false);
+    setLogoutArmed(false);
+    if (nextPanel === "bots") {
+      setBotPanelLibraryEnabled(true);
+    }
   }, []);
+
+  const openBotLibraryDrawer = useCallback(() => {
+    if (botLibraryCloseTimerRef.current) {
+      clearTimeout(botLibraryCloseTimerRef.current);
+      botLibraryCloseTimerRef.current = null;
+    }
+    setBotLibraryClosing(false);
+    setBotLibraryExpanded(true);
+  }, []);
+
+  const closeBotLibraryDrawer = useCallback(() => {
+    if (botLibraryCloseTimerRef.current) {
+      clearTimeout(botLibraryCloseTimerRef.current);
+    }
+    setBotLibraryClosing(true);
+    botLibraryCloseTimerRef.current = setTimeout(() => {
+      setBotLibraryExpanded(false);
+      setBotLibraryClosing(false);
+      botLibraryCloseTimerRef.current = null;
+    }, BOT_LIBRARY_DRAWER_ANIMATION_MS);
+  }, []);
+
+  const toggleBotLibraryDrawer = useCallback(() => {
+    if (botLibraryExpanded && !botLibraryClosing) {
+      closeBotLibraryDrawer();
+      return;
+    }
+    openBotLibraryDrawer();
+  }, [
+    botLibraryExpanded,
+    botLibraryClosing,
+    closeBotLibraryDrawer,
+    openBotLibraryDrawer,
+  ]);
 
   useEffect(() => {
     if (panel !== "bots" || !editingBotId) return;
@@ -5445,6 +6172,24 @@ function HomeContent(): React.JSX.Element {
     };
   }, [rightMenuOpen]);
 
+  // The empty-message "Talk to me!" affordance should only stay armed while
+  // the user is still interacting with the composer or starter bot picker.
+  useEffect(() => {
+    if (!composerPrimed) return;
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("[data-starter-compose-surface='true'], [data-starter-bot-affordance='true']")
+      ) {
+        return;
+      }
+      setComposerPrimed(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [composerPrimed]);
+
   // Cancel any pending picker timers if the component tears down mid-preview
   // or mid-return animation (route change, mode switch, logout).
   useEffect(() => {
@@ -5461,6 +6206,14 @@ function HomeContent(): React.JSX.Element {
       if (emptyStateSearchOpenTimerRef.current) {
         clearTimeout(emptyStateSearchOpenTimerRef.current);
         emptyStateSearchOpenTimerRef.current = null;
+      }
+      if (modelRevealTimerRef.current) {
+        clearTimeout(modelRevealTimerRef.current);
+        modelRevealTimerRef.current = null;
+      }
+      if (fieldHelpHideTimerRef.current) {
+        clearTimeout(fieldHelpHideTimerRef.current);
+        fieldHelpHideTimerRef.current = null;
       }
     };
   }, []);
@@ -5586,17 +6339,16 @@ function HomeContent(): React.JSX.Element {
   // optimistic `setDetail` which threads selectedBotId through as
   // `optimisticLastBotId`, so pressing Send still flips the accent
   // before the server reply lands.
+  const privateChatActive = detail?.incognito === true || pendingIncognito;
+
   const activeBot = useMemo<Bot | null>(() => {
+    if (privateChatActive) return null;
     const armedFallback = selectedBotId;
     let activeBotId: string | null = null;
     if (view === "sandbox") {
       activeBotId =
         detail?.lastBotId ?? detail?.botId ?? armedFallback ?? hoveredBotId;
     } else if (view === "chat") {
-      // Private chats always render grayscale — do NOT resolve the bot
-      // color even if one is persisted on the conversation.
-      if (detail?.incognito === true) return null;
-      if (pendingIncognito) return null;
       activeBotId =
         detail?.lastBotId
         ?? detail?.botId
@@ -5612,8 +6364,7 @@ function HomeContent(): React.JSX.Element {
     detail,
     detail?.botId,
     detail?.lastBotId,
-    detail?.incognito,
-    pendingIncognito,
+    privateChatActive,
   ]);
 
   const shellStyle = useMemo<React.CSSProperties | undefined>(() => {
@@ -5626,11 +6377,12 @@ function HomeContent(): React.JSX.Element {
   }, [activeBot, resolvedTheme]);
 
   const selectedComposeBotAccent = useMemo<string | null>(() => {
+    if (privateChatActive) return null;
     const raw = selectedBotId
       ? bots.find((bot) => bot.id === selectedBotId)?.color?.trim()
       : null;
     return raw ? normalizeAccentForTheme(raw, resolvedTheme) : null;
-  }, [bots, resolvedTheme, selectedBotId]);
+  }, [bots, privateChatActive, resolvedTheme, selectedBotId]);
 
   const composeStyle = selectedComposeBotAccent
     ? ({ "--compose-bot-color": selectedComposeBotAccent } as React.CSSProperties)
@@ -5658,6 +6410,8 @@ function HomeContent(): React.JSX.Element {
       name: firstAssistant.botName,
       system_prompt: "",
       model: null,
+      local_model: null,
+      online_model: null,
       temperature: 0,
       max_tokens: 0,
       chat_enabled: 1,
@@ -5666,13 +6420,130 @@ function HomeContent(): React.JSX.Element {
     };
   }, [view, detail?.botId, detail?.incognito, detail?.messages, bots]);
 
+  const headerIdentity = useMemo<{
+    name: string;
+    glyph: BotGlyphName;
+    color: string | null;
+  } | null>(() => {
+    if (!detail) return null;
+    if (activeBot) {
+      return {
+        name: activeBot.name,
+        glyph: isBotGlyphName(activeBot.glyph) ? activeBot.glyph : DEFAULT_BOT_GLYPH,
+        color: activeBot.color,
+      };
+    }
+    const lastAssistantWithBot = detail.messages
+      .slice()
+      .reverse()
+      .find(message =>
+        message.role === "assistant" &&
+        (message.botName || message.botGlyph || message.botColor)
+      );
+    if (lastAssistantWithBot?.botName) {
+      return {
+        name: lastAssistantWithBot.botName,
+        glyph: isBotGlyphName(lastAssistantWithBot.botGlyph)
+          ? lastAssistantWithBot.botGlyph
+          : DEFAULT_BOT_GLYPH,
+        color: lastAssistantWithBot.botColor ?? null,
+      };
+    }
+    return {
+      name: detail.incognito ? "Private" : "Default",
+      glyph: "triangle",
+      color: null,
+    };
+  }, [detail, activeBot]);
+
   // The sidebar is a place to leave the current chat, not mirror it.
   // Keep the active conversation persisted in `conversations`, but hide
   // its row until the user starts another chat or opens a different one.
   const visibleConversations = useMemo(
-    () => conversations.filter(c => c.id !== selectedId),
-    [conversations, selectedId]
+    () => {
+      const order = new Map(
+        unreadConversationOrder.map((conversationId, index) => [conversationId, index])
+      );
+      return conversations
+        .filter(c => c.id !== selectedId)
+        .slice()
+        .sort((a, b) => {
+          const aOrder = order.get(a.id);
+          const bOrder = order.get(b.id);
+          if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder;
+          if (aOrder !== undefined) return -1;
+          if (bOrder !== undefined) return 1;
+          return 0;
+        });
+    },
+    [conversations, selectedId, unreadConversationOrder]
   );
+  const pendingReplyVisible =
+    pendingReply &&
+    (
+      (pendingReplyConversationId !== null && detail?.id === pendingReplyConversationId) ||
+      (pendingReplyIsNewConversation && detail?.id === "pending")
+    );
+
+  const clearConversationUnread = useCallback((conversationId: string) => {
+    setUnreadConversationIds(previous => {
+      if (!previous.has(conversationId)) return previous;
+      const next = new Set(previous);
+      next.delete(conversationId);
+      return next;
+    });
+    setUnreadConversationOrder(previous =>
+      previous.includes(conversationId)
+        ? previous.filter(id => id !== conversationId)
+        : previous
+    );
+  }, []);
+
+  const conversationRowGlowStyle = useCallback((index: number): React.CSSProperties => {
+    const estimatedRowStridePx = 42;
+    const rowHeightPx = 36;
+    const glowFalloffPx = 1200;
+    const rowTopInViewport = Math.max(0, index * estimatedRowStridePx - conversationListScrollTop);
+    // Linear intensity (no easing) so adjacent rows differ by a constant
+    // delta and the gradient feels continuous across tiles. The raw
+    // viewport-derived value is remapped from [0, 1] to [0, 0.45] so
+    // the bottom of the list resolves to fully transparent fill and
+    // the top peaks at a calm 45% color band.
+    const baseIntensity = Math.max(0, Math.min(1, 1 - rowTopInViewport / glowFalloffPx));
+    const intensity = baseIntensity * 0.45;
+    const baseFill = intensity * 60;
+    const innerGlow = intensity * 90;
+    const outerGlow = intensity * 40;
+    const fillGlow = intensity * 22;
+    // Bottom-of-list shade: pulls each row toward black as its row
+    // color band fades out, so the very bottom rows feel slightly
+    // darker than the sidebar surface instead of disappearing.
+    const bottomShade = (1 - baseIntensity) * 14;
+    // Anchor the diagonal "bright" and "counter" spots to absolute
+    // viewport positions in the conversation list so each row only
+    // exposes its own slice of a single continuous gradient.
+    const sunYInRow = 4 - rowTopInViewport;
+    const sunYPct = (sunYInRow / rowHeightPx) * 100;
+    const counterYInRow = 320 - rowTopInViewport;
+    const counterYPct = (counterYInRow / rowHeightPx) * 100;
+    // Smooth black-to-white text transition matched to the same fill
+    // intensity curve. baseIntensity = 1 at the very top (text is
+    // near-black) and = 0 once the row is past the falloff distance
+    // (text is white), with a continuous gray ramp between.
+    const textChannel = Math.round(255 - baseIntensity * 244);
+    const textChannelHex = textChannel.toString(16).padStart(2, "0");
+    const rowText = `#${textChannelHex}${textChannelHex}${textChannelHex}`;
+    return {
+      "--row-depth-base": `${baseFill.toFixed(1)}%`,
+      "--row-depth-glow": `${innerGlow.toFixed(1)}%`,
+      "--row-depth-glow-outer": `${outerGlow.toFixed(1)}%`,
+      "--row-depth-fill": `${fillGlow.toFixed(1)}%`,
+      "--row-depth-shade": `${bottomShade.toFixed(1)}%`,
+      "--row-glow-y": `${sunYPct.toFixed(1)}%`,
+      "--row-counter-y": `${counterYPct.toFixed(1)}%`,
+      "--row-text-color": rowText,
+    } as React.CSSProperties;
+  }, [conversationListScrollTop]);
 
   const panelColorHarmonyActive = bots.length >= BOT_PANEL_COLOR_HARMONY_MIN_BOTS;
   const sortedPanelBots = useMemo(
@@ -5681,11 +6552,7 @@ function HomeContent(): React.JSX.Element {
     )),
     [bots, resolvedTheme, panelColorHarmonyActive]
   );
-  const chatAvailableBots = useMemo(
-    () => bots.filter(botIsChatEnabled),
-    [bots]
-  );
-  const pickerSourceBots = view === "chat" ? chatAvailableBots : bots;
+  const pickerSourceBots = bots;
 
   // Hue lens filters the large empty-state picker before a thread begins.
   // Once a chat has messages, the composer popout receives the raw bot
@@ -5710,7 +6577,7 @@ function HomeContent(): React.JSX.Element {
   const emptyStateTypingSearchAvailable =
     pickerSourceBots.length > 0 &&
     (!detail || detail.messages.length === 0) &&
-    (view === "sandbox" || (view === "chat" && !pendingIncognito));
+    !privateChatActive;
   const hueLensTrackSegments = useMemo(
     () => computeHueLensTrackSegments(pickerSourceBots),
     [pickerSourceBots]
@@ -5724,6 +6591,183 @@ function HomeContent(): React.JSX.Element {
     () => hueLensGradient(hueLensTrackSegments),
     [hueLensTrackSegments]
   );
+  // Empty-state lens slider lives in the compose form just below the
+  // messages frame; mounting condition mirrors the JSX gates further
+  // down. The orb glow in `.messagesFrame::after` reads `--lens-thumb-x`
+  // off the frame's inline style and, when this surface is showing the
+  // lens, the orb's X anchor tracks the slider thumb 1:1 so the chosen
+  // hue feels like the literal spotlight shining up into the chat.
+  const emptyStateLensVisible =
+    hueLensAvailable && (!detail || detail.messages.length === 0) && !privateChatActive;
+  const lensThumbXPct = useMemo(
+    () => hueLensSliderPercent(hueFilterCenter, hueLensTrackSegments),
+    [hueFilterCenter, hueLensTrackSegments]
+  );
+  // Three semantic moods drive the messages-frame ::after orb glow:
+  //   • "private"  — Private chat is armed or active. Mono theme-color
+  //     glow + mono triangle hero. No accent leakage anywhere, in
+  //     keeping with Private's "B&W only" design pillar.
+  //   • "home"     — Empty-state surface, regular chat, untouched (no
+  //     filter, no bot armed, no hover preview). Horizontal RAINBOW
+  //     band at the bottom + the existing rainbow brand mark.
+  //     Celebrates the Prism identity from first impression.
+  //   • "engaged"  — Anything else: filter active, bot armed, mid-
+  //     thread chat, hover preview. Lens-driven hue (the existing
+  //     `var(--accent)` orb behavior).
+  const messagesFrameMode = useMemo<"private" | "home" | "engaged">(() => {
+    if (privateChatActive) return "private";
+    const isUntouchedHome =
+      emptyStateLensVisible &&
+      hueFilterCenter === null &&
+      !selectedBotId &&
+      !hoveredBotId &&
+      !detail?.botId;
+    return isUntouchedHome ? "home" : "engaged";
+  }, [
+    privateChatActive,
+    emptyStateLensVisible,
+    hueFilterCenter,
+    selectedBotId,
+    hoveredBotId,
+    detail?.botId,
+  ]);
+  // Home-mode rainbow halos derived from the populated PRISM families.
+  // Each family becomes one radial-gradient halo on `.messagesFrame
+  // [data-mode="home"]::after`, distributed evenly across the bottom
+  // edge. With one bot family the rainbow collapses to a single halo;
+  // with five it fills the spectrum. Unused slots (fewer than 5
+  // families) get color "transparent" so their CSS color-mix layers
+  // resolve to transparent and the corresponding gradient becomes
+  // invisible. Stays in lockstep with the lens slider's track so
+  // "what colors live in the picker" and "what colors light the orb"
+  // are always the same answer.
+  const HOME_HALO_SLOTS = 5;
+  const homeRainbowVars = useMemo<Record<string, string> | null>(() => {
+    if (messagesFrameMode !== "home") return null;
+    if (hueLensTrackSegments.length === 0) return null;
+    const vars: Record<string, string> = {};
+    for (let i = 0; i < HOME_HALO_SLOTS; i += 1) {
+      if (i < hueLensTrackSegments.length) {
+        const x = (100 * (i + 0.5)) / hueLensTrackSegments.length;
+        vars[`--home-halo-${i + 1}-x`] = `${x.toFixed(1)}%`;
+        vars[`--home-halo-${i + 1}-color`] = hueLensTrackSegments[i].color;
+      } else {
+        vars[`--home-halo-${i + 1}-x`] = "50%";
+        vars[`--home-halo-${i + 1}-color`] = "transparent";
+      }
+    }
+    return vars;
+  }, [messagesFrameMode, hueLensTrackSegments]);
+  const messagesFrameStyle = useMemo<React.CSSProperties | undefined>(
+    () => {
+      const lensThumb: Record<string, string> = emptyStateLensVisible
+        ? { "--lens-thumb-x": `${lensThumbXPct.toFixed(2)}%` }
+        : {};
+      const homeVars = homeRainbowVars ?? {};
+      const merged = { ...lensThumb, ...homeVars };
+      return Object.keys(merged).length > 0
+        ? (merged as unknown as React.CSSProperties)
+        : undefined;
+    },
+    [emptyStateLensVisible, lensThumbXPct, homeRainbowVars]
+  );
+  // Hero override is still drag-only — the Prism triangle replaces a
+  // bot glyph only while the user is actively pressing/touching the
+  // slider thumb. The interface tint, by contrast, is now lens-driven
+  // any time the lens is visible and a filter is set: clicking a bot
+  // syncs the thumb to its hue, dragging moves the thumb, both paths
+  // converge on the same `slider → hsl(hue, 70, 55)` formula so the
+  // user always sees one consistent slider/color relationship.
+  const [lensInteracting, setLensInteracting] = useState(false);
+  // Continuous-hue accent driven by the slider's raw position whenever
+  // the empty-state lens is visible and a filter is set. Drag-only
+  // gating from the prior pass is dropped because picking a bot now
+  // also drives this through the synced filter — so the relationship
+  // between slider position and interface color stays identical
+  // regardless of how the thumb arrived there (click-jump or drag).
+  const lensAccentColor = useMemo<string | null>(
+    () =>
+      emptyStateLensVisible
+        ? hueLensSliderTintHex(hueFilterCenter, hueLensTrackSegments)
+        : null,
+    [emptyStateLensVisible, hueFilterCenter, hueLensTrackSegments]
+  );
+  // Resolution priority:
+  //   1. Lens accent — wins whenever the empty-state surface has a
+  //      filter set, including the moment after a bot click syncs the
+  //      thumb. This keeps slider/interface in lockstep.
+  //   2. Bot accent (`shellStyle`) — falls through when no lens is
+  //      driving (mid-thread, private chat, lens cleared via "All").
+  //   3. Undefined — root theme defaults.
+  const mergedShellStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (lensAccentColor) {
+      return deriveAccentStyle(
+        normalizeAccentForTheme(lensAccentColor, resolvedTheme),
+        resolvedTheme
+      );
+    }
+    if (shellStyle) return shellStyle;
+    return undefined;
+  }, [shellStyle, lensAccentColor, resolvedTheme]);
+
+  // Bot-driven hero halo palette for the dark-mode brand icon "drop
+  // light" (`.brandIconShell::before` and `::after` conic gradients in
+  // page.module.css). Replaces the previous hardcoded 6-stop rainbow:
+  // the halo behind the boxed JPG hero now derives from whichever bot
+  // colors the user has actually created. We sample up to 5 distinct
+  // hex strings in insertion order (deterministic — no per-render
+  // shuffle) and cycle through them so all 5 conic-gradient slots are
+  // always populated. With one bot the halo collapses to a solid hue;
+  // with five+ it spans the user's bot palette. When the user has no
+  // bots, this returns null and the CSS-side `#ffffff` fallback paints
+  // a soft white glow ("white hero" no-bots state). We normalize each
+  // color through `normalizeAccentForTheme(_, "dark")` because the
+  // halos render only in dark theme — this is the same lift treatment
+  // every other dark-mode bot visual uses, so a deep stored hue still
+  // reads on the black background. We deliberately do NOT pad with
+  // PRISM_COLORS to reach 5; the user wants the hero fully bot-driven.
+  const HERO_HALO_SLOTS = 5;
+  const heroHaloVars = useMemo<Record<string, string> | null>(() => {
+    if (bots.length === 0) return null;
+    const seen = new Set<string>();
+    const distinct: string[] = [];
+    for (const bot of bots) {
+      const raw = bot.color?.trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      distinct.push(normalizeAccentForTheme(raw, "dark"));
+      if (distinct.length >= HERO_HALO_SLOTS) break;
+    }
+    if (distinct.length === 0) return null;
+    const vars: Record<string, string> = {};
+    for (let i = 0; i < HERO_HALO_SLOTS; i += 1) {
+      vars[`--hero-halo-${i + 1}`] = distinct[i % distinct.length];
+    }
+    return vars;
+  }, [bots]);
+
+  // App-shell style consumed by chat/sandbox `<main>` — combines the
+  // accent-triad shell style (lens or active bot) with the bot-driven
+  // hero halo vars so descendants like `EmptyStateIcon`'s
+  // `brandIconShell` fallback also pick up the bot palette. Returns
+  // undefined when neither side has anything to contribute, preserving
+  // React's behaviour of omitting the inline style attribute entirely.
+  const appShellStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!mergedShellStyle && !heroHaloVars) return undefined;
+    const merged = { ...(mergedShellStyle ?? {}), ...(heroHaloVars ?? {}) };
+    return merged as React.CSSProperties;
+  }, [mergedShellStyle, heroHaloVars]);
+
+  // Inline style for the auth/hub brand lockup. We deliberately scope
+  // this to ONLY the halo vars — never `mergedShellStyle` — because
+  // those surfaces shouldn't pick up any chat-mode accent triad that
+  // happens to be cached in `shellStyle` from a prior session.
+  const heroHaloStyle = useMemo<React.CSSProperties | undefined>(
+    () => (heroHaloVars ? (heroHaloVars as React.CSSProperties) : undefined),
+    [heroHaloVars]
+  );
 
   useEffect(() => {
     if (!hueLensAvailable && hueFilterCenter !== null) {
@@ -5733,17 +6777,17 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (view !== "chat") return;
-    const enabledIds = new Set(chatAvailableBots.map((bot) => bot.id));
-    if (!detail && selectedBotId && !enabledIds.has(selectedBotId)) {
+    const botIds = new Set(bots.map((bot) => bot.id));
+    if (!detail && selectedBotId && !botIds.has(selectedBotId)) {
       setSelectedBotId(null);
     }
-    if (!detail && hoveredBotId && !enabledIds.has(hoveredBotId)) {
+    if (!detail && hoveredBotId && !botIds.has(hoveredBotId)) {
       setHoveredBotId(null);
     }
-    if (chatBotOverride && !enabledIds.has(chatBotOverride)) {
+    if (chatBotOverride && !botIds.has(chatBotOverride)) {
       setChatBotOverride(undefined);
     }
-  }, [view, detail, selectedBotId, hoveredBotId, chatBotOverride, chatAvailableBots]);
+  }, [view, detail, selectedBotId, hoveredBotId, chatBotOverride, bots]);
 
   // Empty-state picker (Chat + Sandbox) renders bots in color order so
   // the unfiltered grid trends toward a color-wheel/color-square map.
@@ -5773,9 +6817,8 @@ function HomeContent(): React.JSX.Element {
     return buckets;
   }, [sortedPanelBots]);
 
-  // Always five tiles, mirroring the wordmark. No conditional sixth
-  // bucket — randomHex() guarantees new bots fall into one of the
-  // five, and legacy grayscale bots classify by hue.
+  // The library browser always starts with a neutral "all bots" filter,
+  // followed by the five PRISM wordmark buckets.
   const botGroupOrder = useMemo<readonly PrismGroupDef[]>(() => PRISM_GROUPS, []);
 
   // PRISM categories are the default collapsed browsing surface for the
@@ -5783,29 +6826,37 @@ function HomeContent(): React.JSX.Element {
   // the category dashboard itself appears as soon as the user has bots.
   const botPanelDashboardActive = bots.length >= BOT_PANEL_DASHBOARD_MIN_BOTS;
 
-  // Drill-in safety: if the active group disappears (count dropped
-  // below threshold OR the only bot in that group was deleted), bounce
-  // the user back to the dashboard root instead of leaving them on a
-  // ghost view.
+  // Filter safety: if the active group disappears (count dropped below
+  // threshold OR the only bot in that group was deleted), bounce the user
+  // back to the all-bots filter instead of leaving them on a ghost view.
   useEffect(() => {
     if (!botPanelDashboardActive) {
-      if (botPanelGroup !== null) setBotPanelGroup(null);
+      if (botPanelGroup !== BOT_LIBRARY_FILTER_ALL) {
+        setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+      }
       return;
     }
-    if (botPanelGroup && botGroupBuckets[botPanelGroup].length === 0) {
-      setBotPanelGroup(null);
+    if (
+      botPanelGroup !== BOT_LIBRARY_FILTER_ALL &&
+      botGroupBuckets[botPanelGroup].length === 0
+    ) {
+      setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     }
   }, [botPanelDashboardActive, botPanelGroup, botGroupBuckets]);
 
   const visibleBotPanelBots = useMemo<readonly Bot[]>(() => {
     if (!botPanelDashboardActive) return sortedPanelBots;
-    if (!botPanelGroup) return [];
+    if (botPanelGroup === BOT_LIBRARY_FILTER_ALL) return sortedPanelBots;
     return botGroupBuckets[botPanelGroup];
   }, [botPanelDashboardActive, botPanelGroup, botGroupBuckets, sortedPanelBots]);
 
-  const activeBotPanelGroup = botPanelGroup
+  const activeBotPanelGroup = botPanelGroup !== BOT_LIBRARY_FILTER_ALL
     ? PRISM_GROUPS.find(g => g.id === botPanelGroup) ?? null
     : null;
+  const activeBotPanelFilterLabel =
+    botPanelGroup === BOT_LIBRARY_FILTER_ALL
+      ? "All bots"
+      : activeBotPanelGroup?.label ?? "Filtered bots";
 
   const bootstrap = useCallback(async () => {
     const controller = new AbortController();
@@ -5824,14 +6875,21 @@ function HomeContent(): React.JSX.Element {
     void bootstrap();
   }, [bootstrap]);
   useEffect(() => { if (!user) return; void refreshAll(); }, [user]);
+  useEffect(() => {
+    return () => {
+      if (botLibraryCloseTimerRef.current) {
+        clearTimeout(botLibraryCloseTimerRef.current);
+      }
+    };
+  }, []);
 
   // Keep the latest message pinned to the bottom of the stream. Fires when:
   //   - a new conversation is loaded (detail?.id change)
   //   - a message is added, optimistically or from the server (length change)
-  //   - the typing indicator toggles on/off (pendingReply change)
+  //   - the visible typing indicator toggles on/off
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-  }, [detail?.id, detail?.messages.length, pendingReply]);
+  }, [detail?.id, detail?.messages.length, pendingReplyVisible]);
 
   // Drop any pending mid-thread bot override whenever the open
   // conversation changes OR the post-auth surface flips. Without this,
@@ -5842,6 +6900,7 @@ function HomeContent(): React.JSX.Element {
   // clears it; the state has no meaning outside Chat.
   useEffect(() => {
     setChatBotOverride(undefined);
+    setComposerPrimed(false);
   }, [selectedId, view]);
 
   // Every entrance into Sandbox lands on a fresh, empty chat. Sandbox
@@ -5869,9 +6928,10 @@ function HomeContent(): React.JSX.Element {
     setError(null);
   }, [view]);
 
-  async function refreshAll() { await Promise.all([refreshConversations(), refreshSettings(), refreshMemories(), refreshBots(), refreshImages()]); }
+  async function refreshAll() { await Promise.all([refreshConversations(), refreshSettings(), refreshMemories(), refreshBots(), refreshImages(), refreshModels()]); }
   async function refreshConversations() { const d = await api<{ conversations: ConversationSummary[] }>("/api/conversations"); setConversations(d.conversations); }
   async function refreshConversation(id: string): Promise<void> {
+    clearConversationUnread(id);
     const d = await api<{ conversation: ConversationDetail }>(
       `/api/conversations/${id}`
     );
@@ -5893,9 +6953,21 @@ function HomeContent(): React.JSX.Element {
       ? d.conversation.lastBotId
       : d.conversation.botId;
     setSelectedBotId(nextPickedBotId);
+    if (nextPickedBotId) {
+      await refreshBotMemories(nextPickedBotId);
+    } else {
+      setBotMemories([]);
+    }
   }
   async function refreshSettings() { const d = await api<{ settings: UserSettings }>("/api/settings"); setSettings(d.settings); }
+  async function refreshModels() { const d = await api<{ catalog: ModelCatalog }>("/api/models"); setModelCatalog(d.catalog); }
   async function refreshMemories() { const d = await api<{ memories: UserMemory[] }>("/api/memories"); setMemories(d.memories); }
+  async function refreshBotMemories(botId: string) {
+    const d = await api<{ memories: UserMemory[] }>(
+      `/api/memories?botId=${encodeURIComponent(botId)}`
+    );
+    setBotMemories(d.memories);
+  }
   async function refreshBots() { const d = await api<{ bots: Bot[] }>("/api/bots"); setBots(d.bots); }
   async function refreshImages() { const d = await api<{ images: ImageRecord[] }>("/api/images"); setImages(d.images); }
 
@@ -5915,7 +6987,10 @@ function HomeContent(): React.JSX.Element {
     setConversations([]);
     setDetail(null);
     setMemories([]);
+    setBotMemories([]);
+    setLogoutArmed(false);
     setSettings(null);
+    setModelCatalog(null);
     setBots([]);
     setImages([]);
     // Drop any ?view= param so the next login lands on the Hub instead
@@ -5940,6 +7015,7 @@ function HomeContent(): React.JSX.Element {
       setDetail(null);
       setMemories([]);
       setSettings(null);
+      setModelCatalog(null);
       setBots([]);
       setImages([]);
       window.location.href = "/?mode=register";
@@ -5966,12 +7042,18 @@ function HomeContent(): React.JSX.Element {
   //     button). Once the first send resolves, the server's returned
   //     detail supersedes these pending values and the pending flag is
   //     cleared in sendMessage.
-  //   - Sandbox: bot picker in the composer remains the source; cross-
-  //     session memory is disabled server-side anyway, so the
-  //     `incognito` flag is never sent from here.
-  function buildChatRequestBody(message: string): Record<string, unknown> {
+  //   - Sandbox: regular sends keep the existing per-send bot picker and
+  //     thread-only memory behavior. Private sends intentionally reuse the
+  //     Chat-mode incognito contract so the server persists the private row
+  //     and forces LOCAL/no-memory/default-persona in one known path.
+  function buildChatRequestBody(
+    message: string,
+    options: { starterPrompt?: boolean } = {}
+  ): Record<string, unknown> {
     const isChatMode = view === "chat";
-    const mode: "chat" | "sandbox" = isChatMode ? "chat" : "sandbox";
+    const privateForSend = detail?.incognito === true || pendingIncognito;
+    const mode: "chat" | "sandbox" =
+      isChatMode || privateForSend ? "chat" : "sandbox";
     // Resolve effective bot. Chat-mode priority is:
     //   1. chatBotOverride (mid-thread dropdown pick; string = specific,
     //      null = "Default persona"). `undefined` means "no pending
@@ -5990,102 +7072,173 @@ function HomeContent(): React.JSX.Element {
         : (detail?.botId ?? selectedBotId ?? null);
     // Resolve effective privacy: prefer the persisted flag, then the
     // pending intent for a brand-new chat.
-    const chatIncognito =
-      isChatMode && (detail?.incognito === true || pendingIncognito);
-    const providerForSend = chatIncognito
+    const providerForSend = privateForSend
       ? "local"
       : settings?.preferredProvider;
+    const modelChoice = providerForSend
+      ? chatModelChoiceByProvider[providerForSend]
+      : AUTO_MODEL_CHOICE;
+    const modelOverride =
+      modelChoice !== AUTO_MODEL_CHOICE
+        ? modelChoice
+        : undefined;
     return {
       conversationId: selectedId ?? undefined,
       message,
+      ...(options.starterPrompt ? { starterPrompt: true } : {}),
       mode,
       // Chat mode ALWAYS sends botId (string or null) so the server can
-      // persist mid-thread switches. Sandbox keeps the legacy "undefined
-      // drops the key" behavior since its bot picks never write back to
-      // conversations.bot_id.
-      botId: isChatMode ? chatBotId : (selectedBotId ?? undefined),
-      ...(isChatMode ? { incognito: chatIncognito } : {}),
+      // persist mid-thread switches. Private sends also send null so no
+      // Sandbox bot pick can leak into an incognito conversation. Regular
+      // Sandbox keeps the legacy "undefined drops the key" behavior since
+      // its bot picks never write back to conversations.bot_id.
+      botId: privateForSend ? null : isChatMode ? chatBotId : (selectedBotId ?? undefined),
+      ...(mode === "chat" ? { incognito: privateForSend } : {}),
       preferredProvider: providerForSend,
+      ...(modelOverride ? { modelOverride } : {}),
     };
   }
 
-  async function sendMessage(e: React.FormEvent) {
+  async function sendMessage(
+    e: React.FormEvent | React.KeyboardEvent<HTMLTextAreaElement | HTMLFormElement>,
+    options: { starterPrompt?: boolean; draftOverride?: string } = {}
+  ) {
     e.preventDefault();
-    const trimmed = draft.trim();
-    if (!trimmed || pendingReply) return;
+    const rawDraft = options.draftOverride ?? draft;
+    const trimmed = rawDraft.trim();
+    const isStarterPrompt =
+      options.starterPrompt === true &&
+      (!detail || detail.messages.length === 0);
+    if ((!trimmed && !isStarterPrompt) || pendingReply) return;
+    const requestConversationId =
+      detail?.id && detail.id !== "pending"
+        ? detail.id
+        : selectedId;
+    const requestStartedNewConversation = requestConversationId === null;
     setHoveredBotId(null);
     setPendingReply(true);
+    setPendingReplyConversationId(requestConversationId);
+    setPendingReplyIsNewConversation(requestStartedNewConversation);
     setError(null);
 
     const previousDetail = detail;
     const previousPendingIncognito = pendingIncognito;
-    const optimisticMessage: Message = {
-      id: `pending-${Date.now()}`,
-      role: "user",
-      content: trimmed,
-      createdAt: new Date().toISOString(),
-    };
-    const optimisticTitle =
-      detail?.title ?? (trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed);
-    // Forward the chat-mode conversation-level settings (bot + privacy)
-    // into the optimistic detail so the shell accent + privacy affordances
-    // don't flicker between send and server reply. Once the server answers
-    // with the persisted row, this optimistic detail is replaced.
-    const optimisticBotId =
-      detail?.botId ?? (view === "chat" ? selectedBotId ?? null : null);
-    const optimisticIncognito =
-      detail?.incognito === true || (view === "chat" && pendingIncognito);
-    // For lastBot*, keep whatever the current detail had. Our optimistic
-    // update adds a USER message, not an assistant one, so "last bot to
-    // speak" hasn't changed — the real update lands when the server's
-    // assistant reply comes back. In Sandbox where the user can switch
-    // bots per-send, we preview the new pick via the "about to speak"
-    // selectedBotId so the sidebar row hints at the next color before
-    // the reply lands; the server value overrides on response.
-    const optimisticLastBotId =
-      detail?.lastBotId ?? (view === "sandbox" ? selectedBotId ?? null : optimisticBotId);
-    const optimisticLastBotColor =
-      detail?.lastBotColor
-      ?? (optimisticLastBotId
-            ? bots.find(b => b.id === optimisticLastBotId)?.color ?? null
-            : null);
-    setDetail({
-      id: detail?.id ?? "pending",
-      title: optimisticTitle,
-      botId: optimisticBotId,
-      incognito: optimisticIncognito,
-      lastBotId: optimisticLastBotId,
-      lastBotColor: optimisticLastBotColor,
-      // hasAssistantReply reflects the PRE-SEND state (whatever detail
-      // already had) — the optimistic update only inserts a USER
-      // message, not an assistant one. The server's real response
-      // flips this to true once the assistant reply is in the db.
-      hasAssistantReply: detail?.hasAssistantReply ?? false,
-      messages: [...(detail?.messages ?? []), optimisticMessage],
-    });
+    if (!isStarterPrompt) {
+      const optimisticMessage: Message = {
+        id: `pending-${Date.now()}`,
+        role: "user",
+        content: trimmed,
+        createdAt: new Date().toISOString(),
+      };
+      const optimisticTitle =
+        detail?.title ?? (trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed);
+      // Forward the chat-mode conversation-level settings (bot + privacy)
+      // into the optimistic detail so the shell accent + privacy affordances
+      // don't flicker between send and server reply. Once the server answers
+      // with the persisted row, this optimistic detail is replaced.
+      const optimisticIncognito = detail?.incognito === true || pendingIncognito;
+      const optimisticBotId = optimisticIncognito
+        ? null
+        : detail?.botId ?? (view === "chat" ? selectedBotId ?? null : null);
+      // For lastBot*, keep whatever the current detail had. Our optimistic
+      // update adds a USER message, not an assistant one, so "last bot to
+      // speak" hasn't changed — the real update lands when the server's
+      // assistant reply comes back. In Sandbox where the user can switch
+      // bots per-send, we preview the new pick via the "about to speak"
+      // selectedBotId so the sidebar row hints at the next color before
+      // the reply lands; the server value overrides on response.
+      const optimisticLastBotId = optimisticIncognito
+        ? null
+        : detail?.lastBotId ?? (view === "sandbox" ? selectedBotId ?? null : optimisticBotId);
+      const optimisticLastBotColor =
+        detail?.lastBotColor
+        ?? (optimisticLastBotId
+              ? bots.find(b => b.id === optimisticLastBotId)?.color ?? null
+              : null);
+      setDetail({
+        id: detail?.id ?? "pending",
+        title: optimisticTitle,
+        botId: optimisticBotId,
+        incognito: optimisticIncognito,
+        lastBotId: optimisticLastBotId,
+        lastBotColor: optimisticLastBotColor,
+        // hasAssistantReply reflects the PRE-SEND state (whatever detail
+        // already had) — the optimistic update only inserts a USER
+        // message, not an assistant one. The server's real response
+        // flips this to true once the assistant reply is in the db.
+        hasAssistantReply: detail?.hasAssistantReply ?? false,
+        messages: [...(detail?.messages ?? []), optimisticMessage],
+      });
+    }
     setDraft("");
 
     try {
       const d = await api<{ conversation: ConversationDetail }>("/api/chat", {
         method: "POST",
-        body: JSON.stringify(buildChatRequestBody(trimmed)),
+        body: JSON.stringify(
+          buildChatRequestBody(isStarterPrompt ? "" : trimmed, {
+            starterPrompt: isStarterPrompt,
+          })
+        ),
       });
-      setDetail(d.conversation);
-      setSelectedId(d.conversation.id);
+      const stillViewingRequest = requestConversationId
+        ? selectedIdRef.current === requestConversationId ||
+          detailIdRef.current === requestConversationId
+        : selectedIdRef.current === null && detailIdRef.current === "pending";
+      if (stillViewingRequest) {
+        setDetail(d.conversation);
+        setSelectedId(d.conversation.id);
+        setUnreadConversationIds(previous => {
+          if (!previous.has(d.conversation.id)) return previous;
+          const next = new Set(previous);
+          next.delete(d.conversation.id);
+          return next;
+        });
+        setUnreadConversationOrder(previous =>
+          previous.includes(d.conversation.id)
+            ? previous.filter(id => id !== d.conversation.id)
+            : previous
+        );
+      } else {
+        setUnreadConversationIds(previous => {
+          const next = new Set(previous);
+          next.add(d.conversation.id);
+          return next;
+        });
+        setUnreadConversationOrder(previous =>
+          previous.includes(d.conversation.id)
+            ? previous
+            : [...previous, d.conversation.id]
+        );
+      }
       // Pending chat-level flag has now been persisted on the conversation
       // row by the server; the next read derives privacy from detail.
-      if (pendingIncognito) setPendingIncognito(false);
+      if (pendingIncognito && stillViewingRequest) setPendingIncognito(false);
       // Server truth now reflects the user's pick, so the mid-thread
       // override is redundant — drop it so the dropdown goes back to
       // mirroring detail.botId cleanly. Only fires when an override was
       // actually set (keeps the state update a no-op in the common case).
-      if (chatBotOverride !== undefined) setChatBotOverride(undefined);
+      if (chatBotOverride !== undefined && stillViewingRequest) setChatBotOverride(undefined);
       await refreshConversations();
       await refreshMemories();
+      if (stillViewingRequest) {
+        const nextBotId = d.conversation.lastBotId ?? d.conversation.botId;
+        if (nextBotId) {
+          await refreshBotMemories(nextBotId);
+        } else {
+          setBotMemories([]);
+        }
+      }
     } catch (err) {
-      setDetail(previousDetail);
-      setPendingIncognito(previousPendingIncognito);
-      setDraft(trimmed);
+      const stillViewingRequest = requestConversationId
+        ? selectedIdRef.current === requestConversationId ||
+          detailIdRef.current === requestConversationId
+        : selectedIdRef.current === null && detailIdRef.current === "pending";
+      if (stillViewingRequest) {
+        setDetail(previousDetail);
+        setPendingIncognito(previousPendingIncognito);
+        setDraft(isStarterPrompt ? "" : trimmed);
+      }
       setError(
         err instanceof Error
           ? err.message
@@ -6093,7 +7246,77 @@ function HomeContent(): React.JSX.Element {
       );
     } finally {
       setPendingReply(false);
+      setPendingReplyConversationId(null);
+      setPendingReplyIsNewConversation(false);
     }
+  }
+
+  function isStarterPromptAvailable(value: string): boolean {
+    return value.trim().length === 0 && (!detail || detail.messages.length === 0);
+  }
+
+  function isStarterPromptReady(value: string): boolean {
+    return composerPrimed && isStarterPromptAvailable(value);
+  }
+
+  function composerSubmitLabel(value: string): string {
+    if (value.trim().length > 0) return "Send";
+    return isStarterPromptReady(value) ? "Talk to me!" : "";
+  }
+
+  function composerSubmitDisabled(value: string): boolean {
+    return pendingReply || (value.trim().length === 0 && !isStarterPromptReady(value));
+  }
+
+  const primeStarterComposer = useCallback((value: string) => {
+    if (value.trim().length === 0 && (!detail || detail.messages.length === 0)) {
+      setComposerPrimed(true);
+    }
+  }, [detail]);
+
+  function handleComposerChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const nextDraft = e.currentTarget.value;
+    const wasFilled = draft.trim().length > 0;
+    setDraft(nextDraft);
+    if (wasFilled && nextDraft.trim().length === 0) {
+      primeStarterComposer(nextDraft);
+    }
+  }
+
+  function handleComposerFocus() {
+    setHoveredBotId(null);
+    primeStarterComposer(draft);
+  }
+
+  function handleComposerBlur(e: React.FocusEvent<HTMLFormElement>) {
+    const nextFocus = e.relatedTarget;
+    if (nextFocus instanceof Node && e.currentTarget.contains(nextFocus)) return;
+    setComposerPrimed(false);
+  }
+
+  function handleComposerKeyDown(e: React.KeyboardEvent<HTMLFormElement>) {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    if (!(e.target instanceof HTMLTextAreaElement)) return;
+    e.preventDefault();
+    void sendMessage(e, {
+      draftOverride: e.target.value,
+      starterPrompt: isStarterPromptReady(e.target.value),
+    });
+  }
+
+  function startFreshConversation(privateMode: boolean) {
+    setSelectedId(null);
+    setDetail(null);
+    setSelectedBotId(null);
+    setHoveredBotId(null);
+    setChatBotOverride(undefined);
+    closeEmptyStateBotSearch();
+    if (hoverDwellTimerRef.current) {
+      clearTimeout(hoverDwellTimerRef.current);
+      hoverDwellTimerRef.current = null;
+    }
+    setPendingIncognito(privateMode);
+    setSidebarOpen(false);
   }
 
   async function saveSettings(e: React.FormEvent) {
@@ -6210,7 +7433,13 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function deleteMemory(id: string) { await api(`/api/memories/${id}`, { method: "DELETE" }); await refreshMemories(); }
+  async function deleteMemory(id: string) {
+    await api(`/api/memories/${id}`, { method: "DELETE" });
+    await refreshMemories();
+    if (activeBot?.id) {
+      await refreshBotMemories(activeBot.id);
+    }
+  }
 
   // Fork is always anchored to an assistant bubble now (per-message
   // "Fork here" is the only entry point), so `messageId` is mandatory.
@@ -6356,7 +7585,13 @@ function HomeContent(): React.JSX.Element {
   const commitEmptyStateBotSelection = useCallback((botId: string) => {
     cancelPendingEmptyStateSearchOpen();
     const bot = bots.find((candidate) => candidate.id === botId);
-    if (emptyStateSearchActive && bot && botHasFilterableColor(bot)) {
+    // Every commit path — tile click, search pick, dense-grid commit —
+    // funnels through here, so syncing the lens slider thumb to the
+    // committed bot's hue position belongs at this single chokepoint.
+    // Result: the slider always points at "this is where the active
+    // bot lives on the spectrum," and any subsequent drag starts from
+    // the bot's actual color rather than a stale resting position.
+    if (bot && botHasFilterableColor(bot)) {
       const { h } = hexToHsl(bot.color!.trim());
       setHueFilterCenter(hueLensPositionForHue(h));
     }
@@ -6364,8 +7599,9 @@ function HomeContent(): React.JSX.Element {
     setHoveredBotId(null);
     setEmptyStateSearchOpen(false);
     setEmptyStateBotNameFilter("");
+    primeStarterComposer(draft);
     focusDraftInput();
-  }, [bots, cancelPendingEmptyStateSearchOpen, emptyStateSearchActive, focusDraftInput]);
+  }, [bots, cancelPendingEmptyStateSearchOpen, draft, focusDraftInput, primeStarterComposer]);
 
   const openEmptyStateBotSearchFromTyping = useCallback((typedCharacter: string) => {
     cancelPendingEmptyStateSearchOpen();
@@ -6840,8 +8076,7 @@ function HomeContent(): React.JSX.Element {
     };
   }, [pendingResendId, disarmResend]);
 
-  // In create mode, each Bots-panel open gets a fresh color/glyph seed
-  // and returns the Chat availability toggle to its default-off state.
+  // In create mode, each Bots-panel open gets a fresh color/glyph seed.
   // When a deep link opens the panel directly into edit mode, preserve the
   // selected bot's saved values so the random create seed cannot overwrite
   // the customizer fields.
@@ -6849,7 +8084,6 @@ function HomeContent(): React.JSX.Element {
     if (panel !== "bots" || editingBotId) return;
     setNewBotColor(randomHex());
     setNewBotGlyph(randomBotGlyph());
-    setNewBotChatEnabled(false);
   }, [panel, editingBotId]);
 
   // Close the color/glyph popover on any outside click or Escape. Only
@@ -6942,9 +8176,12 @@ function HomeContent(): React.JSX.Element {
   const resetBotForm = useCallback(() => {
     setNewBotName("");
     setNewBotPrompt("");
+    setNewBotLocalModel(AUTO_MODEL_CHOICE);
+    setNewBotOnlineModel(AUTO_MODEL_CHOICE);
+    setNewBotTemperature(BOT_TEMPERATURE_DEFAULT);
+    setNewBotMaxTokens(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
     setNewBotColor(randomHex());
     setNewBotGlyph(randomBotGlyph());
-    setNewBotChatEnabled(false);
     setColorWheelOpen(false);
     // Drop any stashed edit-mode snapshot so the next edit compares
     // against the correct starting state. Safe to always clear here:
@@ -6961,9 +8198,12 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify({
           name: newBotName,
           systemPrompt: newBotPrompt,
+          localModel: newBotLocalModel === AUTO_MODEL_CHOICE ? "" : newBotLocalModel,
+          onlineModel: newBotOnlineModel === AUTO_MODEL_CHOICE ? "" : newBotOnlineModel,
+          temperature: newBotTemperature,
+          maxTokens: newBotMaxTokens,
           color: newBotColor,
           glyph: newBotGlyph,
-          chatEnabled: newBotChatEnabled,
         }),
       });
       resetBotForm();
@@ -7222,33 +8462,142 @@ function HomeContent(): React.JSX.Element {
     setColorWheelOpen(false);
     const seededName = bot.name;
     const seededPrompt = bot.system_prompt ?? "";
+    const seededLocalModel = normalizeModelChoice(bot.local_model ?? bot.model);
+    const seededOnlineModel = normalizeModelChoice(bot.online_model);
+    const seededTemperature = normalizeBotTemperature(bot.temperature);
+    const seededMaxTokens = normalizeBotMaxTokens(bot.max_tokens);
     const seededColor = bot.color?.trim() || randomHex();
     const seededGlyph: BotGlyphName = isBotGlyphName(bot.glyph)
       ? bot.glyph
       : DEFAULT_BOT_GLYPH;
-    const seededChatEnabled = botIsChatEnabled(bot);
     setNewBotName(seededName);
     setNewBotPrompt(seededPrompt);
+    setNewBotLocalModel(seededLocalModel);
+    setNewBotOnlineModel(seededOnlineModel);
+    setNewBotTemperature(seededTemperature);
+    setNewBotMaxTokens(seededMaxTokens);
     setNewBotColor(seededColor);
     setNewBotGlyph(seededGlyph);
-    setNewBotChatEnabled(seededChatEnabled);
     setEditingBotId(bot.id);
     editOriginalRef.current = {
       name: seededName,
       prompt: seededPrompt,
+      localModel: seededLocalModel,
+      onlineModel: seededOnlineModel,
+      temperature: seededTemperature,
+      maxTokens: seededMaxTokens,
       color: seededColor,
       glyph: seededGlyph,
-      chatEnabled: seededChatEnabled,
     };
     setPanelError(null);
   }
 
   function openActiveBotCustomizer() {
     if (!activeBot) return;
-    setBotPanelGroup(null);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     startEditBot(activeBot);
     openRightPanel("bots");
+    setBotLibraryExpanded(false);
+    setBotLibraryClosing(false);
+    setBotPanelLibraryEnabled(false);
   }
+
+  function openActiveBotMemoriesPanel() {
+    if (!activeBot?.id) return;
+    setMemoryPanelScope("bot");
+    void refreshBotMemories(activeBot.id);
+    openRightPanel("memories");
+  }
+
+  function openAllMemoriesPanel() {
+    setMemoryPanelScope("all");
+    void refreshMemories();
+    openRightPanel("memories");
+  }
+
+  function handleProfileLogoutClick() {
+    if (logoutArmed) {
+      void logout();
+      return;
+    }
+    setLogoutArmed(true);
+  }
+
+  function renderProfileCard(): React.JSX.Element {
+    if (!user) return <div className={styles.profile} />;
+    const initial = (user.displayName || user.email).charAt(0).toUpperCase();
+    return (
+      <div
+        className={styles.profile}
+        data-logout-armed={logoutArmed ? "true" : undefined}
+      >
+        <button
+          type="button"
+          className={`${styles.profileAvatar} ${styles.profileAvatarButton}`}
+          onClick={handleProfileLogoutClick}
+          aria-label={
+            logoutArmed
+              ? "Confirm logout"
+              : "Open logout confirmation"
+          }
+          title={logoutArmed ? "Confirm logout" : "Account"}
+        >
+          {logoutArmed ? "×" : initial}
+        </button>
+        <div className={styles.profileInfo}>
+          {logoutArmed ? (
+            <>
+              <strong>Log out?</strong>
+              <span>Tap × to confirm.</span>
+              <button
+                type="button"
+                className={styles.profileLogoutCancel}
+                onClick={() => setLogoutArmed(false)}
+              >
+                Stay signed in
+              </button>
+            </>
+          ) : (
+            <>
+              <strong>{user.displayName}</strong>
+              <span>{user.email}</span>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const memoryPanelAccent = normalizeAccentForTheme(
+    memoryPanelScope === "bot"
+      ? activeBot?.color ?? DEFAULT_ROW_COLOR
+      : DEFAULT_ROW_COLOR,
+    resolvedTheme
+  );
+
+  function memoryBubbleStyle(memory: UserMemory, index: number): React.CSSProperties {
+    const confidence = Number.isFinite(memory.confidence)
+      ? Math.max(0, Math.min(1, memory.confidence))
+      : 0.5;
+    const size = Math.round(104 + confidence * 82);
+    const offsetPattern = [-18, 24, -4, 38, -30, 10];
+    const shadePattern = [0.08, 0.16, 0.24, 0.12, 0.28, 0.2];
+    const shadeTarget = resolvedTheme === "dark" ? "#ffffff" : "#000000";
+    const shade = mixHex(
+      memoryPanelAccent,
+      shadeTarget,
+      shadePattern[index % shadePattern.length]
+    );
+    return {
+      "--memory-bubble-size": `${size}px`,
+      "--memory-bubble-color": shade,
+      "--memory-bubble-offset": `${offsetPattern[index % offsetPattern.length]}px`,
+    } as React.CSSProperties;
+  }
+
+  const memoryPanelBot = memoryPanelScope === "bot" ? activeBot : null;
+  const visibleMemoryBubbles =
+    memoryPanelScope === "all" ? memories : botMemories;
 
   async function saveBot(id: string) {
     const trimmedName = newBotName.trim();
@@ -7261,9 +8610,12 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify({
           name: trimmedName,
           systemPrompt: newBotPrompt,
+          localModel: newBotLocalModel === AUTO_MODEL_CHOICE ? "" : newBotLocalModel,
+          onlineModel: newBotOnlineModel === AUTO_MODEL_CHOICE ? "" : newBotOnlineModel,
+          temperature: newBotTemperature,
+          maxTokens: newBotMaxTokens,
           color: newBotColor,
           glyph: newBotGlyph,
-          chatEnabled: newBotChatEnabled,
         }),
       });
       setEditingBotId(null);
@@ -7299,7 +8651,7 @@ function HomeContent(): React.JSX.Element {
 
   // ── Auth screen ──
   if (!user) return (
-    <main className={`${styles.authLayout} ${themeClass}`}>
+    <main className={`${styles.authLayout} ${themeClass}`} style={heroHaloStyle}>
       <div className={styles.card}>
         <div className={styles.brandLockup}>
           {/* Static icon artwork wrapped in a dedicated halo shell. The shell's
@@ -7905,6 +9257,9 @@ function HomeContent(): React.JSX.Element {
             <button type="button" role="menuitem" onClick={() => openRightPanel("images")}>
               Images
             </button>
+            <button type="button" role="menuitem" onClick={openAllMemoriesPanel}>
+              Memories
+            </button>
           </div>
         )}
       </>
@@ -7930,6 +9285,69 @@ function HomeContent(): React.JSX.Element {
           onClick={closePanel}
           aria-hidden="true"
         />
+      )}
+
+      {/* ── Memories panel ── */}
+      {panel === "memories" && (
+        <div
+          className={`${styles.panel} ${styles.panelMemories}`}
+          data-memory-scope={memoryPanelScope}
+          style={{
+            "--memory-panel-color": memoryPanelAccent,
+          } as React.CSSProperties}
+        >
+          <div className={styles.panelHeader}>
+            <h3>{memoryPanelScope === "all" ? "All memories" : "Bot memories"}</h3>
+            <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
+          </div>
+          {memoryPanelBot && (
+            <div className={styles.memoryBotHeader}>
+              <span className={styles.memoryBotGlyph} aria-hidden="true">
+                <BotGlyph name={memoryPanelBot.glyph} />
+              </span>
+              <div>
+                <strong>{memoryPanelBot.name}</strong>
+                <span>Only this bot can use these memories.</span>
+              </div>
+            </div>
+          )}
+          <p className={styles.memoryPanelHint}>
+            {memoryPanelScope === "all"
+              ? "All saved memories across conversations. Bubble size follows confidence."
+              : "Memories this bot has gathered across chats. Bubble size follows confidence."}
+          </p>
+          {visibleMemoryBubbles.length > 0 ? (
+            <ul className={styles.memoryBubbleCloud}>
+              {visibleMemoryBubbles.map((memory, index) => (
+                <li
+                  key={memory.id}
+                  className={styles.memoryBubble}
+                  style={memoryBubbleStyle(memory, index)}
+                >
+                  <p>{memory.text}</p>
+                  <small>{Math.round(memory.confidence * 100)}%</small>
+                  <button
+                    type="button"
+                    onClick={() => void deleteMemory(memory.id)}
+                    aria-label={`Delete memory: ${memory.text}`}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className={styles.memoryEmptyState}>
+              <strong>No memories yet</strong>
+              <p>
+                {memoryPanelScope === "all"
+                  ? "When Prism saves memories, they will float here."
+                  : "When this bot saves a memory, it will float here."}
+              </p>
+            </div>
+          )}
+          {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+        </div>
       )}
 
       {/* ── Settings panel ── */}
@@ -8019,9 +9437,12 @@ function HomeContent(): React.JSX.Element {
         const hasEditChanges = editPristine
           ? trimmedName !== editPristine.name
             || newBotPrompt !== editPristine.prompt
+            || newBotLocalModel !== editPristine.localModel
+            || newBotOnlineModel !== editPristine.onlineModel
+            || newBotTemperature !== editPristine.temperature
+            || newBotMaxTokens !== editPristine.maxTokens
             || normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
             || newBotGlyph !== editPristine.glyph
-            || newBotChatEnabled !== editPristine.chatEnabled
           : false;
 
         // "Active" = pressing the button commits something useful.
@@ -8057,29 +9478,68 @@ function HomeContent(): React.JSX.Element {
               return { ...base, ["--accent-hover" as string]: hoverMix } as React.CSSProperties;
             })()
           : undefined;
+        const selectedLengthPreset = botReplyLengthPresetForTokens(newBotMaxTokens);
+        const localModelOptions = includeSelectedModelOption(
+          modelOptionsForProvider(modelCatalog, settings, "local"),
+          newBotLocalModel,
+          "local"
+        );
+        const onlineModelOptions = includeSelectedModelOption(
+          modelOptionsForProvider(modelCatalog, settings, "openai"),
+          newBotOnlineModel,
+          "openai"
+        );
+        const botLibraryTotal = bots.length + 1;
+        const botLibrarySummary =
+          botLibraryTotal === 1 ? "Default only" : `${botLibraryTotal} bots`;
+        const editorPanelStyle = !botPanelLibraryEnabled
+          ? (() => {
+              const accentNormalized = normalizeAccentForTheme(newBotColor, resolvedTheme);
+              const base = deriveAccentStyle(accentNormalized, resolvedTheme);
+              return {
+                ...base,
+                ["--editor-bot-color" as string]: accentNormalized,
+                ["--editor-bot-text" as string]: base["--accent-text" as keyof typeof base],
+                ["--editor-bot-ink" as string]: base["--accent-ink" as keyof typeof base],
+                ["--editor-bot-soft" as string]: base["--accent-soft" as keyof typeof base],
+                ["--editor-bot-glow" as string]: base["--accent-glow" as keyof typeof base],
+              } as React.CSSProperties;
+            })()
+          : undefined;
 
         return (
           <div
             className={`${styles.panel} ${styles.panelBots}`}
             data-color-picker-open={colorWheelOpen ? "true" : undefined}
+            data-library-expanded={
+              botPanelLibraryEnabled && botLibraryExpanded ? "true" : undefined
+            }
+            data-editor-only={!botPanelLibraryEnabled ? "true" : undefined}
+            style={editorPanelStyle}
           >
-            <div className={styles.panelHeader}><h3>Bots</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
+            <div className={styles.panelHeader}><h3>{!botPanelLibraryEnabled ? "Edit Bot" : "Bots"}</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
+            {activeFieldHelp && (
+              <div
+                className={styles.botParameterHelpTooltip}
+                style={{
+                  top: `${activeFieldHelp.top}px`,
+                  left: `${activeFieldHelp.left}px`,
+                }}
+                role="tooltip"
+                aria-live="polite"
+              >
+                {activeFieldHelp.text}
+              </div>
+            )}
             {/* One form, two modes. editingBotId hydrates the fields
                 with the target bot's values but the layout itself
                 doesn't fork — the primary button simply switches
                 label + color based on hasEditChanges above. */}
-            <form
-              className={styles.form}
-              onSubmit={(e) => void submitBotForm(e)}
-            >
-              {editingBotId && (
-                <div className={styles.formEditingBanner} role="status">
-                  <span className={styles.formEditingBannerLabel}>Editing</span>
-                  <strong className={styles.formEditingBannerName}>
-                    {editingBot?.name ?? "bot"}
-                  </strong>
-                </div>
-              )}
+            {!botLibraryExpanded && (
+              <form
+                className={styles.form}
+                onSubmit={(e) => void submitBotForm(e)}
+              >
               <div className={styles.botNameRow}>
                 <ColorGlyphPicker
                   color={newBotColor}
@@ -8093,20 +9553,140 @@ function HomeContent(): React.JSX.Element {
                 <input ref={botNameInputRef} required placeholder="Bot name" value={newBotName} onChange={e => setNewBotName(e.target.value)} />
               </div>
               <textarea placeholder="System prompt" value={newBotPrompt} onChange={e => setNewBotPrompt(e.target.value)} />
-              <label className={styles.botChatToggle}>
-                <input
-                  type="checkbox"
-                  checked={newBotChatEnabled}
-                  onChange={event => setNewBotChatEnabled(event.currentTarget.checked)}
-                />
-                <span className={styles.botChatToggleCopy}>
-                  <strong>Available in Chat mode</strong>
+              <section className={styles.botParameterCard} aria-labelledby="bot-parameters-title">
+                <div className={styles.botParameterHeader}>
+                  <span id="bot-parameters-title">Parameters</span>
+                  <small>Plain-language controls for how this bot answers.</small>
+                </div>
+                {/* Switched from native <select> to ComposerModelPicker so the
+                    offline/online dropdowns match the rest of the popover
+                    surfaces (custom listbox, scoped focus traps, theme tokens).
+                    Wrapped in <div> rather than <label> because the picker is a
+                    button-driven menu, not a labellable form control. */}
+                <div
+                  className={`${styles.botParameterField} ${styles.botParameterModelField}`}
+                  onMouseEnter={(event) => showFieldHelp(
+                    "Used when this bot replies while the editor is set to LOCAL.",
+                    event.currentTarget
+                  )}
+                  onMouseLeave={hideFieldHelp}
+                  onFocus={(event) => showFieldHelp(
+                    "Used when this bot replies while the editor is set to LOCAL.",
+                    event.currentTarget
+                  )}
+                  onBlur={hideFieldHelp}
+                >
+                  <span>Preferred offline model</span>
+                  <ComposerModelPicker
+                    value={newBotLocalModel}
+                    onChange={setNewBotLocalModel}
+                    options={localModelOptions}
+                    provider="local"
+                    ariaLabel="Preferred offline model for this bot"
+                  />
+                  <small>Used when this bot replies while the editor is set to LOCAL.</small>
+                </div>
+                <div
+                  className={`${styles.botParameterField} ${styles.botParameterModelField}`}
+                  onMouseEnter={(event) => showFieldHelp(
+                    "Used when this bot replies while the editor is set to ONLINE.",
+                    event.currentTarget
+                  )}
+                  onMouseLeave={hideFieldHelp}
+                  onFocus={(event) => showFieldHelp(
+                    "Used when this bot replies while the editor is set to ONLINE.",
+                    event.currentTarget
+                  )}
+                  onBlur={hideFieldHelp}
+                >
+                  <span>Preferred online model</span>
+                  <ComposerModelPicker
+                    value={newBotOnlineModel}
+                    onChange={setNewBotOnlineModel}
+                    options={onlineModelOptions}
+                    provider="openai"
+                    ariaLabel="Preferred online model for this bot"
+                  />
+                  <small>Used when this bot replies while the editor is set to ONLINE.</small>
+                </div>
+                <div
+                  className={styles.botParameterField}
+                  onMouseEnter={(event) => showFieldHelp(
+                    botTemperatureDescription(newBotTemperature),
+                    event.currentTarget
+                  )}
+                  onMouseLeave={hideFieldHelp}
+                  onFocus={(event) => showFieldHelp(
+                    botTemperatureDescription(newBotTemperature),
+                    event.currentTarget
+                  )}
+                  onBlur={hideFieldHelp}
+                >
+                  <div className={styles.botParameterQuestionRow}>
+                    <span>How much should it improvise?</span>
+                    <strong>{botTemperatureLabel(newBotTemperature)}</strong>
+                  </div>
+                  <input
+                    type="range"
+                    min={BOT_TEMPERATURE_MIN}
+                    max={BOT_TEMPERATURE_MAX}
+                    step={BOT_TEMPERATURE_STEP}
+                    value={newBotTemperature}
+                    onChange={event => setNewBotTemperature(
+                      normalizeBotTemperature(Number(event.currentTarget.value))
+                    )}
+                    className={styles.botParameterRange}
+                    aria-label="How much should this bot improvise?"
+                    // Drives the thumb's fill/edge color inversion in CSS:
+                    // 0 = far left (color fill, black edge) → 1 = far right
+                    // (black fill, color edge). Keeps the thumb visible against
+                    // both ends of the dark→accent track gradient.
+                    style={{
+                      ["--slider-pos" as string]: String(
+                        (newBotTemperature - BOT_TEMPERATURE_MIN)
+                          / (BOT_TEMPERATURE_MAX - BOT_TEMPERATURE_MIN)
+                      ),
+                    } as React.CSSProperties}
+                  />
+                  <div className={styles.botParameterScale} aria-hidden="true">
+                    <span>Stay focused</span>
+                    <span>Balanced</span>
+                    <span>Surprise me</span>
+                  </div>
+                  <small>{botTemperatureDescription(newBotTemperature)}</small>
+                </div>
+                <fieldset
+                  className={styles.botParameterField}
+                  onMouseEnter={(event) => showFieldHelp(
+                    selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it.",
+                    event.currentTarget
+                  )}
+                  onMouseLeave={hideFieldHelp}
+                  onFocus={(event) => showFieldHelp(
+                    selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it.",
+                    event.currentTarget
+                  )}
+                  onBlur={hideFieldHelp}
+                >
+                  <legend>How much should it say?</legend>
+                  <div className={styles.botLengthOptions}>
+                    {BOT_REPLY_LENGTH_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={styles.botLengthOption}
+                        data-selected={newBotMaxTokens === preset.tokens ? "true" : undefined}
+                        onClick={() => setNewBotMaxTokens(preset.tokens)}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
                   <small>
-                    Off by default. Disabled bots stay editable here and usable in Sandbox,
-                    but do not appear in Chat.
+                    {selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it."}
                   </small>
-                </span>
-              </label>
+                </fieldset>
+              </section>
               <button
                 type="submit"
                 disabled={!primaryActive}
@@ -8114,10 +9694,45 @@ function HomeContent(): React.JSX.Element {
               >
                 {primaryLabel}
               </button>
-            </form>
+              </form>
+            )}
 
-            <div className={styles.botsScrollArea}>
-              <h4 className={styles.sectionLabel}>Built-in</h4>
+            {botPanelLibraryEnabled && (
+            <section
+              className={styles.botLibraryDrawer}
+              data-expanded={botLibraryExpanded ? "true" : undefined}
+              aria-label="Bot library"
+            >
+              <button
+                type="button"
+                className={styles.botLibraryHandle}
+                onClick={toggleBotLibraryDrawer}
+                aria-expanded={botLibraryExpanded}
+                aria-controls="bot-library-drawer-content"
+              >
+                <span className={styles.botLibraryGrip} aria-hidden="true" />
+                {/* Handle label is the click *destination*, not the current
+                    view: collapsed → "Bot library" (click to open the drawer),
+                    expanded → "Bot Creator" (click to collapse back to the
+                    create-bot form). */}
+                <span className={styles.botLibraryHandleCopy}>
+                  <strong>
+                    {botLibraryExpanded ? "Bot Creator" : "Bot library"}
+                  </strong>
+                  <small>{botLibrarySummary}</small>
+                </span>
+                <span className={styles.botLibraryHandleChevron} aria-hidden="true">
+                  {botLibraryExpanded ? "↓" : "↑"}
+                </span>
+              </button>
+
+              {botLibraryExpanded && (
+                <div
+                  id="bot-library-drawer-content"
+                  className={`${styles.botsScrollArea} ${styles.botLibraryContent}`}
+                  data-closing={botLibraryClosing ? "true" : undefined}
+                >
+                  <h4 className={styles.sectionLabel}>Built-in</h4>
               <div
                 className={`${styles.botCard} ${styles.botCardDefault}`}
                 aria-label="Default bot: always available, cannot be deleted"
@@ -8136,12 +9751,23 @@ function HomeContent(): React.JSX.Element {
                 </div>
               </div>
 
-              {bots.length > 0 && botPanelDashboardActive && !botPanelGroup && (
-                // Collapsed PRISM dashboard root: render five color tiles
-                // instead of the long bot list. Each tile drills into that
-                // color group, keeping the customizer above as the primary
-                // drawer surface even for small bot libraries.
+              {bots.length > 0 && botPanelDashboardActive && (
                 <div className={styles.botGroupGrid} role="list" aria-label="Bot color groups">
+                  <button
+                    type="button"
+                    role="listitem"
+                    className={`${styles.botGroupTile} ${styles.botGroupTileNeutral}`}
+                    data-selected={botPanelGroup === BOT_LIBRARY_FILTER_ALL ? "true" : undefined}
+                    onClick={() => setBotPanelGroup(BOT_LIBRARY_FILTER_ALL)}
+                    aria-label={`Show all bots (${bots.length})`}
+                  >
+                    <span className={styles.botGroupTileLetter} aria-hidden="true">
+                      <BotGlyph name="triangle" size={16} strokeWidth={2.3} />
+                    </span>
+                    <span className={styles.botGroupTileCount}>
+                      {bots.length === 1 ? "1 bot" : `${bots.length} bots`}
+                    </span>
+                  </button>
                   {botGroupOrder.map(group => {
                     const groupBots = botGroupBuckets[group.id];
                     const count = groupBots.length;
@@ -8170,13 +9796,14 @@ function HomeContent(): React.JSX.Element {
                         type="button"
                         role="listitem"
                         className={styles.botGroupTile}
+                        data-selected={botPanelGroup === group.id ? "true" : undefined}
                         style={tileStyle}
                         onClick={() => setBotPanelGroup(group.id)}
                         disabled={count === 0}
                         aria-label={`Open ${group.label} bots (${count})`}
                       >
                         <span className={styles.botGroupTileLetter} aria-hidden="true">
-                          {group.letter}
+                          {GROUP_LETTER_OVERRIDES[group.id]}
                         </span>
                         <span className={styles.botGroupTileCount}>
                           {count === 1 ? "1 bot" : `${count} bots`}
@@ -8187,62 +9814,35 @@ function HomeContent(): React.JSX.Element {
                 </div>
               )}
 
-              {bots.length > 0 && botPanelDashboardActive && botPanelGroup && (
-                // Drill-in header. Sits above the filtered list and
-                // gives the user an obvious way back to the dashboard
-                // root without hunting for the panel close affordance.
-                <div className={styles.botGroupDrilldown}>
-                  <button
-                    type="button"
-                    className={styles.botGroupBack}
-                    onClick={() => setBotPanelGroup(null)}
-                    aria-label="Back to all color groups"
-                  >
-                    <span aria-hidden="true">←</span>
-                    <span>All colors</span>
-                  </button>
-                  {activeBotPanelGroup && (
-                    <span
-                      className={styles.botGroupDrilldownTitle}
-                      style={{ ["--group-color" as string]: activeBotPanelGroup.swatch } as React.CSSProperties}
-                    >
-                      <span className={styles.botGroupDrilldownLetter} aria-hidden="true">
-                        {activeBotPanelGroup.letter}
-                      </span>
-                      <strong>{activeBotPanelGroup.label}</strong>
-                      <span className={styles.botGroupDrilldownCount}>
-                        {visibleBotPanelBots.length === 1
-                          ? "1 bot"
-                          : `${visibleBotPanelBots.length} bots`}
-                      </span>
+              {bots.length > 0 && (
+                <div className={styles.botLibraryListArea}>
+                  <div className={styles.botLibraryListHeader}>
+                    <h4 className={styles.sectionLabel}>{activeBotPanelFilterLabel}</h4>
+                    <span className={styles.botGroupDrilldownCount}>
+                      {visibleBotPanelBots.length === 1
+                        ? "1 bot"
+                        : `${visibleBotPanelBots.length} bots`}
                     </span>
-                  )}
-                </div>
-              )}
-
-              {bots.length > 0 && !(botPanelDashboardActive && !botPanelGroup) && (
-                <>
-                  {!botPanelDashboardActive && (
-                    <h4 className={styles.sectionLabel}>Your bots</h4>
-                  )}
+                  </div>
                   {/* List-level data attrs mirror the sidebar conversation list:
                       `data-delete-holding` during a press-and-hold on any card ×,
                       `data-delete-armed-all` once the threshold crosses. The CSS
                       keys off both to drive the glow / tilt / iOS-jiggle visuals
                       across every card's × in parallel. Wrapping the map in a
                       div is what gives us a single element to hang those on. */}
-                  <div
-                    className={styles.botList}
-                    data-delete-holding={
-                      holdingKey && holdingKey.startsWith(BOT_DELETE_KEY_PREFIX)
-                        ? "true"
-                        : undefined
-                    }
-                    data-delete-armed-all={
-                      pendingDeleteKey === DELETE_ALL_BOTS_KEY ? "true" : undefined
-                    }
-                  >
-                    {visibleBotPanelBots.map(b => {
+                  <div className={styles.botLibraryInnerScroll}>
+                    <div
+                      className={styles.botList}
+                      data-delete-holding={
+                        holdingKey && holdingKey.startsWith(BOT_DELETE_KEY_PREFIX)
+                          ? "true"
+                          : undefined
+                      }
+                      data-delete-armed-all={
+                        pendingDeleteKey === DELETE_ALL_BOTS_KEY ? "true" : undefined
+                      }
+                    >
+                      {visibleBotPanelBots.map(b => {
                       const isEditing = editingBotId === b.id;
                       // Live preview during editing — the card mirrors the
                       // values currently in the top form so color/glyph
@@ -8252,9 +9852,6 @@ function HomeContent(): React.JSX.Element {
                       const liveGlyph = isEditing
                         ? newBotGlyph
                         : (isBotGlyphName(b.glyph) ? b.glyph : DEFAULT_BOT_GLYPH);
-                      const liveChatEnabled = isEditing
-                        ? newBotChatEnabled
-                        : botIsChatEnabled(b);
                       // Adornments use a display-only harmony pass at large
                       // counts so stacked card accents read as one spectrum;
                       // the saved bot color and edit swatch stay exact.
@@ -8286,7 +9883,10 @@ function HomeContent(): React.JSX.Element {
                           <button
                             type="button"
                             className={styles.botCardTile}
-                            onClick={() => startEditBot(b)}
+                            onClick={() => {
+                              startEditBot(b);
+                              closeBotLibraryDrawer();
+                            }}
                             aria-label={`Edit ${b.name}`}
                             aria-pressed={isEditing}
                           >
@@ -8296,12 +9896,6 @@ function HomeContent(): React.JSX.Element {
                             <div className={styles.botCardBody}>
                               <div className={styles.botCardTitleRow}>
                                 <strong>{b.name}</strong>
-                                <span
-                                  className={styles.botCardChatBadge}
-                                  data-enabled={liveChatEnabled ? "true" : undefined}
-                                >
-                                  {liveChatEnabled ? "Chat on" : "Chat off"}
-                                </span>
                               </div>
                               <small>{b.system_prompt ? b.system_prompt.slice(0, 80) + "..." : "No system prompt"}</small>
                             </div>
@@ -8310,10 +9904,14 @@ function HomeContent(): React.JSX.Element {
                         </div>
                       );
                     })}
+                    </div>
                   </div>
-                </>
+                </div>
               )}
-            </div>
+                </div>
+              )}
+            </section>
+            )}
             {/* Errors from createBot / deleteBot / saveBot used to silently
                 surface in the composer behind the drawer overlay. They now
                 live inside the panel next to the action that triggered
@@ -8369,28 +9967,46 @@ function HomeContent(): React.JSX.Element {
   // mode; Chat stays disabled in Phase 1 and lights up once the mode is
   // built out.
   if (view === "hub") return (
-    <main className={`${styles.authLayout} ${themeClass}`}>
+    <main className={`${styles.authLayout} ${themeClass}`} style={heroHaloStyle}>
       <div className={styles.hubCard}>
         <div className={styles.brandLockup}>
           {/* See note on the auth-screen lockup: dark theme uses the boxed
               JPG with animated halos, light theme uses the bare triangle. */}
-          <div className={styles.brandIconShell} aria-hidden="true">
-            <img
-              src="/icon.jpg"
-              alt=""
-              aria-hidden="true"
-              className={styles.brandIcon}
-            />
-            <img
-              src="/icon-triangle.svg"
-              alt=""
-              aria-hidden="true"
-              className={styles.brandIconLight}
-            />
-          </div>
+          <button
+            type="button"
+            className={`${styles.brandIconShell} ${styles.brandIconButton} ${styles.userHeroAvatar}`}
+            onClick={handleProfileLogoutClick}
+            aria-label={logoutArmed ? "Confirm logout" : "Open logout confirmation"}
+            title={logoutArmed ? "Confirm logout" : "Account"}
+            data-logout-armed={logoutArmed ? "true" : undefined}
+          >
+            {logoutArmed ? (
+              <span className={styles.brandLogoutGlyph} aria-hidden="true">×</span>
+            ) : (
+              <>
+                <img
+                  src="/icon.jpg"
+                  alt=""
+                  aria-hidden="true"
+                  className={styles.brandIcon}
+                />
+                <img
+                  src="/icon-triangle.svg"
+                  alt=""
+                  aria-hidden="true"
+                  className={styles.brandIconLight}
+                />
+              </>
+            )}
+          </button>
           <PrismWordmark className={styles.brandWordmark} />
           {renderDevToolsButton()}
         </div>
+        {logoutArmed && (
+          <p className={styles.hubLogoutHint}>
+            Log out? Tap × again to confirm, or choose Memories below to stay.
+          </p>
+        )}
         <p className={styles.hubGreeting}>
           Welcome back, <span className={styles.hubGreetingName}>{user.displayName}</span>.
         </p>
@@ -8421,6 +10037,81 @@ function HomeContent(): React.JSX.Element {
               Full playground: bots, providers, memory, images, and more.
             </div>
           </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Arena mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphArena size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Arena</div>
+            <div className={styles.hubTileTagline}>
+              Moderated 1 v 1 debate between bots.
+            </div>
+          </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Polling mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphPolling size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Polling</div>
+            <div className={styles.hubTileTagline}>
+              AI-powered polls across full bot groups.
+            </div>
+          </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Coffee mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphCoffee size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Coffee</div>
+            <div className={styles.hubTileTagline}>
+              Group chat for 2-5 reactive bots.
+            </div>
+          </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Games mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphGames size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Games</div>
+            <div className={styles.hubTileTagline}>
+              Boardgame-like bot matches: chess, four-in-a-row, and more.
+            </div>
+          </button>
+          {/* Slate — bot-free document editor (akin to ChatGPT's canvas
+              minus the model). Disabled placeholder until the editor
+              shell is built; advertised here so the Hub previews the
+              full mode roadmap and the auto-fit grid keeps its rhythm
+              once the 7th tile is dropped in. */}
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Slate mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphSlate size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Slate</div>
+            <div className={styles.hubTileTagline}>
+              Distraction-free writing canvas — no bots, just words.
+            </div>
+          </button>
         </div>
         <div className={styles.hubFooter}>
           <button
@@ -8440,9 +10131,10 @@ function HomeContent(): React.JSX.Element {
           >
             <ThemeGlyph mode={effectiveThemeMode} />
           </button>
-          <button type="button" onClick={() => void logout()}>Logout</button>
+          <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
         </div>
       </div>
+      {renderSharedPanels()}
       {renderDevToolsPanel()}
     </main>
   );
@@ -8455,7 +10147,7 @@ function HomeContent(): React.JSX.Element {
   // Bots/Images panels. Default persona is silent; provider routing is
   // whatever the user saved in Settings.
   if (view === "chat") return (
-    <main className={`${styles.appLayout} ${themeClass}`} style={shellStyle}>
+    <main className={`${styles.appLayout} ${themeClass}`} style={appShellStyle}>
       {/* Hide the fixed hamburger whenever a drawer is open on either
           side — it otherwise pokes through the sidebar profile tile
           (left) or the panel overlay dimmer (right) at its z-index:201. */}
@@ -8473,38 +10165,13 @@ function HomeContent(): React.JSX.Element {
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       <aside className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}>
-        <div className={styles.profile}>
-          <div className={styles.profileAvatar} aria-hidden="true">
-            {(user.displayName || user.email).charAt(0).toUpperCase()}
-          </div>
-          <div className={styles.profileInfo}>
-            <strong>{user.displayName}</strong>
-            <span>{user.email}</span>
-          </div>
-        </div>
+        {renderProfileCard()}
 
         <div className={styles.newChatGroup}>
           <button
             type="button"
             className={styles.newChatButton}
-            onClick={() => {
-              setSelectedId(null);
-              setDetail(null);
-              // Clear the last-picked bot AND any stale hover preview
-              // so every fresh chat starts at the neutral "no
-              // selection = default" state. Also cancel any pending
-              // hover-dwell timer so a stale preview doesn't commit
-              // after the picker re-mounts.
-              setSelectedBotId(null);
-              setHoveredBotId(null);
-              closeEmptyStateBotSearch();
-              if (hoverDwellTimerRef.current) {
-                clearTimeout(hoverDwellTimerRef.current);
-                hoverDwellTimerRef.current = null;
-              }
-              setPendingIncognito(false);
-              setSidebarOpen(false);
-            }}
+            onClick={() => startFreshConversation(false)}
           >
             New chat
           </button>
@@ -8518,19 +10185,7 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={`${styles.privateChatButton} ${pendingIncognito ? styles.privateChatButtonActive : ""}`}
-            onClick={() => {
-              setSelectedId(null);
-              setDetail(null);
-              setSelectedBotId(null);
-              setHoveredBotId(null);
-              closeEmptyStateBotSearch();
-              if (hoverDwellTimerRef.current) {
-                clearTimeout(hoverDwellTimerRef.current);
-                hoverDwellTimerRef.current = null;
-              }
-              setPendingIncognito(true);
-              setSidebarOpen(false);
-            }}
+            onClick={() => startFreshConversation(true)}
             aria-pressed={pendingIncognito}
             title="Private chat — local only, no memory"
           >
@@ -8562,9 +10217,11 @@ function HomeContent(): React.JSX.Element {
           className={styles.conversationList}
           data-delete-holding={holdingKey ? "true" : undefined}
           data-delete-armed-all={pendingDeleteKey === DELETE_ALL_KEY ? "true" : undefined}
+          onScroll={event => setConversationListScrollTop(event.currentTarget.scrollTop)}
         >
-          {visibleConversations.map(c => {
+          {visibleConversations.map((c, index) => {
             const isSelected = c.id === selectedId;
+            const isUnread = unreadConversationIds.has(c.id);
             // Row color comes from the server-denormalized last-bot
             // color (or falls back to the live bots list for the
             // empty-conversation case). Passing --row-color and
@@ -8574,23 +10231,32 @@ function HomeContent(): React.JSX.Element {
             const rowAccent = rawRowColor
               ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
               : null;
-            const rowStyle: React.CSSProperties | undefined = rowAccent
-              ? ({
-                  "--row-color": rowAccent,
-                  "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
-                } as React.CSSProperties)
-              : undefined;
+            const rowStyle = {
+              ...conversationRowGlowStyle(index),
+              ...(rowAccent
+                ? {
+                    "--row-color": rowAccent,
+                    "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
+                  }
+                : {}),
+            } as React.CSSProperties;
             return (
               <li
                 key={c.id}
                 className={styles.conversationRow}
                 data-private={c.incognito ? "true" : undefined}
+                data-unread={isUnread ? "true" : undefined}
                 style={rowStyle}
               >
                 <button
                   type="button"
                   className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
-                  onClick={() => { disarmDelete(); void refreshConversation(c.id); setSidebarOpen(false); }}
+                  onClick={() => {
+                    disarmDelete();
+                    clearConversationUnread(c.id);
+                    void refreshConversation(c.id);
+                    setSidebarOpen(false);
+                  }}
                 >
                   {c.title}
                 </button>
@@ -8604,7 +10270,7 @@ function HomeContent(): React.JSX.Element {
           <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
           <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
           <button type="button" onClick={() => openRightPanel("images")}>Images</button>
-          <button type="button" onClick={() => void logout()}>Logout</button>
+          <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
         </div>
       </aside>
 
@@ -8617,10 +10283,45 @@ function HomeContent(): React.JSX.Element {
             aria-label="Back to Hub"
             title="Back to Hub"
           >
-            <PrismWordmark className={styles.hubHomeWordmark} />
+            {headerIdentity ? (
+              <span
+                className={styles.headerIdentity}
+                style={
+                  headerIdentity.color
+                    ? ({
+                        "--header-identity-color": normalizeAccentForTheme(
+                          headerIdentity.color,
+                          resolvedTheme
+                        ),
+                      } as React.CSSProperties)
+                    : undefined
+                }
+              >
+                <span className={styles.headerIdentityGlyph} aria-hidden="true">
+                  <BotGlyph name={headerIdentity.glyph} size={18} strokeWidth={2.25} />
+                </span>
+                <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
+              </span>
+            ) : (
+              <PrismWordmark
+                className={styles.hubHomeWordmark}
+                mono={messagesFrameMode === "private"}
+              />
+            )}
           </button>
           {renderDevToolsButton()}
           <h2>{detail?.title ?? "New conversation"}</h2>
+          {activeBot && (
+            <button
+              type="button"
+              className={`${styles.badge} ${styles.memoryBadge}`}
+              onClick={openActiveBotMemoriesPanel}
+              aria-label={`Open ${activeBot.name} memories`}
+              title={`Open ${activeBot.name} memories`}
+            >
+              <span>MEMORIES</span>
+            </button>
+          )}
           <div className={styles.headerActions}>
             <button
               type="button"
@@ -8643,8 +10344,13 @@ function HomeContent(): React.JSX.Element {
           </div>
         </header>
 
-        <div className={styles.messages}>
-          {!detail && !pendingReply && (() => {
+        <div
+          className={styles.messagesFrame}
+          data-mode={messagesFrameMode}
+          style={messagesFrameStyle}
+        >
+          <div className={styles.messages}>
+            {!detail && !pendingReplyVisible && (() => {
             // Chat-mode empty state:
             //   • DEFAULT — no hover, no commit: rainbow brand mark,
             //     grayscale shell, generic title/hint, full picker grid.
@@ -8685,10 +10391,8 @@ function HomeContent(): React.JSX.Element {
             const hint = pendingIncognito
               ? "Local only. Nothing from this chat is remembered."
               : descriptionPreview ||
-                (chatAvailableBots.length > 0
+                (bots.length > 0
                   ? "Pick a bot below, or just start typing."
-                  : bots.length > 0
-                    ? "Enable a bot for Chat in the Bots panel, or start with Default."
                   : "Say anything. Prism keeps what matters and lets the rest go.");
             const emptyStateStyle = heroBot
               ? botAccentStyle(heroBot.color, resolvedTheme)
@@ -8702,6 +10406,17 @@ function HomeContent(): React.JSX.Element {
                 bot={isPreviewing ? null : heroBot}
                 previewBot={isPreviewing ? heroBot : null}
                 previewAsBotGlyph={isPreviewing}
+                /* Triangle hero replaces the rainbow brand mark whenever
+                   the surface isn't in home mode and there's no bot
+                   armed — its currentColor follows --accent, which
+                   means the triangle matches whatever the rest of the
+                   interface is currently tinted to (lens hue while
+                   engaged, theme fg in private). Drag-mode keeps its
+                   override regardless. */
+                forceTrianglePreview={
+                  lensInteracting ||
+                  (messagesFrameMode !== "home" && !heroBot)
+                }
                 resolvedTheme={resolvedTheme}
               />
             );
@@ -8720,7 +10435,7 @@ function HomeContent(): React.JSX.Element {
                   >
                     {renderHero()}
                   </button>
-                ) : !pendingIncognito && chatAvailableBots.length > 0 ? (
+                ) : !pendingIncognito && bots.length > 0 ? (
                   <button
                     type="button"
                     className={`${styles.emptyStateIconButton} ${styles.emptyStateSearchTrigger}`}
@@ -8803,6 +10518,7 @@ function HomeContent(): React.JSX.Element {
                   return (
                     <div
                       className={styles.chatBotPickerFrame}
+                      data-starter-bot-affordance="true"
                       data-bot-picker-frame="true"
                       data-returning-all={botPickerReturnAnimating ? "true" : undefined}
                       data-search-active={emptyStateSearchActive ? "true" : undefined}
@@ -8921,6 +10637,7 @@ function HomeContent(): React.JSX.Element {
                               updatePickerParallax(e);
                             }}
                             onClick={(e) => {
+                              primeStarterComposer(draft);
                               // Explicit click beats the dwell timer —
                               // the user made a deliberate choice, no
                               // reason to wait the 180ms dwell window.
@@ -9036,6 +10753,15 @@ function HomeContent(): React.JSX.Element {
           })()}
           {detail?.messages.map(msg => {
             const status = getMessageStatus(msg);
+            const modelLabel =
+              msg.role === "assistant" && typeof msg.model === "string"
+                ? msg.model.trim()
+                : "";
+            const modelRevealLabel =
+              modelLabel ||
+              (msg.role === "assistant"
+                ? "not recorded"
+                : "");
             // Historical messages keep their original bot accent bar.
             // The accent is normalized for the active theme so legacy bots
             // whose stored color drifted outside the current safe range still
@@ -9056,6 +10782,10 @@ function HomeContent(): React.JSX.Element {
                 key={msg.id}
                 className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
                 style={messageStyle}
+                data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
+                onClick={() => {
+                  if (modelRevealLabel) revealMessageModel(msg.id);
+                }}
               >
                 <h4>
                   <span className={styles.messageRoleLabel}>
@@ -9063,24 +10793,33 @@ function HomeContent(): React.JSX.Element {
                       ? (msg.botName?.trim() || "Prism")
                       : "You"}
                   </span>
-                  {status && (
-                    <span
-                      className={styles.providerTag}
-                      title={STATUS_LABEL[status]}
-                    >
+                  {status && (() => {
+                    const titleModelCopy = modelLabel
+                      ? `Model: ${modelLabel}`
+                      : modelRevealLabel
+                        ? "Model was not recorded for this earlier message."
+                        : "";
+                    return (
                       <span
-                        className={`${styles.providerDot} ${
-                          status === "human"
-                            ? styles.providerDotHuman
-                            : status === "online"
-                              ? styles.providerDotOnline
-                              : styles.providerDotLocal
-                        }`}
-                        aria-hidden="true"
-                      />
-                      <span className={styles.providerLabel}>{STATUS_LABEL[status]}</span>
-                    </span>
-                  )}
+                        className={styles.providerTag}
+                        title={titleModelCopy ? `${STATUS_LABEL[status]} · ${titleModelCopy}` : STATUS_LABEL[status]}
+                      >
+                        <span
+                          className={`${styles.providerDot} ${
+                            status === "human"
+                              ? styles.providerDotHuman
+                              : status === "online"
+                                ? styles.providerDotOnline
+                                : styles.providerDotLocal
+                          }`}
+                          aria-hidden="true"
+                        />
+                        {modelRevealLabel && (
+                          <span className={styles.providerLabel}>{modelRevealLabel}</span>
+                        )}
+                      </span>
+                    );
+                  })()}
                 </h4>
                 <MessageBody
                   messageId={msg.id}
@@ -9104,6 +10843,7 @@ function HomeContent(): React.JSX.Element {
                     <div
                       className={styles.messageActionsSlot}
                       data-armed={armed ? "true" : undefined}
+                      data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
                       data-resend-affordance={isUser ? "true" : undefined}
                     >
                       <div className={styles.messageActions}>
@@ -9122,12 +10862,14 @@ function HomeContent(): React.JSX.Element {
                             {armed ? "Confirm resend?" : "Resend"}
                           </button>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => void forkChat(msg.id)}
-                          >
-                            Fork here
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void forkChat(msg.id)}
+                            >
+                              Fork here
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -9136,7 +10878,7 @@ function HomeContent(): React.JSX.Element {
               </article>
             );
           })}
-          {pendingReply && (
+          {pendingReplyVisible && (
             <div className={styles.typingIndicator} role="status" aria-live="polite">
               <span>Thinking</span>
               <span className={styles.typingDots} aria-hidden="true">
@@ -9146,17 +10888,24 @@ function HomeContent(): React.JSX.Element {
               </span>
             </div>
           )}
-          <div ref={messagesEndRef} aria-hidden="true" />
+            <div ref={messagesEndRef} aria-hidden="true" />
+          </div>
         </div>
 
         <form
           className={styles.compose}
+          data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
+          data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
           style={composeStyle}
-          onSubmit={sendMessage}
+          onSubmit={e => void sendMessage(e, {
+            starterPrompt: isStarterPromptReady(draft),
+          })}
+          onBlur={handleComposerBlur}
+          onKeyDown={handleComposerKeyDown}
         >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
-          {(!detail || detail.messages.length === 0) && (
+          {(!detail || detail.messages.length === 0) && !privateChatActive && (
             <HueLensControl
               bots={pickerSourceBots}
               filteredBots={filteredBots}
@@ -9165,6 +10914,7 @@ function HomeContent(): React.JSX.Element {
               hueLensAvailable={hueLensAvailable}
               trackGradient={hueLensTrackGradient}
               trackSegments={hueLensTrackSegments}
+              onInteractionChange={setLensInteracting}
             />
           )}
           {/* Chat-mode compose carries two knobs now:
@@ -9243,15 +10993,15 @@ function HomeContent(): React.JSX.Element {
               chatLocked ||
               pendingReply ||
               !detail ||
-              chatAvailableBots.length === 0;
+              bots.length === 0;
             const botTitle = chatLocked
               ? "Private chats always run as the Default persona."
               : !detail
                 ? "Send your first message to change bots mid-thread."
                 : pendingReply
                   ? "Wait for the current reply before switching bots."
-                  : chatAvailableBots.length === 0
-                    ? "Default is the only Chat option until you enable a custom bot."
+                  : bots.length === 0
+                    ? "Default is the only Chat option until you create a custom bot."
                     : undefined;
             // Dropdown is disabled pre-detail, so onChange only fires
             // once the thread exists. Set the override directly; the
@@ -9259,12 +11009,21 @@ function HomeContent(): React.JSX.Element {
             const handleBotSelectChange = (value: string) => {
               setChatBotOverride(value === "" ? null : value);
             };
+            const modelProvider: Provider = displayLocal ? "local" : "openai";
+            const rawModelChoice = chatModelChoiceByProvider[modelProvider];
+            const modelOptions = includeSelectedModelOption(
+              modelOptionsForProvider(modelCatalog, settings, modelProvider),
+              rawModelChoice,
+              modelProvider
+            );
+            const modelSelectDisabled =
+              !settings || pendingReply;
             return (
               <div className={styles.composeTools}>
                 <ComposerBotPicker
                   value={botSelectValue}
                   onChange={handleBotSelectChange}
-                  bots={botFiltersEnabled ? chatAvailableBots : filteredBots}
+                  bots={botFiltersEnabled ? bots : filteredBots}
                   resolvedTheme={resolvedTheme}
                   disabled={botDisabled}
                   title={botTitle}
@@ -9322,6 +11081,20 @@ function HomeContent(): React.JSX.Element {
                     </span>
                   </button>
                 </div>
+                <ComposerModelPicker
+                  value={rawModelChoice}
+                  onChange={(nextChoice) => {
+                    setChatModelChoiceByProvider((previous) => ({
+                      ...previous,
+                      [modelProvider]: nextChoice,
+                    }));
+                  }}
+                  options={modelOptions}
+                  provider={modelProvider}
+                  disabled={modelSelectDisabled}
+                  title={`Model for ${displayLocal ? "LOCAL" : "ONLINE"} replies`}
+                  ariaLabel={`Model for ${displayLocal ? "local" : "online"} replies`}
+                />
               </div>
             );
           })()}
@@ -9329,17 +11102,21 @@ function HomeContent(): React.JSX.Element {
             <textarea
               ref={draftInputRef}
               value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onFocus={() => setHoveredBotId(null)}
+              onChange={handleComposerChange}
+              onFocus={handleComposerFocus}
               placeholder="Say something..."
               spellCheck
               autoCorrect="on"
               autoCapitalize="sentences"
               enterKeyHint="send"
               lang="en"
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(e); } }}
             />
-            <button type="submit" disabled={pendingReply || !draft.trim()}>Send</button>
+            <button
+              type="submit"
+              disabled={composerSubmitDisabled(draft)}
+            >
+              {composerSubmitLabel(draft)}
+            </button>
           </div>
         </form>
       </section>
@@ -9367,7 +11144,7 @@ function HomeContent(): React.JSX.Element {
   // value falls through here so the user still sees a usable surface
   // instead of a blank page.
   return (
-    <main className={`${styles.appLayout} ${themeClass}`} style={shellStyle}>
+    <main className={`${styles.appLayout} ${themeClass}`} style={appShellStyle}>
       {/* Mobile menu toggle — faded out while either drawer is open
           (sidebar on the left, Settings/Bots/Images panel on the right)
           so the fixed hamburger doesn't overlap the profile avatar or
@@ -9387,62 +11164,41 @@ function HomeContent(): React.JSX.Element {
 
       {/* Sidebar */}
       <aside className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}>
-        <div className={styles.profile}>
-          <div className={styles.profileAvatar} aria-hidden="true">
-            {(user.displayName || user.email).charAt(0).toUpperCase()}
-          </div>
-          <div className={styles.profileInfo}>
-            <strong>{user.displayName}</strong>
-            <span>{user.email}</span>
-          </div>
-        </div>
+        {renderProfileCard()}
 
-        <button
-          type="button"
-          className={styles.newChatButton}
-          onClick={() => {
-            setSelectedId(null);
-            setDetail(null);
-            // Match Chat-mode semantics: every fresh Sandbox chat lands
-            // on the default-unselected state with the tile grid
-            // visible, so the user always starts from a clean pick.
-            // Also cancel any pending hover dwell so a stale preview
-            // doesn't commit after the picker re-mounts.
-            setSelectedBotId(null);
-            setHoveredBotId(null);
-            if (hoverDwellTimerRef.current) {
-              clearTimeout(hoverDwellTimerRef.current);
-              hoverDwellTimerRef.current = null;
-            }
-            setSidebarOpen(false);
-          }}
-        >
-          New chat
-        </button>
-
-        <div className={styles.sidebarField}>
-          <span className={styles.sectionLabel}>Online provider</span>
-          {/* Single option today; more online providers (Claude, Gemini, ...) will appear here over time. */}
-          <select
-            className={styles.sidebarSelect}
-            value="openai"
-            onChange={() => { /* only one option for now */ }}
-            disabled={!settings}
+        <div className={styles.newChatGroup}>
+          <button
+            type="button"
+            className={styles.newChatButton}
+            onClick={() => startFreshConversation(false)}
           >
-            <option value="openai">ChatGPT</option>
-          </select>
+            New chat
+          </button>
+          <button
+            type="button"
+            className={`${styles.privateChatButton} ${pendingIncognito ? styles.privateChatButtonActive : ""}`}
+            onClick={() => startFreshConversation(true)}
+            aria-pressed={pendingIncognito}
+            title="Private chat — local only, no memory"
+          >
+            <span className={styles.privateChatButtonIcon} aria-hidden="true">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="4" y="11" width="16" height="9" rx="2" />
+                <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+              </svg>
+            </span>
+            Private chat
+          </button>
         </div>
-
-        <div className={styles.sidebarField}>
-          <span className={styles.sectionLabel}>Local model</span>
-          <div className={styles.sidebarReadout}>
-            {settings?.ollamaModel ?? "Ollama"}
-          </div>
-        </div>
-
-        {/* Incognito is Chat-mode-only now: it doubles as the
-            online/offline toggle there, and Sandbox deliberately has no
-            cross-session memory to "hide from" in the first place. */}
 
         {visibleConversations.length > 0 && (
           <span className={styles.sectionLabel}>Conversations</span>
@@ -9451,9 +11207,11 @@ function HomeContent(): React.JSX.Element {
           className={styles.conversationList}
           data-delete-holding={holdingKey ? "true" : undefined}
           data-delete-armed-all={pendingDeleteKey === DELETE_ALL_KEY ? "true" : undefined}
+          onScroll={event => setConversationListScrollTop(event.currentTarget.scrollTop)}
         >
-          {visibleConversations.map(c => {
+          {visibleConversations.map((c, index) => {
             const isSelected = c.id === selectedId;
+            const isUnread = unreadConversationIds.has(c.id);
             // Same row-tint resolution as the Chat-mode sidebar — shared
             // CSS tokens do the actual painting, we just push the vars.
             // Sandbox rows "live-update" on each reply because the
@@ -9463,23 +11221,32 @@ function HomeContent(): React.JSX.Element {
             const rowAccent = rawRowColor
               ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
               : null;
-            const rowStyle: React.CSSProperties | undefined = rowAccent
-              ? ({
-                  "--row-color": rowAccent,
-                  "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
-                } as React.CSSProperties)
-              : undefined;
+            const rowStyle = {
+              ...conversationRowGlowStyle(index),
+              ...(rowAccent
+                ? {
+                    "--row-color": rowAccent,
+                    "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
+                  }
+                : {}),
+            } as React.CSSProperties;
             return (
               <li
                 key={c.id}
                 className={styles.conversationRow}
                 data-private={c.incognito ? "true" : undefined}
+                data-unread={isUnread ? "true" : undefined}
                 style={rowStyle}
               >
                 <button
                   type="button"
                   className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
-                  onClick={() => { disarmDelete(); void refreshConversation(c.id); setSidebarOpen(false); }}
+                  onClick={() => {
+                    disarmDelete();
+                    clearConversationUnread(c.id);
+                    void refreshConversation(c.id);
+                    setSidebarOpen(false);
+                  }}
                 >
                   {c.title}
                 </button>
@@ -9493,7 +11260,7 @@ function HomeContent(): React.JSX.Element {
           <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
           <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
           <button type="button" onClick={() => openRightPanel("images")}>Images</button>
-          <button type="button" onClick={() => void logout()}>Logout</button>
+          <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
         </div>
       </aside>
 
@@ -9507,20 +11274,55 @@ function HomeContent(): React.JSX.Element {
             aria-label="Back to Hub"
             title="Back to Hub"
           >
-            <PrismWordmark className={styles.hubHomeWordmark} />
+            {headerIdentity ? (
+              <span
+                className={styles.headerIdentity}
+                style={
+                  headerIdentity.color
+                    ? ({
+                        "--header-identity-color": normalizeAccentForTheme(
+                          headerIdentity.color,
+                          resolvedTheme
+                        ),
+                      } as React.CSSProperties)
+                    : undefined
+                }
+              >
+                <span className={styles.headerIdentityGlyph} aria-hidden="true">
+                  <BotGlyph name={headerIdentity.glyph} size={18} strokeWidth={2.25} />
+                </span>
+                <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
+              </span>
+            ) : (
+              <PrismWordmark
+                className={styles.hubHomeWordmark}
+                mono={messagesFrameMode === "private"}
+              />
+            )}
           </button>
           {renderDevToolsButton()}
           <h2>{detail?.title ?? "New conversation"}</h2>
           {activeBot && (
             <button
               type="button"
-              className={styles.badge}
+              className={`${styles.badge} ${styles.memoryBadge}`}
+              onClick={openActiveBotMemoriesPanel}
+              aria-label={`Open ${activeBot.name} memories`}
+              title={`Open ${activeBot.name} memories`}
+            >
+              <span>MEMORIES</span>
+            </button>
+          )}
+          {activeBot && (
+            <button
+              type="button"
+              className={`${styles.badge} ${styles.editBotBadge}`}
               onClick={openActiveBotCustomizer}
               aria-label={`Edit ${activeBot.name}`}
               title={`Edit ${activeBot.name}`}
+              style={botAccentStyle(activeBot.color, resolvedTheme)}
             >
-              <span>EDIT</span>
-              <span>BOT</span>
+              <span>EDIT BOT</span>
             </button>
           )}
           <div className={styles.headerActions}>
@@ -9551,8 +11353,13 @@ function HomeContent(): React.JSX.Element {
           </div>
         </header>
 
-        <div className={styles.messages}>
-          {!detail && !pendingReply && (() => {
+        <div
+          className={styles.messagesFrame}
+          data-mode={messagesFrameMode}
+          style={messagesFrameStyle}
+        >
+          <div className={styles.messages}>
+            {!detail && !pendingReplyVisible && (() => {
             // Sandbox empty state — mirrors the Chat-mode empty state so
             // both modes feel like the same "start a new chat" surface:
             //   • DEFAULT — no hover, no armed bot: brand mark hero, full
@@ -9574,22 +11381,25 @@ function HomeContent(): React.JSX.Element {
             // hue lens can step the density stage back when the band
             // contains far fewer bots than the full library.
             const pickerGeom =
-              pickerBots.length > 0
+              !pendingIncognito && pickerBots.length > 0
                 ? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight)
                 : null;
             const isArmed =
+              !pendingIncognito &&
               selectedBotId !== null &&
               activeBot?.id === selectedBotId;
             const isPreviewing =
-              hoveredBotId !== null && activeBot?.id === hoveredBotId;
-            const heroBot = activeBot;
-            const title =
-              heroBot?.name?.trim() || "Start a new conversation";
+              !pendingIncognito && hoveredBotId !== null && activeBot?.id === hoveredBotId;
+            const heroBot = pendingIncognito ? null : activeBot;
+            const title = pendingIncognito
+              ? "Private chat"
+              : heroBot?.name?.trim() || "Start a new conversation";
             const descriptionPreview = heroBot
               ? firstLinesOf(heroBot.system_prompt)
               : "";
-            const hint =
-              descriptionPreview ||
+            const hint = pendingIncognito
+              ? "Local only. Nothing from this chat is remembered."
+              : descriptionPreview ||
               (bots.length > 0
                 ? "Pick a bot below, or just start typing. You can swap bots between sends."
                 : "Type a message below to begin. Hover any bubble to fork a reply or resend your own. Exports and custom bots live in the header.");
@@ -9605,6 +11415,17 @@ function HomeContent(): React.JSX.Element {
                 bot={isPreviewing ? null : heroBot}
                 previewBot={isPreviewing ? heroBot : null}
                 previewAsBotGlyph={isPreviewing}
+                /* Triangle hero replaces the rainbow brand mark whenever
+                   the surface isn't in home mode and there's no bot
+                   armed — its currentColor follows --accent, which
+                   means the triangle matches whatever the rest of the
+                   interface is currently tinted to (lens hue while
+                   engaged, theme fg in private). Drag-mode keeps its
+                   override regardless. */
+                forceTrianglePreview={
+                  lensInteracting ||
+                  (messagesFrameMode !== "home" && !heroBot)
+                }
                 resolvedTheme={resolvedTheme}
               />
             );
@@ -9623,7 +11444,7 @@ function HomeContent(): React.JSX.Element {
                   >
                     {renderHero()}
                   </button>
-                ) : bots.length > 0 ? (
+                ) : !pendingIncognito && bots.length > 0 ? (
                   <button
                     type="button"
                     className={`${styles.emptyStateIconButton} ${styles.emptyStateSearchTrigger}`}
@@ -9642,7 +11463,7 @@ function HomeContent(): React.JSX.Element {
                 ) : (
                   <p className={styles.emptyStateHint}>{hint}</p>
                 )}
-                {pickerBots.length > 0 && (() => {
+                {!pendingIncognito && pickerBots.length > 0 && (() => {
                   // Same geometry math as the Chat-mode picker: mobile
                   // stays square, desktop goes widescreen, and density
                   // stages scale from the viewport-driven frame width.
@@ -9683,6 +11504,7 @@ function HomeContent(): React.JSX.Element {
                   return (
                     <div
                       className={styles.chatBotPickerFrame}
+                      data-starter-bot-affordance="true"
                       data-bot-picker-frame="true"
                       data-returning-all={botPickerReturnAnimating ? "true" : undefined}
                       data-search-active={emptyStateSearchActive ? "true" : undefined}
@@ -9800,6 +11622,7 @@ function HomeContent(): React.JSX.Element {
                               updatePickerParallax(e);
                             }}
                             onClick={(e) => {
+                              primeStarterComposer(draft);
                               // Explicit click beats the dwell timer —
                               // the user made a deliberate choice, no
                               // reason to wait the 180ms dwell window.
@@ -9890,6 +11713,15 @@ function HomeContent(): React.JSX.Element {
           })()}
           {detail?.messages.map(msg => {
             const status = getMessageStatus(msg);
+            const modelLabel =
+              msg.role === "assistant" && typeof msg.model === "string"
+                ? msg.model.trim()
+                : "";
+            const modelRevealLabel =
+              modelLabel ||
+              (msg.role === "assistant"
+                ? "not recorded"
+                : "");
             // Push the bot's color into the assistant bubble itself so
             // the message owns the accent visually, leaving the header
             // dots free for HUMAN / LOCAL / ONLINE status only. The
@@ -9910,6 +11742,10 @@ function HomeContent(): React.JSX.Element {
                 key={msg.id}
                 className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
                 style={messageStyle}
+                data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
+                onClick={() => {
+                  if (modelRevealLabel) revealMessageModel(msg.id);
+                }}
               >
                 <h4>
                   <span className={styles.messageRoleLabel}>
@@ -9928,7 +11764,11 @@ function HomeContent(): React.JSX.Element {
                   {status && (
                     <span
                       className={styles.providerTag}
-                      title={STATUS_LABEL[status]}
+                      title={
+                        modelLabel
+                          ? `${STATUS_LABEL[status]} · Model: ${modelLabel}`
+                          : STATUS_LABEL[status]
+                      }
                     >
                       <span
                         className={`${styles.providerDot} ${
@@ -9940,7 +11780,9 @@ function HomeContent(): React.JSX.Element {
                         }`}
                         aria-hidden="true"
                       />
-                      <span className={styles.providerLabel}>{STATUS_LABEL[status]}</span>
+                      {modelRevealLabel && (
+                        <span className={styles.providerLabel}>{modelRevealLabel}</span>
+                      )}
                     </span>
                   )}
                 </h4>
@@ -9963,6 +11805,7 @@ function HomeContent(): React.JSX.Element {
                     <div
                       className={styles.messageActionsSlot}
                       data-armed={armed ? "true" : undefined}
+                      data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
                       data-resend-affordance={isUser ? "true" : undefined}
                     >
                       <div className={styles.messageActions}>
@@ -9981,12 +11824,14 @@ function HomeContent(): React.JSX.Element {
                             {armed ? "Confirm resend?" : "Resend"}
                           </button>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => void forkChat(msg.id)}
-                          >
-                            Fork here
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void forkChat(msg.id)}
+                            >
+                              Fork here
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -9995,7 +11840,7 @@ function HomeContent(): React.JSX.Element {
               </article>
             );
           })}
-          {pendingReply && (
+          {pendingReplyVisible && (
             <div className={styles.typingIndicator} role="status" aria-live="polite">
               <span>Generating response</span>
               <span className={styles.typingDots} aria-hidden="true">
@@ -10007,17 +11852,24 @@ function HomeContent(): React.JSX.Element {
           )}
           {/* Scroll sentinel: kept at the very end so the scroll effect can
               always bring the latest content into view. */}
-          <div ref={messagesEndRef} aria-hidden="true" />
+            <div ref={messagesEndRef} aria-hidden="true" />
+          </div>
         </div>
 
         <form
           className={styles.compose}
+          data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
+          data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
           style={composeStyle}
-          onSubmit={sendMessage}
+          onSubmit={e => void sendMessage(e, {
+            starterPrompt: isStarterPromptReady(draft),
+          })}
+          onBlur={handleComposerBlur}
+          onKeyDown={handleComposerKeyDown}
         >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
-          {(!detail || detail.messages.length === 0) && (
+          {(!detail || detail.messages.length === 0) && !privateChatActive && (
             <HueLensControl
               bots={pickerSourceBots}
               filteredBots={filteredBots}
@@ -10026,11 +11878,13 @@ function HomeContent(): React.JSX.Element {
               hueLensAvailable={hueLensAvailable}
               trackGradient={hueLensTrackGradient}
               trackSegments={hueLensTrackSegments}
+              onInteractionChange={setLensInteracting}
             />
           )}
           <div className={styles.composeTools}>
             {(() => {
               const botHasCommenced = !!detail && detail.messages.length > 0;
+              const botDisabled = privateChatActive || !detail || bots.length === 0;
               return (
                 <>
                   {/* Pre-chat (!detail): dropdown is disabled so the tile
@@ -10042,13 +11896,15 @@ function HomeContent(): React.JSX.Element {
                       currently in selectedBotId; the user explicitly switches
                       by changing this dropdown. */}
                   <ComposerBotPicker
-                    value={selectedBotId ?? ""}
+                    value={privateChatActive ? "" : selectedBotId ?? ""}
                     onChange={next => setSelectedBotId(next || null)}
                     bots={botHasCommenced ? bots : filteredBots}
                     resolvedTheme={resolvedTheme}
-                    disabled={!detail || bots.length === 0}
+                    disabled={botDisabled}
                     title={
-                      !detail
+                      privateChatActive
+                        ? "Private chats always run as the Default persona."
+                        : !detail
                         ? "Pick a bot from the grid above to start the chat. You can swap here between sends once it begins."
                         : bots.length === 0
                           ? "Default is the only option until you create a custom bot."
@@ -10072,34 +11928,40 @@ function HomeContent(): React.JSX.Element {
               );
             })()}
             {(() => {
-              const isLocal = settings?.preferredProvider === "local";
+              const isLocal = privateChatActive || settings?.preferredProvider === "local";
               const providerLocked = settings?.providerLocked ?? false;
+              const providerDisabled = !settings || providerLocked || privateChatActive;
+              const lockReason = privateChatActive
+                ? "Private chats always run on LOCAL."
+                : providerLocked
+                  ? `Response mode locked to ${isLocal ? "Local" : "Online"}.`
+                  : null;
               return (
-                <div className={`${styles.modeControl} ${providerLocked ? styles.modeControlLocked : ""}`}>
+                <div className={`${styles.modeControl} ${providerDisabled ? styles.modeControlLocked : ""}`}>
                   <button
                     type="button"
-                    className={`${styles.modeToggleTrack} ${providerLocked ? styles.modeToggleTrackLocked : ""}`}
+                    className={`${styles.modeToggleTrack} ${providerDisabled ? styles.modeToggleTrackLocked : ""}`}
                     onClick={() => {
-                      if (!settings || providerLocked) return;
+                      if (providerDisabled) return;
                       void switchProvider(isLocal ? "openai" : "local");
                     }}
                     aria-label={
-                      providerLocked
-                        ? `Response mode locked to ${isLocal ? "Local" : "Online"}.`
+                      lockReason
+                        ? `${lockReason} (currently ${isLocal ? "LOCAL" : "ONLINE"})`
                         : isLocal
                           ? "Response mode: Local. Click to switch to Online."
                           : "Response mode: Online. Click to switch to Local."
                     }
                     aria-pressed={!isLocal}
-                    aria-disabled={!settings || providerLocked}
+                    aria-disabled={providerDisabled}
                     title={
-                      providerLocked
-                        ? `Locked to ${isLocal ? "Local" : "Online"}`
+                      lockReason
+                        ? lockReason
                         : isLocal
                           ? "Switch to Online"
                           : "Switch to Local"
                     }
-                    disabled={!settings}
+                    disabled={providerDisabled}
                   >
                     <span
                       className={`${styles.modeThumb} ${
@@ -10122,16 +11984,20 @@ function HomeContent(): React.JSX.Element {
                     className={`${styles.modeLockDock} ${providerLocked ? styles.modeLockDockLocked : ""}`}
                     onClick={() => void toggleProviderLock()}
                     aria-label={
-                      providerLocked
+                      privateChatActive
+                        ? "Private chat already pins response mode to Local."
+                        : providerLocked
                         ? `Unlock response mode. It is currently locked to ${isLocal ? "Local" : "Online"}.`
                         : `Lock response mode to ${isLocal ? "Local" : "Online"}.`
                     }
                     title={
-                      providerLocked
+                      privateChatActive
+                        ? "Private chat pins Local mode"
+                        : providerLocked
                         ? `Unlock (${isLocal ? "Local" : "Online"} locked)`
                         : `Lock ${isLocal ? "Local" : "Online"}`
                     }
-                    disabled={!settings}
+                    disabled={!settings || privateChatActive}
                   >
                     <svg
                       className={`${styles.modeLockGlyph} ${providerLocked ? styles.modeLockGlyphLocked : ""}`}
@@ -10156,22 +12022,52 @@ function HomeContent(): React.JSX.Element {
                 </div>
               );
             })()}
+            {(() => {
+              const isLocal = privateChatActive || settings?.preferredProvider !== "openai";
+              const modelProvider: Provider = isLocal ? "local" : "openai";
+              const rawModelChoice = chatModelChoiceByProvider[modelProvider];
+              const modelOptions = includeSelectedModelOption(
+                modelOptionsForProvider(modelCatalog, settings, modelProvider),
+                rawModelChoice,
+                modelProvider
+              );
+              return (
+                <ComposerModelPicker
+                  value={rawModelChoice}
+                  onChange={(nextChoice) => {
+                    setChatModelChoiceByProvider((previous) => ({
+                      ...previous,
+                      [modelProvider]: nextChoice,
+                    }));
+                  }}
+                  options={modelOptions}
+                  provider={modelProvider}
+                  disabled={!settings || pendingReply}
+                  title={`Model for ${isLocal ? "LOCAL" : "ONLINE"} replies`}
+                  ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
+                />
+              );
+            })()}
           </div>
           <div className={styles.composeInner}>
             <textarea
               ref={draftInputRef}
               value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onFocus={() => setHoveredBotId(null)}
+              onChange={handleComposerChange}
+              onFocus={handleComposerFocus}
               placeholder="Ask anything..."
               spellCheck
               autoCorrect="on"
               autoCapitalize="sentences"
               enterKeyHint="send"
               lang="en"
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(e); } }}
             />
-            <button type="submit" disabled={pendingReply || !draft.trim()}>Send</button>
+            <button
+              type="submit"
+              disabled={composerSubmitDisabled(draft)}
+            >
+              {composerSubmitLabel(draft)}
+            </button>
           </div>
         </form>
       </section>
