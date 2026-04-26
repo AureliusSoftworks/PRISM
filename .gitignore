@@ -15,6 +15,7 @@ apps/api/data/
 .cursor/agents/🤖*.md
 .cursor/subagents/
 .cursor/commands/🤖 overseers.md
+.cursor/overseers/
 .cursor/runbooks/
 .cursor/output/
 .cursor/todo.md
