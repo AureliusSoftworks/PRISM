@@ -158,7 +158,7 @@
   font-family: var(--font-ui-sans), system-ui, sans-serif;
   background: var(--bg);
   background-image: var(--app-gradient);
-  color: var(--row-text-color);
+  color: var(--fg);
   min-height: 100dvh;
   display: grid;
   place-items: center;
@@ -205,11 +205,6 @@
 }
 
 .brandIconShell {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 0;
-  padding: 0;
-  background: transparent;
   position: relative;
   width: 56px;
   height: 56px;
@@ -217,48 +212,12 @@
   place-items: center;
   flex-shrink: 0;
   isolation: isolate;
-  color: var(--fg);
 }
 
-.brandIconButton {
-  cursor: pointer;
-}
-
-.brandIconButton:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--accent-glow);
-  border-radius: 18px;
-}
-
-.userHeroAvatar.brandIconButton:focus-visible {
-  box-shadow: 0 0 0 3px color-mix(in srgb, #ffffff 40%, transparent);
-}
-
-.brandLogoutGlyph {
-  position: relative;
-  z-index: 2;
-  width: 56px;
-  height: 56px;
-  display: grid;
-  place-items: center;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, #ffffff 45%, transparent);
-  background: #000000;
-  color: #ffffff;
-  font-size: 34px;
-  font-weight: 300;
-  line-height: 1;
-}
-
-/* Two blurred halos behind the icon — phase-locked to prevent the
-   "desaturation flash" that happens when complementary hues overlap
+/* Two blurred rainbow halos behind the icon — phase-locked to prevent
+   the "desaturation flash" that happens when complementary hues overlap
    under mix-blend-mode: screen, plus a gentle organic wobble on top.
-   The five color stops are sourced from `--hero-halo-1` … `--hero-halo-5`
-   CSS variables that the React shell sets from the user's bot palette
-   (see `heroHaloVars` in page.tsx). With no bots created the vars are
-   absent and the `#ffffff` fallback paints a soft white glow, giving
-   the dark-mode hero a clean uncolored "white hero" no-bots state.
-
+   
    THE MATH
      screen(A, B) = 1 − (1 − A)(1 − B) per channel.
      Screen of complementary hues (e.g. red + cyan) produces pure white
@@ -267,9 +226,7 @@
      values — including 180° — so every few seconds the whole halo
      flashes pale grey. To keep saturation constant, the relative hue
      at every spatial overlap must stay inside the analogous window
-     (≲ 90° apart). Note: with bot-driven stops a user whose bots span
-     complementary hues will see brief desaturated overlap zones —
-     accepted trade-off in exchange for a fully bot-driven palette.
+     (≲ 90° apart).
 
    THE FIX (saturation)
      Both rings share a steady linear spin (`brandPrismSpin`, 6s). They
@@ -328,19 +285,17 @@
 }
 
 .brandIconShell::before {
-  /* Inner ring — bot-derived palette anchored at 0°, with a small
-     wobble. Stops are evenly spaced (72° per band) so the gradient
-     stays smooth regardless of bot count: with one bot all 5 vars
-     resolve to the same hue (solid halo); with 2+ they cycle. */
+  /* Inner ring — full rainbow anchored at 0°, with a small wobble. */
   inset: -8px;
   background: conic-gradient(
     from 0deg,
-    var(--hero-halo-1, #ffffff) 0deg,
-    var(--hero-halo-2, #ffffff) 72deg,
-    var(--hero-halo-3, #ffffff) 144deg,
-    var(--hero-halo-4, #ffffff) 216deg,
-    var(--hero-halo-5, #ffffff) 288deg,
-    var(--hero-halo-1, #ffffff) 360deg
+    #ff5f6d 0deg,
+    #ffb703 55deg,
+    #80ffdb 120deg,
+    #38bdf8 190deg,
+    #8b5cf6 260deg,
+    #ec4899 320deg,
+    #ff5f6d 360deg
   );
   filter: blur(10px) saturate(1.45);
   opacity: 0.45;
@@ -350,20 +305,21 @@
 }
 
 .brandIconShell::after {
-  /* Outer ring — same bot-derived palette, anchored at 45°. That 45°
-     offset is the fixed analogous-hue gap that the screen blend will
-     see at every spatial point once the rings are rotating in
-     lockstep. Its wobble is a touch wider than the inner ring's so
-     the outer halo "breathes" a bit more visibly. */
+  /* Outer ring — same palette, anchored at 45°. That 45° offset is the
+     fixed analogous-hue gap that the screen blend will see at every
+     spatial point once the rings are rotating in lockstep. Its wobble
+     is a touch wider than the inner ring's so the outer halo "breathes"
+     a bit more visibly. */
   inset: -14px;
   background: conic-gradient(
     from 45deg,
-    var(--hero-halo-1, #ffffff) 0deg,
-    var(--hero-halo-2, #ffffff) 72deg,
-    var(--hero-halo-3, #ffffff) 144deg,
-    var(--hero-halo-4, #ffffff) 216deg,
-    var(--hero-halo-5, #ffffff) 288deg,
-    var(--hero-halo-1, #ffffff) 360deg
+    #ff5f6d 0deg,
+    #ffb703 55deg,
+    #80ffdb 120deg,
+    #38bdf8 190deg,
+    #8b5cf6 260deg,
+    #ec4899 320deg,
+    #ff5f6d 360deg
   );
   filter: blur(14px) saturate(1.4);
   opacity: 0.32;
@@ -445,20 +401,6 @@
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.18));
 }
 
-.userHeroAvatar::before,
-.userHeroAvatar::after {
-  background: #ffffff;
-  animation: none;
-  opacity: 0.14;
-}
-
-.userHeroAvatar .brandIcon {
-  filter:
-    grayscale(1)
-    contrast(1.15)
-    drop-shadow(0 2px 8px rgba(0, 0, 0, 0.18));
-}
-
 /* Light-theme sibling of .brandIcon. Both icons are rendered in the DOM;
    CSS picks exactly one per theme (see .themeLight overrides below). The
    triangle SVG owns its own rainbow gradient so it doesn't need the
@@ -506,11 +448,6 @@
   filter:
     hue-rotate(var(--brand-icon-light-hue-shift));
   animation: brandIconLightHueDrift 6s linear infinite;
-}
-
-.themeLight .userHeroAvatar .brandIconLight {
-  filter: brightness(0);
-  animation: none;
 }
 
 .themeLight .brandWordmark {
@@ -637,10 +574,10 @@
 /* ── Hub ──
    Post-auth landing surface. Reuses .authLayout for the background so
    the login -> hub transition feels like a single continuous page; the
-   card widens enough for a small grid of mode tiles. */
+   card just widens to accommodate the two mode tiles side-by-side. */
 .hubCard {
   width: 100%;
-  max-width: 920px;
+  max-width: 640px;
   background: var(--bg-surface);
   border: 1px solid var(--line);
   border-radius: 20px;
@@ -792,14 +729,6 @@
   border-color: var(--line-strong);
 }
 
-.hubLogoutHint {
-  margin: -2px 0 4px;
-  color: var(--danger);
-  font-size: 12px;
-  line-height: 1.4;
-  text-align: center;
-}
-
 /* Clickable prism wordmark that lives in the Sandbox chat header as a
    back-to-Hub affordance. Styled as a quiet hover target so it sits
    left of the title without competing for attention with it. */
@@ -837,62 +766,6 @@
   display: block;
 }
 
-/* Mono wordmark — used by non-home / private / engaged surfaces. The
-   inline SVG sets all five letter strokes to `currentColor` when
-   `data-mono="true"`, so we just need to provide that color via the
-   element's `color` and clear the colored drop-shadow filter from
-   `.brandWordmark` (orange/cyan glow doesn't make sense around a
-   solid-theme mark). Light theme's pre-existing `brightness(0)`
-   override keeps the wordmark black there regardless, which lines
-   up with the desired theme-color outcome. */
-.brandWordmark[data-mono="true"],
-.hubHomeWordmark[data-mono="true"] {
-  color: var(--fg);
-  filter: none;
-}
-
-.headerIdentity {
-  --header-identity-color: var(--fg);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--header-identity-color);
-}
-
-.headerIdentityGlyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--header-identity-color) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--header-identity-color) 30%, transparent);
-  box-shadow: var(--shadow-sm);
-  flex: 0 0 auto;
-}
-
-.themeLight .headerIdentityGlyph {
-  border-color: color-mix(in srgb, var(--header-identity-color) 42%, var(--line-strong));
-  box-shadow:
-    var(--shadow-sm),
-    inset 0 0 0 1px
-      color-mix(in srgb, var(--header-identity-color) 18%, transparent);
-}
-
-.headerIdentityName {
-  max-width: min(28vw, 220px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
-  font-size: 15px;
-  font-weight: var(--font-weight-title, 300);
-  letter-spacing: 0.035em;
-  color: var(--fg);
-}
-
 /* Mirror the auth/hub lockup in light mode: force every letter stroke
    to solid black so the back-to-Hub wordmark reads as a calm, high-
    contrast mark against the white chat header. `brightness(0)` is the
@@ -926,49 +799,35 @@
 
 /* ── Sidebar ── */
 .sidebar {
-  border-right: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-right: 1px solid var(--line);
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow: hidden;
-  background:
-    radial-gradient(
-      circle at 18% 10%,
-      color-mix(in srgb, var(--accent) 14%, transparent),
-      transparent 30%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--accent) 7%, var(--bg-surface)),
-      var(--bg-surface) 42%
-    );
+  background: var(--bg-surface);
 }
 
 .profile {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto 1fr;
   gap: 10px;
   align-items: center;
   padding: 6px 8px;
-  border-radius: 12px;
-  transition: background 0.16s, border-color 0.16s;
-}
-
-.profile[data-logout-armed="true"] {
-  background: var(--danger-soft);
 }
 
 .profileAvatar {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 1px solid #000000;
-  padding: 0;
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: #ffffff;
-  color: #000000;
+  /* Same two-stop gradient shape as before, now driven by --accent so it
+     stays grayscale by default and follows the bot color when one is set. */
+  background: linear-gradient(
+    135deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 65%, #000000 35%)
+  );
+  color: var(--accent-text);
   display: grid;
   place-items: center;
   font-size: 14px;
@@ -976,22 +835,7 @@
   letter-spacing: 0.02em;
   box-shadow: var(--shadow-sm);
   flex-shrink: 0;
-  transition: background 0.25s, border-color 0.25s, color 0.25s;
-}
-
-.profileAvatarButton {
-  cursor: pointer;
-}
-
-.profileAvatarButton:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, #ffffff 38%, transparent);
-}
-
-.profile[data-logout-armed="true"] .profileAvatar {
-  border-color: #ffffff;
-  background: #000000;
-  color: #ffffff;
+  transition: background 0.25s, color 0.25s;
 }
 
 .profileInfo {
@@ -1015,27 +859,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.profileLogoutCancel {
-  appearance: none;
-  -webkit-appearance: none;
-  justify-self: start;
-  border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent);
-  background: transparent;
-  color: var(--danger);
-  border-radius: 999px;
-  padding: 3px 8px;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.profileLogoutCancel:hover,
-.profileLogoutCancel:focus-visible {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  outline: none;
 }
 
 /* Sidebar start-of-chat controls. The regular "New chat" button is the
@@ -1084,23 +907,22 @@
   text-align: center;
 }
 
-/* Private chat — secondary, paired with New chat as a sidebar set. Same
-   geometry (padding/font-size/border-radius) so the two buttons read as
-   a deliberate pair, and the text + glyph use the full theme foreground
-   (var(--fg)) so contrast holds at parity with New chat's accent-text.
-   Color tokens stay strictly B&W (fg/bg/line) — the accent triad is
-   deliberately not referenced here so even when the shell is tinted by
-   a bot or the lens, Private chat keeps reading as "no color leaks." */
+/* Private chat — secondary ghost-style button deliberately stripped of
+   the accent triad so even when the active chat's bot color is lighting
+   up the shell, Private chat still reads as "B&W, no color leaks here".
+   Uses fg/line tokens directly rather than var(--accent), matching the
+   spec's "remove accent colors (black and white only)" clause. */
 .privateChatButton {
   border: 1px solid var(--line);
   background: var(--bg);
-  color: var(--fg);
+  color: var(--fg-muted);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 9px 11px;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.01em;
   text-align: left;
   width: 100%;
   display: flex;
@@ -1111,6 +933,7 @@
 
 .privateChatButton:hover {
   border-color: var(--line-strong);
+  color: var(--fg);
   background: var(--bg-hover);
 }
 
@@ -1197,15 +1020,8 @@
   display: grid;
   gap: 3px;
   align-content: start;
-  padding: 8px 6px;
-  margin: 4px 0 0;
-  border-radius: 12px;
-  background: color-mix(in srgb, #000 18%, var(--bg-surface));
-  box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.32),
-    inset 0 8px 14px -8px rgba(0, 0, 0, 0.55),
-    inset 0 -8px 14px -8px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 0 2px;
+  margin: 0 -2px;
 }
 
 .conversationList::-webkit-scrollbar {
@@ -1223,11 +1039,6 @@
    position:relative is the anchor the armed "Are you sure? ✓" pill uses
    to grow leftward from the × spot without disturbing the row's height. */
 .conversationRow {
-  --row-depth-base: 0%;
-  --row-depth-glow: 0%;
-  --row-depth-glow-outer: 0%;
-  --row-depth-fill: 0%;
-  --row-text-color: var(--fg);
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: stretch;
@@ -1236,7 +1047,6 @@
 }
 
 .conversationTitleButton {
-  position: relative;
   width: 100%;
   text-align: left;
   /* Baseline: transparent chrome. When the row has a --row-color set
@@ -1246,12 +1056,8 @@
      border on top. Without --row-color the row renders exactly as it
      did before. */
   border: 1px solid transparent;
-  background:
-    linear-gradient(
-      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent),
-      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent)
-    );
-  color: var(--row-text-color, var(--fg-muted));
+  background: transparent;
+  color: var(--fg-muted);
   border-radius: 8px;
   padding: 8px 10px;
   cursor: pointer;
@@ -1260,25 +1066,12 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  box-shadow:
-    inset 0 5px 9px -6px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(0, 0, 0, 0.18),
-    inset -24px -18px 48px -22px color-mix(
-      in srgb,
-      var(--row-color, var(--accent)) var(--row-depth-glow-outer),
-      transparent
-    ),
-    10px -8px 30px -18px color-mix(
-      in srgb,
-      var(--row-color, var(--accent)) var(--row-depth-glow-outer),
-      transparent
-    );
-  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .conversationTitleButton:hover {
   background: var(--bg-hover);
-  color: var(--row-text-color);
+  color: var(--fg);
 }
 
 .conversationTitleButton.selected {
@@ -1303,36 +1096,11 @@
    row tinting is disabled (null resolver → undefined style → no
    selector match → baseline look). */
 .conversationRow[style*="--row-color"] .conversationTitleButton {
-  /* Continuous diagonal interior light. The two radial spots are
-     positioned in absolute viewport coordinates by --row-glow-y /
-     --row-counter-y, so each tile only exposes its slice of one
-     gradient that spans the entire conversation list. The base layer
-     is an opacity step that fades from full row color at the top of
-     the list to fully transparent at the bottom; the diagonal glow
-     sits on top of it. The lowest layer is a black shade that
-     strengthens as rows approach the bottom of the falloff range so
-     the very last rows feel slightly darker than the sidebar
-     surface. Border color is unchanged. */
-  background:
-    radial-gradient(
-      ellipse 720px 420px at 92% var(--row-glow-y, 12%),
-      color-mix(in srgb, var(--row-color) var(--row-depth-glow), transparent),
-      color-mix(in srgb, var(--row-color) var(--row-depth-fill), transparent) 38%,
-      transparent 72%
-    ),
-    radial-gradient(
-      ellipse 720px 420px at 12% var(--row-counter-y, 88%),
-      color-mix(in srgb, var(--row-color) var(--row-depth-fill), transparent),
-      transparent 66%
-    ),
-    linear-gradient(
-      color-mix(in srgb, var(--row-color) var(--row-depth-base), transparent),
-      color-mix(in srgb, var(--row-color) var(--row-depth-base), transparent)
-    ),
-    linear-gradient(
-      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent),
-      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent)
-    );
+  /* Subtle tint: ~22% of the (already lightness-clamped) bot color over
+     the natural transparent baseline. This is enough hue to read as a
+     color band when many rows are stacked, without overpowering the
+     title text. */
+  background: color-mix(in srgb, var(--row-color) 22%, transparent);
   /* Shade-aware border: starts at the bot color itself and blends
      toward --fg by a percentage that the React layer computed from
      the fill's WCAG contrast against the theme surface. Low-contrast
@@ -1356,26 +1124,11 @@
 }
 
 .conversationRow[style*="--row-color"] .conversationTitleButton:hover {
-  background:
-    radial-gradient(
-      ellipse 720px 420px at 92% var(--row-glow-y, 12%),
-      color-mix(in srgb, var(--row-color) var(--row-depth-glow), transparent),
-      color-mix(in srgb, var(--row-color) var(--row-depth-fill), transparent) 38%,
-      transparent 72%
-    ),
-    radial-gradient(
-      ellipse 720px 420px at 12% var(--row-counter-y, 88%),
-      color-mix(in srgb, var(--row-color) var(--row-depth-fill), transparent),
-      transparent 66%
-    ),
-    linear-gradient(
-      color-mix(in srgb, var(--row-color) var(--row-depth-base), transparent),
-      color-mix(in srgb, var(--row-color) var(--row-depth-base), transparent)
-    ),
-    linear-gradient(
-      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent),
-      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent)
-    );
+  /* Denser tint on hover (32%) so the row visually "lifts" while
+     keeping the same hue. Text color falls through to the baseline
+     hover rule above so there's still a strong title-to-background
+     contrast shift. */
+  background: color-mix(in srgb, var(--row-color) 32%, transparent);
 }
 
 .conversationRow[style*="--row-color"] .conversationTitleButton.selected {
@@ -1384,48 +1137,8 @@
      shine through even more (36%). Bold title text + --fg border +
      heavier fill together read unambiguously as "active", while the
      hue preserves the bot identity. */
-  background:
-    radial-gradient(
-      ellipse 720px 420px at 92% var(--row-glow-y, 12%),
-      color-mix(in srgb, var(--row-color) var(--row-depth-glow), transparent),
-      color-mix(in srgb, var(--row-color) var(--row-depth-fill), transparent) 38%,
-      transparent 72%
-    ),
-    radial-gradient(
-      ellipse 720px 420px at 12% var(--row-counter-y, 88%),
-      color-mix(in srgb, var(--row-color) var(--row-depth-fill), transparent),
-      transparent 66%
-    ),
-    linear-gradient(
-      color-mix(in srgb, var(--row-color) var(--row-depth-base), transparent),
-      color-mix(in srgb, var(--row-color) var(--row-depth-base), transparent)
-    ),
-    linear-gradient(
-      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent),
-      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent)
-    );
+  background: color-mix(in srgb, var(--row-color) 36%, transparent);
   border-color: var(--fg);
-  color: var(--row-text-color);
-}
-
-.conversationRow[data-unread="true"] .conversationTitleButton {
-  color: var(--row-text-color);
-  border-color: color-mix(in srgb, var(--row-color, var(--accent)) 72%, var(--line) 28%);
-  font-weight: 500;
-  padding-right: 26px;
-}
-
-.conversationRow[data-unread="true"] .conversationTitleButton::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: 10px;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--row-color, var(--accent));
-  transform: translateY(-50%);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--row-color, var(--accent)) 68%, transparent);
 }
 
 /* Sidebar marker for private chats. The row gets data-private="true"
@@ -1656,7 +1369,6 @@
     animation: none;
     transform: scale(1.08);
   }
-
 }
 
 .sidebarFooter {
@@ -2150,7 +1862,7 @@
 /* ── Chat pane ── */
 .chatPane {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto 1fr auto;
   min-height: 0;
   min-width: 0;
 }
@@ -2188,15 +1900,11 @@
   background: var(--bg);
   color: var(--fg-muted);
   border-radius: 8px;
-  height: 30px;
-  padding: 0 12px;
+  padding: 6px 12px;
   cursor: pointer;
   font: inherit;
   font-size: 12px;
   font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
@@ -2267,15 +1975,11 @@
   background: var(--bg);
   color: var(--fg-muted);
   border-radius: 8px;
-  height: 30px;
-  padding: 0 12px;
+  padding: 6px 12px;
   cursor: pointer;
   font: inherit;
   font-size: 12px;
   font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -2345,19 +2049,18 @@
      grayscale default and just enough to draw the pill's edge otherwise. */
   border: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent);
   border-radius: 999px;
-  /* Match the header action buttons' height so the bot-context badges
-     and the general header actions share one visual rhythm. */
-  height: 30px;
-  padding: 0 12px;
+  /* Compensate for the 1px border so the pill keeps the same outer size
+     and alignment it had before the border was added. */
+  padding: 3px 9px;
   cursor: pointer;
   font: inherit;
   display: inline-flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  line-height: 1;
-  font-size: 10px;
+  gap: 1px;
+  line-height: 0.9;
+  font-size: 8px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -2373,230 +2076,14 @@
   transform: translateY(-1px);
 }
 
-.memoryBadge {
-  background: color-mix(in srgb, var(--accent-soft) 72%, var(--bg-deep) 28%);
-}
-
-.editBotBadge {
-  background: color-mix(in srgb, var(--accent) 34%, var(--bg-deep) 66%);
-  border-color: color-mix(in srgb, var(--accent) 62%, transparent);
-  color: var(--accent-ink);
-}
-
-.editBotBadge:hover,
-.editBotBadge:focus-visible {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: color-mix(in srgb, var(--accent) 82%, var(--accent-text) 18%);
-}
-
-.messagesFrame {
-  position: relative;
-  min-height: 0;
-  overflow: hidden;
-  isolation: isolate;
-}
-
-.messagesFrame::before,
-.messagesFrame::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  z-index: 2;
-  pointer-events: none;
-  backdrop-filter: blur(5px) saturate(1.05);
-  -webkit-backdrop-filter: blur(5px) saturate(1.05);
-}
-
-.messagesFrame::before {
-  top: 0;
-  height: 30px;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--bg-surface) 58%, transparent),
-    color-mix(in srgb, var(--bg-surface) 18%, transparent) 62%,
-    transparent
-  );
-  mask-image: linear-gradient(to bottom, #000000 0 50%, transparent);
-  -webkit-mask-image: linear-gradient(to bottom, #000000 0 50%, transparent);
-}
-
-.messagesFrame::after {
-  bottom: 0;
-  height: 58px;
-  backdrop-filter: blur(8px) saturate(1.04);
-  -webkit-backdrop-filter: blur(8px) saturate(1.04);
-  background:
-    radial-gradient(
-      ellipse 13% 42% at var(--lens-thumb-x, 50%) 100%,
-      color-mix(in srgb, #ffffff 28%, var(--accent) 72%) 0%,
-      color-mix(in srgb, #ffffff 10%, var(--accent) 90%) 20%,
-      color-mix(in srgb, var(--accent) 24%, transparent) 48%,
-      transparent 72%
-    ),
-    radial-gradient(
-      ellipse 62% 20% at var(--lens-thumb-x, 50%) 98%,
-      transparent 0%,
-      color-mix(in srgb, var(--accent) 8%, transparent) 24%,
-      color-mix(in srgb, var(--accent) 32%, transparent) 50%,
-      color-mix(in srgb, var(--accent) 8%, transparent) 76%,
-      transparent 100%
-    ),
-    radial-gradient(
-      ellipse at var(--lens-thumb-x, 50%) bottom,
-      color-mix(in srgb, var(--accent) 20%, transparent) 0%,
-      color-mix(in srgb, var(--accent) 8%, transparent) 30%,
-      transparent 58%
-    ),
-    linear-gradient(
-      to bottom,
-      transparent 0%,
-      color-mix(in srgb, var(--bg-surface) 18%, transparent) 34%,
-      color-mix(in srgb, var(--bg-surface) 72%, transparent) 72%,
-      var(--bg-surface) 100%
-    );
-  box-shadow:
-    inset 0 -10px 18px -18px color-mix(in srgb, var(--accent) 68%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #ffffff 10%, var(--accent) 50%),
-    0 -4px 18px -16px color-mix(in srgb, var(--accent) 38%, transparent),
-    0 -1px 12px -10px color-mix(in srgb, #ffffff 12%, var(--accent) 42%);
-  mask-image:
-    linear-gradient(to right, transparent 0%, #000000 28%, #000000 72%, transparent 100%),
-    linear-gradient(to top, #000000 0 70%, transparent);
-  -webkit-mask-image:
-    linear-gradient(to right, transparent 0%, #000000 28%, #000000 72%, transparent 100%),
-    linear-gradient(to top, #000000 0 70%, transparent);
-  mask-composite: intersect;
-  -webkit-mask-composite: source-in;
-}
-
-/* Private chat — mono mood. Local --accent override flows into the
-   ::after gradients (and into any descendant that consumes --accent
-   inside this surface) so the orb glow tints to the theme foreground
-   (white in dark mode, black in light) instead of leaking a hue.
-   Reinforces Private's "no color leaks" design pillar at the orb. */
-.messagesFrame[data-mode="private"] {
-  --accent: var(--fg);
-}
-
-/* Home / zoomed-out — rainbow mood. Empty-state surface, regular
-   chat, no filter and no bot interaction yet. Structurally mirrors
-   the default orb (white core at the slider's X, soft halo behind
-   it, bg-surface fade for compose-form continuity) but the single
-   --accent halo is replaced with FIVE PRISM-color radials
-   distributed across the bottom edge. Their overlap zones blend
-   into each other in srgb so the band reads as "blurred prism
-   spectrum" rather than a hard rainbow stripe. The white orb stays
-   at `var(--lens-thumb-x, 50%)` so it sits exactly under the
-   slider thumb, matching every other mode. */
-.messagesFrame[data-mode="home"]::after {
-  background:
-    /* White core orb — brighter (95%) and slightly more focused so it
-       reads as a sharp "neon dot" sitting on the rainbow strip rather
-       than a fuzzy bloom. */
-    radial-gradient(
-      ellipse 11% 38% at var(--lens-thumb-x, 50%) 100%,
-      color-mix(in srgb, #ffffff 95%, transparent) 0%,
-      color-mix(in srgb, #ffffff 52%, transparent) 22%,
-      color-mix(in srgb, #ffffff 20%, transparent) 48%,
-      transparent 72%
-    ),
-    /* Wide, SHORT white halo behind the core — neon-strip-shaped (45%
-       wide, 26% tall) so the orb's lit area extends horizontally
-       along the bottom edge rather than ballooning upward. */
-    radial-gradient(
-      ellipse 45% 26% at var(--lens-thumb-x, 50%) 100%,
-      color-mix(in srgb, #ffffff 32%, transparent) 0%,
-      color-mix(in srgb, #ffffff 12%, transparent) 30%,
-      color-mix(in srgb, #ffffff 4%, transparent) 60%,
-      transparent 82%
-    ),
-    /* Five dynamic halos — populated from the bot library's PRISM
-       families via inline CSS variables (--home-halo-N-x and
-       --home-halo-N-color). Unused slots receive color `transparent`
-       so their gradient layer collapses to nothing via color-mix
-       (transparent, transparent → transparent), letting the rainbow
-       scale from 1 color (single bot family) up to 5 (full PRISM
-       spread) without conditional CSS. Wide-and-short (38% × 28%)
-       so halos hug the bottom edge rather than billowing upward;
-       four-stop falloff (44% → 20% → 6% → transparent) softens
-       overlap zones into smooth color transitions. */
-    radial-gradient(
-      ellipse 38% 28% at var(--home-halo-1-x, 12%) 100%,
-      color-mix(in srgb, var(--home-halo-1-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-1-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-1-color, transparent) 6%, transparent) 56%,
-      transparent 86%
-    ),
-    radial-gradient(
-      ellipse 38% 28% at var(--home-halo-2-x, 31%) 100%,
-      color-mix(in srgb, var(--home-halo-2-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-2-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-2-color, transparent) 6%, transparent) 56%,
-      transparent 86%
-    ),
-    radial-gradient(
-      ellipse 38% 28% at var(--home-halo-3-x, 50%) 100%,
-      color-mix(in srgb, var(--home-halo-3-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-3-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-3-color, transparent) 6%, transparent) 56%,
-      transparent 86%
-    ),
-    radial-gradient(
-      ellipse 38% 28% at var(--home-halo-4-x, 69%) 100%,
-      color-mix(in srgb, var(--home-halo-4-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-4-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-4-color, transparent) 6%, transparent) 56%,
-      transparent 86%
-    ),
-    radial-gradient(
-      ellipse 38% 28% at var(--home-halo-5-x, 88%) 100%,
-      color-mix(in srgb, var(--home-halo-5-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-5-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-5-color, transparent) 6%, transparent) 56%,
-      transparent 86%
-    ),
-    /* bg-surface fade — identical to default ::after for compose-form
-       continuity at the bottom edge. */
-    linear-gradient(
-      to bottom,
-      transparent 0%,
-      color-mix(in srgb, var(--bg-surface) 18%, transparent) 34%,
-      color-mix(in srgb, var(--bg-surface) 72%, transparent) 72%,
-      var(--bg-surface) 100%
-    );
-  /* Lit-from-below white inset glow + a brighter 1px bottom line for
-     the "neon strip" edge feel. Sharper than the default --accent
-     inset because there's no committed accent to soften it. */
-  box-shadow:
-    inset 0 -8px 22px -18px color-mix(in srgb, #ffffff 30%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #ffffff 22%, transparent);
-  /* Two-axis mask. Horizontal: 22%/78% taper for stronger edge fade,
-     so the leftmost red and rightmost purple ease into transparent at
-     the rails rather than cutting hard. Vertical: tighter band — only
-     the bottom ~30% of the frame is opaque, fading fully transparent
-     by 65%. Result is a thin neon-strip read. */
-  mask-image:
-    linear-gradient(to right, transparent 0%, #000000 22%, #000000 78%, transparent 100%),
-    linear-gradient(to top, #000000 0%, #000000 28%, transparent 65%);
-  -webkit-mask-image:
-    linear-gradient(to right, transparent 0%, #000000 22%, #000000 78%, transparent 100%),
-    linear-gradient(to top, #000000 0%, #000000 28%, transparent 65%);
-  mask-composite: intersect;
-  -webkit-mask-composite: source-in;
-}
-
 .messages {
   overflow-y: auto;
-  padding: 24px 20px 42px;
+  padding: 24px 20px;
   display: grid;
   gap: 16px;
   align-content: start;
   max-width: 860px;
   width: 100%;
-  height: 100%;
-  min-height: 0;
   margin: 0 auto;
 }
 
@@ -3679,7 +3166,6 @@
    warm ivory instead of near-black. Keep the fill soft, but lean tile outlines
    slightly toward foreground so bright oranges/yellows remain legible. */
 .themeLight .emptyStateBotGlyph,
-.themeLight .colorSwatchButton,
 .themeLight .botCardGlyph,
 .themeLight .chatBotTile:not(.chatBotTileSolidSwatch) {
   border-color: color-mix(
@@ -3915,8 +3401,7 @@
 }
 
 .message:hover .providerLabel,
-.message:focus-within .providerLabel,
-.message[data-model-revealed="true"] .providerLabel {
+.message:focus-within .providerLabel {
   opacity: 0.7;
 }
 
@@ -4041,7 +3526,6 @@
 
 .message:hover .messageActionsSlot,
 .message:focus-within .messageActionsSlot,
-.messageActionsSlot[data-model-revealed="true"],
 .messageActionsSlot[data-armed="true"] {
   grid-template-rows: 1fr;
   margin-top: 0;
@@ -4158,134 +3642,6 @@
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 10px;
-}
-
-.composeModelControl {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  height: 36px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--bg-deep);
-  position: relative;
-  transition:
-    border-color 0.2s ease,
-    background 0.2s ease;
-}
-
-.composeModelControl:hover,
-.composeModelControl:focus-within {
-  border-color: var(--line-strong);
-}
-
-.composeModelControl[data-provider="local"] {
-  background: color-mix(in srgb, var(--bg-deep) 88%, #68e6a6 12%);
-}
-
-.composeModelControl[data-provider="openai"] {
-  background: color-mix(in srgb, var(--bg-deep) 88%, #7db7ff 12%);
-}
-
-.composeModelControl[data-disabled="true"] {
-  border-color: var(--line);
-  background: color-mix(in srgb, var(--bg-deep) 88%, var(--fg) 12%);
-  filter: saturate(0);
-}
-
-.composeModelTrigger {
-  -webkit-appearance: none;
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  height: 100%;
-  padding: 0 12px 0 10px;
-  background: transparent;
-  border: 0;
-  color: var(--fg);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  border-radius: inherit;
-}
-
-.composeModelTrigger:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-glow) 55%, transparent);
-}
-
-.composeModelTrigger:disabled {
-  cursor: not-allowed;
-  color: var(--fg-muted);
-  opacity: 0.68;
-}
-
-.composeModelTriggerName {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: min(18ch, 34vw);
-  font-weight: 650;
-}
-
-.composeModelTriggerChevron {
-  display: inline-flex;
-  align-items: center;
-  color: var(--fg-subtle);
-  flex-shrink: 0;
-  transition: transform 0.18s ease;
-}
-
-.composeModelControl[data-open="true"] .composeModelTriggerChevron {
-  transform: rotate(180deg);
-}
-
-.composeModelMenu {
-  min-width: max(100%, 300px);
-}
-
-.composeModelOption {
-  justify-content: space-between;
-  gap: 14px;
-  align-items: center;
-}
-
-.composeModelOptionMain {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.composeModelOptionName {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--fg);
-}
-
-.composeModelOptionMeta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  color: var(--fg-subtle);
-  text-transform: uppercase;
-}
-
-.composeModelDefaultBadge {
-  flex-shrink: 0;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--fg-muted);
-  text-transform: uppercase;
 }
 
 /* Hue lens row — Prism-style color filter. Full-width in the pre-chat
@@ -5040,8 +4396,8 @@
   max-width: 860px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
   align-items: end;
 }
 
@@ -5057,53 +4413,13 @@
   font: inherit;
   font-size: var(--font-size-compose);
   line-height: 1.5;
-  min-width: 0;
   transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.compose[data-compose-ready="true"] textarea {
-  border-color: color-mix(in srgb, var(--accent-ink) 74%, var(--line));
-  box-shadow: inset -18px 0 24px -24px var(--accent-glow);
-}
-
-.compose[data-compose-ready="true"][data-compose-bot-selected="true"] textarea {
-  border-color: color-mix(
-    in srgb,
-    var(--compose-bot-color, var(--accent)) 72%,
-    var(--line)
-  );
-  box-shadow: inset -18px 0 24px -24px color-mix(
-    in srgb,
-    var(--compose-bot-color, var(--accent)) 72%,
-    transparent
-  );
 }
 
 .compose textarea:focus {
   outline: none;
   border-color: var(--accent-ink);
   box-shadow: 0 0 0 3px var(--accent-glow);
-}
-
-.compose[data-compose-ready="true"] textarea:focus {
-  box-shadow:
-    0 0 0 3px var(--accent-glow),
-    inset -18px 0 24px -24px var(--accent-glow);
-}
-
-.compose[data-compose-ready="true"][data-compose-bot-selected="true"] textarea:focus {
-  border-color: var(--compose-bot-color, var(--accent));
-  box-shadow:
-    0 0 0 3px color-mix(
-      in srgb,
-      var(--compose-bot-color, var(--accent)) 35%,
-      transparent
-    ),
-    inset -18px 0 24px -24px color-mix(
-      in srgb,
-      var(--compose-bot-color, var(--accent)) 72%,
-      transparent
-    );
 }
 
 .compose[data-compose-bot-selected="true"] textarea::placeholder {
@@ -5128,38 +4444,8 @@
   font: inherit;
   font-size: var(--font-size-compose);
   font-weight: 600;
-  opacity: 0.52;
-  filter: saturate(0.72);
-  transform: translateX(0);
-  transition:
-    background 0.25s,
-    border-color 0.25s,
-    color 0.25s,
-    filter 0.18s ease,
-    opacity 0.18s ease,
-    transform 0.18s ease;
-  box-shadow: none;
-}
-
-.compose[data-compose-ready="true"] .composeInner button:not(:disabled) {
-  opacity: 1;
-  filter: none;
-  transform: translateX(0);
+  transition: background 0.25s, border-color 0.25s, color 0.25s, transform 0.05s;
   box-shadow: var(--shadow-sm);
-}
-
-.composeInner:focus-within button:not(:disabled),
-.composeInner:hover button:not(:disabled) {
-  opacity: 0.88;
-  filter: saturate(0.9);
-  transform: translateX(-2px);
-}
-
-.compose[data-compose-ready="true"] .composeInner:focus-within button:not(:disabled),
-.compose[data-compose-ready="true"] .composeInner:hover button:not(:disabled) {
-  opacity: 1;
-  filter: none;
-  transform: translateX(-2px);
 }
 
 .composeInner button:hover:not(:disabled) {
@@ -5189,7 +4475,7 @@
   background: color-mix(in srgb, var(--bg-deep) 86%, var(--fg) 14%);
   color: var(--fg-muted);
   filter: saturate(0);
-  opacity: 0.44;
+  opacity: 0.72;
   cursor: not-allowed;
 }
 
@@ -5270,215 +4556,13 @@
   isolation: isolate;
 }
 
-.panelBots[data-library-expanded="true"] {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-
-.panelBots[data-editor-only="true"] {
-  --accent: var(--editor-bot-color);
-  --accent-hover: color-mix(in srgb, var(--editor-bot-color) 82%, var(--editor-bot-text) 18%);
-  --accent-text: var(--editor-bot-text);
-  --accent-ink: var(--editor-bot-ink);
-  --accent-soft: var(--editor-bot-soft);
-  --accent-glow: var(--editor-bot-glow);
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  border-left-color: color-mix(in srgb, var(--editor-bot-color) 34%, var(--line));
-  background:
-    radial-gradient(
-      circle at 82% 90%,
-      color-mix(in srgb, var(--editor-bot-color) 14%, transparent),
-      transparent 30%
-    ),
-    linear-gradient(
-      0deg,
-      color-mix(in srgb, var(--editor-bot-color) 7%, var(--bg-surface)),
-      var(--bg-surface) 42%
-    );
-}
-
-.panelBots[data-editor-only="true"] .botParameterCard {
-  border-color: color-mix(in srgb, var(--editor-bot-color) 34%, var(--line));
-  background: color-mix(in srgb, var(--editor-bot-color) 7%, var(--bg));
-}
-
-.panelBots[data-editor-only="true"] .form input,
-.panelBots[data-editor-only="true"] .form textarea,
-.panelBots[data-editor-only="true"] .form select {
-  border-color: color-mix(in srgb, var(--editor-bot-color) 18%, var(--line));
-  background: var(--bg);
-}
-
-.panelBots[data-editor-only="true"] .form input:focus,
-.panelBots[data-editor-only="true"] .form textarea:focus,
-.panelBots[data-editor-only="true"] .form select:focus {
-  border-color: var(--editor-bot-color);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--editor-bot-color) 22%, transparent);
-}
-
 .panelBots .form {
   margin-top: 0;
   gap: 12px;
-  /* Intentionally NO `both` (or `forwards`) fill — keeping the
-     `transform: translateY(0)` keyframe state stuck on the form
-     would create a CSS containing block, which silently re-anchors
-     any `position: fixed` descendants (like the color/glyph popover)
-     to the form's bounding rect instead of the viewport. The
-     animation still plays once on mount; after it finishes the
-     transform reverts to `none` and fixed-positioned descendants
-     can escape the panel cleanly. */
-  animation: botCustomizerIn 180ms cubic-bezier(0.2, 0.9, 0.2, 1);
 }
 
 .panelBots .form textarea {
-  min-height: clamp(92px, 16dvh, 168px);
-}
-
-.botLibraryDrawer {
-  min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
-  overflow: hidden;
-}
-
-.botLibraryDrawer:not([data-expanded="true"]) {
-  align-self: start;
-}
-
-.botLibraryHandle {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  border: 1px solid var(--line);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--fg) 7%, transparent),
-      transparent
-    ),
-    var(--bg);
-  color: var(--fg);
-  border-radius: 14px;
-  padding: 9px 12px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.16s, border-color 0.16s, transform 0.06s;
-}
-
-.botLibraryHandle:hover,
-.botLibraryHandle:focus-visible {
-  border-color: var(--line-strong);
-  background: var(--bg-hover);
-  outline: none;
-}
-
-.botLibraryHandle:active {
-  transform: translateY(1px);
-}
-
-.botLibraryGrip {
-  width: 26px;
-  height: 18px;
-  border-radius: 999px;
-  border: 1px solid var(--line-strong);
-  background:
-    linear-gradient(var(--fg-muted), var(--fg-muted)) center 5px / 14px 1px no-repeat,
-    linear-gradient(var(--fg-muted), var(--fg-muted)) center 9px / 18px 1px no-repeat,
-    linear-gradient(var(--fg-muted), var(--fg-muted)) center 13px / 14px 1px no-repeat,
-    var(--bg-deep);
-}
-
-.botLibraryHandleCopy {
-  min-width: 0;
-  display: grid;
-  gap: 1px;
-}
-
-.botLibraryHandleCopy strong {
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.botLibraryHandleCopy small {
-  color: var(--fg-muted);
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.botLibraryHandleChevron {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  color: var(--fg-muted);
-  background: var(--bg-deep);
-  border: 1px solid var(--line);
-  font-size: 14px;
-  line-height: 1;
-}
-
-.botLibraryDrawer[data-expanded="true"] .botLibraryHandle {
-  border-color: var(--line-strong);
-  background: var(--bg-deep);
-}
-
-.botLibraryDrawer[data-expanded="true"] {
-  min-height: 0;
-  align-self: stretch;
-}
-
-.botLibraryContent {
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-  align-content: stretch;
-  gap: 8px;
-  overflow: hidden;
-  animation: botLibrarySlideUp 220ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
-}
-
-.botLibraryContent[data-closing="true"] {
-  pointer-events: none;
-  animation: botLibrarySlideDown 200ms cubic-bezier(0.4, 0, 0.8, 0.3) both;
-}
-
-@keyframes botLibrarySlideUp {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes botLibrarySlideDown {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-}
-
-@keyframes botCustomizerIn {
-  from {
-    opacity: 0;
-    transform: translateY(-12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  min-height: clamp(180px, 32dvh, 320px);
 }
 
 .panelBots[data-color-picker-open="true"]::after {
@@ -5486,7 +4570,7 @@
   position: fixed;
   inset: 0;
   z-index: 110;
-  background: color-mix(in srgb, #000 26%, transparent);
+  background: color-mix(in srgb, #000 62%, transparent);
   pointer-events: auto;
   animation: overlayIn 0.14s ease-out;
 }
@@ -5545,343 +4629,73 @@
   cursor: pointer;
 }
 
-.botParameterCard {
-  border: 1px solid var(--line);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--fg) 6%, transparent),
-      transparent 56%
-    ),
-    var(--bg);
-  border-radius: 14px;
-  padding: 10px;
-  display: grid;
-  gap: 10px;
-}
-
-.botParameterHeader {
-  display: grid;
-  gap: 3px;
-}
-
-.botParameterHeader span,
-.botParameterField > span,
-.botParameterField legend,
-.botParameterQuestionRow span {
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--fg);
-}
-
-.botParameterHeader small,
-.botParameterField small {
-  color: var(--fg-muted);
-  font-size: 11.5px;
-  line-height: 1.35;
-}
-
-/* Wide-screen affordance: when there's room to the left of the bot
-   editor panel, hide the inline <small> help text inside parameter
-   fields and rely on the floating .botParameterHelpTooltip rendered
-   in that blurred area instead. Below the breakpoint the side
-   tooltip is hidden and the inline copy remains the source of truth. */
-@media (min-width: 800px) {
-  .botParameterField > small,
-  .botParameterField fieldset > small,
-  .botParameterField div > small {
-    display: none;
-  }
-}
-
-.botParameterHelpTooltip {
-  position: fixed;
-  /* Slide the tooltip leftward from its anchor so it floats outside
-     the panel into the dimmed/blurred area beside the editor. */
-  transform: translate(calc(-100% - 16px), 0);
-  width: 240px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-lg);
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--fg);
-  pointer-events: none;
-  z-index: 220;
-  opacity: 0;
-  animation: botParameterHelpTooltipIn 0.14s ease-out forwards;
-}
-
-@keyframes botParameterHelpTooltipIn {
-  from {
-    opacity: 0;
-    transform: translate(calc(-100% - 8px), 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate(calc(-100% - 16px), 0);
-  }
-}
-
-@media (max-width: 799px) {
-  .botParameterHelpTooltip {
-    display: none;
-  }
-}
-
-.botParameterField {
-  border: 0;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 7px;
-}
-
-/* ── ComposerModelPicker form-variant overrides ──────────────────────
-   The chat compose toolbar uses ComposerModelPicker as a 36px pill that
-   opens its menu UPWARD (suited to a sticky bottom-of-screen toolbar).
-   Inside the bot editor it needs to read as a full-width form field that
-   visually matches the rest of .form's inputs, with a menu that opens
-   DOWNWARD so it doesn't cover the label and prior parameter rows. */
-.botParameterModelField .composeModelControl {
-  display: flex;
-  width: 100%;
-  height: auto;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-}
-
-/* Drop the provider-tinted backgrounds — those are a chat-toolbar accent
-   that would compete with the bot's own accent in the editor panel. */
-.botParameterModelField .composeModelControl[data-provider="local"],
-.botParameterModelField .composeModelControl[data-provider="openai"] {
-  background: var(--bg);
-}
-
-.botParameterModelField .composeModelControl:hover,
-.botParameterModelField .composeModelControl:focus-within {
-  border-color: var(--line-strong);
-}
-
-.botParameterModelField .composeModelTrigger {
-  width: 100%;
-  height: auto;
-  padding: 11px 13px;
-  font-size: 14px;
-  justify-content: space-between;
-  border-radius: inherit;
-}
-
-/* The inline "MODEL" mini-label is redundant here — the parent <span>
-   already names the field ("Preferred offline model" / "...online model"). */
-.botParameterModelField .composeControlLabel {
-  display: none;
-}
-
-.botParameterModelField .composeModelTriggerName {
-  flex: 1;
-  text-align: left;
-  font-size: 14px;
-  color: var(--fg);
-}
-
-.botParameterModelField .composeBotMenu {
-  bottom: auto;
-  top: calc(100% + 6px);
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-}
-
-/* Editor-only panel uses the active bot's color for accents on focus, so
-   mirror the input/textarea behaviour for the picker control too. */
-.panelBots[data-editor-only="true"] .botParameterModelField .composeModelControl {
-  border-color: color-mix(in srgb, var(--editor-bot-color) 18%, var(--line));
-}
-
-.panelBots[data-editor-only="true"]
-  .botParameterModelField
-  .composeModelControl:focus-within {
-  border-color: var(--editor-bot-color);
-  box-shadow: 0 0 0 3px
-    color-mix(in srgb, var(--editor-bot-color) 22%, transparent);
-}
-
-.botParameterQuestionRow {
+.botChatToggle {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.botParameterQuestionRow strong {
-  color: var(--accent-ink);
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in srgb, var(--accent-ink) 22%, var(--line) 78%);
-  border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.panelBots .form input.botParameterRange {
-  -webkit-appearance: none;
-  appearance: none;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  outline: none;
-  padding: 0;
-  height: 22px;
+  gap: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 10px 12px;
   cursor: pointer;
 }
 
-.panelBots .form input.botParameterRange:focus {
-  box-shadow: none;
-  outline: none;
-}
-
-.panelBots .form input.botParameterRange:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, #000000 35%, transparent);
-}
-
-.botParameterRange::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--accent-ink) 12%, var(--bg-deep)),
-    color-mix(in srgb, var(--accent-ink) 38%, var(--bg-deep)) 30%,
-    color-mix(in srgb, var(--accent-ink) 70%, var(--bg-deep)) 60%,
-    var(--accent-ink)
-  );
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #000 22%, transparent);
-}
-
-.botParameterRange::-moz-range-track {
-  height: 6px;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--accent-ink) 12%, var(--bg-deep)),
-    color-mix(in srgb, var(--accent-ink) 38%, var(--bg-deep)) 30%,
-    color-mix(in srgb, var(--accent-ink) 70%, var(--bg-deep)) 60%,
-    var(--accent-ink)
-  );
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #000 22%, transparent);
-}
-
-/* Inverted-thumb trick: the thumb's fill and edge swap between black and the
-   bot's accent color based on slider position (--slider-pos: 0..1, set inline
-   in JSX). At the dark end of the track the thumb reads as a colored marble
-   with a black ring; at the saturated end it reads as a black eye ringed by
-   the accent. The thin --bg-surface halo keeps the silhouette legible at the
-   midpoint where both fill and edge are 50/50 gray. */
-.botParameterRange::-webkit-slider-thumb {
+.botChatToggle input {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
-  margin-top: -6px;
-  border-radius: 50%;
-  background: color-mix(
-    in srgb,
-    #000000 calc(var(--slider-pos, 0.5) * 100%),
-    var(--accent-ink)
-  );
-  border: 2px solid color-mix(
-    in srgb,
-    var(--accent-ink) calc(var(--slider-pos, 0.5) * 100%),
-    #000000
-  );
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--bg-surface) 70%, transparent),
-    0 2px 6px rgba(0, 0, 0, 0.28);
-  cursor: grab;
-  transition:
-    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
-    background 0.14s linear,
-    border-color 0.14s linear;
-}
-
-.botParameterRange::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: color-mix(
-    in srgb,
-    #000000 calc(var(--slider-pos, 0.5) * 100%),
-    var(--accent-ink)
-  );
-  border: 2px solid color-mix(
-    in srgb,
-    var(--accent-ink) calc(var(--slider-pos, 0.5) * 100%),
-    #000000
-  );
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--bg-surface) 70%, transparent),
-    0 2px 6px rgba(0, 0, 0, 0.28);
-  cursor: grab;
-  transition:
-    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
-    background 0.14s linear,
-    border-color 0.14s linear;
-}
-
-.botParameterRange:active::-webkit-slider-thumb,
-.botParameterRange:focus-visible::-webkit-slider-thumb {
-  transform: scale(1.18);
-  cursor: grabbing;
-}
-
-.botParameterRange:active::-moz-range-thumb,
-.botParameterRange:focus-visible::-moz-range-thumb {
-  transform: scale(1.18);
-  cursor: grabbing;
-}
-
-.botParameterScale {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--fg-muted);
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.botLengthOptions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.panelBots .form button.botLengthOption {
-  border: 1px solid var(--line);
+  width: 44px;
+  min-width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
   background: var(--bg-deep);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.botChatToggle input::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  transition: transform 0.15s, background 0.15s;
+}
+
+.botChatToggle input:checked {
+  border-color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent-ink) 22%, var(--bg-deep) 78%);
+}
+
+.botChatToggle input:checked::before {
+  transform: translateX(20px);
+  background: var(--accent-ink);
+}
+
+.botChatToggle input:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+.botChatToggleCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.botChatToggleCopy strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.botChatToggleCopy small {
   color: var(--fg-muted);
-  border-radius: 10px;
-  padding: 8px 6px;
-  font-size: 12px;
-  font-weight: 650;
-  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
-}
-
-.panelBots .form button.botLengthOption:hover {
-  border-color: var(--line-strong);
-  color: var(--fg);
-  background: var(--bg-hover);
-}
-
-.panelBots .form button.botLengthOption[data-selected="true"] {
-  color: var(--accent-ink);
-  border-color: color-mix(in srgb, var(--accent-ink) 42%, var(--line) 58%);
-  background: color-mix(in srgb, var(--accent-ink) 12%, var(--bg) 88%);
+  font-size: 11.5px;
+  line-height: 1.35;
 }
 
 /* Low-emphasis text-style button for secondary panel actions. */
@@ -5983,160 +4797,6 @@
 .memoryList button:hover {
   background: var(--bg-hover);
   color: var(--fg);
-}
-
-.panelMemories {
-  overflow-y: auto;
-}
-
-.panelMemories[data-memory-scope="bot"] {
-  border-left: 1px solid color-mix(in srgb, var(--memory-panel-color) 52%, var(--line));
-  background:
-    radial-gradient(
-      circle at 88% 12%,
-      color-mix(in srgb, var(--memory-panel-color) 18%, transparent),
-      transparent 34%
-    ),
-    var(--bg-surface);
-}
-
-.memoryBotHeader {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 42%, var(--line));
-  background: color-mix(in srgb, var(--memory-panel-color) 18%, var(--bg));
-  border-radius: 18px;
-  padding: 12px;
-}
-
-.memoryBotGlyph {
-  width: 44px;
-  height: 44px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  color: var(--memory-panel-color);
-  background: color-mix(in srgb, var(--memory-panel-color) 24%, var(--bg-deep));
-  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 42%, transparent);
-}
-
-.memoryBotHeader strong,
-.memoryBotHeader span {
-  display: block;
-}
-
-.memoryBotHeader strong {
-  color: var(--fg);
-  font-size: 14px;
-}
-
-.memoryBotHeader span {
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.memoryPanelHint {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.memoryBubbleCloud {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 0 24px;
-  overflow-x: hidden;
-}
-
-.memoryBubble {
-  width: min(var(--memory-bubble-size), 82vw);
-  min-height: min(var(--memory-bubble-size), 82vw);
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 34% 28%, color-mix(in srgb, #ffffff 24%, transparent), transparent 34%),
-    color-mix(in srgb, var(--memory-bubble-color) 82%, var(--bg) 18%);
-  border: 1px solid color-mix(in srgb, var(--memory-bubble-color) 54%, transparent);
-  box-shadow:
-    inset 0 -18px 30px color-mix(in srgb, #000000 12%, transparent),
-    0 16px 34px color-mix(in srgb, var(--memory-bubble-color) 18%, transparent);
-  color: var(--fg);
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 6px;
-  padding: clamp(18px, 10%, 26px);
-  margin-left: var(--memory-bubble-offset);
-  position: relative;
-  text-align: center;
-}
-
-.memoryBubble p {
-  margin: 0;
-  font-size: clamp(11px, 8.4%, 13px);
-  line-height: 1.22;
-  max-height: 6.2em;
-  overflow: hidden;
-}
-
-.memoryBubble small {
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  color: color-mix(in srgb, var(--fg) 66%, transparent);
-}
-
-.memoryBubble button {
-  -webkit-appearance: none;
-  appearance: none;
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
-  color: var(--fg-muted);
-  font: inherit;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.memoryBubble button:hover,
-.memoryBubble button:focus-visible {
-  background: var(--danger);
-  color: white;
-  border-color: color-mix(in srgb, var(--danger) 75%, white);
-  outline: none;
-}
-
-.memoryEmptyState {
-  border: 1px dashed var(--line);
-  border-radius: 18px;
-  padding: 22px;
-  background: color-mix(in srgb, var(--bg) 78%, var(--bg-deep) 22%);
-  display: grid;
-  gap: 6px;
-  color: var(--fg-muted);
-}
-
-.memoryEmptyState strong {
-  color: var(--fg);
-}
-
-.memoryEmptyState p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
 }
 
 /* ── Bot cards ── */
@@ -6345,7 +5005,7 @@
 .botNameRow {
   display: flex;
   gap: 10px;
-  align-items: center;
+  align-items: stretch;
 }
 
 .botNameRow > input {
@@ -6353,68 +5013,74 @@
   min-width: 0;
 }
 
-/* Swatch trigger: the same soft 56×56 bot hero tile used by
-   .emptyStateBotGlyph in the main editor, made interactive so the profile
-   picture and editor hero stay visually identical. Click opens the combined
-   picker popover; right-click re-rolls BOTH color and glyph. */
+/* Swatch trigger: a solid colored button whose foreground color (set via
+   inline style driven by pickReadableText) carries the current glyph. The
+   button is the bot's identity condensed into one tap target — color +
+   mark in a single affordance. Click opens the combined picker popover;
+   right-click re-rolls BOTH color and glyph. */
 .colorPickerWrapper {
   position: relative;
   display: inline-flex;
-  align-items: center;
+  align-items: stretch;
 }
 
 .colorSwatchButton {
-  -webkit-appearance: none;
-  appearance: none;
-  /* Pin the preview to a fixed square footprint so it never stretches
-     with the bot-name input it sits beside, and matches the stage 1
-     chatBotTile chrome (gradient fill + bot-color border + tinted glyph). */
+  /* Pin the preview to a confident square instead of letting the input row
+     collapse it; this keeps the selected glyph/color preview legible next to
+     the larger selector glyphs. */
+  aspect-ratio: 1 / 1;
   width: 56px;
-  height: 56px;
   min-width: 56px;
   min-height: 56px;
-  aspect-ratio: 1 / 1;
   padding: 0;
-  border-radius: 14px;
-  color: var(--bot-color, var(--fg-muted));
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 14%, var(--bg-surface)),
-    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 6%, var(--bg-surface))
-  );
-  border: 1px solid
-    color-mix(
-      in srgb,
-      var(--bot-color, var(--fg-muted)) 34%,
-      var(--line)
-    );
+  border-radius: 8px;
+  /* --swatch-border is injected inline per-render by swatchBorderStyle()
+     as a color-mix() expression. It ramps from the theme's default --line
+     toward --fg as the fill color approaches the surface luminance, so
+     a near-black swatch in dark mode (or a near-white swatch in light
+     mode) still reads as a distinct tile. When the custom property is
+     missing (e.g. server-side render before hydration), the fallback
+     keeps the original --line value so nothing suddenly jumps visually. */
+  border: 1px solid var(--swatch-border, var(--line));
   cursor: pointer;
-  overflow: visible;
+  overflow: hidden;
+  /* Glyph is the button's child; center it inside the color fill on both
+     axes. The glyph inherits currentColor, which is set inline per-swatch
+     by pickReadableText() to either near-black (#0b0b0d) or pure white
+     depending on the color's WCAG relative luminance — so bright picks
+     (yellow, lime) switch to dark ink and deep picks (navy, purple) keep
+     white, automatically, without any per-color tuning. */
   display: grid;
   place-items: center;
-  flex-shrink: 0;
-  isolation: isolate;
   line-height: 0;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent),
-    var(--shadow-sm);
-  transition:
-    color 0.18s ease,
-    background 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.2s ease,
-    transform 0.08s;
+  /* Subtle inner ring so dark picks still register against a dark card. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s;
 }
 
 .colorSwatchButton > svg {
+  /* Defensive: some glyph paths drift a pixel inside their 24×24 viewBox.
+     Belt-and-suspenders centering so the whole SVG node sits square inside
+     the grid cell. */
   display: block;
-  width: 24px;
-  height: 24px;
+  width: 100%;
+  height: 100%;
   margin: auto;
+  transform: translateY(-1px) scale(1.82);
+  transform-origin: center;
 }
 
 .colorSwatchButton:hover {
-  filter: brightness(1.08);
+  /* Blend the current (possibly compensated) border one step further
+     toward --fg on hover instead of snapping to --line-strong. That way
+     a fully-compensated near-white border in light mode still gets a
+     discernible "hover" bump without the border jumping back to the
+     theme default mid-hover. */
+  border-color: color-mix(
+    in srgb,
+    var(--swatch-border, var(--line-strong)) 70%,
+    var(--fg) 30%
+  );
 }
 
 .colorSwatchButton:active {
@@ -6423,32 +5089,22 @@
 
 .colorSwatchButton:focus-visible {
   outline: none;
-  border-color: color-mix(in srgb, var(--bot-color, var(--fg-muted)) 42%, transparent);
+  border-color: var(--accent-ink);
   box-shadow:
-    var(--shadow-sm),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
     0 0 0 3px var(--accent-glow);
 }
 
-/* Combined color + glyph popover. Wide screens: floats in the dimmed
-   area to the LEFT of the panel — the React component computes the
-   final viewport `top`/`left` (with the leftward shift folded in)
-   and applies them inline alongside `position: fixed` so the popover
-   escapes the panel's overflow clip and lands cleanly outside the
-   panel chrome. Mirrors the parameter-help tooltip pattern. Narrow
-   screens (`@media (max-width: 799px)` below): re-centered as a modal
-   so the picker isn't crammed into a sliver beside the panel. Width
-   and padding are tuned so the 14-column dense glyph grid reads
-   comfortably while the color square keeps a sensible 2:1 aspect;
-   max-height caps the scroll region so it never overflows the
-   viewport on shorter screens. */
+/* Combined color + glyph popover. Drops from the swatch like the old
+   wheel-only popover, but now also hosts the full glyph library in a
+   scrollable grid. Width and padding are tuned so the 14-column dense
+   glyph grid reads comfortably while the color square keeps a sensible
+   2:1 aspect; capped vertically so the scroll region doesn't push the
+   Create button below the fold. */
 .colorGlyphPopover {
-  /* `position`, `top`, `left`, and `transform` are all forced inline
-     by the React component on wide viewports so the popover's
-     placement is fully self-sufficient (immune to CSS HMR oddities
-     and ancestor containing-block surprises). Defaults here are
-     defensive — they kick in only as fallbacks (e.g. SSR before
-     hydration) or when the inline style is intentionally omitted. */
-  position: fixed;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
   z-index: 120;
   width: 320px;
   max-height: calc(100dvh - 96px);
@@ -6457,28 +5113,11 @@
   border-radius: 14px;
   padding: 8px;
   box-shadow: var(--shadow-md);
-  animation: colorPopoverInLeft 0.18s ease-out;
+  animation: popIn 0.18s ease-out;
   display: grid;
   gap: 8px;
   justify-items: center;
   overflow: hidden;
-}
-
-/* Slide-in animation that doesn't fight the inline transform: stays
-   at translate(0,0) for the final state and slides in from a touch
-   to the right (closer to the swatch) on entry. The animation runs
-   on top of the inline `transform: none`, but since both endpoints
-   commute with `none` we land at the inline value once the keyframes
-   release. */
-@keyframes colorPopoverInLeft {
-  from {
-    opacity: 0;
-    transform: translateX(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
 }
 
 /* Thin divider between the color wheel and the glyph grid sections of the
@@ -6809,6 +5448,25 @@
   flex-wrap: wrap;
 }
 
+.botCardChatBadge {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+
+.botCardChatBadge[data-enabled="true"] {
+  color: var(--bot-color, var(--fg));
+  border-color: color-mix(in srgb, var(--bot-color, var(--fg)) 42%, var(--line) 58%);
+  background: color-mix(in srgb, var(--bot-color, var(--fg)) 10%, transparent);
+}
+
 .botCard small {
   color: var(--fg-muted);
   font-size: 12px;
@@ -7033,13 +5691,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .panelBots .form,
-  .botLibraryContent,
-  .botLibraryContent[data-closing="true"] {
-    animation: none;
-    transform: none;
-  }
-
   .emptyStateIconButton .emptyStateBotGlyph::after {
     animation: none;
   }
@@ -7104,10 +5755,8 @@
    .botGroupBack returns to this collapsed root view. */
 .botGroupGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  position: relative;
-  z-index: 2;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
 }
 
 .botGroupTile {
@@ -7123,9 +5772,8 @@
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  padding: 7px 9px;
+  gap: 12px;
+  padding: 10px 12px;
   text-align: left;
   transition: border-color 0.15s, background 0.15s;
 }
@@ -7138,40 +5786,6 @@
     color-mix(in srgb, var(--group-color, var(--bg)) 18%, var(--bg) 82%)
   );
   outline: none;
-}
-
-.botGroupTile[data-selected="true"] {
-  border-color: color-mix(in srgb, var(--group-color, var(--fg)) 72%, var(--fg) 28%);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--group-color, var(--fg)) 55%, transparent),
-    0 10px 22px color-mix(in srgb, var(--group-color, var(--fg)) 14%, transparent);
-}
-
-.botGroupTileNeutral {
-  border-color: color-mix(in srgb, var(--fg) 36%, var(--line) 64%);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--fg) 18%, var(--bg) 82%),
-      color-mix(in srgb, var(--bg) 94%, var(--fg) 6%)
-    );
-}
-
-.botGroupTileNeutral:hover:not(:disabled),
-.botGroupTileNeutral:focus-visible,
-.botGroupTileNeutral[data-selected="true"] {
-  border-color: color-mix(in srgb, var(--fg) 72%, var(--line) 28%);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--fg) 26%, var(--bg) 74%),
-      color-mix(in srgb, var(--bg) 90%, var(--fg) 10%)
-    );
-}
-
-.botGroupTileNeutral .botGroupTileLetter {
-  color: var(--bg);
-  background: var(--fg);
 }
 
 .botGroupTile:disabled {
@@ -7202,33 +5816,6 @@
   text-transform: uppercase;
   margin-left: auto;
   flex: 0 0 auto;
-}
-
-.botLibraryListArea {
-  min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 6px;
-  overflow: hidden;
-}
-
-.botLibraryListHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid var(--line);
-  padding: 0 0 6px;
-}
-
-.botLibraryListHeader .sectionLabel {
-  margin: 0;
-}
-
-.botLibraryInnerScroll {
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 2px;
 }
 
 .botGroupDrilldown {
@@ -7301,6 +5888,35 @@
   align-content: start;
   gap: 10px;
   padding-right: 4px;
+}
+
+/* Editing banner inside the form. The banner is a calm "you're
+   editing <name>" chip sitting above the name/prompt row. Adopts
+   the bot's color lightly so it still reads as "Bots panel" rather
+   than "yet another alert". */
+.formEditingBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.formEditingBannerLabel {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.formEditingBannerName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
 }
 
 /* Replaces the generate form when LOCAL mode is selected. Neutral (not an
@@ -7687,20 +6303,8 @@
   }
 
   .panelBots .form textarea {
-    min-height: clamp(88px, 18dvh, 150px);
+    min-height: clamp(132px, 24dvh, 220px);
     max-height: none;
-  }
-
-  .composeModelControl {
-    flex: 1 1 180px;
-  }
-
-  .composeModelTrigger {
-    width: 100%;
-  }
-
-  .composeModelTriggerName {
-    max-width: 100%;
   }
 
   .botNameRow {
