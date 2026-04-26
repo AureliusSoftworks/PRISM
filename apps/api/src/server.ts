@@ -5,14 +5,14 @@ import { clearCookie, json, parseCookies, readJsonBody, setCookie, setCorsHeader
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import { processChatMessage } from "./chat.ts";
-import { deleteAllConversations, deleteConversation, rewindConversation } from "./conversations.ts";
+import { deleteAllConversations, deleteConversation, listConversationSummaries, rewindConversation } from "./conversations.ts";
 import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
-  resolveBotChatEnabled,
 } from "./bots.ts";
 import { resolveNextSettings } from "./settings.ts";
+import { buildModelCatalog } from "./providers.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import { generateImage } from "./image-provider.ts";
@@ -25,6 +25,7 @@ import {
   purgeExpiredImages
 } from "./image-retention.ts";
 import { deleteVectorsForUser } from "./qdrant.ts";
+import type { ChatMessage } from "@localai/shared";
 
 const config = getAppConfig();
 const db = createDatabase();
@@ -149,6 +150,12 @@ function readString(value: unknown, fieldName: string): string {
     throw new Error(`${fieldName} is required.`);
   }
   return value.trim();
+}
+
+function readOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function createSession(userId: string): { token: string; expiresAt: string } {
@@ -338,73 +345,9 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/conversations", async (ctx) => {
       const userId = requireAuth(ctx);
-      // bot_id + incognito ride along in the list response so the sidebar
-      // can render private-chat markers and bot-colored accents without a
-      // second roundtrip per row.
-      //
-      // last_bot_id / last_bot_color come from the MOST RECENT assistant
-      // message on the conversation — no bot_id filter. That means when
-      // the user picks "Default" mid-thread in Sandbox, subsequent
-      // Default replies show up as last_bot_id = NULL, which the client
-      // interprets as "Default is the current bot" and paints the row
-      // WHITE. Before this change, Default replies were invisible to the
-      // sidebar and the row stayed colored by whichever bot had spoken
-      // previously — a lie about who's "active" in the thread.
-      //
-      // has_assistant_reply disambiguates "Default was last" (reply
-      // exists but has no bot_id) from "no reply yet" (conversation row
-      // exists but no assistant message — only reachable via a failed
-      // send that errored after the user msg was inserted). The first
-      // case wants WHITE; the second wants the locked-bot fallback. We
-      // can't tell them apart from last_bot_id alone.
-      //
-      // Correlated subqueries are cheap here: SQLite optimizes the
-      // LIMIT 1 DESC scan with the existing messages(conversation_id,
-      // created_at) locality, so ordering on updated_at doesn't force a
-      // full messages table scan per row.
-      const rows = db
-        .prepare(
-          `SELECT c.id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
-                  (SELECT m.bot_id FROM messages m
-                     WHERE m.conversation_id = c.id
-                       AND m.role = 'assistant'
-                     ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
-                  (SELECT b.color FROM messages m
-                     LEFT JOIN bots b ON b.id = m.bot_id
-                     WHERE m.conversation_id = c.id
-                       AND m.role = 'assistant'
-                     ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
-                  EXISTS (SELECT 1 FROM messages m
-                            WHERE m.conversation_id = c.id
-                              AND m.role = 'assistant') AS has_assistant_reply
-             FROM conversations c
-            WHERE c.user_id = ?
-         ORDER BY c.updated_at DESC`
-        )
-        .all(userId) as Array<{
-        id: string;
-        title: string;
-        bot_id: string | null;
-        incognito: number;
-        created_at: string;
-        updated_at: string;
-        last_bot_id: string | null;
-        last_bot_color: string | null;
-        has_assistant_reply: number;
-      }>;
       json(ctx.res, 200, {
         ok: true,
-        conversations: rows.map((row) => ({
-          id: row.id,
-          title: row.title,
-          botId: row.bot_id ?? null,
-          incognito: row.incognito === 1,
-          lastBotId: row.last_bot_id ?? null,
-          lastBotColor: row.last_bot_color ?? null,
-          hasAssistantReply: row.has_assistant_reply === 1,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at
-        }))
+        conversations: listConversationSummaries(db, userId)
       });
     }),
     route("GET", "/api/conversations/:id", async (ctx) => {
@@ -450,7 +393,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const messageRows = db
         .prepare(
-          `SELECT m.id, m.role, m.content, m.provider, m.created_at,
+          `SELECT m.id, m.role, m.content, m.provider, m.model, m.created_at,
                   b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
            FROM messages m
            LEFT JOIN bots b ON b.id = m.bot_id
@@ -462,6 +405,7 @@ function buildRoutes(): RouteDefinition[] {
         role: "user" | "assistant" | "system";
         content: string;
         provider: string | null;
+        model: string | null;
         bot_name: string | null;
         bot_color: string | null;
         bot_glyph: string | null;
@@ -478,6 +422,7 @@ function buildRoutes(): RouteDefinition[] {
           row.provider === "local" || row.provider === "openai"
             ? row.provider
             : undefined,
+        model: row.model ?? undefined,
         botName: row.bot_name ?? undefined,
         botColor: row.bot_color ?? undefined,
         botGlyph: row.bot_glyph ?? undefined,
@@ -515,7 +460,8 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const message = readString(body.message, "message");
+      const starterPrompt = body.starterPrompt === true;
+      const message = starterPrompt ? "" : readString(body.message, "message");
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
       // Three-valued parse so the server can distinguish:
@@ -538,8 +484,8 @@ function buildRoutes(): RouteDefinition[] {
       // leaking a sandbox turn into cross-session storage. processChatMessage
       // enforces the same default as defense in depth.
       const mode = body.mode === "chat" ? "chat" : "sandbox";
-      // Incognito is a Chat-mode concept (see chat.ts): it flips the turn
-      // offline AND skips memory. We deliberately ignore any `incognito`
+      // Incognito is a Chat-mode concept (see chat.ts): it keeps the turn
+      // ephemeral and skips memory. We deliberately ignore any `incognito`
       // flag for Sandbox requests so the two modes stay semantically
       // distinct even if a stale client still sends the field.
       const incognito = mode === "chat" && body.incognito === true;
@@ -551,58 +497,63 @@ function buildRoutes(): RouteDefinition[] {
           : undefined;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const effectiveBotId = incognito ? null : botId;
+      const explicitModelOverride = readOptionalString(body.modelOverride);
+      const ephemeralMessages = Array.isArray(body.ephemeralMessages)
+        ? body.ephemeralMessages as ChatMessage[]
+        : undefined;
 
       let botSystemPrompt: string | undefined;
-      let botOverrides: GenerateOptions | undefined;
-      if (botId) {
+      let starterPromptLabel: string | undefined;
+      const generationOverrides: GenerateOptions = {};
+      if (explicitModelOverride) {
+        generationOverrides.model = explicitModelOverride;
+      }
+      if (effectiveBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, model, temperature, max_tokens, chat_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, model, local_model, online_model, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
-          .get(botId, userId) as
+          .get(effectiveBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
               model?: string | null;
+              local_model?: string | null;
+              online_model?: string | null;
               temperature?: number | null;
               max_tokens?: number | null;
-              chat_enabled?: number | null;
             }
           | undefined;
         if (bot) {
-          const alreadyLockedToConversation =
-            mode === "chat" &&
-            conversationId !== undefined &&
-            Boolean(
-              db
-                .prepare(
-                  "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND bot_id = ?"
-                )
-                .get(conversationId, userId, botId)
-            );
-          if (mode === "chat" && bot.chat_enabled !== 1 && !alreadyLockedToConversation) {
-            throw new Error("Bot is not enabled for Chat mode.");
-          }
+          starterPromptLabel = bot.name;
           // Name is folded into the system prompt by composeBotSystemPrompt so
           // the model actually knows who it's supposed to be, even when the
           // user left the prompt field blank. Unit-tested in
           // `__tests__/bots.test.ts`.
           botSystemPrompt = composeBotSystemPrompt(bot.name, bot.system_prompt);
-          const overrides: GenerateOptions = {};
-          if (typeof bot.model === "string" && bot.model.trim()) {
-            overrides.model = bot.model.trim();
-          }
+          const botPreferredModel = effectiveProvider === "local"
+            ? readOptionalString(bot.local_model) ?? readOptionalString(bot.model)
+            : readOptionalString(bot.online_model);
+          const resolvedModelOverride =
+            explicitModelOverride ?? botPreferredModel;
+          if (resolvedModelOverride) generationOverrides.model = resolvedModelOverride;
           if (typeof bot.temperature === "number") {
-            overrides.temperature = bot.temperature;
+            generationOverrides.temperature = bot.temperature;
           }
           if (typeof bot.max_tokens === "number") {
-            overrides.maxTokens = bot.max_tokens;
-          }
-          if (Object.keys(overrides).length > 0) {
-            botOverrides = overrides;
+            generationOverrides.maxTokens = bot.max_tokens;
           }
         }
       }
+      if (!starterPromptLabel && effectiveBotId === null) {
+        starterPromptLabel = "Prism";
+      }
+      const botOverrides =
+        Object.keys(generationOverrides).length > 0
+          ? generationOverrides
+          : undefined;
 
       // Prefer the user's saved key; fall back to the server-wide env key so a
       // single OPENAI_API_KEY in .env makes chat work without double-entry.
@@ -615,11 +566,14 @@ function buildRoutes(): RouteDefinition[] {
         message,
         userKey,
         {
-          preferredProvider: requestedProvider ?? user.preferred_provider,
+          preferredProvider: effectiveProvider,
           autoMemory: !incognito && Boolean(user.auto_memory),
           openAiApiKey,
-          botId,
+          starterPrompt,
+          starterPromptLabel,
+          botId: effectiveBotId,
           incognito,
+          ephemeralMessages,
           botSystemPrompt,
           botOverrides,
           mode,
@@ -631,18 +585,35 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/memories", async (ctx) => {
       const userId = requireAuth(ctx);
       const userKey = decryptUserKey(userId);
-      const rows = db
-        .prepare(
-          "SELECT id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
-        )
-        .all(userId) as Array<{
+      const conversationId = readOptionalString(ctx.query.get("conversationId"));
+      const botId = readOptionalString(ctx.query.get("botId"));
+      type MemoryRow = {
         id: string;
+        conversation_id: string | null;
+        bot_id: string | null;
         confidence: number;
         ciphertext: string;
         iv: string;
         tag: string;
         created_at: string;
-      }>;
+      };
+      const rows = botId
+        ? db
+            .prepare(
+              "SELECT id, conversation_id, bot_id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
+            )
+            .all(userId, botId) as MemoryRow[]
+        : conversationId
+        ? db
+            .prepare(
+              "SELECT id, conversation_id, bot_id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
+            )
+            .all(userId, conversationId) as MemoryRow[]
+        : db
+            .prepare(
+              "SELECT id, conversation_id, bot_id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
+            )
+            .all(userId) as MemoryRow[];
       json(ctx.res, 200, {
         ok: true,
         memories: rows.map((row) => {
@@ -656,6 +627,8 @@ function buildRoutes(): RouteDefinition[] {
           ) as { text?: string };
           return {
             id: row.id,
+            conversationId: row.conversation_id ?? undefined,
+            botId: row.bot_id ?? undefined,
             confidence: row.confidence,
             text: payload.text ?? "",
             createdAt: row.created_at
@@ -687,6 +660,14 @@ function buildRoutes(): RouteDefinition[] {
           ollamaModel: config.ollamaModel,
         },
       });
+    }),
+    route("GET", "/api/models", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const catalog = await buildModelCatalog(openAiApiKey);
+      json(ctx.res, 200, { ok: true, catalog });
     }),
     route("PATCH", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -811,7 +792,9 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const name = readString(body.name, "name");
       const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : "";
-      const model = typeof body.model === "string" ? body.model : null;
+      const model = readOptionalString(body.model);
+      const localModel = readOptionalString(body.localModel);
+      const onlineModel = readOptionalString(body.onlineModel);
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
       const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 2048;
       // Accept any non-empty string for color (CSS parses the value at render
@@ -827,21 +810,33 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.glyph === "string" && body.glyph.trim().length > 0
           ? body.glyph.trim()
           : null;
-      const chatEnabled = resolveBotChatEnabled(body.chatEnabled);
+      const chatEnabled = 1;
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, model, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
-      ).run(botId, userId, name, systemPrompt, model, temperature, maxTokens, color, glyph, chatEnabled, now, now);
+        "INSERT INTO bots (id, user_id, name, system_prompt, model, local_model, online_model, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(botId, userId, name, systemPrompt, model, localModel, onlineModel, temperature, maxTokens, color, glyph, chatEnabled, now, now);
       json(ctx.res, 201, {
         ok: true,
-        bot: { id: botId, name, systemPrompt, model, temperature, maxTokens, color, glyph, chat_enabled: chatEnabled },
+        bot: {
+          id: botId,
+          name,
+          systemPrompt,
+          model,
+          local_model: localModel,
+          online_model: onlineModel,
+          temperature,
+          maxTokens,
+          color,
+          glyph,
+          chat_enabled: chatEnabled,
+        },
       });
     }),
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, model, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, model, local_model, online_model, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -858,6 +853,14 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.name === "string") { fields.push("name = ?"); values.push(body.name); }
       if (typeof body.systemPrompt === "string") { fields.push("system_prompt = ?"); values.push(body.systemPrompt); }
       if (typeof body.model === "string") { fields.push("model = ?"); values.push(body.model); }
+      if (typeof body.localModel === "string") {
+        fields.push("local_model = ?");
+        values.push(readOptionalString(body.localModel));
+      }
+      if (typeof body.onlineModel === "string") {
+        fields.push("online_model = ?");
+        values.push(readOptionalString(body.onlineModel));
+      }
       if (typeof body.temperature === "number") { fields.push("temperature = ?"); values.push(body.temperature); }
       if (typeof body.maxTokens === "number") { fields.push("max_tokens = ?"); values.push(body.maxTokens); }
       // Color update semantics: non-empty string updates, explicit null clears,
@@ -878,10 +881,6 @@ function buildRoutes(): RouteDefinition[] {
         fields.push("glyph = ?");
         values.push(null);
       }
-      if (typeof body.chatEnabled === "boolean") {
-        fields.push("chat_enabled = ?");
-        values.push(resolveBotChatEnabled(body.chatEnabled));
-      }
       if (fields.length > 0) {
         fields.push("updated_at = ?");
         values.push(new Date().toISOString());
@@ -893,11 +892,6 @@ function buildRoutes(): RouteDefinition[] {
     route("DELETE", "/api/bots/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       deleteBot(db, userId, ctx.params.id);
-      json(ctx.res, 200, { ok: true });
-    }),
-    route("DELETE", "/api/bots/:id", async (ctx) => {
-      const userId = requireAuth(ctx);
-      db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(ctx.params.id, userId);
       json(ctx.res, 200, { ok: true });
     }),
     // User-facing bulk-clear — removes every bot the caller owns in one
@@ -988,8 +982,16 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         "INSERT INTO conversations (id, user_id, title, bot_id, parent_id, fork_message_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).run(forkId, userId, `Fork of ${parent.title}`, parent.bot_id, parentId, forkMessageId, parent.incognito, now, now);
-      let messageQuery = "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC";
-      let messages: Array<{ id: string; role: string; content: string; created_at: string }>;
+      let messageQuery = "SELECT id, role, content, provider, model, bot_id, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC";
+      let messages: Array<{
+        id: string;
+        role: string;
+        content: string;
+        provider: string | null;
+        model: string | null;
+        bot_id: string | null;
+        created_at: string;
+      }>;
       if (forkMessageId) {
         const cutoff = db.prepare("SELECT created_at FROM messages WHERE id = ? AND conversation_id = ?").get(forkMessageId, parentId) as { created_at: string } | undefined;
         if (cutoff) {
@@ -1002,8 +1004,8 @@ function buildRoutes(): RouteDefinition[] {
       }
       for (const msg of messages) {
         db.prepare(
-          "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-        ).run(randomId(12), forkId, userId, msg.role, msg.content, msg.created_at);
+          "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(randomId(12), forkId, userId, msg.role, msg.content, msg.provider, msg.model, msg.bot_id, msg.created_at);
       }
       json(ctx.res, 201, { ok: true, conversationId: forkId });
     }),

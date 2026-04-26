@@ -6,7 +6,7 @@ headless on your Windows machine and reachable across the LAN from any
 device. Every account is its own sandbox — encrypted memory, customizable
 chatbots, OpenAI image generation, forkable conversations, markdown export.
 
-**Current release:** v0.1.0. See [CHANGELOG.md](CHANGELOG.md) for release notes.
+**Current release:** v0.1.1. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Branch model:** `main` holds tagged, released versions only; all active
 development happens on `dev`. Every release is a merge of `dev` into `main`

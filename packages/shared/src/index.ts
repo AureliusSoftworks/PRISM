@@ -43,6 +43,8 @@ export interface ChatMessage {
   createdAt: string;
   /** Provider that generated the message (assistant only; undefined for user/system). */
   provider?: "local" | "openai";
+  /** Concrete model id used for this assistant reply, when recorded. */
+  model?: string;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
   botName?: string;
   /** Bot's associated accent color (CSS color string). Resolved from bots.color at read time. */
@@ -64,11 +66,10 @@ export interface Conversation {
    */
   botId: string | null;
   /**
-   * Private chat marker — once `true`, every send routes to LOCAL
-   * (Ollama), accent styling is suppressed to grayscale, and nothing
-   * is written to the cross-thread `memories` table or the Qdrant
-   * summary index for this conversation. Set at conversation creation
-   * time via the sidebar "Private chat" button and never flipped after.
+   * Private chat marker — once `true`, accent styling is suppressed to
+   * grayscale, the thread stays client-held, and nothing is written to
+   * conversation history, the cross-thread `memories` table, or the Qdrant
+   * summary index. Provider selection remains a separate user choice.
    */
   incognito: boolean;
   /**
@@ -109,6 +110,8 @@ export interface Conversation {
 export interface UserMemory {
   id: string;
   userId: string;
+  conversationId?: string;
+  botId?: string;
   createdAt: string;
   confidence: number;
   text: string;
@@ -118,7 +121,8 @@ export interface UserMemory {
  * Post-auth surface the user is chatting from.
  *
  * - `"chat"`: the calm, stripped-down personal Prism. Honors auto-memory and
- *   per-send `incognito` (where incognito forces the provider to LOCAL).
+ *   per-send `incognito` (where incognito keeps the conversation entirely
+ *   ephemeral without changing the selected provider).
  * - `"sandbox"`: the full command-center. Cross-session memory is disabled
  *   entirely here — the rolling message window IS the thread's memory. The
  *   `incognito` flag is ignored for Sandbox requests.
@@ -131,7 +135,14 @@ export type ChatMode = "chat" | "sandbox";
 export interface ChatRequestPayload {
   conversationId?: string;
   message: string;
+  starterPrompt?: boolean;
   mode?: ChatMode;
+  /**
+   * Client-held prior messages for an incognito chat. The server uses this as
+   * prompt context only; private turns are never read from or written to
+   * persisted conversation/message storage.
+   */
+  ephemeralMessages?: ChatMessage[];
 }
 
 export interface ChatResponsePayload {

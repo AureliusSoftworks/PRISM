@@ -5,7 +5,6 @@ import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
-  resolveBotChatEnabled,
 } from "../bots.ts";
 
 /**
@@ -66,22 +65,6 @@ describe("composeBotSystemPrompt", () => {
     const prompt = composeBotSystemPrompt("DJ K-Razor", "");
     assert.ok(prompt);
     assert.match(prompt!, /You are DJ K-Razor\./);
-  });
-});
-
-describe("resolveBotChatEnabled", () => {
-  it("defaults new bots to unavailable in Chat mode", () => {
-    assert.equal(resolveBotChatEnabled(undefined), 0);
-  });
-
-  it("stores explicit boolean toggle values", () => {
-    assert.equal(resolveBotChatEnabled(true), 1);
-    assert.equal(resolveBotChatEnabled(false), 0);
-  });
-
-  it("ignores non-boolean values and preserves the fallback", () => {
-    assert.equal(resolveBotChatEnabled("true", 0), 0);
-    assert.equal(resolveBotChatEnabled("false", 1), 1);
   });
 });
 

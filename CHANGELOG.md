@@ -10,6 +10,8 @@ Active development happens on the `dev` branch; every release is a merge into
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-26
+
 ### Added
 
 - **Per-mode memory model.** Memory behavior now splits cleanly by
@@ -168,4 +170,5 @@ command-center UI.
   `QDRANT_URL`, and — only in ONLINE mode — `api.openai.com`. Documented
   in `DESIGN.md`.
 
+[0.1.1]: https://github.com/prism/prism/releases/tag/v0.1.1
 [0.1.0]: https://github.com/prism/prism/releases/tag/v0.1.0
