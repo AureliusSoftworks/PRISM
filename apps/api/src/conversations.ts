@@ -1,4 +1,155 @@
 import type { DatabaseSync } from "node:sqlite";
+import { randomId } from "./security.ts";
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  botId: string | null;
+  incognito: boolean;
+  lastBotId: string | null;
+  lastBotColor: string | null;
+  hasAssistantReply: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const DEV_SEED_CHAT_USER_MESSAGE = "Dev tools seeded this sidebar chat.";
+const DEV_SEED_CHAT_ASSISTANT_MESSAGE =
+  "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+
+/**
+ * Create saved, bot-attributed placeholder chats for Developer Tools.
+ *
+ * These rows deliberately bypass the normal LLM pipeline: they are only seeded
+ * UI fixtures for sidebar density checks, so a static lorem assistant reply is
+ * enough and avoids provider/network side effects.
+ */
+export function createDevSeedConversations(
+  db: DatabaseSync,
+  userId: string,
+  count: number
+): number {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error("Chat seed count must be a positive integer.");
+  }
+
+  const botRows = db
+    .prepare(
+      "SELECT id FROM bots WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC, name ASC"
+    )
+    .all(userId) as Array<{ id: string }>;
+
+  const insertConversation = db.prepare(
+    "INSERT INTO conversations (id, user_id, title, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)"
+  );
+  const insertMessage = db.prepare(
+    "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  );
+
+  const baseTime = Date.now();
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    for (let index = 0; index < count; index += 1) {
+      const conversationId = randomId(12);
+      const botId = botRows.length > 0
+        ? botRows[index % botRows.length]?.id ?? null
+        : null;
+      const createdAt = new Date(baseTime + index * 2).toISOString();
+      const updatedAt = new Date(baseTime + index * 2 + 1).toISOString();
+      const ordinal = index + 1;
+
+      insertConversation.run(
+        conversationId,
+        userId,
+        `Dev chat ${ordinal}`,
+        botId,
+        createdAt,
+        updatedAt
+      );
+      insertMessage.run(
+        randomId(12),
+        conversationId,
+        userId,
+        "user",
+        DEV_SEED_CHAT_USER_MESSAGE,
+        null,
+        createdAt
+      );
+      insertMessage.run(
+        randomId(12),
+        conversationId,
+        userId,
+        "assistant",
+        DEV_SEED_CHAT_ASSISTANT_MESSAGE,
+        botId,
+        updatedAt
+      );
+    }
+    db.exec("COMMIT");
+    return count;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
+ * Return saved conversations for the sidebar/history list.
+ *
+ * Private/incognito rows are deliberately excluded here. Current private chats
+ * are ephemeral and never persist; this filter hides older rows that may have
+ * been saved before that contract existed.
+ */
+export function listConversationSummaries(
+  db: DatabaseSync,
+  userId: string
+): ConversationSummary[] {
+  // last_bot_id / last_bot_color come from the MOST RECENT assistant message on
+  // the conversation, regardless of the conversation's locked bot_id.
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
+              (SELECT m.bot_id FROM messages m
+                 WHERE m.conversation_id = c.id
+                   AND m.role = 'assistant'
+                 ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
+              (SELECT b.color FROM messages m
+                 LEFT JOIN bots b ON b.id = m.bot_id
+                 WHERE m.conversation_id = c.id
+                   AND m.role = 'assistant'
+                 ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
+              EXISTS (SELECT 1 FROM messages m
+                        WHERE m.conversation_id = c.id
+                          AND m.role = 'assistant') AS has_assistant_reply
+         FROM conversations c
+        WHERE c.user_id = ?
+          AND COALESCE(c.incognito, 0) = 0
+     ORDER BY c.updated_at DESC`
+    )
+    .all(userId) as Array<{
+    id: string;
+    title: string;
+    bot_id: string | null;
+    incognito: number;
+    created_at: string;
+    updated_at: string;
+    last_bot_id: string | null;
+    last_bot_color: string | null;
+    has_assistant_reply: number;
+  }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    botId: row.bot_id ?? null,
+    incognito: row.incognito === 1,
+    lastBotId: row.last_bot_id ?? null,
+    lastBotColor: row.last_bot_color ?? null,
+    hasAssistantReply: row.has_assistant_reply === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
 
 /**
  * Permanently remove a single chat owned by `userId`.

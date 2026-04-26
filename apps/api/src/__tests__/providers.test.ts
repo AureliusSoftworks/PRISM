@@ -147,7 +147,7 @@ describe("buildModelCatalog", () => {
           JSON.stringify({
             models: [
               { name: "llama3.2" },
-              { name: "gemma3" },
+              { name: "gemma3:latest" },
               { name: "llama3.2" },
             ],
           }),
@@ -173,7 +173,8 @@ describe("buildModelCatalog", () => {
     const catalog = await buildModelCatalog("sk-test");
 
     assert.ok(catalog.local.some((model) => model.id === "llama3.2"));
-    assert.ok(catalog.local.some((model) => model.id === "gemma3"));
+    const gemma = catalog.local.find((model) => model.id === "gemma3:latest");
+    assert.equal(gemma?.label, "Gemma3");
     assert.ok(catalog.online.some((model) => model.id === "gpt-4o"));
     assert.ok(catalog.online.some((model) => model.id === "o3-mini"));
     assert.ok(!catalog.online.some((model) => model.id === "text-embedding-3-small"));

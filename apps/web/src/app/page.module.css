@@ -1,6 +1,6 @@
 /* ── Theme tokens ──
    Near-neutral base: the app chrome avoids saturated color except where
-   `--accent` supplies it. Dark theme stays grayscale; light theme uses
+   `--accent` supplies it. Dark theme stays warm grayscale; light theme uses
    low-chroma warm neutrals so the page reads softly instead of as a
    blue-white sheet. When a bot is selected, `--accent` and
    `--accent-text` are overridden inline on the app shell to the bot's
@@ -14,26 +14,26 @@
    card accent bar use each bot's own `--bot-color`, independent of
    whichever bot happens to be in focus right now. */
 .themeDark {
-  --bg: #0a0a0b;
-  --bg-deep: #050506;
-  --bg-surface: #121214;
-  --bg-elevated: #17171a;
-  --bg-hover: #1d1d20;
-  --bg-active: #26262a;
+  --bg: #0b0a09;
+  --bg-deep: #060504;
+  --bg-surface: #151311;
+  --bg-elevated: #1b1816;
+  --bg-hover: #211e1b;
+  --bg-active: #2b2723;
 
-  --fg: #e8e9ec;
-  --fg-muted: #8a8b91;
-  --fg-subtle: #595a5f;
+  --fg: #eee7df;
+  --fg-muted: #938b82;
+  --fg-subtle: #625b53;
 
-  --line: #1e1e22;
-  --line-strong: #2b2b30;
+  --line: #25211e;
+  --line-strong: #342f2a;
 
   /* Grayscale default; overridden inline when a bot is selected. */
-  --accent: #c9cdd6;
+  --accent: #d7cfc3;
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff 12%);
   --accent-soft: color-mix(in srgb, var(--accent) 18%, var(--bg) 82%);
   --accent-glow: color-mix(in srgb, var(--accent) 22%, transparent);
-  --accent-text: #0b0b0d;
+  --accent-text: #0c0a08;
   /* --accent-ink: the accent safely-usable AS a foreground (text, icon,
      border) on top of --bg. Defaults to --accent and is overridden inline
      when a bot is selected so bright colors get auto-darkened for contrast.
@@ -153,12 +153,58 @@
   margin-top: 2px;
 }
 
+.conversationHeaderRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px;
+  padding: 0 13px 0 6px;
+  margin: 2px 0 0;
+}
+
+.conversationHeaderRow .sectionLabel {
+  margin-top: 0;
+}
+
+.conversationDeleteAllButton {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  width: auto;
+  min-width: 32px;
+  height: 20px;
+  padding: 0 8px;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.92;
+  transition: color 0.15s, background 0.15s, opacity 0.15s, transform 0.05s;
+}
+
+.conversationDeleteAllButton:hover,
+.conversationDeleteAllButton:focus-visible {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  opacity: 1;
+  outline: none;
+}
+
+.conversationDeleteAllButton:active {
+  transform: translateY(1px);
+}
+
 /* ── Auth ── */
 .authLayout {
   font-family: var(--font-ui-sans), system-ui, sans-serif;
   background: var(--bg);
   background-image: var(--app-gradient);
-  color: var(--row-text-color);
+  color: var(--fg);
   min-height: 100dvh;
   display: grid;
   place-items: center;
@@ -234,30 +280,9 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, #ffffff 40%, transparent);
 }
 
-.brandLogoutGlyph {
-  position: relative;
-  z-index: 2;
-  width: 56px;
-  height: 56px;
-  display: grid;
-  place-items: center;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, #ffffff 45%, transparent);
-  background: #000000;
-  color: #ffffff;
-  font-size: 34px;
-  font-weight: 300;
-  line-height: 1;
-}
-
-/* Two blurred halos behind the icon — phase-locked to prevent the
+/* Two blurred rainbow halos behind the icon — phase-locked to prevent
    "desaturation flash" that happens when complementary hues overlap
    under mix-blend-mode: screen, plus a gentle organic wobble on top.
-   The five color stops are sourced from `--hero-halo-1` … `--hero-halo-5`
-   CSS variables that the React shell sets from the user's bot palette
-   (see `heroHaloVars` in page.tsx). With no bots created the vars are
-   absent and the `#ffffff` fallback paints a soft white glow, giving
-   the dark-mode hero a clean uncolored "white hero" no-bots state.
 
    THE MATH
      screen(A, B) = 1 − (1 − A)(1 − B) per channel.
@@ -267,9 +292,7 @@
      values — including 180° — so every few seconds the whole halo
      flashes pale grey. To keep saturation constant, the relative hue
      at every spatial overlap must stay inside the analogous window
-     (≲ 90° apart). Note: with bot-driven stops a user whose bots span
-     complementary hues will see brief desaturated overlap zones —
-     accepted trade-off in exchange for a fully bot-driven palette.
+     (≲ 90° apart).
 
    THE FIX (saturation)
      Both rings share a steady linear spin (`brandPrismSpin`, 6s). They
@@ -328,19 +351,17 @@
 }
 
 .brandIconShell::before {
-  /* Inner ring — bot-derived palette anchored at 0°, with a small
-     wobble. Stops are evenly spaced (72° per band) so the gradient
-     stays smooth regardless of bot count: with one bot all 5 vars
-     resolve to the same hue (solid halo); with 2+ they cycle. */
+  /* Inner ring — full rainbow anchored at 0°, with a small wobble. */
   inset: -8px;
   background: conic-gradient(
     from 0deg,
-    var(--hero-halo-1, #ffffff) 0deg,
-    var(--hero-halo-2, #ffffff) 72deg,
-    var(--hero-halo-3, #ffffff) 144deg,
-    var(--hero-halo-4, #ffffff) 216deg,
-    var(--hero-halo-5, #ffffff) 288deg,
-    var(--hero-halo-1, #ffffff) 360deg
+    #ff5f6d 0deg,
+    #ffb703 55deg,
+    #80ffdb 120deg,
+    #38bdf8 190deg,
+    #8b5cf6 260deg,
+    #ec4899 320deg,
+    #ff5f6d 360deg
   );
   filter: blur(10px) saturate(1.45);
   opacity: 0.45;
@@ -350,20 +371,21 @@
 }
 
 .brandIconShell::after {
-  /* Outer ring — same bot-derived palette, anchored at 45°. That 45°
-     offset is the fixed analogous-hue gap that the screen blend will
-     see at every spatial point once the rings are rotating in
-     lockstep. Its wobble is a touch wider than the inner ring's so
-     the outer halo "breathes" a bit more visibly. */
+  /* Outer ring — same palette, anchored at 45°. That 45° offset is the
+     fixed analogous-hue gap that the screen blend will see at every
+     spatial point once the rings are rotating in lockstep. Its wobble
+     is a touch wider than the inner ring's so the outer halo "breathes"
+     a bit more visibly. */
   inset: -14px;
   background: conic-gradient(
     from 45deg,
-    var(--hero-halo-1, #ffffff) 0deg,
-    var(--hero-halo-2, #ffffff) 72deg,
-    var(--hero-halo-3, #ffffff) 144deg,
-    var(--hero-halo-4, #ffffff) 216deg,
-    var(--hero-halo-5, #ffffff) 288deg,
-    var(--hero-halo-1, #ffffff) 360deg
+    #ff5f6d 0deg,
+    #ffb703 55deg,
+    #80ffdb 120deg,
+    #38bdf8 190deg,
+    #8b5cf6 260deg,
+    #ec4899 320deg,
+    #ff5f6d 360deg
   );
   filter: blur(14px) saturate(1.4);
   opacity: 0.32;
@@ -792,14 +814,6 @@
   border-color: var(--line-strong);
 }
 
-.hubLogoutHint {
-  margin: -2px 0 4px;
-  color: var(--danger);
-  font-size: 12px;
-  line-height: 1.4;
-  text-align: center;
-}
-
 /* Clickable prism wordmark that lives in the Sandbox chat header as a
    back-to-Hub affordance. Styled as a quiet hover target so it sits
    left of the title without competing for attention with it. */
@@ -837,25 +851,11 @@
   display: block;
 }
 
-/* Mono wordmark — used by non-home / private / engaged surfaces. The
-   inline SVG sets all five letter strokes to `currentColor` when
-   `data-mono="true"`, so we just need to provide that color via the
-   element's `color` and clear the colored drop-shadow filter from
-   `.brandWordmark` (orange/cyan glow doesn't make sense around a
-   solid-theme mark). Light theme's pre-existing `brightness(0)`
-   override keeps the wordmark black there regardless, which lines
-   up with the desired theme-color outcome. */
-.brandWordmark[data-mono="true"],
-.hubHomeWordmark[data-mono="true"] {
-  color: var(--fg);
-  filter: none;
-}
-
 .headerIdentity {
   --header-identity-color: var(--fg);
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   color: var(--header-identity-color);
 }
@@ -864,12 +864,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--header-identity-color) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--header-identity-color) 30%, transparent);
-  box-shadow: var(--shadow-sm);
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--header-identity-color) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--header-identity-color) 34%, transparent);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 22px color-mix(in srgb, var(--header-identity-color) 12%, transparent);
   flex: 0 0 auto;
 }
 
@@ -902,6 +904,10 @@
   filter: brightness(0);
 }
 
+.appLayout[data-private-active="true"]:not(.themeLight) .hubHomeWordmark {
+  filter: brightness(0) invert(1);
+}
+
 /* ── App shell ── */
 .appLayout {
   /* Instrument Sans keeps body/supporting text flexible and readable while
@@ -926,23 +932,13 @@
 
 /* ── Sidebar ── */
 .sidebar {
-  border-right: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-right: 1px solid var(--line);
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow: hidden;
-  background:
-    radial-gradient(
-      circle at 18% 10%,
-      color-mix(in srgb, var(--accent) 14%, transparent),
-      transparent 30%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--accent) 7%, var(--bg-surface)),
-      var(--bg-surface) 42%
-    );
+  background: var(--bg-surface);
 }
 
 .profile {
@@ -955,14 +951,10 @@
   transition: background 0.16s, border-color 0.16s;
 }
 
-.profile[data-logout-armed="true"] {
-  background: var(--danger-soft);
-}
-
 .profileAvatar {
   appearance: none;
   -webkit-appearance: none;
-  border: 1px solid #000000;
+  border: 0;
   padding: 0;
   width: 36px;
   height: 36px;
@@ -976,22 +968,7 @@
   letter-spacing: 0.02em;
   box-shadow: var(--shadow-sm);
   flex-shrink: 0;
-  transition: background 0.25s, border-color 0.25s, color 0.25s;
-}
-
-.profileAvatarButton {
-  cursor: pointer;
-}
-
-.profileAvatarButton:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, #ffffff 38%, transparent);
-}
-
-.profile[data-logout-armed="true"] .profileAvatar {
-  border-color: #ffffff;
-  background: #000000;
-  color: #ffffff;
+  transition: background 0.25s, color 0.25s;
 }
 
 .profileInfo {
@@ -1048,9 +1025,28 @@
 }
 
 .newChatButton {
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: var(--accent-text);
+  border: 1px solid color-mix(in srgb, #ffffff 50%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #ffffff 72%, transparent) 0%,
+      color-mix(in srgb, #ffffff 50%, transparent) 38%,
+      color-mix(in srgb, #ffffff 34%, transparent) 100%
+    ),
+    radial-gradient(
+      circle at 18% 18%,
+      color-mix(in srgb, #ffffff 44%, transparent),
+      transparent 38%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 18%, transparent),
+      color-mix(in srgb, #ff9f1c 14%, transparent) 25%,
+      color-mix(in srgb, #b7e63a 14%, transparent) 48%,
+      color-mix(in srgb, #2fd3e3 14%, transparent) 72%,
+      color-mix(in srgb, #7b5cff 18%, transparent)
+    );
+  color: #000000;
   border-radius: 10px;
   padding: 10px 12px;
   cursor: pointer;
@@ -1063,11 +1059,35 @@
   align-items: center;
   gap: 8px;
   transition: background 0.25s, border-color 0.25s, color 0.25s, transform 0.05s;
-  box-shadow: var(--shadow-sm);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 55%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000000 16%, transparent);
 }
 
 .newChatButton:hover {
-  background: var(--accent-hover);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #ffffff 82%, transparent) 0%,
+      color-mix(in srgb, #ffffff 58%, transparent) 38%,
+      color-mix(in srgb, #ffffff 42%, transparent) 100%
+    ),
+    radial-gradient(
+      circle at 18% 18%,
+      color-mix(in srgb, #ffffff 52%, transparent),
+      transparent 38%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 24%, transparent),
+      color-mix(in srgb, #ff9f1c 18%, transparent) 25%,
+      color-mix(in srgb, #b7e63a 18%, transparent) 48%,
+      color-mix(in srgb, #2fd3e3 18%, transparent) 72%,
+      color-mix(in srgb, #7b5cff 24%, transparent)
+    );
+  border-color: color-mix(in srgb, #ffffff 62%, transparent);
+  color: #000000;
 }
 
 .newChatButton:active {
@@ -1084,23 +1104,21 @@
   text-align: center;
 }
 
-/* Private chat — secondary, paired with New chat as a sidebar set. Same
-   geometry (padding/font-size/border-radius) so the two buttons read as
-   a deliberate pair, and the text + glyph use the full theme foreground
-   (var(--fg)) so contrast holds at parity with New chat's accent-text.
-   Color tokens stay strictly B&W (fg/bg/line) — the accent triad is
-   deliberately not referenced here so even when the shell is tinted by
-   a bot or the lens, Private chat keeps reading as "no color leaks." */
+/* Private chat — secondary, paired with New chat as a sidebar set. It is
+   intentionally monochrome: New chat is white-filled/black text, Private
+   chat is the inverse white-outline/white text, independent of the active
+   accent color. */
 .privateChatButton {
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--fg);
+  border: 1px solid #ffffff;
+  background: transparent;
+  color: #ffffff;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 9px 11px;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.01em;
   text-align: left;
   width: 100%;
   display: flex;
@@ -1110,25 +1128,33 @@
 }
 
 .privateChatButton:hover {
-  border-color: var(--line-strong);
-  background: var(--bg-hover);
+  border-color: #ffffff;
+  color: #ffffff;
+  background: color-mix(in srgb, #ffffff 10%, transparent);
 }
 
 .privateChatButton:active {
   transform: translateY(1px);
 }
 
+.privateChatButton:focus-visible {
+  outline: none;
+  border-color: #ffffff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ffffff 28%, transparent);
+}
+
 /* "Armed" state — user clicked Private chat and the next send will
-   create an incognito conversation. Subtle outlined fill, still B&W. */
+   create an incognito conversation. Subtle accent fill, still secondary. */
 .privateChatButtonActive {
-  border-color: var(--fg);
-  color: var(--fg);
-  background: var(--bg-active);
+  border-color: #ffffff;
+  color: #ffffff;
+  background: color-mix(in srgb, #ffffff 14%, transparent);
 }
 
 .privateChatButtonActive:hover {
-  background: var(--bg-active);
-  color: var(--fg);
+  border-color: #ffffff;
+  background: color-mix(in srgb, #ffffff 18%, transparent);
+  color: #ffffff;
 }
 
 .privateChatButtonIcon {
@@ -1206,6 +1232,20 @@
     inset 0 8px 14px -8px rgba(0, 0, 0, 0.55),
     inset 0 -8px 14px -8px rgba(0, 0, 0, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.conversationList[data-private-empty="true"] {
+  align-content: center;
+}
+
+.conversationListEmptyState {
+  justify-self: center;
+  width: min(100%, 18ch);
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  text-align: center;
 }
 
 .conversationList::-webkit-scrollbar {
@@ -1288,12 +1328,13 @@
   font-weight: 500;
 }
 
-/* Bot-colored tint for conversation rows, keyed off the --row-color
+/* Bot/PRISM-colored tint for conversation rows, keyed off the --row-color
    custom property the React layer sets inline based on the LAST bot to
-   respond in each chat. For Chat-mode chats the bot is locked at
-   start, so this renders a static rainbow panel across many chats;
-   for Sandbox-mode chats, the tint updates on every assistant reply
-   since refreshConversations() pulls the server's live lastBotColor.
+   respond in each chat, or a PRISM fallback for Default/no-bot chats.
+   For Chat-mode chats the bot is locked at start, so this renders a
+   static rainbow panel across many chats; for Sandbox-mode chats, the
+   tint updates on every assistant reply since refreshConversations()
+   pulls the server's live lastBotColor.
    Private chats (data-private="true") never get a --row-color set and
    thus keep their existing grayscale rendering.
 
@@ -1820,20 +1861,14 @@
    NEXT_PUBLIC_DEV_TOOLS=1 at build time (see DEV_TOOLS_ENABLED in
    page.tsx); prod builds without that flag strip the JSX entirely. */
 
-/* Inline launcher button — sits directly to the right of the PRISM wordmark
-   so it stays visible even when framework dev overlays claim the viewport
-   corners. */
+/* Developer tools launcher. Uses the same icon-only footprint as the
+   adjacent utility buttons, with only a subtle danger tint to mark it as
+   a development-only surface. */
 .devToolsButton {
-  width: 30px !important;
-  height: 30px !important;
-  border: 1px solid color-mix(in srgb, var(--line-strong) 70%, var(--danger) 30%) !important;
-  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--danger) 12%) !important;
-  color: color-mix(in srgb, var(--fg) 84%, var(--danger) 16%) !important;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18) !important;
+  color: var(--fg-muted) !important;
 }
 
 .devToolsButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--bg-hover) 82%, var(--danger) 18%) !important;
   color: var(--fg) !important;
 }
 
@@ -2206,12 +2241,54 @@
   border-color: var(--line-strong);
 }
 
+.headerUtilityButton {
+  min-width: 48px;
+}
+
+.headerIconButton {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 30px !important;
+  height: 30px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--fg-muted);
+  border-radius: 999px !important;
+  box-shadow: none !important;
+  display: inline-grid !important;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.headerIconButton:hover:not(:disabled) {
+  color: var(--fg);
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+.headerIconButton:focus-visible {
+  outline: none;
+}
+
+.headerIconGlyph {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* Compact icon-only cycle button for Light / Dark / Auto. Lives in the
    headerActions cluster so it sits in the top-right corner of the window. */
-/* Icon-only cycle button for Light / Dark / Auto. Styled after the
-   provider-lock dock so both "small status buttons" look and feel the
-   same: fully round, no chrome at rest, fg-muted glyph that brightens on
-   hover. !important is needed to override the background / border /
+/* Icon-only cycle button for Light / Dark / Auto. Styled so small utility
+   buttons share the same rhythm: fully round, no chrome at rest,
+   fg-muted glyph that brightens on hover. !important is needed to override the background / border /
    padding baked into .headerActions button when this lives in the chat
    header cluster. */
 .themeToggleButton {
@@ -2397,6 +2474,35 @@
   isolation: isolate;
 }
 
+.messagesFrame[data-mode="home"] {
+  background:
+    radial-gradient(
+      ellipse 78% 58% at 10% 18%,
+      color-mix(in srgb, #ff4d6d 7%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      ellipse 82% 56% at 34% 4%,
+      color-mix(in srgb, #ff9f1c 5%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 86% 60% at 52% 50%,
+      color-mix(in srgb, #b7e63a 4%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 82% 58% at 72% 16%,
+      color-mix(in srgb, #2fd3e3 6%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 80% 60% at 92% 40%,
+      color-mix(in srgb, #7b5cff 6%, transparent),
+      transparent 72%
+    );
+}
+
 .messagesFrame::before,
 .messagesFrame::after {
   content: "";
@@ -2491,15 +2597,15 @@
    at `var(--lens-thumb-x, 50%)` so it sits exactly under the
    slider thumb, matching every other mode. */
 .messagesFrame[data-mode="home"]::after {
+  filter: saturate(1.45);
   background:
-    /* White core orb — brighter (95%) and slightly more focused so it
-       reads as a sharp "neon dot" sitting on the rainbow strip rather
-       than a fuzzy bloom. */
+    /* White core orb — still reads as the lens highlight, but with less
+       broad white spill so the PRISM band underneath stays saturated. */
     radial-gradient(
       ellipse 11% 38% at var(--lens-thumb-x, 50%) 100%,
-      color-mix(in srgb, #ffffff 95%, transparent) 0%,
-      color-mix(in srgb, #ffffff 52%, transparent) 22%,
-      color-mix(in srgb, #ffffff 20%, transparent) 48%,
+      color-mix(in srgb, #ffffff 78%, transparent) 0%,
+      color-mix(in srgb, #ffffff 32%, transparent) 22%,
+      color-mix(in srgb, #ffffff 10%, transparent) 48%,
       transparent 72%
     ),
     /* Wide, SHORT white halo behind the core — neon-strip-shaped (45%
@@ -2507,9 +2613,9 @@
        along the bottom edge rather than ballooning upward. */
     radial-gradient(
       ellipse 45% 26% at var(--lens-thumb-x, 50%) 100%,
-      color-mix(in srgb, #ffffff 32%, transparent) 0%,
-      color-mix(in srgb, #ffffff 12%, transparent) 30%,
-      color-mix(in srgb, #ffffff 4%, transparent) 60%,
+      color-mix(in srgb, #ffffff 16%, transparent) 0%,
+      color-mix(in srgb, #ffffff 6%, transparent) 30%,
+      color-mix(in srgb, #ffffff 2%, transparent) 60%,
       transparent 82%
     ),
     /* Five dynamic halos — populated from the bot library's PRISM
@@ -2524,37 +2630,37 @@
        overlap zones into smooth color transitions. */
     radial-gradient(
       ellipse 38% 28% at var(--home-halo-1-x, 12%) 100%,
-      color-mix(in srgb, var(--home-halo-1-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-1-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-1-color, transparent) 6%, transparent) 56%,
+      color-mix(in srgb, var(--home-halo-1-color, transparent) 62%, transparent) 0%,
+      color-mix(in srgb, var(--home-halo-1-color, transparent) 34%, transparent) 28%,
+      color-mix(in srgb, var(--home-halo-1-color, transparent) 10%, transparent) 56%,
       transparent 86%
     ),
     radial-gradient(
       ellipse 38% 28% at var(--home-halo-2-x, 31%) 100%,
-      color-mix(in srgb, var(--home-halo-2-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-2-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-2-color, transparent) 6%, transparent) 56%,
+      color-mix(in srgb, var(--home-halo-2-color, transparent) 62%, transparent) 0%,
+      color-mix(in srgb, var(--home-halo-2-color, transparent) 34%, transparent) 28%,
+      color-mix(in srgb, var(--home-halo-2-color, transparent) 10%, transparent) 56%,
       transparent 86%
     ),
     radial-gradient(
       ellipse 38% 28% at var(--home-halo-3-x, 50%) 100%,
-      color-mix(in srgb, var(--home-halo-3-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-3-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-3-color, transparent) 6%, transparent) 56%,
+      color-mix(in srgb, var(--home-halo-3-color, transparent) 62%, transparent) 0%,
+      color-mix(in srgb, var(--home-halo-3-color, transparent) 34%, transparent) 28%,
+      color-mix(in srgb, var(--home-halo-3-color, transparent) 10%, transparent) 56%,
       transparent 86%
     ),
     radial-gradient(
       ellipse 38% 28% at var(--home-halo-4-x, 69%) 100%,
-      color-mix(in srgb, var(--home-halo-4-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-4-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-4-color, transparent) 6%, transparent) 56%,
+      color-mix(in srgb, var(--home-halo-4-color, transparent) 62%, transparent) 0%,
+      color-mix(in srgb, var(--home-halo-4-color, transparent) 34%, transparent) 28%,
+      color-mix(in srgb, var(--home-halo-4-color, transparent) 10%, transparent) 56%,
       transparent 86%
     ),
     radial-gradient(
       ellipse 38% 28% at var(--home-halo-5-x, 88%) 100%,
-      color-mix(in srgb, var(--home-halo-5-color, transparent) 44%, transparent) 0%,
-      color-mix(in srgb, var(--home-halo-5-color, transparent) 20%, transparent) 28%,
-      color-mix(in srgb, var(--home-halo-5-color, transparent) 6%, transparent) 56%,
+      color-mix(in srgb, var(--home-halo-5-color, transparent) 62%, transparent) 0%,
+      color-mix(in srgb, var(--home-halo-5-color, transparent) 34%, transparent) 28%,
+      color-mix(in srgb, var(--home-halo-5-color, transparent) 10%, transparent) 56%,
       transparent 86%
     ),
     /* bg-surface fade — identical to default ::after for compose-form
@@ -2639,15 +2745,15 @@
 }
 
 .emptyStateSearching {
-  gap: 10px;
-  padding-top: 40px;
+  /* Search is an overlay, so opening it must not reflow the hero or picker. */
+  --empty-state-search-active: 1;
 }
 
-/* Empty-state icon — Default (no bot) variant.
+/* Empty-state icon — Default/private Prism variants.
  *
- * Uses the bare Prism triangle in both themes. The boxed dark icon and
- * animated halos stay exclusive to the auth screen's entry moment; the
- * "new conversation" placeholder should feel calmer and background-free. */
+ * Regular preview/engaged states use the bare Prism triangle. Private
+ * chats get their own hub-style black tile below so the user sees the
+ * same account/avatar object from the Hub without reintroducing hue. */
 .emptyStateBrand {
   position: relative;
   width: 56px;
@@ -2676,37 +2782,80 @@
     drop-shadow(0 1px 2px rgba(0, 0, 0, 0.28));
 }
 
+.emptyStatePrivateHero {
+  color: #ffffff;
+  overflow: visible;
+}
+
+.emptyStatePrivateHero::before,
+.emptyStatePrivateHero::after {
+  display: block;
+  background: #ffffff;
+  animation: none;
+  opacity: 0.16;
+}
+
+.emptyStatePrivateHero::before {
+  inset: -9px;
+  filter: blur(11px);
+}
+
+.emptyStatePrivateHero::after {
+  inset: -16px;
+  filter: blur(18px);
+  opacity: 0.11;
+}
+
+.themeLight .emptyStatePrivateHero::before,
+.themeLight .emptyStatePrivateHero::after {
+  display: block;
+}
+
+.themeLight .emptyStatePrivateHero .brandIcon {
+  display: block;
+}
+
 /* Empty-state icon — Bot variant.
  *
- * Scaled-up sibling of .botCardGlyph (see note there). Identical visual
- * vocabulary — color-mixed tinted background, color-mixed border, bot
- * color on the stroke — so the empty state, the bot card, the inline
- * name glyph, and the message bubble all read as "the same bot". Size
- * and border-radius match .emptyStateBrand's 56×56 footprint so the
- * layout never jumps when the user switches bots. */
+ * The hero stays synced to the selected bot color, but it deliberately
+ * avoids the solid square tile language used by editor controls. A soft
+ * ambient halo keeps it decorative/read-only at a glance instead of
+ * looking like another bot button. */
 .emptyStateBotGlyph {
   position: relative;
   width: 56px;
   height: 56px;
-  border-radius: 16px;
+  border-radius: 999px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
   isolation: isolate;
   overflow: visible;
   color: var(--bot-ink, var(--bot-color, var(--fg-muted)));
-  background: color-mix(
-    in srgb,
-    var(--bot-color, var(--fg-muted)) 14%,
-    transparent
-  );
-  border: 1px solid
-    color-mix(
-      in srgb,
-      var(--bot-color, var(--fg-muted)) 30%,
-      transparent
+  background:
+    radial-gradient(
+      circle,
+      color-mix(
+        in srgb,
+        var(--bot-color, var(--fg-muted)) 20%,
+        transparent
+      ) 0 44%,
+      transparent 72%
     );
-  box-shadow: var(--shadow-sm);
+  border: 0;
+  box-shadow:
+    0 0 34px
+      color-mix(
+        in srgb,
+        var(--bot-color, var(--fg-muted)) 22%,
+        transparent
+      ),
+    inset 0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--bot-color, var(--fg-muted)) 16%,
+        transparent
+      );
   /* Transitions on color-driving properties so the hero glyph morphs
      smoothly as committed bot selections change. The background / border
      / color share the same easing so the three properties read as a
@@ -2716,6 +2865,11 @@
     background 0.18s ease,
     border-color 0.18s ease,
     box-shadow 0.2s ease;
+}
+
+.emptyStateBotGlyph > svg {
+  width: 34px;
+  height: 34px;
 }
 
 /* Clickable hero in the COMMITTED state — wraps EmptyStateIcon so the
@@ -2788,17 +2942,20 @@
 }
 
 .emptyStateSearch {
-  width: min(520px, calc(100% - 32px));
-  margin: 0 auto 2px;
+  width: min(520px, calc(100% - 48px));
+  margin: 0 auto;
   display: grid;
   gap: 8px;
-  position: relative;
-  z-index: 2;
+  position: absolute;
+  top: 154px;
+  left: 24px;
+  right: 24px;
+  z-index: 4;
   animation: emptyStateSearchSpotlightIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .emptyStateSearching .emptyStateSearch {
-  margin: 0 auto 6px;
+  margin: 0 auto;
 }
 
 .emptyStateSearchField {
@@ -2811,12 +2968,12 @@
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--bg-surface) 88%, rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--bg) 82%, rgba(255, 255, 255, 0.08))
+      color-mix(in srgb, var(--bg-surface) 42%, transparent),
+      color-mix(in srgb, var(--bg) 34%, transparent)
     );
-  border: 1px solid color-mix(in srgb, var(--line) 72%, var(--accent-glow));
+  border: 1px solid color-mix(in srgb, var(--line) 48%, var(--accent-glow));
   box-shadow:
-    0 18px 56px color-mix(in srgb, #000 24%, transparent),
+    0 18px 48px color-mix(in srgb, #000 16%, transparent),
     0 0 0 1px color-mix(in srgb, #fff 4%, transparent) inset;
   backdrop-filter: blur(18px) saturate(1.24);
 }
@@ -2879,11 +3036,16 @@
    breathing ring in the bot's own hue. */
 .emptyStateIconButton:hover .emptyStateBotGlyph {
   box-shadow:
-    var(--shadow-sm),
-    0 0 0 4px
+    0 0 38px
       color-mix(
         in srgb,
-        var(--bot-color, var(--fg-muted)) 22%,
+        var(--bot-color, var(--fg-muted)) 30%,
+        transparent
+      ),
+    inset 0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--bot-color, var(--fg-muted)) 24%,
         transparent
       );
 }
@@ -2922,9 +3084,9 @@
  * Tile size is still driven by --tile-size so the one-bot → wall-of-
  * tiles sizing curve in pickerGeometry() still works.
  *
- * Visual DNA stays in lockstep with .glyphOption / .botCardGlyph /
- * .emptyStateBotGlyph: each tile carries its own --bot-color via inline
- * style and color-mixes background, border, and glyph against it.
+ * Visual DNA stays in lockstep with the editor's bot-colored glyph previews:
+ * each tile carries its own --bot-color via inline style and color-mixes
+ * background, border, and glyph against it.
  *
  * The hover effect is "Apple Watch but inverted" — instead of layout
  * dictating focus (center icon biggest), the cursor dictates focus: the
@@ -2976,29 +3138,6 @@
    non-touch sessions and idle states keep their default touch-action. */
 .chatBotPickerFrame[data-touch-active="true"] {
   touch-action: none;
-}
-
-@media (min-width: 721px) {
-  .emptyStateSearch {
-    margin-bottom: 28px;
-  }
-
-  .chatBotPickerFrame[data-search-active="true"] {
-    position: relative;
-    left: auto;
-    bottom: auto;
-    top: 28px;
-    width: min(var(--picker-width, 320px), calc(100% - 48px));
-    height: min(var(--picker-height, 320px), 200px);
-    margin: 28px auto 0;
-    overflow: hidden;
-    transform: none;
-  }
-
-  .chatBotPickerFrame[data-search-active="true"][data-returning-all="true"],
-  .chatBotPickerFrame[data-search-active="true"][data-returning-all="true"] .chatBotPicker {
-    animation: none;
-  }
 }
 
 @keyframes botPickerReturnToAll {
@@ -3109,7 +3248,7 @@
   /* Default (non-selected) state: opaque two-stop gradient carrying a
      faint --bot-color tint so the user still reads a flash of color,
      but the glyph stays the focal point. Both stops mix bot color into
-     --bg-surface (theme-aware: white in light, #121214 in dark) — top
+     --bg-surface (theme-aware: white in light, #151311 in dark) — top
      edge gets a touch more tint, bottom edge fades toward neutral, so
      each tile reads as a subtly-lifted card instead of a flat swatch.
      A 1px border mixed against --line reserves layout so hover/
@@ -3676,11 +3815,9 @@
 }
 
 /* Light mode needs a stronger edge treatment because warm bot colors sit on
-   warm ivory instead of near-black. Keep the fill soft, but lean tile outlines
-   slightly toward foreground so bright oranges/yellows remain legible. */
-.themeLight .emptyStateBotGlyph,
-.themeLight .colorSwatchButton,
-.themeLight .botCardGlyph,
+   warm ivory instead of near-black. Keep chat-picker fills soft, but lean
+   tile outlines slightly toward foreground so bright oranges/yellows remain
+   legible. Editor previews use solid bot-color tiles and opt out above. */
 .themeLight .chatBotTile:not(.chatBotTileSolidSwatch) {
   border-color: color-mix(
     in srgb,
@@ -3846,6 +3983,21 @@
   border-radius: 14px 0 0 4px;
 }
 
+.messageAssistant[data-message-edge="prism"]::before {
+  background: linear-gradient(
+    180deg,
+    #ff4d6d,
+    #ff9f1c 24%,
+    #b7e63a 48%,
+    #2fd3e3 72%,
+    #7b5cff
+  );
+}
+
+.messageAssistant[data-message-edge="private"]::before {
+  background: var(--fg);
+}
+
 .messageAssistant::after {
   content: "";
   position: absolute;
@@ -3857,6 +4009,23 @@
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--message-accent, transparent) 18%, transparent),
+    transparent
+  );
+}
+
+.messageAssistant[data-message-edge="prism"]::after {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, #ff4d6d 11%, transparent),
+    color-mix(in srgb, #2fd3e3 7%, transparent) 45%,
+    transparent
+  );
+}
+
+.messageAssistant[data-message-edge="private"]::after {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--fg) 10%, transparent),
     transparent
   );
 }
@@ -3887,6 +4056,32 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.prismMessageRoleLabel {
+  display: inline-flex;
+  align-items: center;
+}
+
+.messageRoleVisuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.prismMessageRoleLetters {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.prismMessageRoleLetter {
+  color: var(--fg);
 }
 
 .messageUser h4 {
@@ -4158,6 +4353,16 @@
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.composeUtilityActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composeUtilityButton {
+  flex-shrink: 0;
 }
 
 .composeModelControl {
@@ -4835,17 +5040,11 @@
   color: var(--fg);
 }
 
-/* Integrated response-mode control:
-   - left: a compact "lightswitch" track with a sliding thumb
-   - right: a background-less lock glyph docked inside the same rail
-   Hover on the lock lights up the WHOLE rail border so the lock's coupling
-   with the switch is obvious. Clicking the lock physically "welds" the thumb
-   to the lock via a pseudo-element that bridges the 4 px gap, so the locked
-   state reads as one continuous raised piece. */
+/* Integrated response-mode control: a compact lightswitch track with a
+   sliding thumb for LOCAL / ONLINE. */
 .modeControl {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
   border: 1px solid var(--line);
   background: var(--bg-deep);
   border-radius: 999px;
@@ -4860,13 +5059,6 @@
 
 .modeControl:hover {
   border-color: var(--line-strong);
-}
-
-/* When the padlock is the hover target, treat the whole rail as hot. Tells
-   the user "this button governs the entire control", not just a tiny pill.
-   Browsers without :has() just fall back to the plain .modeLockDock hover. */
-.modeControl:has(.modeLockDock:hover):not(.modeControlLocked) {
-  border-color: var(--accent-ink);
 }
 
 .modeControlLocked {
@@ -4889,9 +5081,7 @@
   border-radius: 999px;
   position: relative;
   cursor: pointer;
-  /* overflow stays visible so the locked-state bridge can extend past the
-     track on the right without being clipped. */
-  overflow: visible;
+  overflow: hidden;
 }
 
 .modeToggleTrackLocked {
@@ -4942,98 +5132,14 @@
   line-height: 1;
 }
 
-/* Locked: the thumb changes color to an accent tint AND grows a bridge across
-   the 4 px flex gap into the lock dock. Together with the filled lock body
-   (see .modeLockGlyphLocked) the whole right side of the control reads as
-   one welded-shut piece of metal. */
 .modeControlLocked .modeThumb {
   background: var(--accent-soft);
   color: var(--fg);
-  border-top-right-radius: 4px;
-  border-bottom-right-radius: 4px;
   box-shadow: 0 0 0 1px var(--accent), 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
-.modeControlLocked .modeThumb::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 100%;
-  /* Wider than the 4 px flex gap so the join visibly tucks under the lock
-     glyph instead of ending at the seam. */
-  width: 10px;
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 1px var(--accent), 0 1px 2px rgba(0, 0, 0, 0.35);
-  /* Square on the left so it butts flush against the squared thumb edge,
-     gently rounded on the right so it tucks under the lock cleanly. */
-  border-radius: 0 4px 4px 0;
-  pointer-events: none;
-}
-
-.themeLight .modeControlLocked .modeThumb,
-.themeLight .modeControlLocked .modeThumb::after {
+.themeLight .modeControlLocked .modeThumb {
   box-shadow: 0 0 0 1px var(--accent), 0 1px 2px rgba(17, 24, 39, 0.1);
-}
-
-/* Right-side lock dock: intentionally transparent at every state. The visual
-   state changes live on the rail border and the glyph color instead. */
-.modeLockDock {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  margin: 0;
-  border: 0;
-  background: transparent;
-  color: var(--fg-muted);
-  border-radius: 999px;
-  display: inline-grid;
-  place-items: center;
-  cursor: pointer;
-  font: inherit;
-  line-height: 1;
-  flex-shrink: 0;
-  position: relative;
-  z-index: 1;
-  transition: color 0.2s ease;
-}
-
-.modeLockDock:hover:not(:disabled) {
-  color: var(--fg);
-}
-
-.modeLockDock:focus-visible {
-  outline: none;
-}
-
-.modeLockDockLocked,
-.modeLockDockLocked:hover:not(:disabled) {
-  color: var(--accent-ink);
-}
-
-.modeLockDock:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.modeLockGlyph {
-  width: 14px;
-  height: 14px;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: fill 0.2s ease, stroke 0.2s ease;
-}
-
-/* Locked: fill the lock body so the glyph shifts from a hollow outline to
-   a solid padlock silhouette. Pairs with the accent thumb + bridge so the
-   locked state is unmistakable at a glance. */
-.modeLockGlyph.modeLockGlyphLocked .modeLockBody {
-  fill: currentColor;
 }
 
 .composeInner {
@@ -5249,7 +5355,7 @@
    descendant inherits them. Overriding that triad at the Bots panel
    boundary neutralises the bleed in one place instead of patching each
    descendant selector. Resolves to near-black accents in light mode
-   (--fg = #0b0b0d) and near-white accents in dark mode, so buttons +
+   (--fg = #17130f in light) and warm near-white accents in dark mode, so buttons +
    focus rings + input highlights inside the panel read in pure B/W
    regardless of the last bot talked to.
    Per-card identity (`.botCard::before` bar and `.botCardGlyph`) keeps
@@ -5264,6 +5370,8 @@
   --accent-ink: var(--fg);
   --accent-soft: color-mix(in srgb, var(--fg) 12%, var(--bg) 88%);
   --accent-glow: color-mix(in srgb, var(--fg) 22%, transparent);
+  --picker-color: var(--editor-bot-color);
+  --picker-ink: var(--editor-bot-ink);
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   align-content: stretch;
   overflow: hidden;
@@ -5639,77 +5747,6 @@
   gap: 7px;
 }
 
-/* ── ComposerModelPicker form-variant overrides ──────────────────────
-   The chat compose toolbar uses ComposerModelPicker as a 36px pill that
-   opens its menu UPWARD (suited to a sticky bottom-of-screen toolbar).
-   Inside the bot editor it needs to read as a full-width form field that
-   visually matches the rest of .form's inputs, with a menu that opens
-   DOWNWARD so it doesn't cover the label and prior parameter rows. */
-.botParameterModelField .composeModelControl {
-  display: flex;
-  width: 100%;
-  height: auto;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-}
-
-/* Drop the provider-tinted backgrounds — those are a chat-toolbar accent
-   that would compete with the bot's own accent in the editor panel. */
-.botParameterModelField .composeModelControl[data-provider="local"],
-.botParameterModelField .composeModelControl[data-provider="openai"] {
-  background: var(--bg);
-}
-
-.botParameterModelField .composeModelControl:hover,
-.botParameterModelField .composeModelControl:focus-within {
-  border-color: var(--line-strong);
-}
-
-.botParameterModelField .composeModelTrigger {
-  width: 100%;
-  height: auto;
-  padding: 11px 13px;
-  font-size: 14px;
-  justify-content: space-between;
-  border-radius: inherit;
-}
-
-/* The inline "MODEL" mini-label is redundant here — the parent <span>
-   already names the field ("Preferred offline model" / "...online model"). */
-.botParameterModelField .composeControlLabel {
-  display: none;
-}
-
-.botParameterModelField .composeModelTriggerName {
-  flex: 1;
-  text-align: left;
-  font-size: 14px;
-  color: var(--fg);
-}
-
-.botParameterModelField .composeBotMenu {
-  bottom: auto;
-  top: calc(100% + 6px);
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-}
-
-/* Editor-only panel uses the active bot's color for accents on focus, so
-   mirror the input/textarea behaviour for the picker control too. */
-.panelBots[data-editor-only="true"] .botParameterModelField .composeModelControl {
-  border-color: color-mix(in srgb, var(--editor-bot-color) 18%, var(--line));
-}
-
-.panelBots[data-editor-only="true"]
-  .botParameterModelField
-  .composeModelControl:focus-within {
-  border-color: var(--editor-bot-color);
-  box-shadow: 0 0 0 3px
-    color-mix(in srgb, var(--editor-bot-color) 22%, transparent);
-}
-
 .botParameterQuestionRow {
   display: flex;
   align-items: center;
@@ -5913,6 +5950,44 @@
   padding-top: 14px;
   display: grid;
   gap: 8px;
+}
+
+.accountActions {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.accountActions h4 {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.accountLogoutButton {
+  margin-top: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  justify-self: start;
+}
+
+.accountLogoutButton:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--fg-muted);
+}
+
+.accountLogoutButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .dangerZone h4 {
@@ -6187,10 +6262,10 @@
   gap: 6px;
 }
 
-/* Avatar-style tile on the left of each bot card. Uses the bot's own
-   color via --bot-color (falls back to fg-muted for the default card or
-   bots without a color). The tile has a soft accent-tinted background
-   and the glyph itself inherits the accent color. */
+/* Avatar-style tile on the left of each bot card. Editor previews use the
+   same selected-tile language as the swatch trigger: solid bot color with a
+   readable glyph ink, instead of the softer ambient treatment used by the
+   empty-state hero. */
 .botCardGlyph {
   width: 34px;
   height: 34px;
@@ -6199,50 +6274,44 @@
   place-items: center;
   flex-shrink: 0;
   align-self: flex-start;
-  color: var(--bot-color, var(--fg-muted));
-  background: color-mix(
-    in srgb,
-    var(--bot-color, var(--fg-muted)) 14%,
-    transparent
-  );
+  color: var(--bot-tile-ink, var(--accent-text));
+  background: var(--bot-color, var(--accent));
   border: 1px solid
     color-mix(
       in srgb,
-      var(--bot-color, var(--fg-muted)) 30%,
-      transparent
+      var(--bot-color, var(--accent)) 78%,
+      var(--bot-tile-ink, #000000)
     );
-}
-
-/* Inline bot glyph shown next to the bot name in an assistant message
-   header. Inherits `color` from the wrapper, which receives the bot's
-   exact hex color as an inline style so it reads at full saturation
-   even when --message-accent is tweaking the bubble fill. */
-.messageBotGlyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  margin-right: 2px;
+  box-shadow: 0 8px 18px
+    color-mix(in srgb, var(--bot-color, var(--accent)) 20%, transparent);
 }
 
 /* ── Bot glyph picker ────────────────────────────────────────────
    Dense, glyph-first grid. Compact square cells keep the chooser tidy
    while the glyph size/stroke relationship comes from BotGlyph itself:
    larger marks get thinner strokes, smaller marks get thicker strokes.
-   Cells use an explicit black/white polarity: resting glyph buttons are
-   black with white marks, and selected buttons invert to white with
-   black marks. On hover, the currently-picked wheel color gives a live
-   "paint-preview" feel where you can see each candidate glyph wearing
-   the accent before you commit. The wheel color is piped in via
-   --picker-color, which is set inline on .glyphGridShell
-   (clampAccentLightness-normalized so it reads in both light and dark
-   modes identically to accents elsewhere). Falls back to the theme's
-   stock accent tokens when --picker-color is unavailable. */
+   The glyph box is deliberately black/white instead of bot-colored:
+   dark theme rests black with white marks, light theme rests white
+   with black marks, and the selected glyph inverts that polarity. */
 .glyphPicker {
+  --glyph-option-bg: #000000;
+  --glyph-option-fg: #ffffff;
+  --glyph-option-selected-bg: #ffffff;
+  --glyph-option-selected-fg: #000000;
+  --glyph-option-border: rgba(255, 255, 255, 0.18);
+  --glyph-option-hover-border: rgba(255, 255, 255, 0.42);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
   gap: 4px;
+}
+
+.themeLight .glyphPicker {
+  --glyph-option-bg: #ffffff;
+  --glyph-option-fg: #000000;
+  --glyph-option-selected-bg: #000000;
+  --glyph-option-selected-fg: #ffffff;
+  --glyph-option-border: rgba(0, 0, 0, 0.2);
+  --glyph-option-hover-border: rgba(0, 0, 0, 0.48);
 }
 
 .glyphPicker button.glyphOption {
@@ -6258,8 +6327,8 @@
      The tile fill itself carries the black/white state, while the 1px
      border keeps hover/selection from jittering the glyph. */
   border: 1px solid transparent;
-  background: #000000;
-  color: #ffffff;
+  background: var(--glyph-option-bg);
+  color: var(--glyph-option-fg);
   border-radius: 4px;
   padding: 0;
   display: grid;
@@ -6271,12 +6340,6 @@
     border-color 0.15s,
     color 0.15s,
     box-shadow 0.15s;
-}
-
-.themeLight .glyphPicker button.glyphOption {
-  color: #ffffff;
-  background: #000000;
-  border-color: #000000;
 }
 
 .glyphOption > svg {
@@ -6294,50 +6357,37 @@
   transform-origin: center;
 }
 
-/* Picker color is confined to hover/focus so the grid stays calm. Selection
-   uses the app-wide inverted-button language: --fg tile fill, --bg glyph ink. */
+.glyphPicker button.glyphOption {
+  color: var(--glyph-option-fg);
+  background: var(--glyph-option-bg);
+  border-color: var(--glyph-option-border);
+}
+
 .glyphPicker button.glyphOption:hover:not(.glyphOptionSelected) {
-  color: var(--picker-ink, #ffffff);
-  background: var(--picker-color, var(--line-strong));
-  border-color: var(--picker-color, var(--line-strong));
+  color: var(--glyph-option-fg);
+  background: var(--glyph-option-bg);
+  border-color: var(--glyph-option-hover-border);
 }
 
 .glyphPicker button.glyphOption:focus-visible {
   outline: none;
-  border-color: var(--picker-color, var(--line-strong));
+  border-color: var(--glyph-option-hover-border);
 }
 
 .glyphPicker button.glyphOptionSelected,
 .glyphPicker button.glyphOptionSelected:focus-visible {
-  color: #000000;
-  background: #ffffff;
+  color: var(--glyph-option-selected-fg);
+  background: var(--glyph-option-selected-bg);
   background-image: none;
-  border-color: #ffffff;
+  border-color: var(--glyph-option-selected-bg);
   box-shadow: none;
 }
 
 .glyphPicker button.glyphOptionSelected:hover {
-  color: var(--picker-color, #000000);
-  background: #ffffff;
+  color: var(--glyph-option-selected-fg);
+  background: var(--glyph-option-selected-bg);
   background-image: none;
-  border-color: #ffffff;
-  box-shadow: none;
-}
-
-.themeLight .glyphPicker button.glyphOptionSelected,
-.themeLight .glyphPicker button.glyphOptionSelected:focus-visible {
-  color: #000000;
-  background: #ffffff;
-  background-image: none;
-  border-color: #ffffff;
-  box-shadow: none;
-}
-
-.themeLight .glyphPicker button.glyphOptionSelected:hover {
-  color: var(--picker-color, #000000);
-  background: #ffffff;
-  background-image: none;
-  border-color: #ffffff;
+  border-color: var(--glyph-option-selected-bg);
   box-shadow: none;
 }
 
@@ -6353,22 +6403,22 @@
   min-width: 0;
 }
 
-/* Swatch trigger: the same soft 56×56 bot hero tile used by
-   .emptyStateBotGlyph in the main editor, made interactive so the profile
-   picture and editor hero stay visually identical. Click opens the combined
-   picker popover; right-click re-rolls BOTH color and glyph. */
+/* Swatch trigger: solid bot-color tile with readable glyph ink, matching the
+   selected-tile look from the bot picker without borrowing the softer hero
+   treatment. Click opens the combined picker popover; right-click re-rolls
+   BOTH color and glyph. */
 .colorPickerWrapper {
   position: relative;
   display: inline-flex;
   align-items: center;
 }
 
+.form button.colorSwatchButton,
 .colorSwatchButton {
   -webkit-appearance: none;
   appearance: none;
   /* Pin the preview to a fixed square footprint so it never stretches
-     with the bot-name input it sits beside, and matches the stage 1
-     chatBotTile chrome (gradient fill + bot-color border + tinted glyph). */
+     with the bot-name input it sits beside. */
   width: 56px;
   height: 56px;
   min-width: 56px;
@@ -6376,17 +6426,13 @@
   aspect-ratio: 1 / 1;
   padding: 0;
   border-radius: 14px;
-  color: var(--bot-color, var(--fg-muted));
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 14%, var(--bg-surface)),
-    color-mix(in srgb, var(--bot-color, var(--fg-muted)) 6%, var(--bg-surface))
-  );
+  color: var(--bot-tile-ink, var(--bot-ink, var(--accent-text)));
+  background: var(--bot-color, var(--accent));
   border: 1px solid
     color-mix(
       in srgb,
-      var(--bot-color, var(--fg-muted)) 34%,
-      var(--line)
+      var(--bot-color, var(--accent)) 78%,
+      var(--bot-tile-ink, #000000)
     );
   cursor: pointer;
   overflow: visible;
@@ -6396,8 +6442,8 @@
   isolation: isolate;
   line-height: 0;
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent),
-    var(--shadow-sm);
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
+    0 10px 24px color-mix(in srgb, var(--bot-color, var(--accent)) 24%, transparent);
   transition:
     color 0.18s ease,
     background 0.18s ease,
@@ -6406,6 +6452,7 @@
     transform 0.08s;
 }
 
+.form button.colorSwatchButton > svg,
 .colorSwatchButton > svg {
   display: block;
   width: 24px;
@@ -6413,19 +6460,32 @@
   margin: auto;
 }
 
+.form button.colorSwatchButton:hover,
 .colorSwatchButton:hover {
+  background: var(--bot-color, var(--accent));
+  color: var(--bot-tile-ink, var(--bot-ink, var(--accent-text)));
   filter: brightness(1.08);
 }
 
+.form button.colorSwatchButton:active,
 .colorSwatchButton:active {
+  background: var(--bot-color, var(--accent));
+  color: var(--bot-tile-ink, var(--bot-ink, var(--accent-text)));
   transform: translateY(1px);
 }
 
+.form button.colorSwatchButton:focus-visible,
 .colorSwatchButton:focus-visible {
   outline: none;
-  border-color: color-mix(in srgb, var(--bot-color, var(--fg-muted)) 42%, transparent);
+  background: var(--bot-color, var(--accent));
+  color: var(--bot-tile-ink, var(--bot-ink, var(--accent-text)));
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--accent)) 64%,
+    var(--bot-tile-ink, #000000)
+  );
   box-shadow:
-    var(--shadow-sm),
+    0 10px 24px color-mix(in srgb, var(--bot-color, var(--accent)) 24%, transparent),
     0 0 0 3px var(--accent-glow);
 }
 
@@ -6540,6 +6600,7 @@
   height: 280px;
   border-radius: 10px;
   overflow: hidden;
+  isolation: isolate;
   /* 3D stage for the inner tilt. 800px gives a gentle perspective —
      enough to see the rotation, not so much that glyphs distort. */
   perspective: 800px;
@@ -6588,7 +6649,7 @@
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  z-index: 4; /* above ::after vignette so rim reads cleanly */
+  z-index: 0;
   border: 2.5px solid transparent;
   /* IMPORTANT — ellipse, NOT circle. The shell is wider than it is tall,
      so a `circle farthest-corner` gradient puts the left/right edge
@@ -6639,7 +6700,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 3;
+  z-index: 0;
   /* Ellipse (matching the rim) so shadow and rim stay symmetrical:
      light on whichever side the camera faces, shadow pooling on the
      opposite side. Alpha stops are multiplied by --vignette-intensity
@@ -6654,6 +6715,8 @@
 }
 
 .glyphGridScroll {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   overflow-y: auto;
@@ -6765,7 +6828,7 @@
 /* Dark-mode band compression: pulls the overlay's black/white caps
    closer to the mid-band so the visible gradient spans [38, 62] in
    HSL lightness rather than the light-mode [30, 70]. Deep hues come
-   out a little brighter (readable against `#0a0a0b`), pale hues a
+   out a little brighter (readable against `#0b0a09`), pale hues a
    little dimmer (no more glare). Saturation is unchanged — the overlay
    only touches the L axis. */
 .themeDark .colorSquare {
@@ -6787,9 +6850,9 @@
   border-radius: 50%;
   transform: translate(-50%, -50%);
   background: transparent;
-  border: 2px solid #ffffff;
+  border: 2px solid #000000;
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.72),
     0 0 6px rgba(0, 0, 0, 0.25);
   pointer-events: none;
 }

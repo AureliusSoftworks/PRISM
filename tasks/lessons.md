@@ -5,6 +5,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-04-25 · [UX]
+**Trigger**: A sidebar Conversations delete-all header × was first aligned to the outer sidebar edge, then overcorrected too far left before landing on the row delete column.
+**Lesson**: Sidebar header actions that correspond to row actions should align to the row action column inside the conversation list inset, not the outer sidebar edge or label width. For the Conversations delete-all ×, use the same effective gutter as `.conversationDelete` rather than `space-between` across the whole sidebar.
+**Applies to**: `apps/web/src/app/page.module.css` `.conversationHeaderRow`, `.conversationDeleteAllButton`, and sidebar row action alignment.
+
+### 2026-04-25 · [UX]
 **Trigger**: The stage-4+ bot picker used center-out/radial population ordering, and PRISM category dashboard tiles used radial/conic color treatment.
 **Lesson**: Bot picker grid population should stay row-major left-to-right across all density stages. PRISM category dashboard gradients should read left-to-right, not radial/conic.
 **Applies to**: `apps/web/src/app/page.tsx` `pickerFormationCells()` and `buildBotGroupGradient()`.

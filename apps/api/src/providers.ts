@@ -121,12 +121,19 @@ function truncateForDisplay(value: string): string {
 }
 
 function modelLabelFromId(id: string): string {
-  return id
+  const parts = id
     .split(/[-_:]/)
     .filter(Boolean)
-    .map((part) => part.toUpperCase() === part
-      ? part
-      : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .filter((part, index, allParts) =>
+      !(index === allParts.length - 1 && part.toLowerCase() === "latest")
+    );
+  const displayParts = parts.length > 0 ? parts : [id];
+  return displayParts
+    .map((part) =>
+      part.toUpperCase() === part
+        ? part
+        : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`
+    )
     .join(" ");
 }
 

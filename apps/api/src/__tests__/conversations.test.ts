@@ -2,8 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  createDevSeedConversations,
   deleteAllConversations,
   deleteConversation,
+  listConversationSummaries,
   rewindConversation,
 } from "../conversations.ts";
 
@@ -16,6 +18,17 @@ function createTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
+      bot_id TEXT,
+      incognito INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE bots (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT,
+      glyph TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -25,6 +38,7 @@ function createTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      bot_id TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE conversation_exports (
@@ -74,6 +88,108 @@ function seedChat(db: DatabaseSync, userId: string, conversationId: string): voi
     "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
   ).run(`sum-${suffix}`, userId, conversationId, "user likes cats", now);
 }
+
+function seedListConversation(
+  db: DatabaseSync,
+  options: {
+    id: string;
+    userId: string;
+    title: string;
+    updatedAt: string;
+    incognito?: boolean;
+    botId?: string | null;
+    assistantBotId?: string | null;
+  }
+): void {
+  db.prepare(
+    "INSERT INTO conversations (id, user_id, title, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    options.id,
+    options.userId,
+    options.title,
+    options.botId ?? null,
+    options.incognito ? 1 : 0,
+    "2026-01-01T00:00:00.000Z",
+    options.updatedAt
+  );
+
+  if (options.assistantBotId !== undefined) {
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      `assistant-${options.id}`,
+      options.id,
+      options.userId,
+      "assistant",
+      "hello",
+      options.assistantBotId,
+      options.updatedAt
+    );
+  }
+}
+
+describe("listConversationSummaries", () => {
+  it("excludes persisted private conversations from the sidebar list", () => {
+    const db = createTestDb();
+    seedListConversation(db, {
+      id: "saved-1",
+      userId: "user-1",
+      title: "Saved chat",
+      updatedAt: "2026-01-01T00:00:03.000Z",
+    });
+    seedListConversation(db, {
+      id: "private-1",
+      userId: "user-1",
+      title: "Private chat",
+      updatedAt: "2026-01-01T00:00:04.000Z",
+      incognito: true,
+    });
+    seedListConversation(db, {
+      id: "other-user",
+      userId: "user-2",
+      title: "Other user chat",
+      updatedAt: "2026-01-01T00:00:05.000Z",
+    });
+
+    const conversations = listConversationSummaries(db, "user-1");
+
+    assert.deepEqual(
+      conversations.map(c => c.id),
+      ["saved-1"]
+    );
+    assert.ok(conversations.every(c => !c.incognito));
+  });
+
+  it("keeps public conversation row metadata for sidebar coloring", () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-1",
+      "user-1",
+      "Storm Bot",
+      "#67e8f9",
+      "triangle",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z"
+    );
+    seedListConversation(db, {
+      id: "saved-1",
+      userId: "user-1",
+      title: "Saved chat",
+      botId: "bot-1",
+      assistantBotId: "bot-1",
+      updatedAt: "2026-01-01T00:00:03.000Z",
+    });
+
+    const [conversation] = listConversationSummaries(db, "user-1");
+
+    assert.equal(conversation?.botId, "bot-1");
+    assert.equal(conversation?.lastBotId, "bot-1");
+    assert.equal(conversation?.lastBotColor, "#67e8f9");
+    assert.equal(conversation?.hasAssistantReply, true);
+  });
+});
 
 describe("deleteConversation", () => {
   it("removes the chat, its messages, and its exports", () => {
@@ -255,6 +371,57 @@ describe("deleteAllConversations", () => {
       .prepare("SELECT conversation_id FROM images WHERE user_id = ?")
       .get("user-2") as { conversation_id: string | null } | undefined;
     assert.equal(otherImage?.conversation_id, "chat-3");
+  });
+});
+
+describe("createDevSeedConversations", () => {
+  it("creates saved sidebar chats with lorem assistant replies", () => {
+    const db = createTestDb();
+    const now = "2026-01-01T00:00:00.000Z";
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Ada", "#67e8f9", "bot", now, now);
+
+    const created = createDevSeedConversations(db, "user-1", 2);
+
+    assert.equal(created, 2);
+    const conversations = listConversationSummaries(db, "user-1");
+    assert.equal(conversations.length, 2);
+    assert.ok(conversations.every((conversation) => conversation.hasAssistantReply));
+    assert.ok(conversations.every((conversation) => conversation.botId === "bot-1"));
+    assert.ok(conversations.every((conversation) => conversation.lastBotId === "bot-1"));
+    assert.ok(conversations.every((conversation) => conversation.lastBotColor === "#67e8f9"));
+
+    const messages = db
+      .prepare("SELECT role, content, bot_id FROM messages WHERE user_id = ? ORDER BY created_at ASC")
+      .all("user-1") as Array<{ role: string; content: string; bot_id: string | null }>;
+    assert.equal(messages.length, 4);
+    assert.equal(messages.filter((message) => message.role === "assistant").length, 2);
+    assert.ok(
+      messages
+        .filter((message) => message.role === "assistant")
+        .every((message) => message.content.includes("Lorem ipsum") && message.bot_id === "bot-1")
+    );
+  });
+
+  it("falls back to default assistant chats when the user has no bots", () => {
+    const db = createTestDb();
+
+    createDevSeedConversations(db, "user-1", 1);
+
+    const [conversation] = listConversationSummaries(db, "user-1");
+    assert.equal(conversation?.botId, null);
+    assert.equal(conversation?.lastBotId, null);
+    assert.equal(conversation?.hasAssistantReply, true);
+  });
+
+  it("rejects non-positive seed counts", () => {
+    const db = createTestDb();
+
+    assert.throws(
+      () => createDevSeedConversations(db, "user-1", 0),
+      /positive integer/
+    );
   });
 });
 

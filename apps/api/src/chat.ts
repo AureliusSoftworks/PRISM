@@ -48,6 +48,11 @@ export interface UserChatSettings {
    */
   botId?: string | null;
   incognito?: boolean;
+  /**
+   * Client-held prior messages for private chats. Used as prompt context only;
+   * incognito turns never read from or write to conversation/message storage.
+   */
+  ephemeralMessages?: ChatMessage[];
   botSystemPrompt?: string;
   /** Optional per-bot generation overrides, forwarded to the provider. */
   botOverrides?: GenerateOptions;
@@ -55,7 +60,7 @@ export interface UserChatSettings {
    * Which post-auth surface the request originated from. Changes what
    * "memory" means for this turn:
    *   - "chat": cross-thread personal-fact memory + Qdrant summary recall.
-   *     Honors `incognito` as a force-offline + skip-memory shortcut.
+   *     Honors `incognito` as an ephemeral + skip-memory shortcut.
    *   - "sandbox": NO cross-thread memory. Thread-scoped rolling
    *     compaction only — silent, invisible in the sidebar, never
    *     retrievable from other conversations.
@@ -170,6 +175,26 @@ function buildPromptMessages(args: {
   return promptMessages;
 }
 
+function sanitizeEphemeralMessages(messages: ChatMessage[] | undefined): ChatMessage[] {
+  if (!messages) return [];
+  return messages
+    .filter((message) =>
+      (message.role === "user" || message.role === "assistant" || message.role === "system") &&
+      message.content.trim().length > 0
+    )
+    .slice(-RECENT_WINDOW_SIZE);
+}
+
+function privateConversationTitle(messages: ChatMessage[], fallbackMessage: string, label?: string): string {
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  if (firstUserMessage) {
+    return generateConversationTitle(firstUserMessage.content);
+  }
+  return fallbackMessage.trim().length > 0
+    ? generateConversationTitle(fallbackMessage)
+    : generateStarterConversationTitle(label);
+}
+
 /**
  * Chat-mode cross-thread retrieval. Runs personal-fact lookup and Qdrant
  * summary similarity in parallel under a short timeout so chat always
@@ -240,15 +265,11 @@ export async function processChatMessage(
   const promptUserMessage = isStarterPrompt
     ? buildStarterPromptInstruction()
     : message;
-  // Incognito is a Chat-mode concept (see shared types): flips this turn
-  // offline AND skips all memory. We force LOCAL below as defense in
-  // depth so a misbehaving client can't route an incognito turn to a
-  // remote provider. Sandbox ignores `incognito` entirely — the UI
-  // doesn't surface it there and the concept doesn't apply.
+  // Incognito is a Chat-mode concept (see shared types): keeps the thread
+  // client-held and skips all memory. Provider choice remains the normal
+  // local/online user setting; Sandbox ignores `incognito` entirely.
   const incognitoForTurn = mode === "chat" && settings.incognito === true;
-  const effectiveProvider = incognitoForTurn
-    ? "local"
-    : settings.preferredProvider;
+  const effectiveProvider = settings.preferredProvider;
   // The memory concerns are deliberately NOT one flag:
   //   - skipPersonalFacts: don't write to `memories`. True only for
   //     incognito; bot-scoped memories intentionally grow across Chat
@@ -265,11 +286,66 @@ export async function processChatMessage(
       : mode === "sandbox"
         ? "thread_only"
         : "cross_thread";
+  const activeBotId = incognitoForTurn ? null : settings.botId;
   const activeMemoryBotId =
-    typeof settings.botId === "string" && settings.botId.trim().length > 0
-      ? settings.botId.trim()
+    typeof activeBotId === "string" && activeBotId.trim().length > 0
+      ? activeBotId.trim()
       : null;
   const provider = selectProvider(effectiveProvider, settings.openAiApiKey);
+
+  if (incognitoForTurn) {
+    const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
+    const promptMessages = buildPromptMessages({
+      botSystemPrompt: undefined,
+      threadSummary: null,
+      memoryLines: [],
+      chatHistory: history,
+      userMessage: promptUserMessage,
+    });
+
+    const assistantReply = await provider.generateResponse(
+      promptMessages,
+      settings.botOverrides
+    );
+    const modelUsed =
+      settings.botOverrides?.model?.trim() ||
+      (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
+    const assistantCreatedAt = new Date().toISOString();
+    const nextMessages: ChatMessage[] = [
+      ...history,
+      ...(
+        isStarterPrompt
+          ? []
+          : [{
+              id: randomId(12),
+              role: "user" as const,
+              content: message,
+              createdAt: now,
+            }]
+      ),
+      {
+        id: randomId(12),
+        role: "assistant",
+        content: assistantReply,
+        createdAt: assistantCreatedAt,
+        provider: provider.name,
+        model: modelUsed,
+      },
+    ];
+    return {
+      id: conversationId ?? randomId(12),
+      userId,
+      title: privateConversationTitle(nextMessages, message, settings.starterPromptLabel),
+      botId: null,
+      incognito: true,
+      lastBotId: null,
+      lastBotColor: null,
+      hasAssistantReply: true,
+      createdAt: nextMessages[0]?.createdAt ?? now,
+      updatedAt: assistantCreatedAt,
+      messages: nextMessages,
+    };
+  }
 
   let activeConversationId = conversationId;
   if (!activeConversationId) {
@@ -282,7 +358,7 @@ export async function processChatMessage(
       isStarterPrompt
         ? generateStarterConversationTitle(settings.starterPromptLabel)
         : generateConversationTitle(message),
-      settings.botId ?? null,
+      activeBotId ?? null,
       incognitoForTurn ? 1 : 0,
       now,
       now
@@ -364,7 +440,7 @@ export async function processChatMessage(
     assistantReply,
     provider.name,
     modelUsed,
-    settings.botId ?? null,
+    activeBotId ?? null,
     assistantCreatedAt
   );
 
@@ -378,12 +454,12 @@ export async function processChatMessage(
   // key (legacy callers, Sandbox, scripts) so we leave bot_id alone.
   // Explicit null (client chose "Default") and strings (specific bot)
   // both flow through as real UPDATEs.
-  if (settings.botId !== undefined) {
+  if (activeBotId !== undefined) {
     db.prepare(
       "UPDATE conversations SET updated_at = ?, bot_id = ? WHERE id = ? AND user_id = ?"
     ).run(
       assistantCreatedAt,
-      settings.botId,
+      activeBotId,
       activeConversationId,
       userId
     );

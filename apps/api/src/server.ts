@@ -5,7 +5,7 @@ import { clearCookie, json, parseCookies, readJsonBody, setCookie, setCorsHeader
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import { processChatMessage } from "./chat.ts";
-import { deleteAllConversations, deleteConversation, rewindConversation } from "./conversations.ts";
+import { createDevSeedConversations, deleteAllConversations, deleteConversation, listConversationSummaries, rewindConversation } from "./conversations.ts";
 import {
   composeBotSystemPrompt,
   deleteAllBots,
@@ -26,6 +26,7 @@ import {
   purgeExpiredImages
 } from "./image-retention.ts";
 import { deleteVectorsForUser } from "./qdrant.ts";
+import type { ChatMessage } from "@localai/shared";
 
 const config = getAppConfig();
 const db = createDatabase();
@@ -345,73 +346,9 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/conversations", async (ctx) => {
       const userId = requireAuth(ctx);
-      // bot_id + incognito ride along in the list response so the sidebar
-      // can render private-chat markers and bot-colored accents without a
-      // second roundtrip per row.
-      //
-      // last_bot_id / last_bot_color come from the MOST RECENT assistant
-      // message on the conversation — no bot_id filter. That means when
-      // the user picks "Default" mid-thread in Sandbox, subsequent
-      // Default replies show up as last_bot_id = NULL, which the client
-      // interprets as "Default is the current bot" and paints the row
-      // WHITE. Before this change, Default replies were invisible to the
-      // sidebar and the row stayed colored by whichever bot had spoken
-      // previously — a lie about who's "active" in the thread.
-      //
-      // has_assistant_reply disambiguates "Default was last" (reply
-      // exists but has no bot_id) from "no reply yet" (conversation row
-      // exists but no assistant message — only reachable via a failed
-      // send that errored after the user msg was inserted). The first
-      // case wants WHITE; the second wants the locked-bot fallback. We
-      // can't tell them apart from last_bot_id alone.
-      //
-      // Correlated subqueries are cheap here: SQLite optimizes the
-      // LIMIT 1 DESC scan with the existing messages(conversation_id,
-      // created_at) locality, so ordering on updated_at doesn't force a
-      // full messages table scan per row.
-      const rows = db
-        .prepare(
-          `SELECT c.id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
-                  (SELECT m.bot_id FROM messages m
-                     WHERE m.conversation_id = c.id
-                       AND m.role = 'assistant'
-                     ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
-                  (SELECT b.color FROM messages m
-                     LEFT JOIN bots b ON b.id = m.bot_id
-                     WHERE m.conversation_id = c.id
-                       AND m.role = 'assistant'
-                     ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
-                  EXISTS (SELECT 1 FROM messages m
-                            WHERE m.conversation_id = c.id
-                              AND m.role = 'assistant') AS has_assistant_reply
-             FROM conversations c
-            WHERE c.user_id = ?
-         ORDER BY c.updated_at DESC`
-        )
-        .all(userId) as Array<{
-        id: string;
-        title: string;
-        bot_id: string | null;
-        incognito: number;
-        created_at: string;
-        updated_at: string;
-        last_bot_id: string | null;
-        last_bot_color: string | null;
-        has_assistant_reply: number;
-      }>;
       json(ctx.res, 200, {
         ok: true,
-        conversations: rows.map((row) => ({
-          id: row.id,
-          title: row.title,
-          botId: row.bot_id ?? null,
-          incognito: row.incognito === 1,
-          lastBotId: row.last_bot_id ?? null,
-          lastBotColor: row.last_bot_color ?? null,
-          hasAssistantReply: row.has_assistant_reply === 1,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at
-        }))
+        conversations: listConversationSummaries(db, userId)
       });
     }),
     route("GET", "/api/conversations/:id", async (ctx) => {
@@ -521,6 +458,16 @@ function buildRoutes(): RouteDefinition[] {
       const deleted = deleteAllConversations(db, userId);
       json(ctx.res, 200, { ok: true, deleted });
     }),
+    route("POST", "/api/conversations/dev-seed", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const count = Number(body.count);
+      if (!Number.isInteger(count) || count < 1 || count > 2000) {
+        throw new Error("Chat seed count must be between 1 and 2000.");
+      }
+      const created = createDevSeedConversations(db, userId, count);
+      json(ctx.res, 200, { ok: true, created });
+    }),
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -548,8 +495,8 @@ function buildRoutes(): RouteDefinition[] {
       // leaking a sandbox turn into cross-session storage. processChatMessage
       // enforces the same default as defense in depth.
       const mode = body.mode === "chat" ? "chat" : "sandbox";
-      // Incognito is a Chat-mode concept (see chat.ts): it flips the turn
-      // offline AND skips memory. We deliberately ignore any `incognito`
+      // Incognito is a Chat-mode concept (see chat.ts): it keeps the turn
+      // ephemeral and skips memory. We deliberately ignore any `incognito`
       // flag for Sandbox requests so the two modes stay semantically
       // distinct even if a stale client still sends the field.
       const incognito = mode === "chat" && body.incognito === true;
@@ -561,10 +508,12 @@ function buildRoutes(): RouteDefinition[] {
           : undefined;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
-      const effectiveProvider = incognito
-        ? "local"
-        : requestedProvider ?? user.preferred_provider;
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const effectiveBotId = incognito ? null : botId;
       const explicitModelOverride = readOptionalString(body.modelOverride);
+      const ephemeralMessages = Array.isArray(body.ephemeralMessages)
+        ? body.ephemeralMessages as ChatMessage[]
+        : undefined;
 
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
@@ -572,12 +521,12 @@ function buildRoutes(): RouteDefinition[] {
       if (explicitModelOverride) {
         generationOverrides.model = explicitModelOverride;
       }
-      if (botId) {
+      if (effectiveBotId) {
         const bot = db
           .prepare(
             "SELECT name, system_prompt, model, local_model, online_model, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
-          .get(botId, userId) as
+          .get(effectiveBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
@@ -609,7 +558,7 @@ function buildRoutes(): RouteDefinition[] {
           }
         }
       }
-      if (!starterPromptLabel && botId === null) {
+      if (!starterPromptLabel && effectiveBotId === null) {
         starterPromptLabel = "Prism";
       }
       const botOverrides =
@@ -633,8 +582,9 @@ function buildRoutes(): RouteDefinition[] {
           openAiApiKey,
           starterPrompt,
           starterPromptLabel,
-          botId,
+          botId: effectiveBotId,
           incognito,
+          ephemeralMessages,
           botSystemPrompt,
           botOverrides,
           mode,
