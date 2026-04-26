@@ -1,0 +1,146 @@
+name: Release Pipeline (dev -> main)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Shared release version without leading v (example: 0.2.0)"
+        required: true
+        type: string
+      client_testflight_build:
+        description: "Optional App Store Connect/TestFlight build reference"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate release gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce main-only releases
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Release workflow is allowed only from main."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck workspace
+        run: npm run typecheck
+
+      - name: Lint workspace
+        run: npm run lint
+
+  create-releases:
+    name: Create draft release lanes
+    runs-on: ubuntu-latest
+    needs: preflight
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      CLIENT_TESTFLIGHT_BUILD: ${{ inputs.client_testflight_build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build server artifact bundle
+        run: |
+          mkdir -p release-artifacts/server
+          tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude=apps/web/.next \
+            --exclude=apps/api/data \
+            -czf "release-artifacts/server/prism-server-v${RELEASE_VERSION}-bundle.tar.gz" \
+            .
+
+      - name: Build private client lane manifest
+        run: |
+          mkdir -p release-artifacts/client
+          cat <<EOF > "release-artifacts/client/prism-client-v${RELEASE_VERSION}-private-lane.txt"
+          Prism Client private distribution lane
+          =====================================
+          Version: v${RELEASE_VERSION}
+          Channel: Private TestFlight (invite-only)
+          Discoverability: Not publicly listed
+          Build reference: ${CLIENT_TESTFLIGHT_BUILD:-not-provided}
+
+          Note:
+          - This repository publishes server release artifacts.
+          - Native iOS/macOS binaries are distributed through private TestFlight.
+          EOF
+
+      - name: Create or update draft releases
+        run: |
+          set -euo pipefail
+
+          server_tag="server/v${RELEASE_VERSION}"
+          client_tag="client/v${RELEASE_VERSION}"
+
+          ensure_release() {
+            local tag="$1"
+            local title="$2"
+            local notes_file="$3"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release edit "$tag" \
+                --draft=true \
+                --title "$title" \
+                --notes-file "$notes_file" \
+                --target "${GITHUB_SHA}"
+            else
+              gh release create "$tag" \
+                --draft \
+                --target "${GITHUB_SHA}" \
+                --title "$title" \
+                --notes-file "$notes_file"
+            fi
+          }
+
+          cat <<EOF > /tmp/server-notes.md
+          ## Prism Server Draft Release
+
+          - Branch source: \`main\`
+          - Shared version: \`v${RELEASE_VERSION}\`
+          - Release lane: Server artifact draft
+          - Promotion: Publish manually after deployment gate is confirmed
+          EOF
+
+          cat <<EOF > /tmp/client-notes.md
+          ## Prism Client Private Lane
+
+          - Branch source: \`main\`
+          - Shared version: \`v${RELEASE_VERSION}\`
+          - Distribution: Private TestFlight lane (not public App Store listing)
+          - Build reference: \`${CLIENT_TESTFLIGHT_BUILD:-not-provided}\`
+          EOF
+
+          ensure_release "$server_tag" "Prism Server v${RELEASE_VERSION}" /tmp/server-notes.md
+          ensure_release "$client_tag" "Prism Client v${RELEASE_VERSION} (Private Lane)" /tmp/client-notes.md
+
+      - name: Upload release assets
+        run: |
+          set -euo pipefail
+          gh release upload "server/v${RELEASE_VERSION}" \
+            "release-artifacts/server/prism-server-v${RELEASE_VERSION}-bundle.tar.gz" \
+            --clobber
+          gh release upload "client/v${RELEASE_VERSION}" \
+            "release-artifacts/client/prism-client-v${RELEASE_VERSION}-private-lane.txt" \
+            --clobber

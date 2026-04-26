@@ -1,0 +1,65 @@
+# Prism Release Process
+
+This runbook defines the production release flow for Prism:
+
+- `dev` is the integration branch.
+- `main` is release-only.
+- Release automation runs from `main` and creates two draft release lanes:
+  - `Prism Server` draft release on GitHub
+  - `Prism Client` private-lane tracking release (actual binary stays in
+    invite-only TestFlight)
+
+## Release Channel Semantics
+
+To avoid ambiguity:
+
+- GitHub **draft** releases are unpublished and can be reviewed before exposure.
+- GitHub published releases in a public repository are public.
+- Apple **unlisted** is low-discovery, not true privacy.
+- Apple **private** for this workflow means invite-only TestFlight distribution.
+
+## dev -> main Promotion Contract
+
+Before promoting to `main`, complete:
+
+1. Production readiness gate from `docs/production-readiness-gate.md`
+2. Required tests/lint/typecheck for the release candidate
+3. `CHANGELOG.md` update for the target version
+4. Merge `dev` into `main` through normal review
+
+## Release Workflow
+
+Workflow file: `.github/workflows/release-main.yml`
+
+Trigger:
+
+- Manual dispatch from `main` only
+
+Inputs:
+
+- `version`: shared semantic version without leading `v` (example: `0.2.0`)
+- `client_testflight_build`: optional App Store Connect/TestFlight build marker
+
+Output lanes:
+
+1. **Server lane**
+   - Tag: `server/v<version>`
+   - GitHub draft release: `Prism Server v<version>`
+   - Asset: `prism-server-v<version>-bundle.tar.gz`
+
+2. **Client lane**
+   - Tag: `client/v<version>`
+   - GitHub draft release: `Prism Client v<version> (Private Lane)`
+   - Asset: private-lane manifest text file with TestFlight reference
+   - Actual iOS/macOS binary remains in private TestFlight, not GitHub
+
+## Publish Decision
+
+Only publish the server draft release after:
+
+- deployment gate checks pass
+- rollback path is validated
+- release notes are reviewed
+
+The client lane stays a private TestFlight handoff pointer unless and until the
+native client distribution policy changes.
