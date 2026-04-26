@@ -38,7 +38,12 @@ Trigger:
 Inputs:
 
 - `version`: shared semantic version without leading `v` (example: `0.2.0`)
-- `client_testflight_build`: optional App Store Connect/TestFlight build marker
+- `client_testflight_build`: required App Store Connect/TestFlight build marker
+
+Validation guards:
+
+- `version` must match semantic-version core format (`x.y.z`)
+- `CHANGELOG.md` must contain `## [<version>]` before release creation
 
 Output lanes:
 

@@ -8,8 +8,8 @@ on:
         required: true
         type: string
       client_testflight_build:
-        description: "Optional App Store Connect/TestFlight build reference"
-        required: false
+        description: "Required App Store Connect/TestFlight build reference"
+        required: true
         type: string
 
 permissions:
@@ -31,6 +31,21 @@ jobs:
             exit 1
           fi
 
+      - name: Validate release inputs
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          CLIENT_TESTFLIGHT_BUILD: ${{ inputs.client_testflight_build }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must follow SemVer core format (example: 0.2.0)."
+            exit 1
+          fi
+          if [ -z "$(printf '%s' "${CLIENT_TESTFLIGHT_BUILD}" | tr -d '[:space:]')" ]; then
+            echo "client_testflight_build is required for private-lane traceability."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -48,6 +63,17 @@ jobs:
 
       - name: Lint workspace
         run: npm run lint
+
+      - name: Ensure changelog contains target version section
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          escaped_version="${RELEASE_VERSION//./\\.}"
+          if ! grep -Eq "^## \\[${escaped_version}\\]( - .+)?$" CHANGELOG.md; then
+            echo "CHANGELOG.md must include a ## [${RELEASE_VERSION}] section before release."
+            exit 1
+          fi
 
   create-releases:
     name: Create draft release lanes
