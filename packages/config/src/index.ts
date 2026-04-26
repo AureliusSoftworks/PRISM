@@ -6,6 +6,22 @@ function readEnv(name: string, fallback?: string): string {
   return value;
 }
 
+function readBooleanEnv(name: string, fallback: boolean): boolean {
+  const value = process.env[name];
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
 const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
 
 /**
@@ -53,6 +69,7 @@ function normalizeOllamaHost(value: string | undefined): string {
 export interface AppConfig {
   apiPort: number;
   serverName: string;
+  discoveryEnabled: boolean;
   sessionCookieName: string;
   sessionTtlHours: number;
   encryptionMasterKey: string;
@@ -66,6 +83,7 @@ export function getAppConfig(): AppConfig {
   return {
     apiPort: Number(process.env.API_PORT ?? "8787"),
     serverName: process.env.PRISM_SERVER_NAME ?? "Prism Server",
+    discoveryEnabled: readBooleanEnv("PRISM_DISCOVERY_ENABLED", true),
     sessionCookieName: process.env.SESSION_COOKIE_NAME ?? "localai_session",
     sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? "24"),
     encryptionMasterKey: readEnv(

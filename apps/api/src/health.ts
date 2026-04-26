@@ -44,7 +44,7 @@ export function buildHealthResponse(
     serverVersion: PRISM_SERVER_VERSION,
     apiVersion: PRISM_API_VERSION,
     pairingEnabled: true,
-    serverName: config.serverName,
+    serverName: config.serverName ?? process.env.PRISM_SERVER_NAME ?? "Prism Server",
     services: {
       sqlite,
       qdrant: config.qdrantUrl ? "configured" : "not_configured",

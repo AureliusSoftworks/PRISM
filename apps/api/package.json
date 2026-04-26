@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@localai/config": "file:../../packages/config",
-    "@localai/shared": "file:../../packages/shared"
+    "@localai/shared": "file:../../packages/shared",
+    "dnssd-advertise": "^1.1.4"
   },
   "devDependencies": {
     "@types/node": "^24.8.1",

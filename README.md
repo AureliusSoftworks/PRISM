@@ -34,6 +34,8 @@ Planning docs:
 - [Native client MVP](docs/native-client-mvp.md)
 - [App Store review checklist](docs/app-store-review.md)
 - [Licensing and brand model](docs/licensing-and-brand.md)
+- [Production readiness gate](docs/production-readiness-gate.md)
+- [Release process (dev -> main)](docs/release-process.md)
 
 ## Architecture
 
@@ -81,6 +83,7 @@ npm run dev
 |----------|---------|-------------|
 | `API_PORT` | `8787` | API server port |
 | `PRISM_SERVER_NAME` | `Prism Server` | Friendly name returned by readiness checks and future pairing/discovery flows |
+| `PRISM_DISCOVERY_ENABLED` | `true` | Advertise Prism Server on the LAN as `_prism._tcp` for future native clients |
 | `SESSION_COOKIE_NAME` | `localai_session` | Session cookie key |
 | `SESSION_TTL_HOURS` | `24` | Session lifetime |
 | `ENCRYPTION_MASTER_KEY` | (dev default) | Master key for per-user key wrapping |
@@ -130,6 +133,13 @@ Double-click `start.bat` at the repo root. On first run it verifies/installs Nod
 - **Frontend** is built with Next.js `output: "standalone"` and served by `node .next/standalone/apps/web/server.js` on `0.0.0.0:3000`. `start.bat` also stages `.next/static/` and `public/` into the standalone bundle after each build — without this step the browser would load HTML successfully but all JS/CSS would 404.
 
 Session cookies work same-origin because Next's `rewrites()` proxies `/api/*` to `127.0.0.1:8787` server-side. You only need to open **port 3000** on the LAN; port 8787 should stay closed.
+
+Native Prism clients use a different path: they discover the API directly via
+Bonjour/DNS-SD (`_prism._tcp`) and then pair with a short-lived code generated
+from Settings. For native-client pairing, the API port advertised by
+`API_PORT` must be reachable on the local network. Default Docker bridge
+networking may not expose mDNS advertisements to the LAN, so manual URL entry
+remains the fallback there unless host networking or an mDNS reflector is added.
 
 One-time Windows Firewall rule for LAN access (PowerShell as admin):
 ```powershell

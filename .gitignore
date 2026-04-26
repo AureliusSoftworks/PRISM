@@ -9,3 +9,15 @@ apps/web/.next/
 apps/web/out/
 apps/api/data/
 *.log
+
+# Local Overseer operational artifacts
+.cursor/agents/🤖*.md
+.cursor/subagents/
+.cursor/commands/🤖 overseers.md
+.cursor/runbooks/
+
+# Apple signing and distribution secrets
+*.p12
+*.mobileprovision
+AuthKey_*.p8
+ExportOptions.plist

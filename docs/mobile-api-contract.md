@@ -91,16 +91,21 @@ from `PRISM_SERVER_NAME` and defaults to `Prism Server`.
 Prism Server should advertise itself on the LAN so a freshly installed client
 can find it without requiring the user to type an IP address.
 
-Recommended discovery channel:
+Implemented discovery channel:
 
 - Bonjour/mDNS service type: `_prism._tcp.`
-- Service name: user-visible server name, such as `Jared's Prism`
+- Service name: `PRISM_SERVER_NAME`, such as `Jared's Prism`
 - Port: API port, normally `8787` for direct API access
 - TXT records:
   - `api=1`
   - `version=0.1.0`
   - `pairing=required`
   - `tls=optional`
+
+Prism Server advertises this service when `PRISM_DISCOVERY_ENABLED=true`.
+Discovery is intended for native/bare-metal server runs. Default Docker bridge
+networking may not propagate mDNS advertisements to the LAN, so native clients
+must keep manual URL entry as a fallback.
 
 The client onboarding flow should request Local Network permission before
 scanning. Manual server URL entry remains required for custom hosts, remote

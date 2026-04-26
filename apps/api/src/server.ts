@@ -7,6 +7,7 @@ import type { RouteDefinition, RequestContext } from "./types.ts";
 import { requireValidSession, resolveSessionToken } from "./auth.ts";
 import { buildHealthResponse } from "./health.ts";
 import { consumePairingCode, createPairingCode } from "./pairing.ts";
+import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage } from "./chat.ts";
 import { createDevSeedConversations, deleteAllConversations, deleteConversation, listConversationSummaries, rewindConversation } from "./conversations.ts";
 import {
@@ -1109,6 +1110,34 @@ const server = createServer(async (req, res) => {
   }
 });
 
+let stopDiscovery: StopDiscovery | null = null;
+let shuttingDown = false;
+
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.log(`Received ${signal}; shutting down Prism API.`);
+
+  if (stopDiscovery) {
+    await stopDiscovery();
+    stopDiscovery = null;
+  }
+
+  await new Promise<void>((resolve) => {
+    server.close(() => resolve());
+  });
+}
+
+process.on("SIGINT", () => {
+  void shutdown("SIGINT").then(() => process.exit(0));
+});
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM").then(() => process.exit(0));
+});
+
 server.listen(config.apiPort, () => {
   console.log(`API ready at http://localhost:${config.apiPort}`);
+  stopDiscovery = startPrismDiscovery(config);
 });
