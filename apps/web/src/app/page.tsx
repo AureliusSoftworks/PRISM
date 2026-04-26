@@ -1389,6 +1389,10 @@ interface UserSettings {
   hasOpenAiApiKey: boolean;
   ollamaModel: string;
 }
+interface PairingCode {
+  code: string;
+  expiresAt: string;
+}
 interface UserMemory {
   id: string;
   conversationId?: string;
@@ -5801,6 +5805,9 @@ function HomeContent(): React.JSX.Element {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [openAiKey, setOpenAiKey] = useState("");
+  const [pairingCode, setPairingCode] = useState<PairingCode | null>(null);
+  const [pairingBusy, setPairingBusy] = useState(false);
+  const [pairingCopyStatus, setPairingCopyStatus] = useState<string | null>(null);
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [botMemories, setBotMemories] = useState<UserMemory[]>([]);
   const [memoryPanelScope, setMemoryPanelScope] = useState<MemoryPanelScope>("bot");
@@ -7429,6 +7436,44 @@ function HomeContent(): React.JSX.Element {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function generatePairingCode() {
+    setPairingBusy(true);
+    setPairingCopyStatus(null);
+    setPanelError(null);
+    try {
+      const response = await api<{ pairingCode: PairingCode }>(
+        "/api/pairing/codes",
+        { method: "POST" }
+      );
+      setPairingCode(response.pairingCode);
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Pairing code failed.");
+    } finally {
+      setPairingBusy(false);
+    }
+  }
+
+  async function copyPairingCode() {
+    if (!pairingCode) return;
+    try {
+      await navigator.clipboard.writeText(pairingCode.code);
+      setPairingCopyStatus("Copied");
+    } catch {
+      setPanelError("Copy failed. Select the code and copy it manually.");
+    }
+  }
+
+  function formatPairingExpiry(expiresAt: string): string {
+    const expiry = new Date(expiresAt);
+    if (Number.isNaN(expiry.getTime())) {
+      return "Expires soon";
+    }
+    return `Expires at ${expiry.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    })}`;
   }
 
   async function switchProvider(provider: Provider) {
@@ -9540,6 +9585,41 @@ function HomeContent(): React.JSX.Element {
               <button type="submit" disabled={busy}>Save</button>
             </form>
           )}
+          <div className={styles.pairingActions}>
+            <h4>Pair a device</h4>
+            <p className={styles.muted}>
+              Generate a short-lived code to connect the future Prism iOS/Mac app
+              to this server.
+            </p>
+            {pairingCode && (
+              <div className={styles.pairingCodeCard} aria-live="polite">
+                <strong className={styles.pairingCodeValue}>{pairingCode.code}</strong>
+                <small className={styles.pairingCodeMeta}>
+                  {formatPairingExpiry(pairingCode.expiresAt)}
+                </small>
+              </div>
+            )}
+            <div className={styles.pairingButtonRow}>
+              <button
+                type="button"
+                className={styles.accountLogoutButton}
+                onClick={() => void generatePairingCode()}
+                disabled={busy || pairingBusy}
+              >
+                {pairingBusy ? "Generating..." : pairingCode ? "Generate new code" : "Generate code"}
+              </button>
+              {pairingCode && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={() => void copyPairingCode()}
+                  disabled={pairingBusy}
+                >
+                  {pairingCopyStatus ?? "Copy code"}
+                </button>
+              )}
+            </div>
+          </div>
           <div className={styles.accountActions}>
             <h4>Account</h4>
             <p className={styles.muted}>Sign out of this Prism session.</p>

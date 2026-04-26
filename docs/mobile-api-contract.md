@@ -129,6 +129,10 @@ POST /api/pairing/codes
 Cookie: localai_session=<web-session>
 ```
 
+The first web surface for this is the authenticated Settings drawer's
+"Pair a device" section. It generates a code-only pairing credential; QR
+display remains a later client-polish step.
+
 Response:
 
 ```json
