@@ -7,7 +7,7 @@ This runbook defines the production release flow for Prism:
 - Release automation runs from `main` and creates two draft release lanes:
   - `Prism Server` draft release on GitHub
   - `Prism Client` private-lane tracking release (actual binary stays in
-    invite-only TestFlight)
+  invite-only TestFlight)
 
 ## Release Channel Semantics
 
@@ -26,6 +26,13 @@ Before promoting to `main`, complete:
 2. Required tests/lint/typecheck for the release candidate
 3. `CHANGELOG.md` update for the target version
 4. Merge `dev` into `main` through normal review
+
+Automation support:
+
+- `.github/workflows/promote-dev-to-main.yml` runs on pull requests targeting
+`main`.
+- It enforces `head_ref == dev` and reruns workspace `typecheck` + `lint`.
+- This prevents accidental non-release branches from being merged into `main`.
 
 ## Release Workflow
 
@@ -48,15 +55,14 @@ Validation guards:
 Output lanes:
 
 1. **Server lane**
-   - Tag: `server/v<version>`
-   - GitHub draft release: `Prism Server v<version>`
-   - Asset: `prism-server-v<version>-bundle.tar.gz`
-
+  - Tag: `server/v<version>`
+  - GitHub draft release: `Prism Server v<version>`
+  - Asset: `prism-server-v<version>-bundle.tar.gz`
 2. **Client lane**
-   - Tag: `client/v<version>`
-   - GitHub draft release: `Prism Client v<version> (Private Lane)`
-   - Asset: private-lane manifest text file with TestFlight reference
-   - Actual iOS/macOS binary remains in private TestFlight, not GitHub
+  - Tag: `client/v<version>`
+  - GitHub draft release: `Prism Client v<version> (Private Lane)`
+  - Asset: private-lane manifest text file with TestFlight reference
+  - Actual iOS/macOS binary remains in private TestFlight, not GitHub
 
 ## Publish Decision
 

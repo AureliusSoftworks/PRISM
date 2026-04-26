@@ -1,0 +1,36 @@
+name: Promote dev to main gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate-promotion:
+    name: Validate dev -> main promotion
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce source branch
+        run: |
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "Only dev -> main pull requests are allowed for release promotions."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck workspace
+        run: npm run typecheck
+
+      - name: Lint workspace
+        run: npm run lint
