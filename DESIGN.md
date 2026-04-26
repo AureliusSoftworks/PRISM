@@ -131,6 +131,29 @@ Docker Compose with four services:
 
 All services use `restart: unless-stopped` for headless boot recovery.
 
+## Apple Companion Roadmap
+
+Prism's App Store direction is a two-binary split:
+
+1. **Prism Server** runs on Mac, Windows, or Linux as the user-controlled local
+   runtime. It owns data, providers, accounts, pairing, and the existing web UI.
+2. **Prism iOS/Mac** is the paid official native client. It discovers a Prism
+   Server on the local network, pairs with it, stores a Keychain session, and
+   calls the server API directly.
+
+The native client must not reimplement chat, memory, provider routing, or
+tenancy rules on-device. Those invariants stay in `apps/api`. The first native
+vertical slice is server discovery, pairing, `GET /api/auth/me`,
+`GET /api/conversations`, `GET /api/conversations/:id`, and `POST /api/chat`.
+
+Reference docs:
+
+- `docs/app-store-distribution.md`
+- `docs/mobile-api-contract.md`
+- `docs/native-client-mvp.md`
+- `docs/app-store-review.md`
+- `docs/licensing-and-brand.md`
+
 ## Future Extensions
 
 - Bot-to-bot sandbox (scenario entity, agent roster, turn loop, transcript export)

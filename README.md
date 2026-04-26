@@ -2,15 +2,38 @@
 
 A local-first AI playground. The fidelity and per-account isolation of
 ChatGPT Gov, the systems-focus and creative-permission of FL Studio. Runs
-headless on your Windows machine and reachable across the LAN from any
-device. Every account is its own sandbox — encrypted memory, customizable
-chatbots, OpenAI image generation, forkable conversations, markdown export.
+headless on a user-owned machine and reachable across the LAN from any
+trusted device. Every account is its own sandbox — encrypted memory,
+customizable chatbots, OpenAI image generation, forkable conversations,
+markdown export.
 
 **Current release:** v0.1.0. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Branch model:** `main` holds tagged, released versions only; all active
 development happens on `dev`. Every release is a merge of `dev` into `main`
 with a matching `CHANGELOG.md` entry and a semver tag.
+
+## App Store Split Roadmap
+
+Prism's planned Apple distribution model is a two-binary split:
+
+- **Prism Server** — the open-source local runtime for Mac, Windows, or Linux,
+  distributed from GitHub Releases.
+- **Prism iOS/Mac** — the official paid native App Store client that discovers,
+  pairs with, and controls a user-owned Prism Server.
+
+The existing web UI remains the desktop/admin surface for the server. The
+official native client should not be a thin web wrapper; it should provide
+first-run onboarding, Local Network discovery, tap/click-to-connect pairing,
+Keychain session storage, and native Apple-platform UI.
+
+Planning docs:
+
+- [App Store distribution model](docs/app-store-distribution.md)
+- [Mobile API contract](docs/mobile-api-contract.md)
+- [Native client MVP](docs/native-client-mvp.md)
+- [App Store review checklist](docs/app-store-review.md)
+- [Licensing and brand model](docs/licensing-and-brand.md)
 
 ## Architecture
 
