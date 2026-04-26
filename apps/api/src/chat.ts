@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
 import {
   extractMemoryCandidates,
@@ -7,6 +8,7 @@ import {
 } from "./memory.ts";
 import {
   selectProvider,
+  OPENAI_DEFAULT_MODEL,
   type GenerateOptions,
   type LlmProvider,
   type ProviderMessage,
@@ -20,10 +22,19 @@ import {
 } from "./memory-summarizer.ts";
 import type { ChatMessage, ChatMode, Conversation } from "@localai/shared";
 
+const config = getAppConfig();
+
 export interface UserChatSettings {
   preferredProvider: "local" | "openai";
   autoMemory: boolean;
   openAiApiKey?: string;
+  /**
+   * When true, the model produces the opening assistant turn without
+   * persisting a synthetic user message. Used by empty-composer Enter.
+   */
+  starterPrompt?: boolean;
+  /** Human-readable persona label for starter chat titles. */
+  starterPromptLabel?: string;
   /**
    * Tri-valued by design:
    *   - undefined → client didn't send a botId (leave conversation's
@@ -65,11 +76,26 @@ function generateConversationTitle(message: string): string {
   return trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed;
 }
 
+function generateStarterConversationTitle(label?: string): string {
+  const trimmed = label?.trim();
+  return trimmed ? `${trimmed} starter` : "Conversation starter";
+}
+
+function buildStarterPromptInstruction(): string {
+  return [
+    "Start this conversation for the user.",
+    "Use your current system/persona instructions as context.",
+    "Ask one concise, inviting question that gives the user an easy first step.",
+    "Do not mention system prompts, hidden instructions, or that the message was auto-started.",
+  ].join(" ");
+}
+
 type MessageRow = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   provider: string | null;
+  model: string | null;
   bot_name: string | null;
   bot_color: string | null;
   bot_glyph: string | null;
@@ -86,6 +112,7 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
       row.provider === "local" || row.provider === "openai"
         ? row.provider
         : undefined,
+    model: row.model ?? undefined,
     botName: row.bot_name ? row.bot_name : undefined,
     botColor: row.bot_color ? row.bot_color : undefined,
     botGlyph: row.bot_glyph ? row.bot_glyph : undefined,
@@ -153,15 +180,19 @@ async function retrieveMemoriesWithFallback(
   provider: LlmProvider,
   userId: string,
   message: string,
-  userKey: Buffer
+  userKey: Buffer,
+  botId: string | null,
+  includeThreadSummaries: boolean
 ): Promise<string[]> {
   const timeoutSentinel = Symbol("memory-timeout");
   const timeout = new Promise<typeof timeoutSentinel>((resolve) => {
     setTimeout(() => resolve(timeoutSentinel), MEMORY_RETRIEVAL_TIMEOUT_MS);
   });
   const retrieval = Promise.allSettled([
-    retrieveRelevantMemories(db, provider, userId, message, userKey),
-    retrieveMemorySummaries(provider, userId, message),
+    retrieveRelevantMemories(db, provider, userId, message, userKey, botId),
+    includeThreadSummaries
+      ? retrieveMemorySummaries(provider, userId, message)
+      : Promise.resolve([]),
   ]);
 
   const result = await Promise.race([retrieval, timeout]);
@@ -205,6 +236,10 @@ export async function processChatMessage(
 ): Promise<Conversation> {
   const now = new Date().toISOString();
   const mode: ChatMode = settings.mode ?? "sandbox";
+  const isStarterPrompt = settings.starterPrompt === true;
+  const promptUserMessage = isStarterPrompt
+    ? buildStarterPromptInstruction()
+    : message;
   // Incognito is a Chat-mode concept (see shared types): flips this turn
   // offline AND skips all memory. We force LOCAL below as defense in
   // depth so a misbehaving client can't route an incognito turn to a
@@ -214,14 +249,15 @@ export async function processChatMessage(
   const effectiveProvider = incognitoForTurn
     ? "local"
     : settings.preferredProvider;
-  // The three memory concerns are deliberately NOT one flag:
-  //   - skipPersonalFacts: don't write to `memories` (cross-thread facts).
-  //     True for Sandbox (thread isolation) AND incognito (leave no trace).
+  // The memory concerns are deliberately NOT one flag:
+  //   - skipPersonalFacts: don't write to `memories`. True only for
+  //     incognito; bot-scoped memories intentionally grow across Chat
+  //     and Sandbox when auto-memory is enabled.
   //   - skipSummarization: don't run any summarizer. True only for
   //     incognito — Sandbox still summarizes, just into a thread-scoped,
   //     Qdrant-free path.
-  //   - retrievalMode: which recall path (if any) feeds this turn's prompt.
-  const skipPersonalFacts = mode === "sandbox" || incognitoForTurn;
+  //   - retrievalMode: which thread summary path (if any) feeds this turn.
+  const skipPersonalFacts = incognitoForTurn;
   const skipSummarization = incognitoForTurn;
   const retrievalMode: "none" | "cross_thread" | "thread_only" =
     incognitoForTurn
@@ -229,6 +265,10 @@ export async function processChatMessage(
       : mode === "sandbox"
         ? "thread_only"
         : "cross_thread";
+  const activeMemoryBotId =
+    typeof settings.botId === "string" && settings.botId.trim().length > 0
+      ? settings.botId.trim()
+      : null;
   const provider = selectProvider(effectiveProvider, settings.openAiApiKey);
 
   let activeConversationId = conversationId;
@@ -239,7 +279,9 @@ export async function processChatMessage(
     ).run(
       activeConversationId,
       userId,
-      generateConversationTitle(message),
+      isStarterPrompt
+        ? generateStarterConversationTitle(settings.starterPromptLabel)
+        : generateConversationTitle(message),
       settings.botId ?? null,
       incognitoForTurn ? 1 : 0,
       now,
@@ -262,7 +304,7 @@ export async function processChatMessage(
   // thread-compaction summary in Sandbox mode.
   const historyRowsDesc = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
@@ -277,13 +319,16 @@ export async function processChatMessage(
   let memoryLines: string[] = [];
   if (retrievalMode === "thread_only") {
     threadSummary = getLatestThreadSummary(db, userId, activeConversationId);
-  } else if (retrievalMode === "cross_thread") {
+  }
+  if (!incognitoForTurn && !isStarterPrompt) {
     memoryLines = await retrieveMemoriesWithFallback(
       db,
       provider,
       userId,
       message,
-      userKey
+      userKey,
+      activeMemoryBotId,
+      retrievalMode === "cross_thread"
     );
   }
 
@@ -292,27 +337,33 @@ export async function processChatMessage(
     threadSummary,
     memoryLines,
     chatHistory: history,
-    userMessage: message,
+    userMessage: promptUserMessage,
   });
 
-  const userMessageId = randomId(12);
-  db.prepare(
-    "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?)"
-  ).run(userMessageId, activeConversationId, userId, message, now);
+  if (!isStarterPrompt) {
+    const userMessageId = randomId(12);
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?)"
+    ).run(userMessageId, activeConversationId, userId, message, now);
+  }
 
   const assistantReply = await provider.generateResponse(
     promptMessages,
     settings.botOverrides
   );
+  const modelUsed =
+    settings.botOverrides?.model?.trim() ||
+    (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
   const assistantCreatedAt = new Date().toISOString();
   db.prepare(
-    "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)"
+    "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)"
   ).run(
     randomId(12),
     activeConversationId,
     userId,
     assistantReply,
     provider.name,
+    modelUsed,
     settings.botId ?? null,
     assistantCreatedAt
   );
@@ -356,17 +407,25 @@ export async function processChatMessage(
       .get(activeConversationId, userId) as { n: number }
   ).n;
 
-  // Cross-thread personal facts: Chat mode only, non-incognito, with
-  // autoMemory on. Gate is deliberately conservative so Sandbox threads
-  // and incognito turns never seed the `memories` table.
+  // Cross-thread facts: non-incognito turns with autoMemory on. When a
+  // concrete bot is active, the memory is scoped to that bot so its
+  // personality can grow across Chat and Sandbox.
   if (
     !skipPersonalFacts &&
-    mode === "chat" &&
-    settings.autoMemory
+    settings.autoMemory &&
+    !isStarterPrompt
   ) {
     const candidates = extractMemoryCandidates(message);
     if (candidates.length > 0) {
-      await persistMemoryCandidates(db, provider, userId, candidates, userKey);
+      await persistMemoryCandidates(
+        db,
+        provider,
+        userId,
+        activeConversationId,
+        activeMemoryBotId,
+        candidates,
+        userKey
+      );
     }
   }
 
@@ -438,7 +497,7 @@ export async function processChatMessage(
 
   const messageRows = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id

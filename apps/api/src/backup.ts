@@ -16,12 +16,16 @@ export interface BackupSnapshot {
       createdAt: string;
       /** Optional; older v1 snapshots (pre-provider tracking) omit this. */
       provider?: "local" | "openai";
+      /** Optional; older v1 snapshots (pre-model tracking) omit this. */
+      model?: string;
       /** Optional; older v1 snapshots (pre-per-message bot tracking) omit this. */
       botId?: string;
     }>;
   }>;
   memories: Array<{
     id: string;
+    conversationId?: string;
+    botId?: string;
     confidence: number;
     payload: Record<string, unknown>;
     createdAt: string;
@@ -70,13 +74,14 @@ export function exportUserSnapshot(
   const conversationPayload = conversations.map((conversation) => {
     const messages = db
       .prepare(
-        "SELECT id, role, content, provider, bot_id, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
+        "SELECT id, role, content, provider, model, bot_id, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
       )
       .all(conversation.id, userId) as Array<{
       id: string;
       role: string;
       content: string;
       provider: string | null;
+      model: string | null;
       bot_id: string | null;
       created_at: string;
     }>;
@@ -91,12 +96,14 @@ export function exportUserSnapshot(
             ? message.provider
             : undefined;
         const botId: string | undefined = message.bot_id ?? undefined;
+        const model: string | undefined = message.model ?? undefined;
         return {
           id: message.id,
           role: message.role,
           content: message.content,
           createdAt: message.created_at,
           provider,
+          model,
           botId,
         };
       }),
@@ -105,10 +112,12 @@ export function exportUserSnapshot(
 
   const memories = db
     .prepare(
-      "SELECT id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC"
+      "SELECT id, conversation_id, bot_id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC"
     )
     .all(userId) as Array<{
     id: string;
+    conversation_id: string | null;
+    bot_id: string | null;
     confidence: number;
     ciphertext: string;
     iv: string;
@@ -122,6 +131,8 @@ export function exportUserSnapshot(
     conversations: conversationPayload,
     memories: memories.map((memory) => ({
       id: memory.id,
+      conversationId: memory.conversation_id ?? undefined,
+      botId: memory.bot_id ?? undefined,
       confidence: memory.confidence,
       createdAt: memory.created_at,
       payload: decryptJson(
@@ -147,12 +158,12 @@ export function importUserSnapshot(
     VALUES (?, ?, ?, ?, ?)
   `);
   const insertMessage = db.prepare(`
-    INSERT OR REPLACE INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMemory = db.prepare(`
-    INSERT OR REPLACE INTO memories (id, user_id, ciphertext, iv, tag, confidence, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const conversation of snapshot.conversations) {
@@ -172,6 +183,10 @@ export function importUserSnapshot(
         typeof message.botId === "string" && message.botId.length > 0
           ? message.botId
           : null;
+      const modelValue =
+        typeof message.model === "string" && message.model.trim().length > 0
+          ? message.model.trim()
+          : null;
       insertMessage.run(
         message.id,
         conversation.id,
@@ -179,6 +194,7 @@ export function importUserSnapshot(
         message.role,
         message.content,
         providerValue,
+        modelValue,
         botIdValue,
         message.createdAt
       );
@@ -190,6 +206,8 @@ export function importUserSnapshot(
     insertMemory.run(
       memory.id,
       userId,
+      memory.conversationId ?? null,
+      memory.botId ?? null,
       encrypted.ciphertext,
       encrypted.iv,
       encrypted.tag,

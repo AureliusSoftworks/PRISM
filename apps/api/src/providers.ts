@@ -12,6 +12,22 @@ export interface GenerateOptions {
   maxTokens?: number;
 }
 
+export interface ModelCatalogEntry {
+  id: string;
+  label: string;
+  provider: "local" | "openai";
+  isDefault?: boolean;
+}
+
+export interface ModelCatalog {
+  local: ModelCatalogEntry[];
+  online: ModelCatalogEntry[];
+  defaults: {
+    local: string;
+    online: string;
+  };
+}
+
 export interface LlmProvider {
   name: "local" | "openai";
   generateResponse(
@@ -27,7 +43,19 @@ interface OpenAiConfig {
 
 const config = getAppConfig();
 
-const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
+export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
+const OPENAI_FALLBACK_MODELS = [
+  OPENAI_DEFAULT_MODEL,
+  "gpt-4o",
+  "gpt-4.1-mini",
+  "gpt-4.1",
+] as const;
+const OPENAI_CHAT_MODEL_PREFIXES = [
+  "gpt-",
+  "o1",
+  "o3",
+  "o4",
+] as const;
 
 /**
  * Cap on how many characters of an OpenAI error body we echo back through
@@ -90,6 +118,123 @@ function truncateForDisplay(value: string): string {
     return value;
   }
   return `${value.slice(0, OPENAI_ERROR_MESSAGE_MAX_CHARS)}...`;
+}
+
+function modelLabelFromId(id: string): string {
+  return id
+    .split(/[-_:]/)
+    .filter(Boolean)
+    .map((part) => part.toUpperCase() === part
+      ? part
+      : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function uniqueModelIds(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of ids) {
+    const trimmed = id.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function toCatalogEntry(
+  id: string,
+  provider: "local" | "openai",
+  defaultId: string
+): ModelCatalogEntry {
+  return {
+    id,
+    label: modelLabelFromId(id),
+    provider,
+    isDefault: id === defaultId || undefined,
+  };
+}
+
+function isAllowedOpenAiChatModel(id: string): boolean {
+  const normalized = id.trim().toLowerCase();
+  if (!normalized) return false;
+  if (
+    normalized.includes("embedding") ||
+    normalized.includes("whisper") ||
+    normalized.includes("tts") ||
+    normalized.includes("dall-e") ||
+    normalized.includes("image") ||
+    normalized.includes("audio") ||
+    normalized.includes("realtime") ||
+    normalized.includes("moderation")
+  ) {
+    return false;
+  }
+  return OPENAI_CHAT_MODEL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+async function discoverLocalModelIds(): Promise<string[]> {
+  try {
+    const response = await fetch(`${config.ollamaHost}/api/tags`);
+    if (!response.ok) return [];
+    const payload = (await response.json()) as {
+      models?: Array<{ name?: unknown; model?: unknown }>;
+    };
+    return uniqueModelIds(
+      (payload.models ?? [])
+        .map((model) =>
+          typeof model.name === "string"
+            ? model.name
+            : typeof model.model === "string"
+              ? model.model
+              : ""
+        )
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> {
+  if (!openAiApiKey) return [];
+  try {
+    const response = await fetch("https://api.openai.com/v1/models", {
+      headers: { authorization: `Bearer ${openAiApiKey}` },
+    });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: unknown }>;
+    };
+    return uniqueModelIds(
+      (payload.data ?? [])
+        .map((model) => (typeof model.id === "string" ? model.id : ""))
+        .filter(isAllowedOpenAiChatModel)
+        .sort((a, b) => a.localeCompare(b))
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function buildModelCatalog(openAiApiKey?: string): Promise<ModelCatalog> {
+  const [discoveredLocal, discoveredOnline] = await Promise.all([
+    discoverLocalModelIds(),
+    discoverOpenAiModelIds(openAiApiKey),
+  ]);
+  const localIds = uniqueModelIds([config.ollamaModel, ...discoveredLocal]);
+  const onlineIds = uniqueModelIds([
+    OPENAI_DEFAULT_MODEL,
+    ...discoveredOnline,
+    ...OPENAI_FALLBACK_MODELS,
+  ]);
+  return {
+    local: localIds.map((id) => toCatalogEntry(id, "local", config.ollamaModel)),
+    online: onlineIds.map((id) => toCatalogEntry(id, "openai", OPENAI_DEFAULT_MODEL)),
+    defaults: {
+      local: config.ollamaModel,
+      online: OPENAI_DEFAULT_MODEL,
+    },
+  };
 }
 
 export class LocalOllamaProvider implements LlmProvider {

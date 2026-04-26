@@ -43,6 +43,8 @@ export interface ChatMessage {
   createdAt: string;
   /** Provider that generated the message (assistant only; undefined for user/system). */
   provider?: "local" | "openai";
+  /** Concrete model id used for this assistant reply, when recorded. */
+  model?: string;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
   botName?: string;
   /** Bot's associated accent color (CSS color string). Resolved from bots.color at read time. */
@@ -109,6 +111,8 @@ export interface Conversation {
 export interface UserMemory {
   id: string;
   userId: string;
+  conversationId?: string;
+  botId?: string;
   createdAt: string;
   confidence: number;
   text: string;
@@ -131,6 +135,7 @@ export type ChatMode = "chat" | "sandbox";
 export interface ChatRequestPayload {
   conversationId?: string;
   message: string;
+  starterPrompt?: boolean;
   mode?: ChatMode;
 }
 

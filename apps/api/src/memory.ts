@@ -12,6 +12,18 @@ interface StoredMemoryPayload {
   embedding: number[];
 }
 
+type MemoryRow = {
+  id: string;
+  user_id: string;
+  conversation_id: string | null;
+  bot_id: string | null;
+  ciphertext: string;
+  iv: string;
+  tag: string;
+  confidence: number;
+  created_at: string;
+};
+
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) {
     return -1;
@@ -32,12 +44,14 @@ export async function persistMemoryCandidates(
   db: DatabaseSync,
   provider: LlmProvider,
   userId: string,
+  conversationId: string,
+  botId: string | null,
   candidates: MemoryCandidate[],
   userKey: Buffer
 ): Promise<void> {
   const insertMemory = db.prepare(`
-    INSERT INTO memories (id, user_id, ciphertext, iv, tag, confidence, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const candidate of candidates) {
@@ -47,6 +61,8 @@ export async function persistMemoryCandidates(
     insertMemory.run(
       randomId(12),
       userId,
+      conversationId,
+      botId,
       encrypted.ciphertext,
       encrypted.iv,
       encrypted.tag,
@@ -62,21 +78,23 @@ export async function retrieveRelevantMemories(
   userId: string,
   query: string,
   userKey: Buffer,
+  botId?: string | null,
   limit = 4
 ): Promise<UserMemory[]> {
-  const rows = db
-    .prepare(
-      "SELECT id, user_id, ciphertext, iv, tag, confidence, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
-    )
-    .all(userId) as Array<{
-    id: string;
-    user_id: string;
-    ciphertext: string;
-    iv: string;
-    tag: string;
-    confidence: number;
-    created_at: string;
-  }>;
+  const normalizedBotId = typeof botId === "string" && botId.trim().length > 0
+    ? botId.trim()
+    : null;
+  const rows: MemoryRow[] = normalizedBotId
+    ? db
+        .prepare(
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
+        )
+        .all(userId, normalizedBotId) as MemoryRow[]
+    : db
+        .prepare(
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT 100"
+        )
+        .all(userId) as MemoryRow[];
   const queryEmbedding = await provider.embedText(query);
   const scored = rows.map((row) => {
     const decrypted = decryptJson(
@@ -90,6 +108,8 @@ export async function retrieveRelevantMemories(
     return {
       id: row.id,
       userId: row.user_id,
+      conversationId: row.conversation_id ?? undefined,
+      botId: row.bot_id ?? undefined,
       confidence: row.confidence,
       createdAt: row.created_at,
       text: decrypted.text,

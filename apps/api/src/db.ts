@@ -95,6 +95,7 @@ export function createDatabase(): DatabaseSync {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       provider TEXT,
+      model TEXT,
       bot_id TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
@@ -103,6 +104,8 @@ export function createDatabase(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS memories (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -129,11 +132,13 @@ export function createDatabase(): DatabaseSync {
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
       model TEXT,
+      local_model TEXT,
+      online_model TEXT,
       temperature REAL DEFAULT 0.7,
       max_tokens INTEGER DEFAULT 2048,
       color TEXT,
       glyph TEXT,
-      chat_enabled INTEGER NOT NULL DEFAULT 0,
+      chat_enabled INTEGER NOT NULL DEFAULT 1,
       visibility TEXT NOT NULL DEFAULT 'private',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -185,11 +190,33 @@ export function createDatabase(): DatabaseSync {
   if (!hasProviderColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN provider TEXT;");
   }
+  const hasMessageModelColumn = messageColumns.some(
+    (column) => column.name === "model"
+  );
+  if (!hasMessageModelColumn) {
+    db.exec("ALTER TABLE messages ADD COLUMN model TEXT;");
+  }
   const hasBotIdColumn = messageColumns.some(
     (column) => column.name === "bot_id"
   );
   if (!hasBotIdColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN bot_id TEXT;");
+  }
+
+  const memoryColumns = db
+    .prepare("PRAGMA table_info(memories)")
+    .all() as Array<{ name: string }>;
+  const hasMemoryConversationIdColumn = memoryColumns.some(
+    (column) => column.name === "conversation_id"
+  );
+  if (!hasMemoryConversationIdColumn) {
+    db.exec("ALTER TABLE memories ADD COLUMN conversation_id TEXT;");
+  }
+  const hasMemoryBotIdColumn = memoryColumns.some(
+    (column) => column.name === "bot_id"
+  );
+  if (!hasMemoryBotIdColumn) {
+    db.exec("ALTER TABLE memories ADD COLUMN bot_id TEXT;");
   }
 
   // Migrate existing DBs to the bots.color and bots.glyph columns used
@@ -213,7 +240,20 @@ export function createDatabase(): DatabaseSync {
     (column) => column.name === "chat_enabled"
   );
   if (!hasBotChatEnabledColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN chat_enabled INTEGER NOT NULL DEFAULT 0;");
+    db.exec("ALTER TABLE bots ADD COLUMN chat_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  db.exec("UPDATE bots SET chat_enabled = 1 WHERE chat_enabled != 1;");
+  const hasBotLocalModelColumn = botColumns.some(
+    (column) => column.name === "local_model"
+  );
+  if (!hasBotLocalModelColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN local_model TEXT;");
+  }
+  const hasBotOnlineModelColumn = botColumns.some(
+    (column) => column.name === "online_model"
+  );
+  if (!hasBotOnlineModelColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN online_model TEXT;");
   }
 
   return db;

@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildModelCatalog,
   LocalOllamaProvider,
   OpenAiProvider,
   readOpenAiErrorMessage,
@@ -116,6 +117,67 @@ describe("readOpenAiErrorMessage", () => {
     const detail = await readOpenAiErrorMessage(response);
     assert.ok(detail.length <= 600, `detail length ${detail.length} exceeded cap`);
     assert.ok(detail.endsWith("..."), "expected truncation ellipsis");
+  });
+});
+
+describe("buildModelCatalog", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("keeps fallback defaults available when discovery is unavailable", async () => {
+    globalThis.fetch = (async () =>
+      new Response("offline", { status: 503 })) as typeof fetch;
+
+    const catalog = await buildModelCatalog(undefined);
+
+    assert.ok(catalog.defaults.local);
+    assert.equal(catalog.defaults.online, "gpt-4o-mini");
+    assert.equal(catalog.local[0]?.id, catalog.defaults.local);
+    assert.equal(catalog.online[0]?.id, catalog.defaults.online);
+  });
+
+  it("discovers Ollama models and filters OpenAI to chat-capable models", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/tags")) {
+        return new Response(
+          JSON.stringify({
+            models: [
+              { name: "llama3.2" },
+              { name: "gemma3" },
+              { name: "llama3.2" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/v1/models")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "gpt-4o" },
+              { id: "text-embedding-3-small" },
+              { id: "dall-e-3" },
+              { id: "o3-mini" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog("sk-test");
+
+    assert.ok(catalog.local.some((model) => model.id === "llama3.2"));
+    assert.ok(catalog.local.some((model) => model.id === "gemma3"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-4o"));
+    assert.ok(catalog.online.some((model) => model.id === "o3-mini"));
+    assert.ok(!catalog.online.some((model) => model.id === "text-embedding-3-small"));
+    assert.ok(!catalog.online.some((model) => model.id === "dall-e-3"));
   });
 });
 

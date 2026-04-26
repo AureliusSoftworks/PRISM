@@ -1,21 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
 /**
- * Convert the public bot-editor toggle into the integer SQLite stores.
- *
- * Only real booleans are accepted so stringy request bodies such as "true"
- * do not accidentally opt a bot into Chat mode. Callers can pass the stored
- * value as `fallback` when a PATCH omits the field.
- */
-export function resolveBotChatEnabled(
-  value: unknown,
-  fallback: 0 | 1 = 0
-): 0 | 1 {
-  if (typeof value !== "boolean") return fallback;
-  return value ? 1 : 0;
-}
-
-/**
  * Build the system-prompt string sent to the model for a selected bot.
  *
  * Why this exists: the bot's *name* is meaningful context the user picked
