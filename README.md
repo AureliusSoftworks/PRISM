@@ -39,10 +39,8 @@ Prism's planned Apple distribution model is a two-binary split:
 - **Prism iOS/Mac** — the official paid native App Store client that discovers,
   pairs with, and controls a user-owned Prism Server.
 
-The existing web UI remains a development/troubleshooting surface. The
-official native client should not be a thin web wrapper; it should provide
-first-run onboarding, Local Network discovery, tap/click-to-connect pairing,
-Keychain session storage, and native Apple-platform UI.
+The existing web UI remains the reusable Prism interface, but the paid client
+owns native pairing, distribution, session storage, and app-shell presentation.
 
 Planning docs:
 
@@ -54,6 +52,7 @@ Planning docs:
 - [Production readiness gate](docs/production-readiness-gate.md)
 - [Release process (dev -> main)](docs/release-process.md)
 - [Prism Server.app build and release](docs/prism-server-app.md)
+- [Prism.app client build and pairing](docs/prism-client-app.md)
 
 ## Prism Server.app (macOS)
 
@@ -84,6 +83,30 @@ Qdrant sidecar (or use an external Qdrant URL), detect existing Ollama/model
 installs, and guide any missing setup from a clear first-run screen. See
 [docs/prism-server-app.md](docs/prism-server-app.md) for setup, signing,
 notarization, and release steps.
+
+## Prism.app (macOS Client)
+
+Prism.app is the native client shell for the paid app experience. The current
+Debug build pairs with a running Prism Server.app by accepting a short code from
+the server window, storing the returned session locally, and loading the paired
+server's `/prism` interface in a WebKit kiosk window.
+
+Local build:
+
+```bash
+xcodebuild \
+  -project "apps/client-mac/PrismClient.xcodeproj" \
+  -scheme PrismClient \
+  -configuration Debug \
+  -derivedDataPath "apps/client-mac/DerivedData" \
+  build
+```
+
+The Debug build writes:
+
+```text
+apps/client-mac/DerivedData/Build/Products/Debug/Prism.app
+```
 
 ## Architecture
 

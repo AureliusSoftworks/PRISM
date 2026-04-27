@@ -9,7 +9,7 @@ final class RuntimeManager {
     private var webProcess: Process?
     private var apiLogHandle: FileHandle?
     private var webLogHandle: FileHandle?
-    private let startsBundledWebDashboard = false
+    private let startsBundledWebDashboard = true
 
     init(configStore: ConfigStore) {
         self.configStore = configStore

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NODE_VERSION="${NODE_VERSION:-22.12.0}"
+NODE_VERSION="${NODE_VERSION:-22.22.2}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/../build/node-vendor"
 OUTPUT_DIR="${1:-${SCRIPT_DIR}/../Resources/node}"

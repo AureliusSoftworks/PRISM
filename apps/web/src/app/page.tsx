@@ -35,6 +35,7 @@ const HEADER_DELETE_KEY = "__header__";
 // `pendingDeleteKey` slot so the existing auto-disarm / outside-click /
 // Escape behaviour applies to it without any extra wiring.
 const DELETE_ALL_KEY = "__delete_all__";
+const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 
 // Namespace bot-delete keys so they can share the same single "armed" state
 // slot used for conversation deletion without id collisions.
@@ -2079,9 +2080,22 @@ function nextThemeMode(current: Theme): Theme {
 }
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  let nativeSessionToken: string | null = null;
+  if (typeof window !== "undefined") {
+    try {
+      nativeSessionToken = window.localStorage.getItem(NATIVE_SESSION_STORAGE_KEY);
+    } catch {
+      nativeSessionToken = null;
+    }
+  }
+  const headers: HeadersInit = {
+    "content-type": "application/json",
+    ...(nativeSessionToken ? { authorization: `Bearer ${nativeSessionToken}` } : {}),
+    ...(options?.headers ?? {}),
+  };
   const res = await fetch(path, {
     credentials: "include",
-    headers: { "content-type": "application/json", ...(options?.headers ?? {}) },
+    headers,
     ...options,
   });
   // Next rewrite failures can come back as plain text, so parse the body
@@ -6799,6 +6813,11 @@ function HomeContent(): React.JSX.Element {
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST", body: "{}" });
+    try {
+      window.localStorage.removeItem(NATIVE_SESSION_STORAGE_KEY);
+    } catch {
+      // Non-fatal: normal cookie logout still handles browser sessions.
+    }
     setUser(null);
     setConversations([]);
     setDetail(null);

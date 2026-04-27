@@ -1,0 +1,360 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		C00000000000000000000101 /* PrismClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000201 /* PrismClientApp.swift */; };
+		C00000000000000000000102 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000202 /* AppModel.swift */; };
+		C00000000000000000000103 /* PairedServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000203 /* PairedServer.swift */; };
+		C00000000000000000000104 /* ClientConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000204 /* ClientConfigStore.swift */; };
+		C00000000000000000000105 /* PairingExchangeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000205 /* PairingExchangeService.swift */; };
+		C00000000000000000000106 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000206 /* PairingView.swift */; };
+		C00000000000000000000107 /* PairingExchangeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000207 /* PairingExchangeServiceTests.swift */; };
+		C00000000000000000000108 /* ClientConfigStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000208 /* ClientConfigStoreTests.swift */; };
+		C00000000000000000000109 /* KioskWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000020B /* KioskWebView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C00000000000000000000301 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C00000000000000000000401;
+			remoteInfo = PrismClient;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		C00000000000000000000201 /* PrismClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismClientApp.swift; sourceTree = "<group>"; };
+		C00000000000000000000202 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		C00000000000000000000203 /* PairedServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedServer.swift; sourceTree = "<group>"; };
+		C00000000000000000000204 /* ClientConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientConfigStore.swift; sourceTree = "<group>"; };
+		C00000000000000000000205 /* PairingExchangeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingExchangeService.swift; sourceTree = "<group>"; };
+		C00000000000000000000206 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
+		C00000000000000000000207 /* PairingExchangeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingExchangeServiceTests.swift; sourceTree = "<group>"; };
+		C00000000000000000000208 /* ClientConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientConfigStoreTests.swift; sourceTree = "<group>"; };
+		C0000000000000000000020B /* KioskWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KioskWebView.swift; sourceTree = "<group>"; };
+		C00000000000000000000209 /* Prism.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Prism.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0000000000000000000020A /* PrismClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrismClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C00000000000000000000501 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		C00000000000000000000502 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		C00000000000000000000601 = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000602 /* PrismClient */,
+				C00000000000000000000606 /* PrismClientTests */,
+				C00000000000000000000607 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C00000000000000000000602 /* PrismClient */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000201 /* PrismClientApp.swift */,
+				C00000000000000000000202 /* AppModel.swift */,
+				C00000000000000000000603 /* Models */,
+				C00000000000000000000604 /* Services */,
+				C00000000000000000000605 /* Views */,
+			);
+			path = PrismClient;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000603 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000203 /* PairedServer.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000604 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000204 /* ClientConfigStore.swift */,
+				C00000000000000000000205 /* PairingExchangeService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000605 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000206 /* PairingView.swift */,
+				C0000000000000000000020B /* KioskWebView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000606 /* PrismClientTests */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000207 /* PairingExchangeServiceTests.swift */,
+				C00000000000000000000208 /* ClientConfigStoreTests.swift */,
+			);
+			path = PrismClientTests;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000607 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000209 /* Prism.app */,
+				C0000000000000000000020A /* PrismClientTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		C00000000000000000000401 /* PrismClient */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C00000000000000000000901 /* Build configuration list for PBXNativeTarget "PrismClient" */;
+			buildPhases = (
+				C00000000000000000000701 /* Sources */,
+				C00000000000000000000501 /* Frameworks */,
+				C00000000000000000000801 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = PrismClient;
+			productName = Prism;
+			productReference = C00000000000000000000209 /* Prism.app */;
+			productType = "com.apple.product-type.application";
+		};
+		C00000000000000000000402 /* PrismClientTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C00000000000000000000902 /* Build configuration list for PBXNativeTarget "PrismClientTests" */;
+			buildPhases = (
+				C00000000000000000000702 /* Sources */,
+				C00000000000000000000502 /* Frameworks */,
+			);
+			buildRules = ();
+			dependencies = (
+				C00000000000000000000302 /* PBXTargetDependency */,
+			);
+			name = PrismClientTests;
+			productName = PrismClientTests;
+			productReference = C0000000000000000000020A /* PrismClientTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1540;
+				LastUpgradeCheck = 1540;
+				TargetAttributes = {
+					C00000000000000000000401 = {
+						CreatedOnToolsVersion = 15.4;
+					};
+					C00000000000000000000402 = {
+						CreatedOnToolsVersion = 15.4;
+						TestTargetID = C00000000000000000000401;
+					};
+				};
+			};
+			buildConfigurationList = C00000000000000000000900 /* Build configuration list for PBXProject "PrismClient" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = C00000000000000000000601;
+			productRefGroup = C00000000000000000000607 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				C00000000000000000000401 /* PrismClient */,
+				C00000000000000000000402 /* PrismClientTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C00000000000000000000801 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C00000000000000000000701 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000101 /* PrismClientApp.swift in Sources */,
+				C00000000000000000000102 /* AppModel.swift in Sources */,
+				C00000000000000000000103 /* PairedServer.swift in Sources */,
+				C00000000000000000000104 /* ClientConfigStore.swift in Sources */,
+				C00000000000000000000105 /* PairingExchangeService.swift in Sources */,
+				C00000000000000000000106 /* PairingView.swift in Sources */,
+				C00000000000000000000109 /* KioskWebView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C00000000000000000000702 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000107 /* PairingExchangeServiceTests.swift in Sources */,
+				C00000000000000000000108 /* ClientConfigStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C00000000000000000000302 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = C00000000000000000000401 /* PrismClient */; targetProxy = C00000000000000000000301 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		C00000000000000000000A10 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		C00000000000000000000A11 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		C00000000000000000000A20 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Prism;
+				INFOPLIST_KEY_LSUIElement = NO;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-client;
+				PRODUCT_MODULE_NAME = PrismClient;
+				PRODUCT_NAME = Prism;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C00000000000000000000A21 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Prism;
+				INFOPLIST_KEY_LSUIElement = NO;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-client;
+				PRODUCT_MODULE_NAME = PrismClient;
+				PRODUCT_NAME = Prism;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		C00000000000000000000A30 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-client.tests;
+				PRODUCT_MODULE_NAME = PrismClientTests;
+				PRODUCT_NAME = PrismClientTests;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Prism.app/Contents/MacOS/Prism";
+			};
+			name = Debug;
+		};
+		C00000000000000000000A31 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-client.tests;
+				PRODUCT_MODULE_NAME = PrismClientTests;
+				PRODUCT_NAME = PrismClientTests;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Prism.app/Contents/MacOS/Prism";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		C00000000000000000000900 /* Build configuration list for PBXProject "PrismClient" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C00000000000000000000A10 /* Debug */,
+				C00000000000000000000A11 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C00000000000000000000901 /* Build configuration list for PBXNativeTarget "PrismClient" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C00000000000000000000A20 /* Debug */,
+				C00000000000000000000A21 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C00000000000000000000902 /* Build configuration list for PBXNativeTarget "PrismClientTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C00000000000000000000A30 /* Debug */,
+				C00000000000000000000A31 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C00000000000000000000001 /* Project object */;
+}

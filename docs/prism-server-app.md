@@ -67,18 +67,19 @@ The Xcode build phase runs `apps/server-mac/scripts/build-runtime.sh`, which
 stages:
 
 - `apps/api/dist/`
-- `apps/web/.next/standalone/` for internal troubleshooting builds only
-- `apps/web/.next/static/` for internal troubleshooting builds only
-- `apps/web/public/` when present, for internal troubleshooting builds only
+- `apps/web/.next/standalone/` for the paired client kiosk surface
+- `apps/web/.next/static/` for the paired client kiosk surface
+- `apps/web/public/` when present
 - root `node_modules/`
 - workspace package metadata needed by Node module resolution
 
 At runtime, Qdrant is resolved in one of two modes: **Prism-managed** (spawn a
 local sidecar) or **external** (an existing `/readyz` on your configured
 `QDRANT_URL`—including a Qdrant already running on the default port). The app
-launches one user-facing child Node process:
+launches the server API plus a hidden web surface for paired clients:
 
 - API: `runtime/apps/api/dist/server.js`
+- Web: `runtime/apps/web/.next/standalone/apps/web/server.js`
 
 The first-run window also exposes user-approved setup actions:
 
