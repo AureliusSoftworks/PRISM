@@ -5549,6 +5549,38 @@ function GlyphSlate({ size = 88 }: GlyphProps): React.JSX.Element {
   );
 }
 
+function GlyphPseudo({ size = 88 }: GlyphProps): React.JSX.Element {
+  // Notebook + pseudo-flow cue. The page and line blocks imply "code-ish
+  // structure" without reading as a full IDE or terminal.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Notebook page */}
+      <path
+        d="M10 7 H35 L40 12 V41 H10 Z"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        opacity="0.45"
+      />
+      {/* Fold line (P) */}
+      <path d="M35 7 V12 H40" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      {/* Pseudocode lines */}
+      <path d="M15 19 H32" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      <path d="M15 25 H29" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      <path d="M19 31 H29" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      {/* Control-flow branch marker */}
+      <path d="M15 31 V36 H22" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
 // ── Message body with collapsible long content ────────────────────────
 // Wraps the <p> text so we can cap the rendered height on long messages
 // and reveal a "Show more" toggle. Messages under MESSAGE_COLLAPSE_THRESHOLD
@@ -9691,6 +9723,20 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.hubTileLabel}>Slate</div>
             <div className={styles.hubTileTagline}>
               Distraction-free writing canvas — no bots, just words.
+            </div>
+          </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Pseudo mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphPseudo size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Pseudo</div>
+            <div className={styles.hubTileTagline}>
+              TinkerCAD for coding: structured pseudocode, not a full IDE.
             </div>
           </button>
         </div>
