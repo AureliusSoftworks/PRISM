@@ -1,5 +1,14 @@
 import type { NextConfig } from "next";
 import { networkInterfaces } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** Monorepo root — anchors Turbopack so it does not walk up to unrelated lockfiles (e.g. in $HOME). */
+const MONOREPO_ROOT = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  ".."
+);
 
 const apiOrigin = process.env.LOCALAI_API_ORIGIN ?? "http://127.0.0.1:8787";
 
@@ -31,6 +40,9 @@ const extraDevOrigins =
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  turbopack: {
+    root: MONOREPO_ROOT,
+  },
   allowedDevOrigins: [
     "localhost",
     "127.0.0.1",
