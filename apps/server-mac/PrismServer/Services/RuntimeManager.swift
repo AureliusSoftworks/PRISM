@@ -4,16 +4,25 @@ final class RuntimeManager {
     var onStateChange: ((RuntimeState) -> Void)?
 
     private let configStore: ConfigStore
+    private let qdrantManager: QdrantManager
     private var apiProcess: Process?
     private var webProcess: Process?
     private var apiLogHandle: FileHandle?
     private var webLogHandle: FileHandle?
+    private let startsBundledWebDashboard = false
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
+        self.qdrantManager = QdrantManager(configStore: configStore)
     }
 
-    func start(config: ServerConfig) throws {
+    func startMemoryEngine(resolution: QdrantResolution) async throws {
+        try FileManager.default.createDirectory(at: configStore.logDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: configStore.applicationSupportDirectory, withIntermediateDirectories: true)
+        try await qdrantManager.startIfNeeded(resolution: resolution)
+    }
+
+    func start(config: ServerConfig, resolution: QdrantResolution) async throws {
         guard apiProcess == nil, webProcess == nil else {
             onStateChange?(.running)
             return
@@ -22,11 +31,15 @@ final class RuntimeManager {
         try FileManager.default.createDirectory(at: configStore.logDirectory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: configStore.applicationSupportDirectory, withIntermediateDirectories: true)
 
+        try await qdrantManager.startIfNeeded(resolution: resolution)
+
         let runtimeURL = try runtimeRoot()
-        let environment = mergedEnvironment(config: config)
+        let environment = mergedEnvironment(config: config, qdrantURL: resolution.effectiveQdrantURL)
 
         apiLogHandle = try makeLogHandle(named: "api.log")
-        webLogHandle = try makeLogHandle(named: "web.log")
+        if startsBundledWebDashboard {
+            webLogHandle = try makeLogHandle(named: "web.log")
+        }
 
         let api = try startNodeProcess(
             name: "API",
@@ -37,17 +50,18 @@ final class RuntimeManager {
             logHandle: apiLogHandle
         )
 
-        let web = try startNodeProcess(
-            name: "Web",
-            runtimeURL: runtimeURL,
-            entryRelativePath: "apps/web/.next/standalone/apps/web/server.js",
-            workingDirectoryRelativePath: "apps/web/.next/standalone",
-            environment: environment,
-            logHandle: webLogHandle
-        )
-
         apiProcess = api
-        webProcess = web
+        if startsBundledWebDashboard {
+            let web = try startNodeProcess(
+                name: "Web",
+                runtimeURL: runtimeURL,
+                entryRelativePath: "apps/web/.next/standalone/apps/web/server.js",
+                workingDirectoryRelativePath: "apps/web/.next/standalone",
+                environment: environment,
+                logHandle: webLogHandle
+            )
+            webProcess = web
+        }
         onStateChange?(.running)
     }
 
@@ -62,6 +76,7 @@ final class RuntimeManager {
         webLogHandle = nil
         apiLogHandle = nil
 
+        qdrantManager.stop()
         onStateChange?(.stopped)
     }
 
@@ -76,11 +91,12 @@ final class RuntimeManager {
         return runtimeURL
     }
 
-    private func mergedEnvironment(config: ServerConfig) -> [String: String] {
+    private func mergedEnvironment(config: ServerConfig, qdrantURL: String) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         config.environment(applicationSupportDirectory: configStore.applicationSupportDirectory).forEach { key, value in
             environment[key] = value
         }
+        environment["QDRANT_URL"] = qdrantURL
         return environment
     }
 

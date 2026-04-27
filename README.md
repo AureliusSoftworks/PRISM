@@ -39,7 +39,7 @@ Prism's planned Apple distribution model is a two-binary split:
 - **Prism iOS/Mac** — the official paid native App Store client that discovers,
   pairs with, and controls a user-owned Prism Server.
 
-The existing web UI remains the desktop/admin surface for the server. The
+The existing web UI remains a development/troubleshooting surface. The
 official native client should not be a thin web wrapper; it should provide
 first-run onboarding, Local Network discovery, tap/click-to-connect pairing,
 Keychain session storage, and native Apple-platform UI.
@@ -57,9 +57,10 @@ Planning docs:
 
 ## Prism Server.app (macOS)
 
-Prism Server.app is the native macOS menu-bar launcher for the server runtime.
-It packages the existing Node API and Next.js standalone web dashboard into a
-signed/notarized desktop app distributed as a DMG from GitHub Releases.
+Prism Server.app is the native macOS Dock app for the server runtime. It
+packages the Node API, managed Memory Engine, and local setup flow into a
+signed/notarized desktop app distributed as a DMG from GitHub Releases. It
+does not expose the web dashboard as the user-facing product path.
 
 Local build:
 
@@ -78,9 +79,10 @@ The Debug build writes:
 apps/server-mac/DerivedData/Build/Products/Debug/Prism Server.app
 ```
 
-The app does not bundle Ollama or Qdrant. It detects them on launch and guides
-installation/startup from the Setup window. See
-[docs/prism-server-app.md](docs/prism-server-app.md) for signing,
+The user-facing target is plug-and-play: Prism Server.app can run a managed
+Qdrant sidecar (or use an external Qdrant URL), detect existing Ollama/model
+installs, and guide any missing setup from a clear first-run screen. See
+[docs/prism-server-app.md](docs/prism-server-app.md) for setup, signing,
 notarization, and release steps.
 
 ## Architecture

@@ -89,7 +89,7 @@ jobs:
 
       - name: Build Prism Server.app
         run: |
-          VENDOR_NODE=1 xcodebuild \
+          VENDOR_NODE=1 VENDOR_QDRANT=1 xcodebuild \
             -project "apps/server-mac/PrismServer.xcodeproj" \
             -scheme PrismServer \
             -configuration Release \

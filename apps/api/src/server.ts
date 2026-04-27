@@ -35,6 +35,8 @@ const config = getAppConfig();
 const db = createDatabase();
 const masterKey = deriveMasterKey(config.encryptionMasterKey);
 const backupAdapter = new LocalOnlyBackupAdapter();
+const LOCAL_OWNER_EMAIL = "prism-owner@local.prism";
+const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
 
 interface UserDbRow {
   id: string;
@@ -94,6 +96,55 @@ function requireAuth(ctx: RequestContext): string {
   ctx.userId = session.userId;
   touchUserActivity(session.userId);
   return session.userId;
+}
+
+function isLoopbackRequest(ctx: RequestContext): boolean {
+  const address = ctx.req.socket.remoteAddress;
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function requireLoopback(ctx: RequestContext): void {
+  if (!isLoopbackRequest(ctx)) {
+    throw new Error("Local pairing codes can only be generated on this Mac.");
+  }
+}
+
+function getOrCreateLocalOwnerUser(): string {
+  const existing = db
+    .prepare("SELECT id FROM users WHERE email = ?")
+    .get(LOCAL_OWNER_EMAIL) as { id?: string } | undefined;
+  if (existing?.id) {
+    touchUserActivity(existing.id);
+    return existing.id;
+  }
+
+  const userId = randomId(12);
+  const salt = randomId(8);
+  const passwordHash = hashPassword(randomId(32), salt);
+  const userKey = Buffer.from(randomId(32), "hex");
+  const wrappedUserKey = encryptText(userKey.toString("base64"), masterKey);
+  const createdAt = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO users (
+      id, email, display_name, password_hash, password_salt,
+      wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+      theme, preferred_provider, auto_memory, auto_switch_model, created_at, last_active_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, 0, ?, ?)
+  `).run(
+    userId,
+    LOCAL_OWNER_EMAIL,
+    LOCAL_OWNER_DISPLAY_NAME,
+    passwordHash,
+    salt,
+    wrappedUserKey.ciphertext,
+    wrappedUserKey.iv,
+    wrappedUserKey.tag,
+    createdAt,
+    createdAt
+  );
+
+  return userId;
 }
 
 function getUserRow(userId: string): UserDbRow {
@@ -340,6 +391,12 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/pairing/codes", async (ctx) => {
       const userId = requireAuth(ctx);
+      const pairingCode = createPairingCode(db, userId);
+      json(ctx.res, 201, { ok: true, pairingCode });
+    }),
+    route("POST", "/api/local/pairing/codes", async (ctx) => {
+      requireLoopback(ctx);
+      const userId = getOrCreateLocalOwnerUser();
       const pairingCode = createPairingCode(db, userId);
       json(ctx.res, 201, { ok: true, pairingCode });
     }),
@@ -1024,7 +1081,11 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 201, { ok: true, conversationId: forkId });
     }),
     route("GET", "/api/health", async (ctx) => {
-      json(ctx.res, 200, buildHealthResponse(db, config, process.uptime()));
+      json(
+        ctx.res,
+        200,
+        await buildHealthResponse(db, config, process.uptime())
+      );
     })
   ];
 }

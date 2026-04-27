@@ -33,6 +33,8 @@ Responsibilities:
 
 - Start, stop, and report status for the Prism stack.
 - Own SQLite, Qdrant, provider settings, encryption keys, and account data.
+- Provide a managed first-run setup that hides implementation details like
+  Qdrant behind user-facing concepts such as "Memory Engine."
 - Expose the API to trusted local clients.
 - Advertise itself on the LAN for native app discovery.
 - Display QR/pairing codes for new clients.
@@ -45,9 +47,13 @@ Initial packaging stance:
 - GitHub Releases provide server downloads and release notes.
 - A signed/notarized desktop launcher is preferred before pursuing Mac App
   Store server distribution.
-- The macOS desktop launcher now lives in `apps/server-mac/`; see
-  `docs/prism-server-app.md` for local builds, signing, notarization, and DMG
-  release steps.
+- The macOS desktop app now lives in `apps/server-mac/`; see
+  `docs/prism-server-app.md` for local builds, managed first-run setup, signing,
+  notarization, and DMG release steps.
+- Prism Server.app should not require Docker for the Mac-first experience.
+  Ollama should remain native for local acceleration; Qdrant should become a
+  Prism-managed sidecar unless the user explicitly points Prism at an existing
+  Qdrant endpoint.
 - Mac App Store distribution for the server is deferred because sandboxing,
   self-contained bundle rules, Node packaging, Qdrant, and Ollama need a
   separate feasibility pass.

@@ -17,9 +17,11 @@ const config: AppConfig = {
 };
 
 describe("buildHealthResponse", () => {
-  it("includes mobile readiness metadata without leaking secrets", () => {
+  it("includes mobile readiness metadata without leaking secrets", async () => {
     const db = new DatabaseSync(":memory:");
-    const health = buildHealthResponse(db, config, 12.5);
+    const health = await buildHealthResponse(db, config, 12.5, {
+      skipNetworkChecks: true,
+    });
 
     assert.equal(health.ok, true);
     assert.equal(health.uptime, 12.5);

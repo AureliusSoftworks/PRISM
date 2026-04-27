@@ -23,7 +23,7 @@ struct ServerConfig: Equatable {
         encryptionMasterKey: "change-me-to-a-long-random-secret",
         ollamaHost: "http://localhost:11434",
         ollamaModel: "llama3.2",
-        qdrantURL: "http://localhost:6333",
+        qdrantURL: "http://127.0.0.1:6333",
         openAIAPIKey: ""
     )
 

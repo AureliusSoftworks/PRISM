@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct MenuBarContentView: View {
-    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
@@ -10,19 +9,19 @@ struct MenuBarContentView: View {
 
             Divider()
 
-            dependencySection
+            readinessSection
 
             Divider()
 
-            Button("Open Dashboard") {
-                model.openDashboard()
-            }
-            .disabled(!model.runtimeState.isRunning)
-
             HStack {
                 Button(model.runtimeState.isRunning ? "Restart Server" : "Start Server") {
-                    model.runtimeState.isRunning ? model.restart() : model.start()
+                    if model.runtimeState.isRunning {
+                        model.restart()
+                    } else {
+                        model.start()
+                    }
                 }
+                .disabled(!model.dependencyStatus.canStartNodeRuntime && !model.runtimeState.isRunning)
 
                 Button("Stop") {
                     model.stop()
@@ -31,12 +30,12 @@ struct MenuBarContentView: View {
             }
 
             HStack {
-                Button("Setup...") {
+                Button("Setup…") {
                     model.showSetupWindow()
                 }
 
-                Button("Logs...") {
-                    openWindow(id: AppWindow.logs.rawValue)
+                Button("Logs…") {
+                    model.showLogsWindow()
                 }
             }
 
@@ -47,12 +46,9 @@ struct MenuBarContentView: View {
             }
         }
         .padding()
-        .frame(width: 320)
+        .frame(width: 340)
         .task {
             await model.refreshDependencies()
-            if !model.dependencyStatus.canStartServer {
-                model.showSetupWindow()
-            }
         }
     }
 
@@ -65,32 +61,42 @@ struct MenuBarContentView: View {
         }
     }
 
-    private var dependencySection: some View {
+    private var readinessSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Dependencies")
+            Text("Readiness")
                 .font(.subheadline)
                 .fontWeight(.semibold)
 
-            DependencyRow(check: model.dependencyStatus.ollama)
-            DependencyRow(check: model.dependencyStatus.qdrant)
-
-            Button("Refresh Dependencies") {
-                Task {
-                    await model.refreshDependencies()
+            ReadinessPillarView(status: model.dependencyStatus.serverRuntime)
+            ReadinessPillarView(status: model.dependencyStatus.memoryEngine)
+            ReadinessPillarView(status: model.dependencyStatus.localAI.ollama)
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: model.dependencyStatus.localAI.defaultModel.isReady ? "checkmark.circle" : "exclamationmark.triangle")
+                    .foregroundStyle(model.dependencyStatus.localAI.defaultModel.isReady ? .green : .orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.dependencyStatus.localAI.defaultModel.name)
+                        .font(.subheadline)
+                    Text(model.dependencyStatus.localAI.defaultModel.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+            }
+
+            Button("Refresh") {
+                Task { await model.refreshDependencies() }
             }
         }
     }
 }
 
-private struct DependencyRow: View {
-    let check: DependencyCheck
+private struct ReadinessPillarView: View {
+    let status: PillarStatus
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Label(check.name, systemImage: check.systemImage)
-                .foregroundStyle(check.isReachable ? .green : .orange)
-            Text(check.detail)
+            Label(status.name, systemImage: status.systemImage)
+                .foregroundStyle(status.isReady ? .green : .orange)
+            Text(status.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

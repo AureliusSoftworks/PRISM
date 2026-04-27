@@ -23,6 +23,7 @@ function readBooleanEnv(name: string, fallback: boolean): boolean {
 }
 
 const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
+const DEFAULT_QDRANT_URL = "http://127.0.0.1:6333";
 
 /**
  * Turn whatever value is in OLLAMA_HOST into a URL that `fetch()` can use.
@@ -66,6 +67,38 @@ function normalizeOllamaHost(value: string | undefined): string {
   return normalized;
 }
 
+/**
+ * Normalizes a Qdrant base URL for `fetch` (scheme, bind-all fix, no trailing slash).
+ * Mirrors the Swift `QdrantURL` helper in PrismServer.
+ */
+function normalizeQdrantUrl(value: string | undefined): string {
+  const raw = (value ?? "").trim();
+  if (!raw) {
+    return DEFAULT_QDRANT_URL;
+  }
+
+  let normalized = raw;
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `http://${normalized}`;
+  }
+  normalized = normalized.replace(
+    /\/\/0\.0\.0\.0(?=$|[:\/])/i,
+    "//127.0.0.1"
+  );
+  normalized = normalized.replace(/\/+$/, "");
+
+  try {
+    new URL(normalized);
+  } catch {
+    console.warn(
+      `QDRANT_URL value ${JSON.stringify(raw)} is not a valid URL; falling back to ${DEFAULT_QDRANT_URL}`
+    );
+    return DEFAULT_QDRANT_URL;
+  }
+
+  return normalized;
+}
+
 export interface AppConfig {
   apiPort: number;
   serverName: string;
@@ -93,6 +126,8 @@ export function getAppConfig(): AppConfig {
     ollamaHost: normalizeOllamaHost(process.env.OLLAMA_HOST),
     ollamaModel: process.env.OLLAMA_MODEL ?? "llama3.2",
     openAiApiKey: process.env.OPENAI_API_KEY,
-    qdrantUrl: process.env.QDRANT_URL ?? "http://localhost:6333",
+    qdrantUrl: normalizeQdrantUrl(process.env.QDRANT_URL),
   };
 }
+
+export { DEFAULT_QDRANT_URL, normalizeQdrantUrl };

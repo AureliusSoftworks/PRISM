@@ -21,7 +21,18 @@ mkdir -p "${OUTPUT_DIR}"
 
 echo "Staging API runtime..."
 mkdir -p "${OUTPUT_DIR}/apps/api" "${OUTPUT_DIR}/apps/web/.next" "${OUTPUT_DIR}/node_modules/@localai"
-ditto "apps/api/dist" "${OUTPUT_DIR}/apps/api/dist"
+API_DIST_SOURCE="apps/api/dist"
+if [ -f "apps/api/dist/apps/api/src/server.js" ]; then
+  # TypeScript emits the API under the monorepo-relative path because the app
+  # imports workspace packages via tsconfig paths. Flatten just the API output
+  # into the runtime shape that RuntimeManager launches.
+  API_DIST_SOURCE="apps/api/dist/apps/api/src"
+fi
+ditto "${API_DIST_SOURCE}" "${OUTPUT_DIR}/apps/api/dist"
+if [ ! -f "${OUTPUT_DIR}/apps/api/dist/server.js" ]; then
+  echo "Missing staged API entrypoint: ${OUTPUT_DIR}/apps/api/dist/server.js" >&2
+  exit 1
+fi
 ditto "apps/api/package.json" "${OUTPUT_DIR}/apps/api/package.json"
 ditto "package.json" "${OUTPUT_DIR}/package.json"
 ditto "package-lock.json" "${OUTPUT_DIR}/package-lock.json"
@@ -51,4 +62,15 @@ elif [ -x "${SCRIPT_DIR}/../Resources/node/bin/node" ]; then
   ditto "${SCRIPT_DIR}/../Resources/node" "${NODE_OUTPUT_DIR}"
 else
   echo "No bundled Node staged; Prism Server.app will use system Node from PATH."
+fi
+
+QDRANT_DEST="${RESOURCE_DIR}/qdrant"
+if [ "${VENDOR_QDRANT:-0}" = "1" ]; then
+  echo "Vendoring Qdrant into ${QDRANT_DEST}..."
+  "${SCRIPT_DIR}/vendor-qdrant.sh" "${QDRANT_DEST}"
+elif [ -x "${SCRIPT_DIR}/../Resources/qdrant" ]; then
+  echo "Copying pre-vendored Qdrant from apps/server-mac/Resources/qdrant..."
+  install -m 0755 "${SCRIPT_DIR}/../Resources/qdrant" "${QDRANT_DEST}"
+else
+  echo "No bundled Qdrant staged; install \`qdrant\` via Homebrew or run with VENDOR_QDRANT=1."
 fi
