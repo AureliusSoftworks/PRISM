@@ -50,11 +50,29 @@ const BOT_DELETE_KEY_PREFIX = "bot:";
 // apply uniformly.
 const DELETE_ALL_BOTS_KEY = "__delete_all_bots__";
 
-// Messages whose content exceeds this character count join the scroll-driven
-// reading lens: compact away from center, expanded as they approach center.
-// Short messages render at natural height so the lens only affects prose that
-// would otherwise dominate the mobile viewport.
-const MESSAGE_COLLAPSE_THRESHOLD = 220;
+// Developer Tools are enabled by default for Prism's local/native builds.
+// Set NEXT_PUBLIC_DEV_TOOLS=0 only when a distribution build must hide them.
+const DEV_TOOLS_ENABLED = process.env.NEXT_PUBLIC_DEV_TOOLS !== "0";
+
+const DEV_TOOLS_BOT_QUANTITY_MIN = 0;
+const DEV_TOOLS_BOT_QUANTITY_DEFAULT = 10;
+const DEV_TOOLS_BOT_QUANTITY_MAX = 2000;
+const DEV_TOOLS_BOT_QUANTITY_PRESETS = [1, 10, 25, 50, 100, 500, 1000, 2000] as const;
+const DEV_TOOLS_BOT_CREATE_CHUNK_SIZE = 100;
+const DEV_TOOLS_GHOST_COUNT_MIN = 1;
+const DEV_TOOLS_GHOST_COUNT_MAX = 99;
+const DEV_TOOLS_PANEL_DEFAULT_X = 14;
+const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
+const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
+
+type DevToolsBotQuantity = number | "";
+type DevToolsPanelPosition = { x: number; y: number };
+type DevToolsPanelDragState = {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+};
+
 const MESSAGE_COPY_FEEDBACK_MS = 1600;
 
 // ── Prism logo letter palette ─────────────────────────────────────────
@@ -110,6 +128,49 @@ function shufflePalette<T>(source: readonly T[]): T[] {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+function clampDevToolsBotQuantity(value: number): number {
+  if (!Number.isFinite(value)) return DEV_TOOLS_BOT_QUANTITY_MIN;
+  return Math.max(
+    DEV_TOOLS_BOT_QUANTITY_MIN,
+    Math.min(DEV_TOOLS_BOT_QUANTITY_MAX, Math.round(value))
+  );
+}
+
+function randomDevToolsGhostCount(): number {
+  const range = DEV_TOOLS_GHOST_COUNT_MAX - DEV_TOOLS_GHOST_COUNT_MIN + 1;
+  return DEV_TOOLS_GHOST_COUNT_MIN + Math.floor(Math.random() * range);
+}
+
+function randomDevToolsGhostMessage(): string {
+  const ghostCount = randomDevToolsGhostCount();
+  return ghostCount === 1
+    ? "1 ghost was added."
+    : `${ghostCount} ghosts were added.`;
+}
+
+function clampDevToolsPanelPosition(
+  x: number,
+  y: number,
+  panelWidth: number,
+  panelHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
+): DevToolsPanelPosition {
+  const maxX = Math.max(
+    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+    viewportWidth - panelWidth - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
+  );
+  const maxY = Math.max(
+    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+    viewportHeight - panelHeight - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
+  );
+
+  return {
+    x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
+    y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
+  };
 }
 
 interface PrismWordmarkProps {
@@ -249,7 +310,11 @@ interface PickerGeometry {
   mobileColumnStack: boolean;
   /** True when an odd-count balancing cell should lead the bot buttons. */
   leadingFillerCell: boolean;
-  /** True from level 2 onward: remove the tile gradient. */
+  /** True for the bridge stage: flat Stage-2-style tiles that still keep names. */
+  namedFlatTile: boolean;
+  /** True when mobile density should let the picker replace the hero copy. */
+  suppressMobileHeroCopy: boolean;
+  /** True from the icon-only flat stage onward. */
   flattenTile: boolean;
   /** True from level 3 onward: increase the glyph-to-container ratio. */
   enlargeGlyph: boolean;
@@ -277,9 +342,10 @@ interface PickerGeometry {
   radialRainbowGradient: boolean;
 }
 
-type PickerDensityStageId = 1 | 2 | 3 | 4 | 5 | 6;
+type PickerDensityStageId = 1 | 1.5 | 2 | 3 | 4 | 5 | 6;
 
 interface PickerDensityBreakpoints {
+  namedFlatTileCountMin: number;
   flatTileCountMin: number;
   largeGlyphTileCountMin: number;
   crosshairTileCountMin: number;
@@ -306,6 +372,7 @@ interface PickerDensityStageTarget {
  */
 const PICKER_MOBILE_MAX_SQUARE_SIZE = 320;
 const PICKER_LOW_COUNT_MAX = 10;
+const PICKER_ICON_ONLY_FLAT_COUNT = PICKER_LOW_COUNT_MAX + 1;
 const PICKER_MOBILE_LOW_COUNT_MAX_SIZE = 260;
 const PICKER_MOBILE_COLUMN_STACK_MAX_HEIGHT = 340;
 const PICKER_DESKTOP_LOW_COUNT_MAX_WIDTH = 460;
@@ -319,6 +386,8 @@ const PICKER_FEW_BOT_TILE_SIZE_MOBILE = 124;
 const PICKER_FEW_BOT_TILE_SIZE_DESKTOP = 104;
 const PICKER_LOW_COUNT_TILE_SIZE_MOBILE = 72;
 const PICKER_LOW_COUNT_TILE_SIZE_DESKTOP = 76;
+const PICKER_TILE_NAME_MIN_SIZE = PICKER_LOW_COUNT_TILE_SIZE_MOBILE;
+const PICKER_LOW_COUNT_FRAME_VERTICAL_PAD = 24;
 const PICKER_THREE_STACK_TILE_SIZE_MOBILE = 128;
 const PICKER_DEFAULT_GLYPH_RATIO = 0.5;
 const PICKER_STAGE_TWO_GLYPH_RATIO = 0.82;
@@ -338,7 +407,8 @@ const DESKTOP_SIDEBAR_WIDTH = 280;
 const DESKTOP_MESSAGES_PADDING_X = 40;
 const MOBILE_MESSAGES_PADDING_X = 28;
 const PICKER_SIDE_GUTTER = 48;
-const FLAT_TILE_BASE_COUNT = 60;
+const PICKER_NAMED_FLAT_MOBILE_COUNT = 5;
+const PICKER_NAMED_FLAT_DESKTOP_COUNT = 8;
 const LARGE_GLYPH_BASE_COUNT = 180;
 const GLYPHLESS_CARD_BASE_COUNT = 360;
 const COMPACT_PIXEL_GRID_BASE_COUNT = 480;
@@ -490,6 +560,22 @@ function pickerMaxTileSize(totalTiles: number, isDesktop: boolean): number {
     : PICKER_LOW_COUNT_TILE_SIZE_MOBILE;
 }
 
+function lowCountPickerContentHeight(
+  totalTiles: number,
+  pickerHeight: number,
+  gridRows: number,
+  tileSize: number,
+  tileGap: number
+): number {
+  if (totalTiles > PICKER_LOW_COUNT_MAX) return pickerHeight;
+
+  const contentHeight = gridRows * tileSize + Math.max(0, gridRows - 1) * tileGap;
+  return Math.min(
+    pickerHeight,
+    Math.ceil(contentHeight + PICKER_LOW_COUNT_FRAME_VERTICAL_PAD)
+  );
+}
+
 function scaledPickerBreakpoint(baseCount: number, pickerWidth: number): number {
   const linearScale = pickerWidth / PICKER_REFERENCE_SIZE;
   const scale = Math.max(
@@ -524,11 +610,10 @@ function pickerDensityBreakpoints(
     isDesktop
       ? Math.min(pickerWidth, pickerHeight * PICKER_DESKTOP_ASPECT_RATIO)
       : pickerWidth;
-  const flatTileCountMin = pickerStageBreakpoint(
-    FLAT_TILE_BASE_COUNT,
-    densityWidth,
-    isDesktop
-  );
+  const namedFlatTileCountMin = isDesktop
+    ? PICKER_NAMED_FLAT_DESKTOP_COUNT
+    : PICKER_NAMED_FLAT_MOBILE_COUNT;
+  const flatTileCountMin = PICKER_ICON_ONLY_FLAT_COUNT;
   const largeGlyphTileCountMin = pickerStageBreakpoint(
     LARGE_GLYPH_BASE_COUNT,
     densityWidth,
@@ -563,6 +648,7 @@ function pickerDensityBreakpoints(
   );
 
   return {
+    namedFlatTileCountMin,
     flatTileCountMin,
     largeGlyphTileCountMin,
     crosshairTileCountMin,
@@ -573,7 +659,6 @@ function pickerDensityBreakpoints(
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function pickerDensityStageTargets(
   viewportWidth: number,
   viewportHeight: number
@@ -585,7 +670,13 @@ function pickerDensityStageTargets(
       id: 1,
       label: "Stage 1",
       description: "full cards",
-      targetCount: Math.max(1, breakpoints.flatTileCountMin - 1),
+      targetCount: Math.max(1, breakpoints.namedFlatTileCountMin - 1),
+    },
+    {
+      id: 1.5,
+      label: "Stage 1.5",
+      description: "named flat cards",
+      targetCount: breakpoints.namedFlatTileCountMin,
     },
     {
       id: 2,
@@ -668,6 +759,12 @@ function pickerGridShape(
   if (totalTiles === 3) {
     return { cols: 2, rows: 2 };
   }
+  if (aspectRatio <= 1.2 && totalTiles >= 7 && totalTiles <= 9) {
+    return { cols: 3, rows: Math.ceil(totalTiles / 3) };
+  }
+  if (aspectRatio <= 1.2 && totalTiles === 10) {
+    return { cols: 4, rows: 3 };
+  }
   if (aspectRatio <= 1.2 && totalTiles >= 5 && totalTiles <= 10) {
     return { cols: 2, rows: Math.ceil(totalTiles / 2) };
   }
@@ -724,6 +821,7 @@ function pickerGeometry(
         )
       : basePickerHeight;
   const {
+    namedFlatTileCountMin,
     flatTileCountMin,
     largeGlyphTileCountMin,
     crosshairTileCountMin,
@@ -739,7 +837,6 @@ function pickerGeometry(
   const radialRainbowGradient =
     isCompactPixelGrid && totalTiles >= radialRainbowCountMin;
   const isSolidSwatch = isCompactPixelGrid;
-
   if (totalTiles <= 0) {
     return {
       pickerWidth,
@@ -756,6 +853,8 @@ function pickerGeometry(
       threeBotStack: false,
       mobileColumnStack: false,
       leadingFillerCell: false,
+      namedFlatTile: false,
+      suppressMobileHeroCopy: false,
       flattenTile: false,
       enlargeGlyph: false,
       hideGlyphByDefault: false,
@@ -772,6 +871,8 @@ function pickerGeometry(
   // visual affordance at a time: gradient, then larger glyphs, then glyphs,
   // then card chrome/pixel gaps, then the fully abstract rainbow field.
   const leadingFillerCell = totalTiles > 10 && totalTiles % 2 === 1;
+  const namedFlatTile =
+    totalTiles >= namedFlatTileCountMin && totalTiles < flatTileCountMin;
   const gridOccupancyCount = totalTiles + (leadingFillerCell ? 1 : 0);
   const { cols, rows } = pickerGridShape(
     gridOccupancyCount,
@@ -812,6 +913,13 @@ function pickerGeometry(
       )
     )
   );
+  const contentAlignedPickerHeight = lowCountPickerContentHeight(
+    totalTiles,
+    pickerHeight,
+    rows,
+    tileSize,
+    gap
+  );
 
   const glyphRatio = hideGlyphByDefault || isSolidSwatch
     ? 0
@@ -838,7 +946,7 @@ function pickerGeometry(
 
   return {
     pickerWidth,
-    pickerHeight,
+    pickerHeight: contentAlignedPickerHeight,
     tileSize,
     glyphSize,
     glyphStroke,
@@ -851,6 +959,8 @@ function pickerGeometry(
     threeBotStack: !isDesktop && totalTiles === 3,
     mobileColumnStack: !isDesktop && totalTiles >= 5 && totalTiles <= 10,
     leadingFillerCell,
+    namedFlatTile,
+    suppressMobileHeroCopy: !isDesktop && totalTiles >= namedFlatTileCountMin,
     flattenTile: totalTiles >= flatTileCountMin,
     enlargeGlyph,
     hideGlyphByDefault,
@@ -2141,7 +2251,6 @@ function clearNativeSessionToken(): void {
 // action glyph we render in the shell feels like it belongs to the same
 // set. The bot card × / armed ✓ uses raw character glyphs (matching
 // .conversationDelete), so those intentionally don't live here.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const ICON_PROPS = {
   width: 14,
   height: 14,
@@ -2153,6 +2262,17 @@ const ICON_PROPS = {
   strokeLinejoin: "round" as const,
   "aria-hidden": true,
 };
+
+function IconKey(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <circle cx="7.5" cy="15.5" r="4" />
+      <path d="M10.5 12.5L20 3" />
+      <path d="M16 7l3 3" />
+      <path d="M18 5l2 2" />
+    </svg>
+  );
+}
 
 // ── Bot glyph registry ────────────────────────────────────────────────
 // Sixteen distinct stroke-only icons drawn on a 24x24 viewBox. These are
@@ -3821,6 +3941,77 @@ function isBotGlyphName(value: string | null | undefined): value is BotGlyphName
 function randomBotGlyph(): BotGlyphName {
   const index = Math.floor(Math.random() * CUSTOM_BOT_GLYPH_ORDER.length);
   return CUSTOM_BOT_GLYPH_ORDER[index] ?? DEFAULT_BOT_GLYPH;
+}
+
+const RANDOM_BOT_NAMES = [
+  "Alex", "Avery", "Bailey", "Blake", "Cameron", "Casey", "Charlie",
+  "Dakota", "Drew", "Eden", "Elliot", "Emerson", "Finley", "Harper",
+  "Hayden", "Jamie", "Jordan", "Kai", "Kendall", "Logan", "Morgan",
+  "Parker", "Quinn", "Reese", "Riley", "Robin", "Rowan", "Sage",
+  "Sam", "Skyler", "Taylor", "Terry", "Zion",
+  "Abigail", "Amelia", "Aria", "Audrey", "Aurora", "Bella", "Chloe",
+  "Clara", "Daisy", "Eleanor", "Elena", "Eliza", "Ella", "Emily",
+  "Emma", "Evelyn", "Fiona", "Grace", "Hazel", "Iris", "Isla", "Ivy",
+  "Jade", "Julia", "Lena", "Lila", "Lily", "Lucy", "Luna", "Maya",
+  "Mia", "Nina", "Nora", "Olivia", "Paige", "Ruby", "Sadie", "Sofia",
+  "Stella", "Violet", "Zoe",
+  "Aaron", "Adrian", "Andrew", "Asher", "Austin", "Benjamin", "Caleb",
+  "Daniel", "David", "Elias", "Ethan", "Ezra", "Felix", "Finn",
+  "Gabriel", "Henry", "Isaac", "Jack", "James", "Jonah", "Julian",
+  "Leo", "Liam", "Lucas", "Mateo", "Miles", "Nathan", "Noah", "Oliver",
+  "Owen", "Theo", "Thomas", "Wesley", "Wyatt",
+] as const;
+
+function randomBotName(): string {
+  return RANDOM_BOT_NAMES[Math.floor(Math.random() * RANDOM_BOT_NAMES.length)];
+}
+
+function sampleBotNames(count: number): string[] {
+  if (count <= RANDOM_BOT_NAMES.length) {
+    const pool = [...RANDOM_BOT_NAMES];
+    for (let i = pool.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, count);
+  }
+  return Array.from({ length: count }, () => randomBotName());
+}
+
+const LOREM_IPSUM_SENTENCES = [
+  "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+  "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
+  "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+  "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
+  "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
+  "Curabitur pretium tincidunt lacus.",
+  "Nulla gravida orci a odio.",
+  "Nullam varius, turpis et commodo pharetra, est eros bibendum elit.",
+  "Donec quis orci eget orci vehicula condimentum.",
+  "Curabitur tempor ultrices ipsum.",
+  "Vestibulum sit amet nulla et velit elementum viverra.",
+  "Praesent vestibulum molestie lacus.",
+  "Aenean nonummy hendrerit mauris.",
+  "Phasellus porta, fusce suscipit varius mi.",
+  "Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus.",
+  "Nulla dui, fusce feugiat malesuada odio.",
+  "Morbi nunc odio, gravida at, cursus nec, luctus a, lorem.",
+  "Maecenas tristique orci ac sem.",
+  "Duis ultricies pharetra magna, donec accumsan malesuada orci.",
+  "Aenean lectus, pellentesque eget nunc.",
+] as const;
+
+function randomLoremIpsum(): string {
+  const minSentences = 2;
+  const maxSentences = 5;
+  const sentenceCount =
+    minSentences + Math.floor(Math.random() * (maxSentences - minSentences + 1));
+  const pool = [...LOREM_IPSUM_SENTENCES];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, sentenceCount).join(" ");
 }
 
 interface BotGlyphProps {
@@ -5679,25 +5870,12 @@ function GlyphPseudo({ size = 88 }: GlyphProps): React.JSX.Element {
   );
 }
 
-// ── Message body with scroll-driven expansion ─────────────────────────
-// Long messages are compact away from the viewport center and expand toward
-// full natural height as they pass through the user's reading focal point.
-// Shared between Chat and Sandbox so the behaviour stays consistent.
-
 interface MessageBodyProps {
   content: string;
 }
 
 function MessageBody({ content }: MessageBodyProps): React.JSX.Element {
-  const isLong = content.length > MESSAGE_COLLAPSE_THRESHOLD;
-  if (!isLong) {
-    return <p>{content}</p>;
-  }
-  return (
-    <div className={`${styles.messageBody} ${styles.messageBodyLens}`}>
-      <p>{content}</p>
-    </div>
-  );
+  return <p>{content}</p>;
 }
 
 function HomeContent(): React.JSX.Element {
@@ -5759,9 +5937,6 @@ function HomeContent(): React.JSX.Element {
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
   const selectedIdRef = useRef<string | null>(null);
   const detailIdRef = useRef<string | null>(null);
-  const [messageFocusProgress, setMessageFocusProgress] = useState<Record<string, number>>({});
-  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-  const messageFocusFrameRef = useRef<number | null>(null);
   const [modelRevealMessageId, setModelRevealMessageId] = useState<string | null>(null);
   const modelRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -5795,7 +5970,24 @@ function HomeContent(): React.JSX.Element {
   const [botPanelLibraryEnabled, setBotPanelLibraryEnabled] = useState(true);
   const botLibraryCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [rightMenuOpen, setRightMenuOpen] = useState(false);
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [devToolsBusy, setDevToolsBusy] = useState(false);
+  const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
+  const [devToolsBotQuantity, setDevToolsBotQuantity] =
+    useState<DevToolsBotQuantity>(DEV_TOOLS_BOT_QUANTITY_DEFAULT);
+  const [devToolsPanelPosition, setDevToolsPanelPosition] =
+    useState<DevToolsPanelPosition>({
+      x: DEV_TOOLS_PANEL_DEFAULT_X,
+      y: DEV_TOOLS_PANEL_DEFAULT_Y,
+    });
+  const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
+  const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
+  const resolvedDevToolsBotQuantity =
+    devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
+  const closeDevTools = useCallback(() => {
+    setDevToolsOpen(false);
+    setDevToolsMessage(null);
+  }, []);
   const [bots, setBots] = useState<Bot[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [chatModelChoiceByProvider, setChatModelChoiceByProvider] =
@@ -5911,6 +6103,7 @@ function HomeContent(): React.JSX.Element {
   // block delete and vice versa). Auto-disarms on the same window.
   const [pendingResendId, setPendingResendId] = useState<string | null>(null);
   const pendingResendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const starterSubmitPointerDownRef = useRef(false);
   // Hold-to-delete-all gesture: `holdingKey` tracks which button is currently
   // being pressed, which the CSS keys off (via `data-holding`) to light up
   // the held × / header button AND — through the list-level
@@ -5978,11 +6171,59 @@ function HomeContent(): React.JSX.Element {
   const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
   const viewportWidth = useViewportWidth();
   const viewportHeight = useViewportHeight();
+  const startDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const panel = devToolsPanelRef.current;
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    devToolsPanelDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is missing in some test environments.
+    }
+    event.preventDefault();
+  }, []);
+  const dragDevToolsPanel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = devToolsPanelDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    const panel = devToolsPanelRef.current;
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    const next = clampDevToolsPanelPosition(
+      event.clientX - dragState.offsetX,
+      event.clientY - dragState.offsetY,
+      rect.width,
+      rect.height,
+      window.innerWidth,
+      window.innerHeight
+    );
+    panel.style.left = `${next.x}px`;
+    panel.style.top = `${next.y}px`;
+    setDevToolsPanelPosition(next);
+  }, []);
+  const endDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = devToolsPanelDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    devToolsPanelDragRef.current = null;
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Safe no-op for environments without pointer capture support.
+    }
+  }, []);
   // Shared close helper for the right-hand panels. Also resets panel-specific
   // transient UI so reopening a panel doesn't resurrect stale state.
   const closePanel = useCallback(() => {
     setPanel(null);
-    setRightMenuOpen(false);
     setColorWheelOpen(false);
     setEditingBotId(null);
     if (botLibraryCloseTimerRef.current) {
@@ -6004,7 +6245,6 @@ function HomeContent(): React.JSX.Element {
   const openRightPanel = useCallback((nextPanel: Exclude<PanelView, null>) => {
     setPanel(nextPanel);
     setSidebarOpen(false);
-    setRightMenuOpen(false);
     if (nextPanel === "bots") {
       setBotPanelLibraryEnabled(true);
     }
@@ -6052,6 +6292,32 @@ function HomeContent(): React.JSX.Element {
   }, [panel, editingBotId]);
 
   useEffect(() => {
+    if (!devToolsOpen) return;
+    const panelNode = devToolsPanelRef.current;
+    if (!panelNode) return;
+    const rect = panelNode.getBoundingClientRect();
+
+    setDevToolsPanelPosition((position) => {
+      const next = clampDevToolsPanelPosition(
+        position.x,
+        position.y,
+        rect.width,
+        rect.height,
+        viewportWidth,
+        viewportHeight
+      );
+      return next.x === position.x && next.y === position.y ? position : next;
+    });
+  }, [devToolsOpen, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    const panelNode = devToolsPanelRef.current;
+    if (!panelNode) return;
+    panelNode.style.left = `${devToolsPanelPosition.x}px`;
+    panelNode.style.top = `${devToolsPanelPosition.y}px`;
+  }, [devToolsPanelPosition]);
+
+  useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const update = () => setSystemTheme(media.matches ? "dark" : "light");
     update();
@@ -6062,29 +6328,6 @@ function HomeContent(): React.JSX.Element {
       media.removeListener?.(update);
     };
   }, []);
-
-  useEffect(() => {
-    if (!rightMenuOpen) return;
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest("[data-right-panel-affordance='true']")
-      ) {
-        return;
-      }
-      setRightMenuOpen(false);
-    }
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setRightMenuOpen(false);
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [rightMenuOpen]);
 
   // The empty-message "Talk to me!" affordance should only stay armed while
   // the user is still interacting with the composer or starter bot picker.
@@ -6664,48 +6907,6 @@ function HomeContent(): React.JSX.Element {
   // from main rather than deriving from the user's bot palette.
   const appShellStyle = mergedShellStyle;
 
-  const updateMessageFocusProgress = useCallback(() => {
-    if (messageFocusFrameRef.current !== null) return;
-    messageFocusFrameRef.current = window.requestAnimationFrame(() => {
-      messageFocusFrameRef.current = null;
-      const container = messagesContainerRef.current;
-      if (!container) return;
-
-      const containerRect = container.getBoundingClientRect();
-      const centerY = containerRect.top + containerRect.height * 0.5;
-      const focusRadius = Math.max(160, containerRect.height * 0.42);
-      const next: Record<string, number> = {};
-
-      container
-        .querySelectorAll<HTMLElement>("[data-message-id]")
-        .forEach((element) => {
-          const id = element.dataset.messageId;
-          if (!id) return;
-
-          const rect = element.getBoundingClientRect();
-          const messageCenterY = rect.top + rect.height * 0.5;
-          const distance = Math.abs(messageCenterY - centerY);
-          const rawProgress = Math.max(0, Math.min(1, 1 - distance / focusRadius));
-          const eased = rawProgress * rawProgress * (3 - 2 * rawProgress);
-          if (eased > 0.01) {
-            next[id] = Number(eased.toFixed(3));
-          }
-        });
-
-      setMessageFocusProgress(previous => {
-        const previousKeys = Object.keys(previous);
-        const nextKeys = Object.keys(next);
-        if (
-          previousKeys.length === nextKeys.length &&
-          nextKeys.every(key => previous[key] === next[key])
-        ) {
-          return previous;
-        }
-        return next;
-      });
-    });
-  }, []);
-
   useEffect(() => {
     if (!hueLensAvailable && hueFilterCenter !== null) {
       setHueFilterCenter(null);
@@ -6832,18 +7033,6 @@ function HomeContent(): React.JSX.Element {
     if (clientAccessState !== "allowed") return;
     void bootstrap();
   }, [bootstrap, clientAccessState]);
-  useEffect(() => {
-    const handleResize = () => updateMessageFocusProgress();
-    window.addEventListener("resize", handleResize);
-    updateMessageFocusProgress();
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      if (messageFocusFrameRef.current !== null) {
-        window.cancelAnimationFrame(messageFocusFrameRef.current);
-        messageFocusFrameRef.current = null;
-      }
-    };
-  }, [updateMessageFocusProgress]);
   // refreshAll is intentionally a local function declaration in this component.
   // This effect should run on auth transitions, not on every render identity churn.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6862,8 +7051,7 @@ function HomeContent(): React.JSX.Element {
   //   - the visible typing indicator toggles on/off
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    updateMessageFocusProgress();
-  }, [detail?.id, detail?.messages.length, pendingReplyVisible, updateMessageFocusProgress]);
+  }, [detail?.id, detail?.messages.length, pendingReplyVisible]);
 
   // Drop any pending mid-thread bot override whenever the open
   // conversation changes OR the post-auth surface flips. Without this,
@@ -7254,6 +7442,37 @@ function HomeContent(): React.JSX.Element {
     return pendingReply || (value.trim().length === 0 && !isStarterPromptReady(value));
   }
 
+  function getSubmitter(event: React.FormEvent<HTMLFormElement>): HTMLElement | null {
+    const nativeEvent = event.nativeEvent;
+    if (!("submitter" in nativeEvent)) return null;
+    return nativeEvent.submitter instanceof HTMLElement ? nativeEvent.submitter : null;
+  }
+
+  function handleComposerSubmit(e: React.FormEvent<HTMLFormElement>) {
+    const submitter = getSubmitter(e);
+    const starterSubmitButtonClicked =
+      submitter?.dataset.starterSubmitButton === "true" &&
+      starterSubmitPointerDownRef.current;
+    starterSubmitPointerDownRef.current = false;
+    void sendMessage(e, {
+      starterPrompt:
+        isStarterPromptReady(draft) ||
+        (starterSubmitButtonClicked && isStarterPromptAvailable(draft)),
+    });
+  }
+
+  function handleComposerSubmitButtonPointerDown() {
+    if (isStarterPromptReady(draft)) {
+      starterSubmitPointerDownRef.current = true;
+    }
+  }
+
+  function handleComposerSubmitButtonPointerUp() {
+    window.setTimeout(() => {
+      starterSubmitPointerDownRef.current = false;
+    }, 0);
+  }
+
   const primeStarterComposer = useCallback((value: string) => {
     if (value.trim().length === 0 && (!detail || detail.messages.length === 0)) {
       setComposerPrimed(true);
@@ -7275,6 +7494,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function handleComposerBlur(e: React.FocusEvent<HTMLFormElement>) {
+    if (starterSubmitPointerDownRef.current) return;
     const nextFocus = e.relatedTarget;
     if (nextFocus instanceof Node && e.currentTarget.contains(nextFocus)) return;
     setComposerPrimed(false);
@@ -7286,7 +7506,7 @@ function HomeContent(): React.JSX.Element {
     e.preventDefault();
     void sendMessage(e, {
       draftOverride: e.target.value,
-      starterPrompt: isStarterPromptReady(e.target.value),
+      starterPrompt: isStarterPromptAvailable(e.target.value),
     });
   }
 
@@ -7994,10 +8214,6 @@ function HomeContent(): React.JSX.Element {
       setSidebarOpen(false);
       return;
     }
-    if (rightMenuOpen) {
-      setRightMenuOpen(false);
-      return;
-    }
     if (emptyStateSearchActive) {
       closeEmptyStateBotSearch();
       return;
@@ -8032,7 +8248,6 @@ function HomeContent(): React.JSX.Element {
     pendingIncognito,
     pendingResendId,
     resetEmptyStateBotSelection,
-    rightMenuOpen,
     selectedBotId,
     selectedId,
     sidebarOpen,
@@ -8148,6 +8363,18 @@ function HomeContent(): React.JSX.Element {
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [isDeleteAllActive, disarmDelete]);
+
+  useEffect(() => {
+    if (!devToolsOpen) return;
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        closeDevTools();
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [devToolsOpen, closeDevTools]);
 
   // Clicking anywhere outside the delete / confirm affordance should disarm it.
   // This prevents the confirm pill from lingering in an awkward in-between
@@ -8406,6 +8633,180 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function devToolsDeleteAllBots() {
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    const previousBots = bots;
+    const previousSelectedBotId = selectedBotId;
+    setBots([]);
+    setSelectedBotId(null);
+    try {
+      const result = await api<{ deleted?: number }>("/api/bots", {
+        method: "DELETE",
+      });
+      await refreshBots();
+      const deleted = typeof result?.deleted === "number" ? result.deleted : 0;
+      setDevToolsMessage(
+        deleted === 0
+          ? "No bots to delete."
+          : deleted === 1
+            ? "Deleted 1 bot."
+            : `Deleted ${deleted} bots.`
+      );
+    } catch (err) {
+      setBots(previousBots);
+      setSelectedBotId(previousSelectedBotId);
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Delete all bots failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  async function devToolsCreateRandomBotBatch(batchSize: number) {
+    if (batchSize <= 0) return;
+
+    const names = sampleBotNames(batchSize);
+    for (let start = 0; start < names.length; start += DEV_TOOLS_BOT_CREATE_CHUNK_SIZE) {
+      const chunk = names.slice(start, start + DEV_TOOLS_BOT_CREATE_CHUNK_SIZE);
+      await Promise.all(
+        chunk.map((name) =>
+          api("/api/bots", {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              systemPrompt: randomLoremIpsum(),
+              color: randomHex(),
+              glyph: randomBotGlyph(),
+            }),
+          })
+        )
+      );
+    }
+  }
+
+  async function devToolsAddRandomBots() {
+    const batchSize = resolvedDevToolsBotQuantity;
+    if (batchSize <= 0) {
+      setDevToolsMessage(randomDevToolsGhostMessage());
+      return;
+    }
+
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    try {
+      await devToolsCreateRandomBotBatch(batchSize);
+      await refreshBots();
+      setDevToolsMessage(
+        batchSize === 1 ? "Added 1 random bot." : `Added ${batchSize} random bots.`
+      );
+    } catch (err) {
+      try { await refreshBots(); } catch { /* best-effort refresh */ }
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Add random bots failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  async function devToolsAddSeedChats() {
+    const count = resolvedDevToolsBotQuantity;
+    if (count <= 0) {
+      setDevToolsMessage(randomDevToolsGhostMessage());
+      return;
+    }
+
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    try {
+      const result = await api<{ created?: number }>("/api/conversations/dev-seed", {
+        method: "POST",
+        body: JSON.stringify({ count }),
+      });
+      await refreshConversations();
+      const created = typeof result?.created === "number" ? result.created : count;
+      setDevToolsMessage(
+        created === 1 ? "Added 1 seed chat." : `Added ${created} seed chats.`
+      );
+    } catch (err) {
+      try { await refreshConversations(); } catch { /* best-effort refresh */ }
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Add seed chats failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  async function devToolsSetBotDensityStage(stageId: PickerDensityStageId) {
+    const liveViewportWidth =
+      typeof window === "undefined" ? viewportWidth : window.innerWidth;
+    const liveViewportHeight =
+      typeof window === "undefined" ? viewportHeight : window.innerHeight;
+    const stage = pickerDensityStageTargets(
+      liveViewportWidth,
+      liveViewportHeight
+    ).find((target) => target.id === stageId);
+    if (!stage) return;
+
+    const targetCount = clampDevToolsBotQuantity(stage.targetCount);
+    const delta = targetCount - bots.length;
+    setDevToolsBotQuantity(targetCount);
+
+    if (delta === 0) {
+      setDevToolsMessage(
+        `${stage.label} (${stage.description}) is already active at ${targetCount} bots for ${liveViewportWidth}x${liveViewportHeight}.`
+      );
+      return;
+    }
+
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    const previousBots = bots;
+    const previousSelectedBotId = selectedBotId;
+
+    try {
+      if (delta > 0) {
+        await devToolsCreateRandomBotBatch(delta);
+        await refreshBots();
+        setDevToolsMessage(
+          `${stage.label} (${stage.description}) target: ${targetCount} bots for ${liveViewportWidth}x${liveViewportHeight}. Added ${delta} bots.`
+        );
+        return;
+      }
+
+      const deleteCount = Math.abs(delta);
+      const optimisticDeletedIds = new Set(
+        previousBots.slice(0, deleteCount).map((bot) => bot.id)
+      );
+      setBots((list) => list.filter((bot) => !optimisticDeletedIds.has(bot.id)));
+      if (selectedBotId && optimisticDeletedIds.has(selectedBotId)) {
+        setSelectedBotId(null);
+      }
+
+      const result = await api<{ deleted?: number }>(
+        `/api/bots?limit=${deleteCount}`,
+        { method: "DELETE" }
+      );
+      await refreshBots();
+      const deleted = typeof result?.deleted === "number" ? result.deleted : deleteCount;
+      setDevToolsMessage(
+        `${stage.label} (${stage.description}) target: ${targetCount} bots for ${liveViewportWidth}x${liveViewportHeight}. Deleted ${deleted} bots.`
+      );
+    } catch (err) {
+      setBots(previousBots);
+      setSelectedBotId(previousSelectedBotId);
+      try { await refreshBots(); } catch { /* best-effort refresh */ }
+      setDevToolsMessage(
+        err instanceof Error ? err.message : `Set ${stage.label} failed.`
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
   // Load a specific bot into the top form for editing. The form itself
   // doesn't change shape — it just flips from "create" to "edit" mode
   // via editingBotId, and the name / prompt / color / glyph fields are
@@ -8566,6 +8967,7 @@ function HomeContent(): React.JSX.Element {
         >
           <ThemeGlyph mode={effectiveThemeMode} />
         </button>
+        {renderDevToolsButton()}
       </div>
     );
   }
@@ -9071,49 +9473,172 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  // ── Mobile right-panel launcher ─────────────────────────────────────
-  // Mirrors the left hamburger now that Settings / Bots / Images are
-  // spatially right-side drawers on mobile instead of full-screen sheets.
-  const renderMobilePanelLauncher = (): React.JSX.Element => {
-    const launcherHidden = sidebarOpen || panel !== null;
+  const renderDevToolsButton = (): React.JSX.Element | null => {
+    if (!DEV_TOOLS_ENABLED) return null;
     return (
-      <>
-        <button
-          type="button"
-          className={`${styles.panelMenuToggle} ${launcherHidden ? styles.menuToggleHidden : ""}`}
-          data-right-panel-affordance="true"
-          onClick={() => {
-            setSidebarOpen(false);
-            setRightMenuOpen(open => !open);
-          }}
-          aria-label="Open Settings, Bots, and Images"
-          aria-haspopup="menu"
-          tabIndex={launcherHidden ? -1 : 0}
+      <button
+        type="button"
+        className={`${styles.headerIconButton} ${styles.composeUtilityButton} ${styles.devToolsButton}`}
+        onClick={() => {
+          setDevToolsMessage(null);
+          setDevToolsOpen((open) => !open);
+        }}
+        aria-label="Open developer tools"
+        title="Developer tools"
+      >
+        <IconKey />
+      </button>
+    );
+  };
+
+  const renderDevToolsPanel = (): React.JSX.Element | null => {
+    if (!DEV_TOOLS_ENABLED || !devToolsOpen) return null;
+    const densityStageTargets = pickerDensityStageTargets(
+      viewportWidth,
+      viewportHeight
+    );
+    return (
+      <div
+        ref={devToolsPanelRef}
+        className={styles.devToolsFloatingPanel}
+        role="dialog"
+        aria-labelledby="dev-tools-title"
+      >
+        <div
+          className={styles.devToolsHeader}
+          onPointerDown={startDevToolsPanelDrag}
+          onPointerMove={dragDevToolsPanel}
+          onPointerUp={endDevToolsPanelDrag}
+          onPointerCancel={endDevToolsPanelDrag}
         >
-          ☰
-        </button>
-        {rightMenuOpen && !launcherHidden && (
+          <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
+            Developer tools
+          </h2>
+          <span className={styles.devToolsDragHint} aria-hidden="true">
+            ::
+          </span>
+        </div>
+        <div className={styles.devToolsSection}>
+          <h3 className={styles.devToolsSectionTitle}>Viewport</h3>
+          <p className={styles.devToolsViewportStatus} aria-live="polite">
+            <span>
+              Width <strong>{viewportWidth}px</strong>
+            </span>
+            <span>
+              Height <strong>{viewportHeight}px</strong>
+            </span>
+          </p>
+        </div>
+
+        <div className={styles.devToolsSection}>
+          <h3 className={styles.devToolsSectionTitle}>Seed data</h3>
+          <p className={styles.devToolsSectionHint}>
+            Bots: <strong>{bots.length}</strong> | Sidebar chats:{" "}
+            <strong>{visibleConversations.length}</strong>
+          </p>
+          <label className={styles.devToolsCountControl}>
+            <span>Quantity</span>
+            <input
+              type="number"
+              min={DEV_TOOLS_BOT_QUANTITY_MIN}
+              max={DEV_TOOLS_BOT_QUANTITY_MAX}
+              step={1}
+              value={devToolsBotQuantity}
+              aria-label="Quantity for developer tools add actions"
+              onChange={(event) => {
+                const next = event.currentTarget.value;
+                setDevToolsBotQuantity(
+                  next === "" ? "" : clampDevToolsBotQuantity(Number(next))
+                );
+              }}
+              disabled={devToolsBusy}
+            />
+          </label>
+          <div className={styles.devToolsQuantityRail} aria-label="Quick quantities">
+            {DEV_TOOLS_BOT_QUANTITY_PRESETS.map((quantity) => (
+              <button
+                key={quantity}
+                type="button"
+                className={`${styles.devToolsPresetButton} ${
+                  resolvedDevToolsBotQuantity === quantity ? styles.devToolsPresetButtonActive : ""
+                }`}
+                onClick={() => setDevToolsBotQuantity(quantity)}
+                disabled={devToolsBusy}
+              >
+                {quantity}
+              </button>
+            ))}
+          </div>
+          <p className={styles.devToolsSectionHint}>
+            Stage buttons set total bots for the current viewport.
+          </p>
           <div
-            className={styles.panelQuickMenu}
-            data-right-panel-affordance="true"
-            role="menu"
-            aria-label="Right-side panels"
+            className={styles.devToolsStageRail}
+            aria-label="Bot picker density stages"
           >
-            <button type="button" role="menuitem" onClick={() => openRightPanel("settings")}>
-              Settings
+            {densityStageTargets.map((stage) => {
+              const isCurrentTarget = bots.length === stage.targetCount;
+              return (
+                <button
+                  key={stage.id}
+                  type="button"
+                  className={`${styles.devToolsStageButton} ${
+                    isCurrentTarget ? styles.devToolsStageButtonActive : ""
+                  }`}
+                  onClick={() => void devToolsSetBotDensityStage(stage.id)}
+                  disabled={devToolsBusy}
+                >
+                  <span>{stage.label}</span>
+                  <strong>{stage.targetCount}</strong>
+                  <small>{stage.description}</small>
+                </button>
+              );
+            })}
+          </div>
+          <div className={styles.devToolsActions}>
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() => void devToolsAddRandomBots()}
+              disabled={devToolsBusy}
+            >
+              Add bots
             </button>
-            <button type="button" role="menuitem" onClick={() => openRightPanel("bots")}>
-              Bots
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() => void devToolsAddSeedChats()}
+              disabled={devToolsBusy}
+            >
+              Add chats
             </button>
-            <button type="button" role="menuitem" onClick={() => openRightPanel("images")}>
-              Images
-            </button>
-            <button type="button" role="menuitem" onClick={openAllMemoriesPanel}>
-              Memories
+            <button
+              type="button"
+              className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+              onClick={() => void devToolsDeleteAllBots()}
+              disabled={devToolsBusy || bots.length === 0}
+            >
+              Delete all bots
             </button>
           </div>
+        </div>
+
+        {devToolsMessage && (
+          <p className={styles.devToolsStatus} role="status">
+            {devToolsMessage}
+          </p>
         )}
-      </>
+
+        <div className={styles.deleteAllModalActions}>
+          <button
+            type="button"
+            className={styles.deleteAllModalCancel}
+            onClick={closeDevTools}
+          >
+            Close
+          </button>
+        </div>
+      </div>
     );
   };
 
@@ -10066,10 +10591,12 @@ function HomeContent(): React.JSX.Element {
           >
             <ThemeGlyph mode={effectiveThemeMode} />
           </button>
+          {renderDevToolsButton()}
           <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
         </div>
       </div>
       {renderSharedPanels()}
+      {renderDevToolsPanel()}
     </main>
   );
 
@@ -10094,13 +10621,11 @@ function HomeContent(): React.JSX.Element {
         type="button"
         className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
         onClick={() => {
-          setRightMenuOpen(false);
           setSidebarOpen(o => !o);
         }}
         aria-hidden={sidebarOpen || panel !== null}
         tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
       >☰</button>
-      {renderMobilePanelLauncher()}
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       <aside className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}>
@@ -10281,9 +10806,9 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
         >
           <div
-            ref={messagesContainerRef}
-            className={styles.messages}
-            onScroll={updateMessageFocusProgress}
+            className={`${styles.messages} ${
+              !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
+            }`}
           >
             {!detail && !pendingReplyVisible && (() => {
             // Chat-mode empty state:
@@ -10310,6 +10835,8 @@ function HomeContent(): React.JSX.Element {
               !pendingIncognito && pickerBots.length > 0
                 ? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight)
                 : null;
+            const suppressHeroCopy =
+              pickerGeom?.suppressMobileHeroCopy === true && !emptyStateSearchActive;
             const isArmed =
               !pendingIncognito &&
               selectedBotId !== null &&
@@ -10335,6 +10862,7 @@ function HomeContent(): React.JSX.Element {
             const emptyStateClassName = [
               styles.emptyState,
               emptyStateSearchActive ? styles.emptyStateSearching : null,
+              suppressHeroCopy ? styles.emptyStateDensePicker : null,
             ].filter(Boolean).join(" ");
             const renderHero = () => (
               <EmptyStateIcon
@@ -10365,7 +10893,7 @@ function HomeContent(): React.JSX.Element {
                 {/* Hero is non-interactive until the user has armed
                     a pick — then it becomes the single deselect
                     affordance (click / tap returns to default). */}
-                {isArmed ? (
+                {!suppressHeroCopy && (isArmed ? (
                   <button
                     type="button"
                     className={styles.emptyStateIconButton}
@@ -10387,11 +10915,11 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 ) : (
                   renderHero()
-                )}
-                <div className={styles.emptyStateTitle}>{title}</div>
+                ))}
+                {!suppressHeroCopy && <div className={styles.emptyStateTitle}>{title}</div>}
                 {emptyStateSearchActive ? (
                   renderEmptyStateBotSearch()
-                ) : (
+                ) : suppressHeroCopy ? null : (
                   <p className={styles.emptyStateHint}>{hint}</p>
                 )}
                 {/* Chat-mode start-of-conversation bot picker. Absent in
@@ -10518,7 +11046,7 @@ function HomeContent(): React.JSX.Element {
                         if (isSelected) {
                           tileClassName += ` ${styles.chatBotTileSelected}`;
                         }
-                        if (geom.flattenTile) {
+                        if (geom.namedFlatTile || geom.flattenTile) {
                           tileClassName += ` ${styles.chatBotTileFlat}`;
                         }
                         if (geom.solidSwatch) {
@@ -10531,7 +11059,15 @@ function HomeContent(): React.JSX.Element {
                           geom.selectedDotGlyph && isSelected;
                         const showTileGlyph =
                           !geom.hideGlyphByDefault || showPixelGridGlyph;
-                        const showFeaturedName = geom.singleBot;
+                        const showFeaturedName =
+                          (geom.namedFlatTile || !geom.flattenTile) &&
+                          geom.tileSize >= PICKER_TILE_NAME_MIN_SIZE;
+                        if (showFeaturedName) {
+                          tileClassName += ` ${styles.chatBotTileWithName}`;
+                          if (geom.namedFlatTile) {
+                            tileClassName += ` ${styles.chatBotTileNamedFlat}`;
+                          }
+                        }
                         const tileGlyphSize = showPixelGridGlyph
                           ? Math.max(
                               PICKER_PIXEL_GLYPH_MIN_SIZE,
@@ -10719,12 +11255,9 @@ function HomeContent(): React.JSX.Element {
                     "--message-accent": normalizeAccentForTheme(
                       msg.botColor,
                       resolvedTheme
-                    ),
-                    "--message-focus-progress": (messageFocusProgress[msg.id] ?? 0).toFixed(3),
+                    )
                   } as React.CSSProperties)
-                : ({
-                    "--message-focus-progress": (messageFocusProgress[msg.id] ?? 0).toFixed(3),
-                  } as React.CSSProperties);
+                : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             return (
@@ -10733,7 +11266,6 @@ function HomeContent(): React.JSX.Element {
                 className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
                 style={messageStyle}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
-                data-lens-active="true"
                 data-mobile-context={mobileContextMenu ? "true" : undefined}
                 data-message-id={msg.id}
                 data-message-edge={messageEdge}
@@ -10885,9 +11417,7 @@ function HomeContent(): React.JSX.Element {
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
           style={composeStyle}
-          onSubmit={e => void sendMessage(e, {
-            starterPrompt: isStarterPromptReady(draft),
-          })}
+          onSubmit={handleComposerSubmit}
           onBlur={handleComposerBlur}
           onKeyDown={handleComposerKeyDown}
         >
@@ -11087,6 +11617,10 @@ function HomeContent(): React.JSX.Element {
             <button
               type="submit"
               disabled={composerSubmitDisabled(draft)}
+              data-starter-submit-button="true"
+              onPointerDown={handleComposerSubmitButtonPointerDown}
+              onPointerUp={handleComposerSubmitButtonPointerUp}
+              onPointerCancel={handleComposerSubmitButtonPointerUp}
             >
               {composerSubmitLabel(draft)}
             </button>
@@ -11097,6 +11631,7 @@ function HomeContent(): React.JSX.Element {
       {renderSharedPanels()}
       {renderMessageContextMenu()}
       {renderDeleteAllModal()}
+      {renderDevToolsPanel()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={
@@ -11131,13 +11666,11 @@ function HomeContent(): React.JSX.Element {
         type="button"
         className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
         onClick={() => {
-          setRightMenuOpen(false);
           setSidebarOpen(o => !o);
         }}
         aria-hidden={sidebarOpen || panel !== null}
         tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
       >☰</button>
-      {renderMobilePanelLauncher()}
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
@@ -11331,9 +11864,9 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
         >
           <div
-            ref={messagesContainerRef}
-            className={styles.messages}
-            onScroll={updateMessageFocusProgress}
+            className={`${styles.messages} ${
+              !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
+            }`}
           >
             {!detail && !pendingReplyVisible && (() => {
             // Sandbox empty state — mirrors the Chat-mode empty state so
@@ -11360,6 +11893,8 @@ function HomeContent(): React.JSX.Element {
               !pendingIncognito && pickerBots.length > 0
                 ? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight)
                 : null;
+            const suppressHeroCopy =
+              pickerGeom?.suppressMobileHeroCopy === true && !emptyStateSearchActive;
             const isArmed =
               !pendingIncognito &&
               selectedBotId !== null &&
@@ -11385,6 +11920,7 @@ function HomeContent(): React.JSX.Element {
             const emptyStateClassName = [
               styles.emptyState,
               emptyStateSearchActive ? styles.emptyStateSearching : null,
+              suppressHeroCopy ? styles.emptyStateDensePicker : null,
             ].filter(Boolean).join(" ");
             const renderHero = () => (
               <EmptyStateIcon
@@ -11415,7 +11951,7 @@ function HomeContent(): React.JSX.Element {
                 {/* Hero becomes a deselect button once a bot is armed —
                     click it to drop back to Default while keeping the
                     grid available until a message sends. */}
-                {isArmed ? (
+                {!suppressHeroCopy && (isArmed ? (
                   <button
                     type="button"
                     className={styles.emptyStateIconButton}
@@ -11437,11 +11973,11 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 ) : (
                   renderHero()
-                )}
-                <div className={styles.emptyStateTitle}>{title}</div>
+                ))}
+                {!suppressHeroCopy && <div className={styles.emptyStateTitle}>{title}</div>}
                 {emptyStateSearchActive ? (
                   renderEmptyStateBotSearch()
-                ) : (
+                ) : suppressHeroCopy ? null : (
                   <p className={styles.emptyStateHint}>{hint}</p>
                 )}
                 {!pendingIncognito && pickerBots.length > 0 && (() => {
@@ -11544,7 +12080,7 @@ function HomeContent(): React.JSX.Element {
                         if (isSelected) {
                           tileClassName += ` ${styles.chatBotTileSelected}`;
                         }
-                        if (geom.flattenTile) {
+                        if (geom.namedFlatTile || geom.flattenTile) {
                           tileClassName += ` ${styles.chatBotTileFlat}`;
                         }
                         if (geom.solidSwatch) {
@@ -11557,7 +12093,15 @@ function HomeContent(): React.JSX.Element {
                           geom.selectedDotGlyph && isSelected;
                         const showTileGlyph =
                           !geom.hideGlyphByDefault || showPixelGridGlyph;
-                        const showFeaturedName = geom.singleBot;
+                        const showFeaturedName =
+                          (geom.namedFlatTile || !geom.flattenTile) &&
+                          geom.tileSize >= PICKER_TILE_NAME_MIN_SIZE;
+                        if (showFeaturedName) {
+                          tileClassName += ` ${styles.chatBotTileWithName}`;
+                          if (geom.namedFlatTile) {
+                            tileClassName += ` ${styles.chatBotTileNamedFlat}`;
+                          }
+                        }
                         const tileGlyphSize = showPixelGridGlyph
                           ? Math.max(
                               PICKER_PIXEL_GLYPH_MIN_SIZE,
@@ -11724,13 +12268,8 @@ function HomeContent(): React.JSX.Element {
                     ? "bot"
                     : "prism";
             const messageStyle = normalizedBotColor
-              ? ({
-                  "--message-accent": normalizedBotColor,
-                  "--message-focus-progress": (messageFocusProgress[msg.id] ?? 0).toFixed(3),
-                } as React.CSSProperties)
-              : ({
-                  "--message-focus-progress": (messageFocusProgress[msg.id] ?? 0).toFixed(3),
-                } as React.CSSProperties);
+              ? ({ "--message-accent": normalizedBotColor } as React.CSSProperties)
+              : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             return (
@@ -11739,7 +12278,6 @@ function HomeContent(): React.JSX.Element {
                 className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
                 style={messageStyle}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
-                data-lens-active="true"
                 data-mobile-context={mobileContextMenu ? "true" : undefined}
                 data-message-id={msg.id}
                 data-message-edge={messageEdge}
@@ -11888,9 +12426,7 @@ function HomeContent(): React.JSX.Element {
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
           style={composeStyle}
-          onSubmit={e => void sendMessage(e, {
-            starterPrompt: isStarterPromptReady(draft),
-          })}
+          onSubmit={handleComposerSubmit}
           onBlur={handleComposerBlur}
           onKeyDown={handleComposerKeyDown}
         >
@@ -12044,6 +12580,10 @@ function HomeContent(): React.JSX.Element {
             <button
               type="submit"
               disabled={composerSubmitDisabled(draft)}
+              data-starter-submit-button="true"
+              onPointerDown={handleComposerSubmitButtonPointerDown}
+              onPointerUp={handleComposerSubmitButtonPointerUp}
+              onPointerCancel={handleComposerSubmitButtonPointerUp}
             >
               {composerSubmitLabel(draft)}
             </button>
@@ -12054,6 +12594,7 @@ function HomeContent(): React.JSX.Element {
       {renderSharedPanels()}
       {renderMessageContextMenu()}
       {renderDeleteAllModal()}
+      {renderDevToolsPanel()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={

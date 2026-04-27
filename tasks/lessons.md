@@ -29,6 +29,16 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Lesson**: Treat desktop low-count bot-picker sizing separately from mobile. Mobile can keep the approved compact stacked treatment, but desktop 5-10 bot grids need a much narrower low-count frame and smaller tile cap so the grid starts below the hero title/hint instead of occupying the same visual band. Dense desktop grids should be fixed by reducing the picker parent frame max height in geometry, then deriving density thresholds from the effective constrained frame width/height; CSS top-clearance offsets hide the real geometry problem and let stage selection drift. A desktop max height around 260px uses the available air above the grid without returning to the old hero overlap. When Spotlight bot search is open, the picker must switch from bottom-anchored absolute positioning to an in-flow clipped results panel below the search box so dense rainbow/grid states can never sit behind the search surface.
 **Applies to**: `apps/web/src/app/page.tsx` picker frame geometry/density thresholds and `apps/web/src/app/page.module.css` search-active picker positioning.
 
+### 2026-04-27 · [UX]
+**Trigger**: A stage-1 bot picker overlap fix moved cards into normal flow below the hero, which prevented overlap but made mobile require scrolling to see all bot cards.
+**Lesson**: Bot picker stages exist to prevent scrollbars in the editor/start window. Do not fix hero overlap by pushing the picker downward in normal flow. Instead, compute the available hero-to-composer window and let picker geometry shrink or advance density stages until the visible bot set fits without scrolling.
+**Applies to**: `apps/web/src/app/page.tsx` picker geometry/density stage thresholds and `apps/web/src/app/page.module.css` `.chatBotPickerFrame` positioning.
+
+### 2026-04-27 · [workflow]
+**Trigger**: Browser-inspector debugging was attempted against a presumed running LocalAI web surface without first using the repo's launcher.
+**Lesson**: Before using the local browser inspector for Prism web debugging, run the appropriate `.command` launcher first. Use `start-dev.command` for dev inspection (`http://localhost:3003`, dev API/db) unless explicitly validating production behavior via `start.command`.
+**Applies to**: LocalAI browser-based UI inspection and layout debugging.
+
 ### 2026-04-25 · [UX]
 **Trigger**: Exact PRISM wordmark hue seeding made every generated bot inside a hue family look nearly identical, and hue-slider filtering felt too page-like when it snapped to available families.
 **Lesson**: Treat PRISM bot colors as five hue families, not five exact hexes: generated swatches need slight hue/saturation/lightness variation inside each family so large grids retain a living spectrum. The hue slider should filter continuously through a compressed lens coordinate instead of snapping, but the track should only color families with existing filterable bots.

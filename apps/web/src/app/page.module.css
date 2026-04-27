@@ -954,6 +954,37 @@
   grid-template-columns: 280px 1fr;
   grid-template-rows: 1fr;
   overflow: hidden;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.appLayout input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.appLayout textarea,
+.appLayout [contenteditable="true"] {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.appLayout :where(
+  .chatBotPickerFrame,
+  .chatBotPickerFrame *,
+  .chatBotTile,
+  .chatBotTile *,
+  .botCard,
+  .botCard *,
+  .botCardTile,
+  .botCardTile *,
+  .glyphOption,
+  .glyphOption *,
+  .botLibraryHandle,
+  .botLibraryHandle *
+) {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* ── Sidebar ── */
@@ -1870,12 +1901,338 @@
 
 @media (prefers-reduced-motion: reduce) {
   .deleteAllModalBackdrop,
-  .deleteAllModalPanel {
+  .deleteAllModalPanel,
+  .devToolsFloatingPanel {
     animation-duration: 120ms;
   }
   .deleteAllModalConfirm:hover,
   .deleteAllModalConfirm:focus-visible {
     transform: none;
+  }
+}
+
+/* Developer Tools: local-dev floating surface for stress testing bot density,
+   sidebar seed chats, and viewport-sensitive picker stages. */
+.devToolsButton {
+  border-color: color-mix(in srgb, var(--line-strong) 70%, var(--danger) 30%) !important;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--danger) 12%) !important;
+  color: color-mix(in srgb, var(--fg) 84%, var(--danger) 16%) !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18) !important;
+}
+
+.devToolsButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-hover) 82%, var(--danger) 18%) !important;
+  color: var(--fg) !important;
+}
+
+.devToolsFloatingPanel {
+  position: fixed;
+  top: 76px;
+  left: 14px;
+  z-index: 2147483646;
+  width: min(460px, calc(100vw - 28px));
+  max-height: calc(100dvh - 96px);
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding: 22px 22px 18px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, var(--danger) 22%);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, var(--danger) 6%);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.34),
+    0 8px 22px rgba(0, 0, 0, 0.22);
+  transform-origin: top right;
+  animation: deleteAllPanelIn 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.devToolsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 4px 0;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.devToolsHeader:active {
+  cursor: grabbing;
+}
+
+.devToolsDragHint {
+  color: var(--fg-muted);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 16px;
+  letter-spacing: -0.2em;
+  line-height: 1;
+  padding-right: 0.2em;
+}
+
+.devToolsSection {
+  display: grid;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  margin-top: 10px;
+  border: 1px dashed color-mix(in srgb, var(--line-strong) 60%, var(--danger) 40%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, var(--danger) 8%);
+}
+
+.devToolsSectionTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.devToolsSectionHint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.devToolsSectionHint strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.devToolsViewportStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.devToolsViewportStatus span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.devToolsViewportStatus strong {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.devToolsCountControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.devToolsCountControl input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.devToolsCountControl input:focus {
+  border-color: var(--line-strong);
+  outline: none;
+}
+
+.devToolsCountControl input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.devToolsQuantityRail {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.devToolsPresetButton {
+  appearance: none;
+  min-width: 38px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--bg-hover) 12%);
+  color: var(--fg-muted);
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out, transform 120ms ease-out;
+}
+
+.devToolsPresetButton:hover:not(:disabled),
+.devToolsPresetButton:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--fg);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.devToolsPresetButtonActive {
+  background: color-mix(in srgb, var(--danger-soft) 60%, var(--bg) 40%);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--line) 50%);
+  color: var(--fg);
+}
+
+.devToolsPresetButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.devToolsStageRail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.devToolsStageButton {
+  appearance: none;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--bg-hover) 12%);
+  color: var(--fg-muted);
+  padding: 8px 9px;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsStageButton span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.devToolsStageButton strong {
+  color: var(--fg);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.devToolsStageButton small {
+  min-height: 2.4em;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  line-height: 1.2;
+}
+
+.devToolsStageButton:hover:not(:disabled),
+.devToolsStageButton:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--fg);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.devToolsStageButtonActive {
+  background: color-mix(in srgb, var(--danger-soft) 58%, var(--bg) 42%);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--line) 50%);
+  color: var(--fg);
+}
+
+.devToolsStageButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.devToolsActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.devToolsAction {
+  appearance: none;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+
+.devToolsAction:hover:not(:disabled),
+.devToolsAction:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  outline: none;
+}
+
+.devToolsAction:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.devToolsActionDanger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line) 45%);
+}
+
+.devToolsActionDanger:hover:not(:disabled),
+.devToolsActionDanger:focus-visible {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.devToolsStatus {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+@media (max-width: 560px) {
+  .devToolsFloatingPanel {
+    width: min(460px, calc(100vw - 28px));
+    max-height: calc(100dvh - 82px);
+    padding: 20px 18px 16px;
+  }
+
+  .devToolsAction {
+    flex: 1 1 160px;
+  }
+
+  .devToolsStageRail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2202,80 +2559,6 @@
     );
 }
 
-.messagesFrame::before,
-.messagesFrame::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  z-index: 2;
-  pointer-events: none;
-  backdrop-filter: blur(5px) saturate(1.05);
-  -webkit-backdrop-filter: blur(5px) saturate(1.05);
-}
-
-.messagesFrame::before {
-  top: 0;
-  height: 30px;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--bg-surface) 58%, transparent),
-    color-mix(in srgb, var(--bg-surface) 18%, transparent) 62%,
-    transparent
-  );
-  mask-image: linear-gradient(to bottom, #000000 0 50%, transparent);
-  -webkit-mask-image: linear-gradient(to bottom, #000000 0 50%, transparent);
-}
-
-.messagesFrame::after {
-  bottom: 0;
-  height: 58px;
-  backdrop-filter: blur(8px) saturate(1.04);
-  -webkit-backdrop-filter: blur(8px) saturate(1.04);
-  background:
-    radial-gradient(
-      ellipse 13% 42% at var(--lens-thumb-x, 50%) 100%,
-      color-mix(in srgb, #ffffff 28%, var(--accent) 72%) 0%,
-      color-mix(in srgb, #ffffff 10%, var(--accent) 90%) 20%,
-      color-mix(in srgb, var(--accent) 24%, transparent) 48%,
-      transparent 72%
-    ),
-    radial-gradient(
-      ellipse 62% 20% at var(--lens-thumb-x, 50%) 98%,
-      transparent 0%,
-      color-mix(in srgb, var(--accent) 8%, transparent) 24%,
-      color-mix(in srgb, var(--accent) 32%, transparent) 50%,
-      color-mix(in srgb, var(--accent) 8%, transparent) 76%,
-      transparent 100%
-    ),
-    radial-gradient(
-      ellipse at var(--lens-thumb-x, 50%) bottom,
-      color-mix(in srgb, var(--accent) 20%, transparent) 0%,
-      color-mix(in srgb, var(--accent) 8%, transparent) 30%,
-      transparent 58%
-    ),
-    linear-gradient(
-      to bottom,
-      transparent 0%,
-      color-mix(in srgb, var(--bg-surface) 18%, transparent) 34%,
-      color-mix(in srgb, var(--bg-surface) 72%, transparent) 72%,
-      var(--bg-surface) 100%
-    );
-  box-shadow:
-    inset 0 -10px 18px -18px color-mix(in srgb, var(--accent) 68%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #ffffff 10%, var(--accent) 50%),
-    0 -4px 18px -16px color-mix(in srgb, var(--accent) 38%, transparent),
-    0 -1px 12px -10px color-mix(in srgb, #ffffff 12%, var(--accent) 42%);
-  mask-image:
-    linear-gradient(to right, transparent 0%, #000000 28%, #000000 72%, transparent 100%),
-    linear-gradient(to top, #000000 0 70%, transparent);
-  -webkit-mask-image:
-    linear-gradient(to right, transparent 0%, #000000 28%, #000000 72%, transparent 100%),
-    linear-gradient(to top, #000000 0 70%, transparent);
-  mask-composite: intersect;
-  -webkit-mask-composite: source-in;
-}
-
 /* Private chat — mono mood. Local --accent override flows into the
    ::after gradients (and into any descendant that consumes --accent
    inside this surface) so the orb glow tints to the theme foreground
@@ -2419,8 +2702,21 @@
   max-width: none;
 }
 
-.messages:has(> .emptyState) > .emptyState {
+.messagesEmptyState {
+  max-width: none;
+}
+
+@media (min-width: 721px) {
+  .messages:has(> .emptyState),
+  .messagesEmptyState {
+    padding-bottom: 24px;
+  }
+}
+
+.messages:has(> .emptyState) > .emptyState,
+.messagesEmptyState > .emptyState {
   flex: 1 1 auto;
+  min-height: 100%;
 }
 
 .emptyState {
@@ -2795,12 +3091,12 @@
 .chatBotPickerFrame {
   position: absolute;
   left: 50%;
-  bottom: 32px;
+  bottom: 8px;
   width: var(--picker-width, 320px);
   height: var(--picker-height, 320px);
   max-width: calc(100% - 48px);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
   margin: 0;
   transform-origin: 50% 100%;
@@ -2813,6 +3109,12 @@
     transform 0.14s ease-out,
     width 0.26s ease,
     height 0.26s ease;
+}
+
+@media (max-width: 720px) {
+  .chatBotPickerFrame {
+    bottom: 18px;
+  }
 }
 
 .chatBotPickerFrame[data-returning-all="true"] {
@@ -2913,6 +3215,11 @@
   transform: translateY(12px);
 }
 
+.emptyStateDensePicker {
+  gap: 0;
+  padding-top: 16px;
+}
+
 .chatBotTilePlaceholder {
   width: var(--tile-size, 40px);
   height: var(--tile-size, 40px);
@@ -3007,6 +3314,54 @@
     0 14px 36px color-mix(in srgb, var(--bot-color, var(--fg)) 14%, transparent);
 }
 
+.chatBotTileWithName {
+  box-sizing: border-box;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-content: center;
+  justify-items: center;
+  row-gap: clamp(4px, calc(var(--tile-size, 40px) * 0.07), 10px);
+  padding: clamp(6px, calc(var(--tile-size, 40px) * 0.1), 14px);
+  background:
+    radial-gradient(
+      circle at 50% 36%,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 26%, transparent),
+      transparent 46%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 18%, var(--bg-surface)),
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 8%, var(--bg))
+    );
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 52%,
+    var(--line)
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent),
+    0 10px 26px color-mix(in srgb, var(--bot-color, var(--fg)) 12%, transparent);
+}
+
+.chatBotTileWithName .chatBotTileBotGlyph {
+  grid-area: auto;
+  min-width: 0;
+}
+
+.chatBotTileWithName:hover,
+.chatBotTileWithName:focus-visible {
+  background:
+    radial-gradient(
+      circle at 50% 36%,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 36%, transparent),
+      transparent 48%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 24%, var(--bg-surface)),
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 11%, var(--bg))
+    );
+}
+
 .chatBotPickerSingle .chatBotTileBotGlyph {
   grid-area: auto;
 }
@@ -3041,6 +3396,23 @@
   line-height: 1.2;
   text-transform: uppercase;
   opacity: 0.82;
+}
+
+.chatBotTileNamedFlat {
+  box-shadow: none;
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg-muted)) 34%,
+    var(--line)
+  );
+}
+
+.chatBotTileNamedFlat .chatBotTileFeaturedName {
+  color: color-mix(in srgb, var(--bot-color, var(--fg)) 62%, var(--fg));
+  font-size: clamp(10px, calc(var(--tile-size, 40px) * 0.068), 12px);
+  font-weight: 500;
+  letter-spacing: 0.045em;
+  opacity: 0.72;
 }
 
 .chatBotTile:active {
@@ -3640,20 +4012,6 @@
   animation: messageIn 0.22s ease-out;
 }
 
-@media (max-width: 720px) {
-  .message[data-lens-active="true"] {
-    max-height: calc(1px + (var(--message-focus-progress) * 1200px));
-    opacity: calc(var(--message-focus-progress) * var(--message-focus-progress));
-    transform: scaleY(calc(0.02 + (var(--message-focus-progress) * 0.98)));
-    transform-origin: center;
-    overflow: hidden;
-    transition:
-      max-height 160ms ease,
-      opacity 160ms ease,
-      transform 160ms ease;
-  }
-}
-
 @keyframes messageIn {
   from {
     opacity: 0;
@@ -3867,41 +4225,6 @@
   font-size: var(--font-size-message);
 }
 
-/* Wraps long <p> bodies for the scroll-driven reading lens. The parent bubble
-   owns the accent bar, border, status header, and fork/resend actions; this
-   inner wrapper only interpolates readable body height. */
-.messageBody {
-  display: block;
-  min-width: 0;
-}
-
-.messageBodyLens {
-  --message-focus-progress: 0;
-  max-height: calc(3.1em + (var(--message-focus-progress) * 120dvh));
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    #000 calc(34% + (var(--message-focus-progress) * 66%)),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    #000 calc(34% + (var(--message-focus-progress) * 66%)),
-    transparent 100%
-  );
-  transition:
-    max-height 180ms ease,
-    -webkit-mask-image 180ms ease,
-    mask-image 180ms ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .message[data-lens-active="true"],
-  .messageBodyLens {
-    transition: none;
-  }
-}
-
 .messageContextBackdrop {
   position: fixed;
   inset: 0;
@@ -4095,7 +4418,15 @@
 .compose {
   border-top: 1px solid var(--line);
   padding: 14px 20px 18px;
-  background: var(--bg-surface);
+  background:
+    radial-gradient(
+      ellipse 72% 42% at var(--lens-thumb-x, 50%) 0%,
+      color-mix(in srgb, var(--accent) 12%, transparent) 0%,
+      transparent 74%
+    ),
+    var(--bg-surface);
+  box-shadow:
+    0 -8px 24px -22px color-mix(in srgb, var(--accent) 34%, transparent);
 }
 
 .composeError {
@@ -7219,9 +7550,7 @@
 }
 
 /* Mobile-only menu toggle. Hidden on desktop. */
-.menuToggle,
-.panelMenuToggle,
-.panelQuickMenu {
+.menuToggle {
   display: none;
 }
 
@@ -7427,69 +7756,6 @@
     align-items: center;
     justify-content: center;
     transition: opacity 0.2s ease;
-  }
-
-  .panelMenuToggle {
-    display: inline-flex;
-    position: fixed;
-    top: calc(env(safe-area-inset-top) + 12px);
-    right: max(12px, calc(env(safe-area-inset-right) + 12px));
-    z-index: 201;
-    border: 1px solid var(--line);
-    background: var(--bg-surface);
-    color: var(--fg);
-    border-radius: 10px;
-    padding: 8px 12px;
-    cursor: pointer;
-    font: inherit;
-    font-size: 16px;
-    box-shadow: var(--shadow-sm);
-    align-items: center;
-    justify-content: center;
-    transition: opacity 0.2s ease, background 0.15s, border-color 0.15s;
-  }
-
-  .panelMenuToggle:hover,
-  .panelMenuToggle:focus-visible {
-    background: var(--bg-hover);
-    border-color: var(--line-strong);
-    outline: none;
-  }
-
-  .panelQuickMenu {
-    display: grid;
-    position: fixed;
-    top: calc(env(safe-area-inset-top) + 54px);
-    right: max(12px, calc(env(safe-area-inset-right) + 12px));
-    z-index: 202;
-    min-width: 132px;
-    gap: 4px;
-    padding: 6px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: var(--bg-surface);
-    box-shadow: var(--shadow-lg);
-    animation: popIn 0.16s ease-out;
-  }
-
-  .panelQuickMenu button {
-    border: 0;
-    background: transparent;
-    color: var(--fg);
-    border-radius: 8px;
-    padding: 10px 12px;
-    cursor: pointer;
-    font: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    text-align: right;
-    transition: background 0.15s, color 0.15s;
-  }
-
-  .panelQuickMenu button:hover,
-  .panelQuickMenu button:focus-visible {
-    background: var(--bg-hover);
-    outline: none;
   }
 
   .chatHeader {
