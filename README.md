@@ -7,7 +7,7 @@ trusted device. Every account is its own sandbox — encrypted memory,
 customizable chatbots, OpenAI image generation, forkable conversations,
 markdown export.
 
-**Current release:** v0.1.1. See [CHANGELOG.md](CHANGELOG.md) for release notes.
+**Current release:** v0.2.0. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Branch model:** `main` holds tagged, released versions only; all active
 development happens on `dev`. Every release is a merge of `dev` into `main`
@@ -53,6 +53,35 @@ Planning docs:
 - [Licensing and brand model](docs/licensing-and-brand.md)
 - [Production readiness gate](docs/production-readiness-gate.md)
 - [Release process (dev -> main)](docs/release-process.md)
+- [Prism Server.app build and release](docs/prism-server-app.md)
+
+## Prism Server.app (macOS)
+
+Prism Server.app is the native macOS menu-bar launcher for the server runtime.
+It packages the existing Node API and Next.js standalone web dashboard into a
+signed/notarized desktop app distributed as a DMG from GitHub Releases.
+
+Local build:
+
+```bash
+xcodebuild \
+  -project "apps/server-mac/PrismServer.xcodeproj" \
+  -scheme PrismServer \
+  -configuration Debug \
+  -derivedDataPath "apps/server-mac/DerivedData" \
+  build
+```
+
+The Debug build writes:
+
+```text
+apps/server-mac/DerivedData/Build/Products/Debug/Prism Server.app
+```
+
+The app does not bundle Ollama or Qdrant. It detects them on launch and guides
+installation/startup from the Setup window. See
+[docs/prism-server-app.md](docs/prism-server-app.md) for signing,
+notarization, and release steps.
 
 ## Architecture
 

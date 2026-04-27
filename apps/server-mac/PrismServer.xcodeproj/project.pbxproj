@@ -1,0 +1,474 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000101 /* PrismServerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000201 /* PrismServerApp.swift */; };
+		100000000000000000000102 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000202 /* AppModel.swift */; };
+		10000000000000000000010F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000211 /* AppDelegate.swift */; };
+		100000000000000000000103 /* RuntimeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000203 /* RuntimeState.swift */; };
+		100000000000000000000104 /* ServerConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000204 /* ServerConfig.swift */; };
+		100000000000000000000105 /* DependencyStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000205 /* DependencyStatus.swift */; };
+		100000000000000000000106 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000206 /* ConfigStore.swift */; };
+		100000000000000000000107 /* DependencyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000207 /* DependencyService.swift */; };
+		100000000000000000000108 /* RuntimeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000208 /* RuntimeManager.swift */; };
+		100000000000000000000109 /* LogTailer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000209 /* LogTailer.swift */; };
+		10000000000000000000010A /* MenuBarContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000020A /* MenuBarContentView.swift */; };
+		10000000000000000000010B /* SetupWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000020B /* SetupWindowView.swift */; };
+		10000000000000000000010C /* LogsWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000020C /* LogsWindowView.swift */; };
+		10000000000000000000010D /* ConfigStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000020D /* ConfigStoreTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		100000000000000000000301 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 100000000000000000000401;
+			remoteInfo = PrismServer;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		100000000000000000000201 /* PrismServerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismServerApp.swift; sourceTree = "<group>"; };
+		100000000000000000000202 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		100000000000000000000211 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		100000000000000000000203 /* RuntimeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeState.swift; sourceTree = "<group>"; };
+		100000000000000000000204 /* ServerConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConfig.swift; sourceTree = "<group>"; };
+		100000000000000000000205 /* DependencyStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyStatus.swift; sourceTree = "<group>"; };
+		100000000000000000000206 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
+		100000000000000000000207 /* DependencyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyService.swift; sourceTree = "<group>"; };
+		100000000000000000000208 /* RuntimeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeManager.swift; sourceTree = "<group>"; };
+		100000000000000000000209 /* LogTailer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTailer.swift; sourceTree = "<group>"; };
+		10000000000000000000020A /* MenuBarContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarContentView.swift; sourceTree = "<group>"; };
+		10000000000000000000020B /* SetupWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupWindowView.swift; sourceTree = "<group>"; };
+		10000000000000000000020C /* LogsWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogsWindowView.swift; sourceTree = "<group>"; };
+		10000000000000000000020D /* ConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStoreTests.swift; sourceTree = "<group>"; };
+		10000000000000000000020E /* Prism Server.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Prism Server.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		10000000000000000000020F /* PrismServerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrismServerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		100000000000000000000501 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		100000000000000000000502 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		100000000000000000000601 = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000602 /* PrismServer */,
+				100000000000000000000606 /* PrismServerTests */,
+				100000000000000000000607 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		100000000000000000000602 /* PrismServer */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000201 /* PrismServerApp.swift */,
+				100000000000000000000202 /* AppModel.swift */,
+				100000000000000000000211 /* AppDelegate.swift */,
+				100000000000000000000603 /* Models */,
+				100000000000000000000604 /* Services */,
+				100000000000000000000605 /* Views */,
+			);
+			path = PrismServer;
+			sourceTree = "<group>";
+		};
+		100000000000000000000603 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000203 /* RuntimeState.swift */,
+				100000000000000000000204 /* ServerConfig.swift */,
+				100000000000000000000205 /* DependencyStatus.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		100000000000000000000604 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000206 /* ConfigStore.swift */,
+				100000000000000000000207 /* DependencyService.swift */,
+				100000000000000000000208 /* RuntimeManager.swift */,
+				100000000000000000000209 /* LogTailer.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		100000000000000000000605 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000020A /* MenuBarContentView.swift */,
+				10000000000000000000020B /* SetupWindowView.swift */,
+				10000000000000000000020C /* LogsWindowView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		100000000000000000000606 /* PrismServerTests */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000020D /* ConfigStoreTests.swift */,
+			);
+			path = PrismServerTests;
+			sourceTree = "<group>";
+		};
+		100000000000000000000607 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000020E /* Prism Server.app */,
+				10000000000000000000020F /* PrismServerTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		100000000000000000000401 /* PrismServer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000901 /* Build configuration list for PBXNativeTarget "PrismServer" */;
+			buildPhases = (
+				100000000000000000000701 /* Sources */,
+				100000000000000000000501 /* Frameworks */,
+				100000000000000000000801 /* Resources */,
+				100000000000000000000A01 /* Stage Prism Runtime */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = PrismServer;
+			productName = "Prism Server";
+			productReference = 10000000000000000000020E /* Prism Server.app */;
+			productType = "com.apple.product-type.application";
+		};
+		100000000000000000000402 /* PrismServerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000902 /* Build configuration list for PBXNativeTarget "PrismServerTests" */;
+			buildPhases = (
+				100000000000000000000702 /* Sources */,
+				100000000000000000000502 /* Frameworks */,
+			);
+			buildRules = ();
+			dependencies = (
+				100000000000000000000302 /* PBXTargetDependency */,
+			);
+			name = PrismServerTests;
+			productName = PrismServerTests;
+			productReference = 10000000000000000000020F /* PrismServerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		100000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1540;
+				LastUpgradeCheck = 1540;
+				TargetAttributes = {
+					100000000000000000000401 = {
+						CreatedOnToolsVersion = 15.4;
+					};
+					100000000000000000000402 = {
+						CreatedOnToolsVersion = 15.4;
+						TestTargetID = 100000000000000000000401;
+					};
+				};
+			};
+			buildConfigurationList = 100000000000000000000900 /* Build configuration list for PBXProject "PrismServer" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 100000000000000000000601;
+			productRefGroup = 100000000000000000000607 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				100000000000000000000401 /* PrismServer */,
+				100000000000000000000402 /* PrismServerTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		100000000000000000000801 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		100000000000000000000A01 /* Stage Prism Runtime */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputFileListPaths = ();
+			inputPaths = ();
+			name = "Stage Prism Runtime";
+			outputFileListPaths = ();
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/scripts/build-runtime.sh\" \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/runtime\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		100000000000000000000701 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000101 /* PrismServerApp.swift in Sources */,
+				100000000000000000000102 /* AppModel.swift in Sources */,
+				10000000000000000000010F /* AppDelegate.swift in Sources */,
+				100000000000000000000103 /* RuntimeState.swift in Sources */,
+				100000000000000000000104 /* ServerConfig.swift in Sources */,
+				100000000000000000000105 /* DependencyStatus.swift in Sources */,
+				100000000000000000000106 /* ConfigStore.swift in Sources */,
+				100000000000000000000107 /* DependencyService.swift in Sources */,
+				100000000000000000000108 /* RuntimeManager.swift in Sources */,
+				100000000000000000000109 /* LogTailer.swift in Sources */,
+				10000000000000000000010A /* MenuBarContentView.swift in Sources */,
+				10000000000000000000010B /* SetupWindowView.swift in Sources */,
+				10000000000000000000010C /* LogsWindowView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		100000000000000000000702 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000010D /* ConfigStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		100000000000000000000302 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 100000000000000000000401 /* PrismServer */; targetProxy = 100000000000000000000301 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		100000000000000000000A10 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)");
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		100000000000000000000A11 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		100000000000000000000A20 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Prism Server";
+				INFOPLIST_KEY_LSUIElement = NO;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-server;
+				PRODUCT_MODULE_NAME = PrismServer;
+				PRODUCT_NAME = "Prism Server";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		100000000000000000000A21 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Prism Server";
+				INFOPLIST_KEY_LSUIElement = NO;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-server;
+				PRODUCT_MODULE_NAME = PrismServer;
+				PRODUCT_NAME = "Prism Server";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		100000000000000000000A30 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-server.tests;
+				PRODUCT_MODULE_NAME = PrismServerTests;
+				PRODUCT_NAME = PrismServerTests;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Prism Server.app/Contents/MacOS/Prism Server";
+			};
+			name = Debug;
+		};
+		100000000000000000000A31 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-server.tests;
+				PRODUCT_MODULE_NAME = PrismServerTests;
+				PRODUCT_NAME = PrismServerTests;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Prism Server.app/Contents/MacOS/Prism Server";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		100000000000000000000900 /* Build configuration list for PBXProject "PrismServer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000A10 /* Debug */,
+				100000000000000000000A11 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		100000000000000000000901 /* Build configuration list for PBXNativeTarget "PrismServer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000A20 /* Debug */,
+				100000000000000000000A21 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		100000000000000000000902 /* Build configuration list for PBXNativeTarget "PrismServerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000A30 /* Debug */,
+				100000000000000000000A31 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 100000000000000000000001 /* Project object */;
+}

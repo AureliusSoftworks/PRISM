@@ -1,0 +1,115 @@
+name: Release Prism Server macOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Shared release version without leading v (example: 0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-server-mac-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-sign-notarize:
+    name: Build signed Prism Server.app DMG
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_NOTARYTOOL_APPLE_ID: ${{ secrets.APPLE_NOTARYTOOL_APPLE_ID }}
+      APPLE_NOTARYTOOL_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_NOTARYTOOL_APP_SPECIFIC_PASSWORD }}
+      APPLE_DEVELOPER_ID_CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+      APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+    steps:
+      - name: Enforce main-only server app releases
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Prism Server.app release workflow is allowed only from main."
+            exit 1
+          fi
+
+      - name: Validate inputs and signing secrets
+        run: |
+          set -euo pipefail
+          if ! [[ "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must follow SemVer core format (example: 0.2.0)."
+            exit 1
+          fi
+          for name in \
+            DEVELOPER_ID_APPLICATION \
+            APPLE_TEAM_ID \
+            APPLE_NOTARYTOOL_APPLE_ID \
+            APPLE_NOTARYTOOL_APP_SPECIFIC_PASSWORD \
+            APPLE_DEVELOPER_ID_CERT_BASE64 \
+            APPLE_DEVELOPER_ID_CERT_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required secret: ${name}"
+              exit 1
+            fi
+          done
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+          APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="${RUNNER_TEMP}/developer-id.p12"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/prism-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          printf '%s' "${APPLE_DEVELOPER_ID_CERT_BASE64}" | base64 --decode > "${CERT_PATH}"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security import "${CERT_PATH}" -P "${APPLE_DEVELOPER_ID_CERT_PASSWORD}" -A -t cert -f pkcs12 -k "${KEYCHAIN_PATH}"
+          security list-keychain -d user -s "${KEYCHAIN_PATH}"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+      - name: Build Prism Server.app
+        run: |
+          VENDOR_NODE=1 xcodebuild \
+            -project "apps/server-mac/PrismServer.xcodeproj" \
+            -scheme PrismServer \
+            -configuration Release \
+            -derivedDataPath "apps/server-mac/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Sign, notarize, and package DMG
+        run: |
+          apps/server-mac/scripts/sign-and-notarize.sh \
+            "apps/server-mac/DerivedData/Build/Products/Release/Prism Server.app" \
+            "${RELEASE_VERSION}"
+
+      - name: Ensure server release exists
+        run: |
+          set -euo pipefail
+          gh release view "server/v${RELEASE_VERSION}" >/dev/null
+
+      - name: Upload Prism Server.app DMG
+        run: |
+          gh release upload "server/v${RELEASE_VERSION}" \
+            "apps/server-mac/dist/Prism-Server-v${RELEASE_VERSION}.dmg" \
+            --clobber

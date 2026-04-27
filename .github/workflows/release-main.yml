@@ -146,6 +146,8 @@ jobs:
           - Branch source: \`main\`
           - Shared version: \`v${RELEASE_VERSION}\`
           - Release lane: Server artifact draft
+          - Source/runtime asset: \`prism-server-v${RELEASE_VERSION}-bundle.tar.gz\`
+          - macOS app asset: upload separately with \`.github/workflows/release-server-mac.yml\`
           - Promotion: Publish manually after deployment gate is confirmed
           EOF
 

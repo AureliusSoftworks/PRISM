@@ -35,9 +35,12 @@ export interface DbMemoryRecord {
   createdAt: string;
 }
 
-function resolveDbPath(): string {
+export function resolveDbPath(): string {
   if (process.env.DB_PATH) {
     return process.env.DB_PATH;
+  }
+  if (process.env.LOCALAI_DATA_DIR) {
+    return join(process.env.LOCALAI_DATA_DIR, "localai.db");
   }
   const srcDir = fileURLToPath(new URL(".", import.meta.url));
   return join(srcDir, "..", "data", "localai.db");
