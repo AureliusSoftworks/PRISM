@@ -84,6 +84,53 @@ export function deleteBot(
 }
 
 /**
+ * Permanently remove up to `limit` of the caller's most recently updated bots.
+ *
+ * This powers the Developer Tools density controls. It preserves historical
+ * chats by nulling bot references before deleting the bot rows.
+ */
+export function deleteBots(
+  db: DatabaseSync,
+  userId: string,
+  limit: number
+): number {
+  const normalizedLimit = Math.floor(limit);
+  if (!Number.isFinite(normalizedLimit) || normalizedLimit <= 0) return 0;
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const botIds = db
+      .prepare(
+        "SELECT id FROM bots WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?"
+      )
+      .all(userId, normalizedLimit) as Array<{ id: string }>;
+
+    if (botIds.length === 0) {
+      db.exec("COMMIT");
+      return 0;
+    }
+
+    const ids = botIds.map(({ id }) => id);
+    const placeholders = ids.map(() => "?").join(", ");
+
+    db.prepare(
+      `UPDATE messages SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
+    ).run(userId, ...ids);
+    db.prepare(
+      `UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
+    ).run(userId, ...ids);
+    db.prepare(
+      `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
+    ).run(userId, ...ids);
+    db.exec("COMMIT");
+    return ids.length;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
  * Permanently remove every bot owned by `userId` in a single transaction.
  *
  * Behaviour mirrors {@link deleteBot} applied in bulk:

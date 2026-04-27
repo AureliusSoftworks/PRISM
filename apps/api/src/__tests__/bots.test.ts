@@ -5,6 +5,7 @@ import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
+  deleteBots,
 } from "../bots.ts";
 
 /**
@@ -207,6 +208,55 @@ describe("deleteBot", () => {
       .prepare("SELECT bot_id FROM messages WHERE id = ?")
       .get("msg-2") as { bot_id: string | null } | undefined;
     assert.equal(msg?.bot_id, "bot-2");
+  });
+});
+
+describe("deleteBots", () => {
+  it("removes the newest limited set and leaves older bots intact", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "old", "2026-01-01T00:00:00.000Z");
+    seedBot(db, "user-1", "middle", "2026-01-02T00:00:00.000Z");
+    seedBot(db, "user-1", "new", "2026-01-03T00:00:00.000Z");
+    seedHistoryReferencingBot(db, "user-1", "new", "new");
+    seedHistoryReferencingBot(db, "user-1", "middle", "middle");
+
+    const deleted = deleteBots(db, "user-1", 2);
+
+    assert.equal(deleted, 2);
+    const survivors = db
+      .prepare("SELECT id FROM bots ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      survivors.map((bot) => bot.id),
+      ["old"]
+    );
+
+    for (const suffix of ["new", "middle"]) {
+      const msg = db
+        .prepare("SELECT bot_id FROM messages WHERE id = ?")
+        .get(`msg-${suffix}`) as { bot_id: string | null } | undefined;
+      assert.equal(msg?.bot_id, null);
+    }
+  });
+
+  it("stays scoped to the acting user", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "mine-1", "2026-01-01T00:00:00.000Z");
+    seedBot(db, "user-1", "mine-2", "2026-01-02T00:00:00.000Z");
+    seedBot(db, "user-2", "theirs", "2026-01-03T00:00:00.000Z");
+    seedHistoryReferencingBot(db, "user-2", "theirs", "theirs");
+
+    const deleted = deleteBots(db, "user-1", 10);
+
+    assert.equal(deleted, 2);
+    const survivor = db
+      .prepare("SELECT id FROM bots WHERE user_id = ?")
+      .get("user-2") as { id: string } | undefined;
+    assert.equal(survivor?.id, "theirs");
+    const msg = db
+      .prepare("SELECT bot_id FROM messages WHERE id = ?")
+      .get("msg-theirs") as { bot_id: string | null } | undefined;
+    assert.equal(msg?.bot_id, "theirs");
   });
 });
 
