@@ -57,10 +57,11 @@ After pairing, Prism.app loads:
 <paired-server-web-origin>/
 ```
 
-Pairing uses the API origin (default `http://127.0.0.1:8787`). The kiosk maps
-that to the server's web origin (default `http://127.0.0.1:3000`) before loading
-the authenticated app shell.
+Pairing uses the API origin (default `http://127.0.0.1:18787`). The kiosk maps
+that to the server's web origin (default `http://127.0.0.1:18788`) before loading
+the authenticated app shell. Legacy paired servers using API `:8787` still map to
+web `:3000`.
 
-The WebKit shell seeds the paired session token into local storage before first
-paint. The web app sends that token as a bearer token for API calls. When the
-user logs out, the token is cleared and the normal login/register screen appears.
+The WebKit shell supplies the paired native-client access token as a
+`prism_client_access` cookie before first paint. This token unlocks the hosted
+web shell only; users still register or log in with the normal PRISM auth flow.

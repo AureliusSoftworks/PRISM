@@ -10,7 +10,7 @@ const MONOREPO_ROOT = path.join(
   ".."
 );
 
-const apiOrigin = process.env.LOCALAI_API_ORIGIN ?? "http://127.0.0.1:8787";
+const apiOrigin = process.env.LOCALAI_API_ORIGIN ?? "http://127.0.0.1:18787";
 
 /**
  * Returns every non-internal IPv4 address bound to this host, so LAN devices

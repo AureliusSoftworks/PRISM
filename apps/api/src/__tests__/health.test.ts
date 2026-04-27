@@ -5,7 +5,7 @@ import type { AppConfig } from "@localai/config";
 import { buildHealthResponse } from "../health.ts";
 
 const config: AppConfig = {
-  apiPort: 8787,
+  apiPort: 18787,
   serverName: "Test Prism",
   sessionCookieName: "localai_session",
   sessionTtlHours: 24,

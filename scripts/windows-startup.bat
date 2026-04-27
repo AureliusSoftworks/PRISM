@@ -7,4 +7,4 @@ docker compose up -d
 
 echo Prism services started.
 echo Web UI: http://%COMPUTERNAME%
-echo API:    http://%COMPUTERNAME%:8787
+echo API:    http://%COMPUTERNAME%:18787

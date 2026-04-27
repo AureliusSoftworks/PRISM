@@ -36,6 +36,7 @@ const HEADER_DELETE_KEY = "__header__";
 // Escape behaviour applies to it without any extra wiring.
 const DELETE_ALL_KEY = "__delete_all__";
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
+const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 
 // Namespace bot-delete keys so they can share the same single "armed" state
 // slot used for conversation deletion without id collisions.
@@ -49,14 +50,12 @@ const BOT_DELETE_KEY_PREFIX = "bot:";
 // apply uniformly.
 const DELETE_ALL_BOTS_KEY = "__delete_all_bots__";
 
-// Messages whose content exceeds this character count get rendered with a
-// collapsible body: a max-height cap + bottom fade + "Show more" toggle.
-// Chosen so ~12 lines of typical prose fit comfortably; under it, there is
-// no affordance shown and the message renders as before. Tuned alongside
-// the `.messageBodyCollapsed` `max-height` in page.module.css — keep them
-// roughly in sync (shorter content than the cap would leave the toggle
-// dangling below an already-short message).
-const MESSAGE_COLLAPSE_THRESHOLD = 600;
+// Messages whose content exceeds this character count join the scroll-driven
+// reading lens: compact away from center, expanded as they approach center.
+// Short messages render at natural height so the lens only affects prose that
+// would otherwise dominate the mobile viewport.
+const MESSAGE_COLLAPSE_THRESHOLD = 220;
+const MESSAGE_COPY_FEEDBACK_MS = 1600;
 
 // ── Prism logo letter palette ─────────────────────────────────────────
 // One hex per letter of "prism", mirroring the per-letter stroke colors
@@ -1243,6 +1242,7 @@ type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images" | "memories";
 type MemoryPanelScope = "bot" | "session" | "all";
+type ClientAccessState = "checking" | "allowed" | "blocked";
 // Which post-auth surface is currently rendered. "hub" is the landing
 // screen shown after login; each mode tile navigates to a specific
 // experience. Future modes can be advertised as disabled Hub tiles
@@ -2081,16 +2081,20 @@ function nextThemeMode(current: Theme): Theme {
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   let nativeSessionToken: string | null = null;
+  let clientAccessToken: string | null = null;
   if (typeof window !== "undefined") {
     try {
       nativeSessionToken = window.localStorage.getItem(NATIVE_SESSION_STORAGE_KEY);
+      clientAccessToken = window.localStorage.getItem(CLIENT_ACCESS_STORAGE_KEY);
     } catch {
       nativeSessionToken = null;
+      clientAccessToken = null;
     }
   }
   const headers: HeadersInit = {
     "content-type": "application/json",
     ...(nativeSessionToken ? { authorization: `Bearer ${nativeSessionToken}` } : {}),
+    ...(clientAccessToken ? { "x-prism-client-access": clientAccessToken } : {}),
     ...(options?.headers ?? {}),
   };
   const res = await fetch(path, {
@@ -2114,6 +2118,22 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(payload?.error ?? fallbackMessage);
   }
   return (payload ?? {}) as T;
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (!navigator.clipboard) {
+    throw new Error("Clipboard API unavailable.");
+  }
+  await navigator.clipboard.writeText(text);
+}
+
+function clearNativeSessionToken(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(NATIVE_SESSION_STORAGE_KEY);
+  } catch {
+    // Non-fatal: cookie-backed browser auth can still continue normally.
+  }
 }
 
 // ── Inline SVG glyphs ─────────────────────────────────────────────────
@@ -5523,6 +5543,70 @@ function GlyphGames({ size = 88 }: GlyphProps): React.JSX.Element {
   );
 }
 
+function GlyphStory({ size = 88 }: GlyphProps): React.JSX.Element {
+  // Story mode is about stepping into a scene with bots, so the glyph
+  // combines an open-book frame with a horizon, doorway, and two bot actors.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Open-book / world frame */}
+      <path
+        d="M7 11 H20 C22 11 24 13 24 15 V41 C24 38 22 36 19 36 H7 Z"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        opacity="0.45"
+      />
+      <path
+        d="M41 11 H28 C26 11 24 13 24 15 V41 C24 38 26 36 29 36 H41 Z"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        opacity="0.45"
+      />
+      {/* Immersive environment cues */}
+      <path d="M12 29 C17 23 20 23 24 29 C28 23 31 23 36 29" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      <path d="M24 18 V31" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      <path d="M18 19 H30" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      {/* Bot actors */}
+      <circle cx="16" cy="24" r="2.5" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      <circle cx="32" cy="24" r="2.5" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
+function GlyphLibrary({ size = 88 }: GlyphProps): React.JSX.Element {
+  // Library is the training shelf: source material flows into a small
+  // memory core before it becomes usable context for bots.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Shelves / archive frame */}
+      <path d="M8 38 H40" stroke="currentColor" strokeWidth={2.5} opacity="0.45" />
+      <path d="M10 12 H38 V38 H10 Z" stroke="currentColor" strokeWidth={2.5} opacity="0.45" />
+      {/* Ingestible materials */}
+      <path d="M15 18 V31" stroke={PRISM_COLORS.p} strokeWidth={3} />
+      <path d="M21 16 V31" stroke={PRISM_COLORS.r} strokeWidth={3} />
+      <path d="M27 20 V31" stroke={PRISM_COLORS.i} strokeWidth={3} />
+      {/* Context flow into memory */}
+      <path d="M14 34 C20 28 28 28 34 34" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      <circle cx="34" cy="23" r="4" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
 function GlyphSlate({ size = 88 }: GlyphProps): React.JSX.Element {
   // Document-with-folded-corner silhouette housing three text lines and
   // a blinking-cursor caret. Each PRISM letter gets exactly one element
@@ -5595,39 +5679,24 @@ function GlyphPseudo({ size = 88 }: GlyphProps): React.JSX.Element {
   );
 }
 
-// ── Message body with collapsible long content ────────────────────────
-// Wraps the <p> text so we can cap the rendered height on long messages
-// and reveal a "Show more" toggle. Messages under MESSAGE_COLLAPSE_THRESHOLD
-// chars bypass the wrapper entirely — no dangling toggle, no mask cost.
+// ── Message body with scroll-driven expansion ─────────────────────────
+// Long messages are compact away from the viewport center and expand toward
+// full natural height as they pass through the user's reading focal point.
 // Shared between Chat and Sandbox so the behaviour stays consistent.
 
 interface MessageBodyProps {
-  messageId: string;
   content: string;
-  expanded: boolean;
-  onToggle: (id: string) => void;
 }
 
-function MessageBody({ messageId, content, expanded, onToggle }: MessageBodyProps): React.JSX.Element {
+function MessageBody({ content }: MessageBodyProps): React.JSX.Element {
   const isLong = content.length > MESSAGE_COLLAPSE_THRESHOLD;
   if (!isLong) {
     return <p>{content}</p>;
   }
-  const collapsed = !expanded;
   return (
-    <>
-      <div className={collapsed ? `${styles.messageBody} ${styles.messageBodyCollapsed}` : styles.messageBody}>
-        <p>{content}</p>
-      </div>
-      <button
-        type="button"
-        className={styles.messageExpandToggle}
-        onClick={() => onToggle(messageId)}
-        aria-expanded={expanded}
-      >
-        {expanded ? "Show less" : "Show more"}
-      </button>
-    </>
+    <div className={`${styles.messageBody} ${styles.messageBodyLens}`}>
+      <p>{content}</p>
+    </div>
   );
 }
 
@@ -5650,6 +5719,7 @@ function HomeContent(): React.JSX.Element {
   }, [router]);
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [displayName, setDisplayName] = useState("");
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [clientAccessState, setClientAccessState] = useState<ClientAccessState>("checking");
   // Two error states on purpose:
   //   - `error` is the global / compose-adjacent surface. It catches auth,
   //     sidebar actions (switch provider, theme, delete chat), and chat send
@@ -5689,21 +5759,18 @@ function HomeContent(): React.JSX.Element {
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
   const selectedIdRef = useRef<string | null>(null);
   const detailIdRef = useRef<string | null>(null);
-  // IDs of messages the user has explicitly expanded past the
-  // collapse-long-content cap. Kept as a Set so toggling is O(1) and
-  // independent of message order. Lives in-memory only — reloading a
-  // conversation resets every message to its default (collapsed if long).
-  const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => new Set());
-  const toggleMessageExpand = useCallback((id: string) => {
-    setExpandedMessageIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const [messageFocusProgress, setMessageFocusProgress] = useState<Record<string, number>>({});
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const messageFocusFrameRef = useRef<number | null>(null);
   const [modelRevealMessageId, setModelRevealMessageId] = useState<string | null>(null);
   const modelRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const copiedMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [messageContextMenu, setMessageContextMenu] = useState<{
+    message: Message;
+    x: number;
+    y: number;
+  } | null>(null);
   const revealMessageModel = useCallback((id: string) => {
     if (modelRevealTimerRef.current) {
       clearTimeout(modelRevealTimerRef.current);
@@ -6057,6 +6124,10 @@ function HomeContent(): React.JSX.Element {
       if (modelRevealTimerRef.current) {
         clearTimeout(modelRevealTimerRef.current);
         modelRevealTimerRef.current = null;
+      }
+      if (copiedMessageTimerRef.current) {
+        clearTimeout(copiedMessageTimerRef.current);
+        copiedMessageTimerRef.current = null;
       }
       if (fieldHelpHideTimerRef.current) {
         clearTimeout(fieldHelpHideTimerRef.current);
@@ -6593,6 +6664,48 @@ function HomeContent(): React.JSX.Element {
   // from main rather than deriving from the user's bot palette.
   const appShellStyle = mergedShellStyle;
 
+  const updateMessageFocusProgress = useCallback(() => {
+    if (messageFocusFrameRef.current !== null) return;
+    messageFocusFrameRef.current = window.requestAnimationFrame(() => {
+      messageFocusFrameRef.current = null;
+      const container = messagesContainerRef.current;
+      if (!container) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const centerY = containerRect.top + containerRect.height * 0.5;
+      const focusRadius = Math.max(160, containerRect.height * 0.42);
+      const next: Record<string, number> = {};
+
+      container
+        .querySelectorAll<HTMLElement>("[data-message-id]")
+        .forEach((element) => {
+          const id = element.dataset.messageId;
+          if (!id) return;
+
+          const rect = element.getBoundingClientRect();
+          const messageCenterY = rect.top + rect.height * 0.5;
+          const distance = Math.abs(messageCenterY - centerY);
+          const rawProgress = Math.max(0, Math.min(1, 1 - distance / focusRadius));
+          const eased = rawProgress * rawProgress * (3 - 2 * rawProgress);
+          if (eased > 0.01) {
+            next[id] = Number(eased.toFixed(3));
+          }
+        });
+
+      setMessageFocusProgress(previous => {
+        const previousKeys = Object.keys(previous);
+        const nextKeys = Object.keys(next);
+        if (
+          previousKeys.length === nextKeys.length &&
+          nextKeys.every(key => previous[key] === next[key])
+        ) {
+          return previous;
+        }
+        return next;
+      });
+    });
+  }, []);
+
   useEffect(() => {
     if (!hueLensAvailable && hueFilterCenter !== null) {
       setHueFilterCenter(null);
@@ -6696,8 +6809,41 @@ function HomeContent(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    async function validateClientAccess(): Promise<void> {
+      try {
+        await api("/api/client-access/me");
+        if (!cancelled) setClientAccessState("allowed");
+      } catch {
+        if (!cancelled) {
+          setClientAccessState("blocked");
+          setUser(null);
+        }
+      }
+    }
+
+    void validateClientAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (clientAccessState !== "allowed") return;
     void bootstrap();
-  }, [bootstrap]);
+  }, [bootstrap, clientAccessState]);
+  useEffect(() => {
+    const handleResize = () => updateMessageFocusProgress();
+    window.addEventListener("resize", handleResize);
+    updateMessageFocusProgress();
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      if (messageFocusFrameRef.current !== null) {
+        window.cancelAnimationFrame(messageFocusFrameRef.current);
+        messageFocusFrameRef.current = null;
+      }
+    };
+  }, [updateMessageFocusProgress]);
   // refreshAll is intentionally a local function declaration in this component.
   // This effect should run on auth transitions, not on every render identity churn.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6716,7 +6862,8 @@ function HomeContent(): React.JSX.Element {
   //   - the visible typing indicator toggles on/off
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-  }, [detail?.id, detail?.messages.length, pendingReplyVisible]);
+    updateMessageFocusProgress();
+  }, [detail?.id, detail?.messages.length, pendingReplyVisible, updateMessageFocusProgress]);
 
   // Drop any pending mid-thread bot override whenever the open
   // conversation changes OR the post-auth surface flips. Without this,
@@ -6806,6 +6953,7 @@ function HomeContent(): React.JSX.Element {
     try {
       if (authMode === "register") await api("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, displayName, theme: preAuthTheme }) });
       else await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      clearNativeSessionToken();
       await bootstrap(); setPassword("");
     } catch (err) { setError(err instanceof Error ? err.message : "Auth failed."); }
     finally { setBusy(false); }
@@ -6813,11 +6961,7 @@ function HomeContent(): React.JSX.Element {
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST", body: "{}" });
-    try {
-      window.localStorage.removeItem(NATIVE_SESSION_STORAGE_KEY);
-    } catch {
-      // Non-fatal: normal cookie logout still handles browser sessions.
-    }
+    clearNativeSessionToken();
     setUser(null);
     setConversations([]);
     setDetail(null);
@@ -7223,7 +7367,7 @@ function HomeContent(): React.JSX.Element {
   async function copyPairingCode() {
     if (!pairingCode) return;
     try {
-      await navigator.clipboard.writeText(pairingCode.code);
+      await writeClipboardText(pairingCode.code);
       setPairingCopyStatus("Copied");
     } catch {
       setPanelError("Copy failed. Select the code and copy it manually.");
@@ -7331,6 +7475,30 @@ function HomeContent(): React.JSX.Element {
     await refreshConversations(); await refreshConversation(d.conversationId);
   }
 
+  async function copyMessageToClipboard(msg: Message): Promise<void> {
+    try {
+      await writeClipboardText(msg.content);
+      setCopiedMessageId(msg.id);
+      if (copiedMessageTimerRef.current) {
+        clearTimeout(copiedMessageTimerRef.current);
+      }
+      copiedMessageTimerRef.current = setTimeout(() => {
+        setCopiedMessageId(current => current === msg.id ? null : current);
+        copiedMessageTimerRef.current = null;
+      }, MESSAGE_COPY_FEEDBACK_MS);
+    } catch {
+      setError("Copy failed. Select the message and copy it manually.");
+    }
+  }
+
+  const openMessageContextMenu = useCallback((msg: Message, x: number, y: number) => {
+    setMessageContextMenu({
+      message: msg,
+      x: Math.min(Math.max(x, 88), window.innerWidth - 88),
+      y: Math.min(Math.max(y, 96), window.innerHeight - 96),
+    });
+  }, []);
+
   // Rewind this conversation to just before `msg`, then resubmit its
   // original text through the normal /api/chat pipeline so whatever bot
   // / provider / incognito setting is live right now is what runs — a
@@ -7351,6 +7519,7 @@ function HomeContent(): React.JSX.Element {
   //      sees their history (the server's transaction rolls back too
   //      if step 2 threw).
   async function resendFromMessage(msg: Message): Promise<void> {
+    setMessageContextMenu(null);
     disarmResend();
     if (!selectedId) return;
     if (pendingReply) return;
@@ -7801,6 +7970,10 @@ function HomeContent(): React.JSX.Element {
   const handleAppContextMenu = useCallback((event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
 
+    if (messageContextMenu) {
+      setMessageContextMenu(null);
+      return;
+    }
     if (pendingDeleteKey) {
       disarmDelete();
       return;
@@ -7853,6 +8026,7 @@ function HomeContent(): React.JSX.Element {
     disarmResend,
     emptyStateSearchActive,
     hueFilterCenter,
+    messageContextMenu,
     panel,
     pendingDeleteKey,
     pendingIncognito,
@@ -8460,10 +8634,97 @@ function HomeContent(): React.JSX.Element {
     finally { setBusy(false); }
   }
 
+  if (clientAccessState !== "allowed") {
+    const isChecking = clientAccessState === "checking";
+    return (
+      <main className={`${styles.authLayout} ${themeClass}`}>
+        <div className={styles.card}>
+          <div className={styles.brandLockup}>
+            <div className={styles.brandIconShell} aria-hidden="true">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/icon.jpg" alt="" aria-hidden="true" className={styles.brandIcon} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/icon-triangle.svg" alt="" aria-hidden="true" className={styles.brandIconLight} />
+            </div>
+            <PrismWordmark className={styles.brandWordmark} />
+          </div>
+          <p className={styles.muted}>Local-first AI playground. ChatGPT Gov fidelity, FL Studio creativity.</p>
+          <h2 className={styles.authHeading}>
+            {isChecking ? "Connecting to Prism" : "Open Prism in the app"}
+          </h2>
+          <p className={styles.muted}>
+            {isChecking
+              ? "Checking native client access..."
+              : "This web surface is available after pairing through the Prism iOS or Mac client."}
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  function renderMessageContextMenu(): React.JSX.Element | null {
+    if (!messageContextMenu) return null;
+    const msg = messageContextMenu.message;
+    const isUser = msg.role === "user";
+    return (
+      <>
+        <button
+          type="button"
+          className={styles.messageContextBackdrop}
+          aria-label="Close message actions"
+          onClick={() => setMessageContextMenu(null)}
+        />
+        <div
+          className={styles.messageContextMenu}
+          style={{
+            left: `${messageContextMenu.x}px`,
+            top: `${messageContextMenu.y}px`,
+          }}
+          role="menu"
+          aria-label="Message actions"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMessageContextMenu(null);
+              void copyMessageToClipboard(msg);
+            }}
+          >
+            Copy
+          </button>
+          {isUser ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMessageContextMenu(null);
+                void resendFromMessage(msg);
+              }}
+            >
+              Resend
+            </button>
+          ) : detail?.incognito ? null : (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMessageContextMenu(null);
+                void forkChat(msg.id);
+              }}
+            >
+              Fork
+            </button>
+          )}
+        </div>
+      </>
+    );
+  }
+
   // ── Auth screen ──
   if (!user) return (
     <main className={`${styles.authLayout} ${themeClass}`}>
-      <div className={styles.card}>
+      <div className={`${styles.card} ${styles.authCard}`}>
         <div className={styles.brandLockup}>
           {/* Static icon artwork wrapped in a dedicated halo shell. The shell's
               pseudo-elements own the animated prismatic glows so the icon
@@ -9725,11 +9986,39 @@ function HomeContent(): React.JSX.Element {
               Boardgame-like bot matches: chess, four-in-a-row, and more.
             </div>
           </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Story mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphStory size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Story</div>
+            <div className={styles.hubTileTagline}>
+              A door into somewhere else. The shape is still forming.
+            </div>
+          </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Library mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphLibrary size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Library</div>
+            <div className={styles.hubTileTagline}>
+              Where gathered things learn how to be remembered.
+            </div>
+          </button>
           {/* Slate — bot-free document editor (akin to ChatGPT's canvas
               minus the model). Disabled placeholder until the editor
               shell is built; advertised here so the Hub previews the
               full mode roadmap and the auto-fit grid keeps its rhythm
-              once the 7th tile is dropped in. */}
+              as future tiles are dropped in. */}
           <button
             type="button"
             className={styles.hubTile}
@@ -9755,7 +10044,7 @@ function HomeContent(): React.JSX.Element {
             </div>
             <div className={styles.hubTileLabel}>Pseudo</div>
             <div className={styles.hubTileTagline}>
-              TinkerCAD for coding: structured pseudocode, not a full IDE.
+              Half sketch, half system. A place for almost-code.
             </div>
           </button>
         </div>
@@ -9991,7 +10280,11 @@ function HomeContent(): React.JSX.Element {
           data-mode={messagesFrameMode}
           style={messagesFrameStyle}
         >
-          <div className={styles.messages}>
+          <div
+            ref={messagesContainerRef}
+            className={styles.messages}
+            onScroll={updateMessageFocusProgress}
+          >
             {!detail && !pendingReplyVisible && (() => {
             // Chat-mode empty state:
             //   • DEFAULT — no hover, no commit: rainbow brand mark,
@@ -10427,16 +10720,33 @@ function HomeContent(): React.JSX.Element {
                       msg.botColor,
                       resolvedTheme
                     ),
+                    "--message-focus-progress": (messageFocusProgress[msg.id] ?? 0).toFixed(3),
                   } as React.CSSProperties)
-                : undefined;
+                : ({
+                    "--message-focus-progress": (messageFocusProgress[msg.id] ?? 0).toFixed(3),
+                  } as React.CSSProperties);
+            const copied = copiedMessageId === msg.id;
+            const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             return (
               <article
                 key={msg.id}
                 className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
                 style={messageStyle}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
+                data-lens-active="true"
+                data-mobile-context={mobileContextMenu ? "true" : undefined}
+                data-message-id={msg.id}
                 data-message-edge={messageEdge}
-                onClick={() => {
+                onContextMenu={event => {
+                  event.preventDefault();
+                  openMessageContextMenu(msg, event.clientX, event.clientY);
+                }}
+                onClick={event => {
+                  if (mobileContextMenu) {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    openMessageContextMenu(msg, rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
+                    return;
+                  }
                   if (modelRevealLabel) revealMessageModel(msg.id);
                 }}
               >
@@ -10479,11 +10789,17 @@ function HomeContent(): React.JSX.Element {
                   })()}
                 </h4>
                 <MessageBody
-                  messageId={msg.id}
                   content={msg.content}
-                  expanded={expandedMessageIds.has(msg.id)}
-                  onToggle={toggleMessageExpand}
                 />
+                {copied && (
+                  <span
+                    className={styles.messageCopyToast}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    copied
+                  </span>
+                )}
                 {(() => {
                   // Chat-mode per-message actions. Identical behavior to
                   // Sandbox: assistant bubbles get a one-click "Fork here"
@@ -10499,15 +10815,27 @@ function HomeContent(): React.JSX.Element {
                     <div
                       className={styles.messageActionsSlot}
                       data-armed={armed ? "true" : undefined}
+                      data-copied={copied ? "true" : undefined}
                       data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
                       data-resend-affordance={isUser ? "true" : undefined}
                     >
                       <div className={styles.messageActions}>
+                        <button
+                          type="button"
+                          aria-label="Copy message text"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void copyMessageToClipboard(msg);
+                          }}
+                        >
+                          {copied ? "copied" : "Copy"}
+                        </button>
                         {isUser ? (
                           <button
                             type="button"
                             className={armed ? styles.messageActionArmed : undefined}
-                            onClick={() => {
+                            onClick={(event) => {
+                              event.stopPropagation();
                               if (armed) {
                                 void resendFromMessage(msg);
                               } else {
@@ -10521,7 +10849,10 @@ function HomeContent(): React.JSX.Element {
                           <>
                             <button
                               type="button"
-                              onClick={() => void forkChat(msg.id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void forkChat(msg.id);
+                              }}
                             >
                               Fork here
                             </button>
@@ -10764,6 +11095,7 @@ function HomeContent(): React.JSX.Element {
       </section>
 
       {renderSharedPanels()}
+      {renderMessageContextMenu()}
       {renderDeleteAllModal()}
       {touchPreview && (
         <TouchPreviewBalloon
@@ -10998,7 +11330,11 @@ function HomeContent(): React.JSX.Element {
           data-mode={messagesFrameMode}
           style={messagesFrameStyle}
         >
-          <div className={styles.messages}>
+          <div
+            ref={messagesContainerRef}
+            className={styles.messages}
+            onScroll={updateMessageFocusProgress}
+          >
             {!detail && !pendingReplyVisible && (() => {
             // Sandbox empty state — mirrors the Chat-mode empty state so
             // both modes feel like the same "start a new chat" surface:
@@ -11388,16 +11724,35 @@ function HomeContent(): React.JSX.Element {
                     ? "bot"
                     : "prism";
             const messageStyle = normalizedBotColor
-              ? ({ "--message-accent": normalizedBotColor } as React.CSSProperties)
-              : undefined;
+              ? ({
+                  "--message-accent": normalizedBotColor,
+                  "--message-focus-progress": (messageFocusProgress[msg.id] ?? 0).toFixed(3),
+                } as React.CSSProperties)
+              : ({
+                  "--message-focus-progress": (messageFocusProgress[msg.id] ?? 0).toFixed(3),
+                } as React.CSSProperties);
+            const copied = copiedMessageId === msg.id;
+            const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             return (
               <article
                 key={msg.id}
                 className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
                 style={messageStyle}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
+                data-lens-active="true"
+                data-mobile-context={mobileContextMenu ? "true" : undefined}
+                data-message-id={msg.id}
                 data-message-edge={messageEdge}
-                onClick={() => {
+                onContextMenu={event => {
+                  event.preventDefault();
+                  openMessageContextMenu(msg, event.clientX, event.clientY);
+                }}
+                onClick={event => {
+                  if (mobileContextMenu) {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    openMessageContextMenu(msg, rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
+                    return;
+                  }
                   if (modelRevealLabel) revealMessageModel(msg.id);
                 }}
               >
@@ -11437,11 +11792,17 @@ function HomeContent(): React.JSX.Element {
                   )}
                 </h4>
                 <MessageBody
-                  messageId={msg.id}
                   content={msg.content}
-                  expanded={expandedMessageIds.has(msg.id)}
-                  onToggle={toggleMessageExpand}
                 />
+                {copied && (
+                  <span
+                    className={styles.messageCopyToast}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    copied
+                  </span>
+                )}
                 {(() => {
                   // Assistant bubbles: one-click "Fork here" (non-destructive
                   // branch into a new conversation).
@@ -11455,15 +11816,27 @@ function HomeContent(): React.JSX.Element {
                     <div
                       className={styles.messageActionsSlot}
                       data-armed={armed ? "true" : undefined}
+                      data-copied={copied ? "true" : undefined}
                       data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
                       data-resend-affordance={isUser ? "true" : undefined}
                     >
                       <div className={styles.messageActions}>
+                        <button
+                          type="button"
+                          aria-label="Copy message text"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void copyMessageToClipboard(msg);
+                          }}
+                        >
+                          {copied ? "copied" : "Copy"}
+                        </button>
                         {isUser ? (
                           <button
                             type="button"
                             className={armed ? styles.messageActionArmed : undefined}
-                            onClick={() => {
+                            onClick={(event) => {
+                              event.stopPropagation();
                               if (armed) {
                                 void resendFromMessage(msg);
                               } else {
@@ -11477,7 +11850,10 @@ function HomeContent(): React.JSX.Element {
                           <>
                             <button
                               type="button"
-                              onClick={() => void forkChat(msg.id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void forkChat(msg.id);
+                              }}
                             >
                               Fork here
                             </button>
@@ -11676,6 +12052,7 @@ function HomeContent(): React.JSX.Element {
       </section>
 
       {renderSharedPanels()}
+      {renderMessageContextMenu()}
       {renderDeleteAllModal()}
       {touchPreview && (
         <TouchPreviewBalloon

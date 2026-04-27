@@ -36,13 +36,13 @@ if %ERRORLEVEL% EQU 0 (
 )
 
 REM ── Precondition 2: Native API running ────────────────────────────────
-REM If port 8787 has a listener, a `node ... server.ts` is still holding
+REM If port 18787 has a listener, a `node ... server.ts` is still holding
 REM the DB. Even when the wipe "succeeds" at write-time, WAL pages and the
 REM live connection can keep the old accounts readable until the API
 REM restarts.
-netstat -ano | findstr /R /C:"TCP .*:8787 .*LISTENING" >nul 2>&1
+netstat -ano | findstr /R /C:"TCP .*:18787 .*LISTENING" >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
-    echo ERROR: Something is listening on port 8787.
+    echo ERROR: Something is listening on port 18787.
     echo.
     echo The Prism API is still running. Close the Prism API console
     echo (or stop your API process) and then rerun this script.

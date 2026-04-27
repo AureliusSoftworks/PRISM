@@ -58,6 +58,18 @@ REM Ensure Ollama points to localhost not host.docker.internal
     echo Patching .env for native usage...
     powershell -Command "(Get-Content .env) -replace 'host.docker.internal','localhost' | Set-Content .env"
 )
+>nul findstr /C:"API_PORT=8787" .env && (
+    echo Migrating Prism API port to 18787...
+    powershell -Command "(Get-Content .env) -replace 'API_PORT=8787','API_PORT=18787' | Set-Content .env"
+)
+>nul findstr /C:"WEB_PORT=" .env || (
+    echo Adding Prism web port 18788...
+    echo WEB_PORT=18788>> .env
+)
+>nul findstr /C:"WEB_PORT=3000" .env && (
+    echo Migrating Prism web port to 18788...
+    powershell -Command "(Get-Content .env) -replace 'WEB_PORT=3000','WEB_PORT=18788' | Set-Content .env"
+)
 >nul findstr /C:"NEXT_PUBLIC_API_BASE_URL=http://192.168.0.202:8787" .env && (
     echo Patching frontend API base back to /api for same-origin auth...
     powershell -Command "(Get-Content .env) -replace 'NEXT_PUBLIC_API_BASE_URL=http://192.168.0.202:8787','NEXT_PUBLIC_API_BASE_URL=/api' | Set-Content .env"
@@ -69,8 +81,8 @@ if not exist "apps\api\data" mkdir apps\api\data
 echo [5/5] Starting servers...
 echo.
 echo ============================================
-echo   API:  http://192.168.0.202:8787
-echo   Web:  http://192.168.0.202:3000
+echo   API:  http://192.168.0.202:18787
+echo   Web:  http://192.168.0.202:18788
 echo   Open from any device on your network!
 echo ============================================
 echo.
@@ -110,5 +122,5 @@ if exist "public" (
 )
 
 set "HOSTNAME=0.0.0.0"
-set "PORT=3000"
+set "PORT=18788"
 call node .next\standalone\apps\web\server.js

@@ -1,0 +1,428 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		I00000000000000000000101 /* PrismIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000201 /* PrismIOSApp.swift */; };
+		I00000000000000000000102 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000202 /* AppModel.swift */; };
+		I00000000000000000000103 /* PairedServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000203 /* PairedServer.swift */; };
+		I00000000000000000000104 /* TokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000204 /* TokenStore.swift */; };
+		I00000000000000000000105 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000205 /* SessionStore.swift */; };
+		I00000000000000000000106 /* PairingExchangeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000206 /* PairingExchangeService.swift */; };
+		I00000000000000000000107 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000207 /* RootView.swift */; };
+		I00000000000000000000108 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000208 /* PairingView.swift */; };
+		I00000000000000000000109 /* KioskWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000209 /* KioskWebView.swift */; };
+		I0000000000000000000010D /* ServerDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = I0000000000000000000020D /* ServerDiscoveryService.swift */; };
+		I0000000000000000000010A /* PairingExchangeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = I0000000000000000000020A /* PairingExchangeServiceTests.swift */; };
+		I0000000000000000000010B /* SessionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = I0000000000000000000020B /* SessionStoreTests.swift */; };
+		I0000000000000000000010C /* MemoryTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = I0000000000000000000020C /* MemoryTokenStore.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		I00000000000000000000301 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = I00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = I00000000000000000000401;
+			remoteInfo = PrismIOS;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		I00000000000000000000201 /* PrismIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismIOSApp.swift; sourceTree = "<group>"; };
+		I00000000000000000000202 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		I00000000000000000000203 /* PairedServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedServer.swift; sourceTree = "<group>"; };
+		I00000000000000000000204 /* TokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStore.swift; sourceTree = "<group>"; };
+		I00000000000000000000205 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
+		I00000000000000000000206 /* PairingExchangeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingExchangeService.swift; sourceTree = "<group>"; };
+		I00000000000000000000207 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		I00000000000000000000208 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
+		I00000000000000000000209 /* KioskWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KioskWebView.swift; sourceTree = "<group>"; };
+		I0000000000000000000020D /* ServerDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDiscoveryService.swift; sourceTree = "<group>"; };
+		I0000000000000000000020A /* PairingExchangeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingExchangeServiceTests.swift; sourceTree = "<group>"; };
+		I0000000000000000000020B /* SessionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStoreTests.swift; sourceTree = "<group>"; };
+		I0000000000000000000020C /* MemoryTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryTokenStore.swift; sourceTree = "<group>"; };
+		I0000000000000000000020E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		I0000000000000000000020F /* Prism.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Prism.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		I00000000000000000000210 /* PrismIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrismIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		I00000000000000000000501 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		I00000000000000000000502 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		I00000000000000000000601 = {
+			isa = PBXGroup;
+			children = (
+				I00000000000000000000602 /* PrismIOS */,
+				I00000000000000000000606 /* PrismIOSTests */,
+				I00000000000000000000607 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		I00000000000000000000602 /* PrismIOS */ = {
+			isa = PBXGroup;
+			children = (
+				I00000000000000000000201 /* PrismIOSApp.swift */,
+				I00000000000000000000202 /* AppModel.swift */,
+				I0000000000000000000020E /* Info.plist */,
+				I00000000000000000000603 /* Models */,
+				I00000000000000000000604 /* Services */,
+				I00000000000000000000605 /* Views */,
+			);
+			path = PrismIOS;
+			sourceTree = "<group>";
+		};
+		I00000000000000000000603 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				I00000000000000000000203 /* PairedServer.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		I00000000000000000000604 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				I00000000000000000000204 /* TokenStore.swift */,
+				I00000000000000000000205 /* SessionStore.swift */,
+				I00000000000000000000206 /* PairingExchangeService.swift */,
+				I0000000000000000000020D /* ServerDiscoveryService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		I00000000000000000000605 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				I00000000000000000000207 /* RootView.swift */,
+				I00000000000000000000208 /* PairingView.swift */,
+				I00000000000000000000209 /* KioskWebView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		I00000000000000000000606 /* PrismIOSTests */ = {
+			isa = PBXGroup;
+			children = (
+				I0000000000000000000020A /* PairingExchangeServiceTests.swift */,
+				I0000000000000000000020B /* SessionStoreTests.swift */,
+				I0000000000000000000020C /* MemoryTokenStore.swift */,
+			);
+			path = PrismIOSTests;
+			sourceTree = "<group>";
+		};
+		I00000000000000000000607 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				I0000000000000000000020F /* Prism.app */,
+				I00000000000000000000210 /* PrismIOSTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		I00000000000000000000401 /* PrismIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = I00000000000000000000901 /* Build configuration list for PBXNativeTarget "PrismIOS" */;
+			buildPhases = (
+				I00000000000000000000701 /* Sources */,
+				I00000000000000000000501 /* Frameworks */,
+				I00000000000000000000801 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PrismIOS;
+			productName = Prism;
+			productReference = I0000000000000000000020F /* Prism.app */;
+			productType = "com.apple.product-type.application";
+		};
+		I00000000000000000000402 /* PrismIOSTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = I00000000000000000000902 /* Build configuration list for PBXNativeTarget "PrismIOSTests" */;
+			buildPhases = (
+				I00000000000000000000702 /* Sources */,
+				I00000000000000000000502 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				I00000000000000000000302 /* PBXTargetDependency */,
+			);
+			name = PrismIOSTests;
+			productName = PrismIOSTests;
+			productReference = I00000000000000000000210 /* PrismIOSTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		I00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1540;
+				LastUpgradeCheck = 1540;
+				TargetAttributes = {
+					I00000000000000000000401 = {
+						CreatedOnToolsVersion = 15.4;
+						ProvisioningStyle = Automatic;
+					};
+					I00000000000000000000402 = {
+						CreatedOnToolsVersion = 15.4;
+						DevelopmentTeam = P29JN6JLMV;
+						ProvisioningStyle = Automatic;
+						TestTargetID = I00000000000000000000401;
+					};
+				};
+			};
+			buildConfigurationList = I00000000000000000000900 /* Build configuration list for PBXProject "PrismIOS" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = I00000000000000000000601;
+			productRefGroup = I00000000000000000000607 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				I00000000000000000000401 /* PrismIOS */,
+				I00000000000000000000402 /* PrismIOSTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		I00000000000000000000801 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		I00000000000000000000701 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				I00000000000000000000101 /* PrismIOSApp.swift in Sources */,
+				I00000000000000000000102 /* AppModel.swift in Sources */,
+				I00000000000000000000103 /* PairedServer.swift in Sources */,
+				I00000000000000000000104 /* TokenStore.swift in Sources */,
+				I00000000000000000000105 /* SessionStore.swift in Sources */,
+				I00000000000000000000106 /* PairingExchangeService.swift in Sources */,
+				I0000000000000000000010D /* ServerDiscoveryService.swift in Sources */,
+				I00000000000000000000107 /* RootView.swift in Sources */,
+				I00000000000000000000108 /* PairingView.swift in Sources */,
+				I00000000000000000000109 /* KioskWebView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		I00000000000000000000702 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				I0000000000000000000010A /* PairingExchangeServiceTests.swift in Sources */,
+				I0000000000000000000010B /* SessionStoreTests.swift in Sources */,
+				I0000000000000000000010C /* MemoryTokenStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		I00000000000000000000302 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = I00000000000000000000401 /* PrismIOS */;
+			targetProxy = I00000000000000000000301 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		I00000000000000000000A10 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		I00000000000000000000A11 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		I00000000000000000000A20 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4JP4HKB6SJ;
+				ENABLE_DEBUG_DYLIB = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PrismIOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.localai.prism-ios";
+				PRODUCT_MODULE_NAME = PrismIOS;
+				PRODUCT_NAME = Prism;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		I00000000000000000000A21 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4JP4HKB6SJ;
+				ENABLE_DEBUG_DYLIB = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PrismIOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.localai.prism-ios";
+				PRODUCT_MODULE_NAME = PrismIOS;
+				PRODUCT_NAME = Prism;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		I00000000000000000000A30 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = P29JN6JLMV;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.localai.prism-ios.tests";
+				PRODUCT_MODULE_NAME = PrismIOSTests;
+				PRODUCT_NAME = PrismIOSTests;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Prism.app/Prism";
+			};
+			name = Debug;
+		};
+		I00000000000000000000A31 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = P29JN6JLMV;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.localai.prism-ios.tests";
+				PRODUCT_MODULE_NAME = PrismIOSTests;
+				PRODUCT_NAME = PrismIOSTests;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Prism.app/Prism";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		I00000000000000000000900 /* Build configuration list for PBXProject "PrismIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				I00000000000000000000A10 /* Debug */,
+				I00000000000000000000A11 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		I00000000000000000000901 /* Build configuration list for PBXNativeTarget "PrismIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				I00000000000000000000A20 /* Debug */,
+				I00000000000000000000A21 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		I00000000000000000000902 /* Build configuration list for PBXNativeTarget "PrismIOSTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				I00000000000000000000A30 /* Debug */,
+				I00000000000000000000A31 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = I00000000000000000000001 /* Project object */;
+}

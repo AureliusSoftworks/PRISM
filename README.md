@@ -53,6 +53,7 @@ Planning docs:
 - [Release process (dev -> main)](docs/release-process.md)
 - [Prism Server.app build and release](docs/prism-server-app.md)
 - [Prism.app client build and pairing](docs/prism-client-app.md)
+- [Prism iOS client build and pairing](docs/prism-ios-client.md)
 
 ## Prism Server.app (macOS)
 
@@ -108,10 +109,35 @@ The Debug build writes:
 apps/client-mac/DerivedData/Build/Products/Debug/Prism.app
 ```
 
+## Prism iOS Client
+
+Prism iOS is the iPhone-first hybrid client. It handles native pairing and
+Keychain-backed session storage, then opens the mobile-friendly Prism interface
+in a WebKit kiosk.
+
+Local simulator build:
+
+```bash
+xcodebuild \
+  -project "apps/ios-client/PrismIOS.xcodeproj" \
+  -scheme PrismIOS \
+  -configuration Debug \
+  -derivedDataPath "apps/ios-client/DerivedData" \
+  -sdk iphonesimulator \
+  build
+```
+
+Quick launch shortcuts:
+
+```bash
+prism ios      # Simulator
+prism phone    # Paired physical iPhone
+```
+
 ## Architecture
 
 ```
-[Phone/Desktop] → Nginx (:80) → Frontend (:3000) + API (:8787)
+[Phone/Desktop] → Nginx (:80) → Frontend (:18788) + API (:18787)
                                           │
                               ┌────────────┼────────────┐
                               │            │            │
@@ -152,7 +178,8 @@ npm run dev
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `API_PORT` | `8787` | API server port |
+| `API_PORT` | `18787` | API server port |
+| `WEB_PORT` / `PORT` | `18788` | Web frontend port |
 | `PRISM_SERVER_NAME` | `Prism Server` | Friendly name returned by readiness checks and future pairing/discovery flows |
 | `PRISM_DISCOVERY_ENABLED` | `true` | Advertise Prism Server on the LAN as `_prism._tcp` for future native clients |
 | `SESSION_COOKIE_NAME` | `localai_session` | Session cookie key |
@@ -167,9 +194,11 @@ npm run dev
 ## Features
 
 - **Per-user auth** with encrypted session cookies
-- **Post-auth Hub** with two mode tiles, each carrying a 5-colour prism glyph:
+- **Native-client web gate** — the hosted web shell requires a paired Prism client access token, so direct browser visits show an app-required screen instead of bypassing the client.
+- **Post-auth Hub** with 5-colour prism-glyph mode tiles:
   - **Chat** — a calm, stripped-down "personal Prism" surface (sidebar + history + typing + send). The only compose-adjacent control is an **Incognito** pill that doubles as an online/offline toggle: on = this send is local-only and bypasses memory; off = saved provider + normal memory pipeline.
   - **Sandbox** — the full command-center experience (bots, provider toggle + lock, fork/export, images, advanced settings). No Incognito, no cross-session memory — the thread is its own memory.
+  - **Story**, **Library**, and other disabled roadmap tiles preview future bot experiences before their shells are built.
   Mode is mirrored to the URL (`?view=chat` / `?view=sandbox`) so refreshes preserve the current surface.
 - **Strict data isolation** — every query is tenant-scoped by `user_id`
 - **Mode-specific memory model**:
@@ -200,10 +229,10 @@ Place a shortcut to `scripts/windows-startup.bat` in `shell:startup`.
 ### Option D: One-click native launcher (no Docker)
 Double-click `start.bat` at the repo root. On first run it verifies/installs Node 22 LTS (via Chocolatey if needed), creates `.env` from `.env.example` and opens it in Notepad for your secrets, installs all workspace dependencies, then builds and launches both services:
 
-- **API** runs in a secondary console titled *"LocalAI API"* via `node --experimental-strip-types apps/api/src/server.ts` and listens on `0.0.0.0:8787`.
-- **Frontend** is built with Next.js `output: "standalone"` and served by `node .next/standalone/apps/web/server.js` on `0.0.0.0:3000`. `start.bat` also stages `.next/static/` and `public/` into the standalone bundle after each build — without this step the browser would load HTML successfully but all JS/CSS would 404.
+- **API** runs in a secondary console titled *"LocalAI API"* via `node --experimental-strip-types apps/api/src/server.ts` and listens on `0.0.0.0:18787`.
+- **Frontend** is built with Next.js `output: "standalone"` and served by `node .next/standalone/apps/web/server.js` on `0.0.0.0:18788`. `start.bat` also stages `.next/static/` and `public/` into the standalone bundle after each build — without this step the browser would load HTML successfully but all JS/CSS would 404.
 
-Session cookies work same-origin because Next's `rewrites()` proxies `/api/*` to `127.0.0.1:8787` server-side. You only need to open **port 3000** on the LAN; port 8787 should stay closed.
+Session cookies work same-origin because Next's `rewrites()` proxies `/api/*` to `127.0.0.1:18787` server-side. You only need to open **port 18788** on the LAN; port 18787 should stay closed unless pairing native clients.
 
 Native Prism clients use a different path: they discover the API directly via
 Bonjour/DNS-SD (`_prism._tcp`) and then pair with a short-lived code generated
@@ -214,7 +243,7 @@ remains the fallback there unless host networking or an mDNS reflector is added.
 
 One-time Windows Firewall rule for LAN access (PowerShell as admin):
 ```powershell
-New-NetFirewallRule -DisplayName "Prism Frontend" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow -Profile Private,Domain
+New-NetFirewallRule -DisplayName "Prism Frontend" -Direction Inbound -Protocol TCP -LocalPort 18788 -Action Allow -Profile Private,Domain
 ```
 
 ## Backup & Restore
@@ -250,9 +279,9 @@ Prism is built so that the `LOCAL` mode toggle is a real invariant, not a sugges
 |---------|-----|
 | "Failed to fetch" on frontend | Ensure API container is running: `docker compose logs api` |
 | Ollama not responding | Verify Ollama is running on host and `OLLAMA_HOST` is correct |
-| Can't access from phone | Check Windows firewall allows inbound traffic on port 80 (Docker flow) or port 3000 (native `start.bat` flow) |
+| Can't access from phone | Check Windows firewall allows inbound traffic on port 80 (Docker flow) or port 18788 (native `start.bat` flow) |
 | Blank page / white screen over LAN but tab title shows | Next.js standalone output is missing `static/` or `public/`. Re-run `start.bat` (it stages them automatically), or manually `xcopy /E /Y /I ".next\static" ".next\standalone\apps\web\.next\static"` from `apps\web` after `next build` |
-| Frontend error banner shows raw HTML / "Unexpected token" | The API isn't responding on 8787. Check the *"LocalAI API"* console window for a stack trace; the `api()` helper in `apps/web/src/app/page.tsx` now parses non-JSON bodies defensively, so the real cause will surface on the banner |
+| Frontend error banner shows raw HTML / "Unexpected token" | The API isn't responding on 18787. Check the *"LocalAI API"* console window for a stack trace; the `api()` helper in `apps/web/src/app/page.tsx` now parses non-JSON bodies defensively, so the real cause will surface on the banner |
 | Qdrant connection refused | `docker compose logs qdrant` — may need to recreate volume |
 | Login works but chat fails | Check `ENCRYPTION_MASTER_KEY` matches between restarts |
 

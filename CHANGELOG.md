@@ -139,7 +139,7 @@ command-center UI.
   that on OpenAI's side, so the cleanup just keeps the DB tidy).
 - Inactive-account auto-deletion after 60 days.
 - Self-serve account deletion from Settings with a confirmation prompt.
-- `start.bat` one-click production launcher (web:3000, api:8787) with
+- `start.bat` one-click production launcher (web:18788, api:18787) with
   dependency install, `.env` bootstrap, and standalone-build wiring.
 
 ### Fixed

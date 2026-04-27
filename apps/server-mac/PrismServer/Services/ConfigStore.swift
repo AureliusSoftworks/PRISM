@@ -1,6 +1,9 @@
 import Foundation
 
 final class ConfigStore {
+    private static let legacyDefaultAPIPort = 8787
+    private static let legacyDefaultWebPort = 3000
+
     let applicationSupportDirectory: URL
     let logDirectory: URL
 
@@ -27,6 +30,11 @@ final class ConfigStore {
         config.serverName = env["PRISM_SERVER_NAME"] ?? config.serverName
         config.apiPort = Self.readInt(env["API_PORT"], fallback: config.apiPort)
         config.webPort = Self.readInt(env["WEB_PORT"], fallback: config.webPort)
+        if config.apiPort == Self.legacyDefaultAPIPort,
+           config.webPort == Self.legacyDefaultWebPort {
+            config.apiPort = ServerConfig.defaults.apiPort
+            config.webPort = ServerConfig.defaults.webPort
+        }
         config.discoveryEnabled = Self.readBool(env["PRISM_DISCOVERY_ENABLED"], fallback: config.discoveryEnabled)
         config.sessionCookieName = env["SESSION_COOKIE_NAME"] ?? config.sessionCookieName
         config.sessionTtlHours = Self.readInt(env["SESSION_TTL_HOURS"], fallback: config.sessionTtlHours)

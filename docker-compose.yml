@@ -20,12 +20,13 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      - API_PORT=18787
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - QDRANT_URL=http://qdrant:6333
     volumes:
       - api_data:/app/apps/api/data
     ports:
-      - "8787:8787"
+      - "18787:18787"
     depends_on:
       qdrant:
         condition: service_healthy
@@ -39,8 +40,11 @@ services:
       args:
         NEXT_PUBLIC_API_BASE_URL: /api
     restart: unless-stopped
+    environment:
+      - PORT=18788
+      - LOCALAI_API_ORIGIN=http://api:18787
     ports:
-      - "3000:3000"
+      - "18788:18788"
     depends_on:
       api:
         condition: service_healthy

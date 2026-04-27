@@ -114,7 +114,7 @@ export interface AppConfig {
 
 export function getAppConfig(): AppConfig {
   return {
-    apiPort: Number(process.env.API_PORT ?? "8787"),
+    apiPort: Number(process.env.API_PORT ?? "18787"),
     serverName: process.env.PRISM_SERVER_NAME ?? "Prism Server",
     discoveryEnabled: readBooleanEnv("PRISM_DISCOVERY_ENABLED", true),
     sessionCookieName: process.env.SESSION_COOKIE_NAME ?? "localai_session",

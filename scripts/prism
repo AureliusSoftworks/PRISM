@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
+DEFAULT_IOS_SIMULATOR_ID="29D05410-1ED7-4282-A174-92A2FDB70FCD"
+IOS_BUNDLE_ID="com.localai.prism-ios"
+IOS_APP_PATH="apps/ios-client/DerivedData/Build/Products/Debug-iphonesimulator/Prism.app"
+IOS_DEVICE_APP_PATH="apps/ios-client/DerivedData/Build/Products/Debug-iphoneos/Prism.app"
+
+MAC_CLIENT_BUNDLE_ID="com.localai.prism-client"
+MAC_CLIENT_APP_PATH="apps/client-mac/DerivedData/Build/Products/Debug/Prism.app"
+
+MAC_SERVER_BUNDLE_ID="com.localai.prism-server"
+MAC_SERVER_APP_PATH="apps/server-mac/DerivedData/Build/Products/Debug/Prism Server.app"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  prism ios
+  prism phone
+  prism mac-client
+  prism mac-server
+
+Aliases:
+  prism iphone
+  prism client
+  prism server
+
+Environment:
+  SIMULATOR_ID="Simulator UDID" prism ios
+  PHONE_DEVICE_ID="Device UDID" prism phone
+USAGE
+}
+
+resolve_phone_device_id() {
+  local explicit_device_id="${PHONE_DEVICE_ID:-${DEVICE_ID:-}}"
+  if [[ -n "$explicit_device_id" ]]; then
+    printf '%s\n' "$explicit_device_id"
+    return
+  fi
+
+  local devices_json
+  devices_json="$(mktemp -t prism-devices.XXXXXX.json)"
+  xcrun devicectl list devices --json-output "$devices_json" --quiet >/dev/null
+
+  python3 - "$devices_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+devices = payload.get("result", {}).get("devices", [])
+phones = [
+    device for device in devices
+    if device.get("hardwareProperties", {}).get("platform") == "iOS"
+    and device.get("hardwareProperties", {}).get("reality") == "physical"
+]
+
+if not phones:
+    print("No paired physical iPhone found. Connect and unlock your phone, or run PHONE_DEVICE_ID=\"Device UDID\" prism phone.", file=sys.stderr)
+    sys.exit(1)
+
+if len(phones) > 1:
+    names = ", ".join(phone.get("deviceProperties", {}).get("name", "Unnamed iPhone") for phone in phones)
+    print(f"Multiple physical iPhones found ({names}); using the first. Set PHONE_DEVICE_ID to choose one.", file=sys.stderr)
+
+selected = phones[0]
+name = selected.get("deviceProperties", {}).get("name", "iPhone")
+udid = selected.get("hardwareProperties", {}).get("udid") or selected.get("identifier")
+print(f"Using {name} ({udid})", file=sys.stderr)
+print(udid)
+PY
+
+  rm -f "$devices_json"
+}
+
+run_ios() {
+  local simulator_id="${SIMULATOR_ID:-$DEFAULT_IOS_SIMULATOR_ID}"
+
+  open -a Simulator
+  xcrun simctl boot "$simulator_id" 2>/dev/null || true
+  xcrun simctl bootstatus "$simulator_id" -b
+  xcrun simctl terminate "$simulator_id" "$IOS_BUNDLE_ID" 2>/dev/null || true
+
+  xcodebuild \
+    -project "apps/ios-client/PrismIOS.xcodeproj" \
+    -scheme PrismIOS \
+    -configuration Debug \
+    -derivedDataPath "apps/ios-client/DerivedData" \
+    -sdk iphonesimulator \
+    -destination "platform=iOS Simulator,id=$simulator_id" \
+    build
+
+  xcrun simctl install "$simulator_id" "$IOS_APP_PATH"
+  xcrun simctl launch "$simulator_id" "$IOS_BUNDLE_ID"
+}
+
+run_phone() {
+  local device_id
+  device_id="$(resolve_phone_device_id)"
+
+  xcodebuild \
+    -project "apps/ios-client/PrismIOS.xcodeproj" \
+    -scheme PrismIOS \
+    -configuration Debug \
+    -derivedDataPath "apps/ios-client/DerivedData" \
+    -sdk iphoneos \
+    -destination "platform=iOS,id=$device_id" \
+    build
+
+  xcrun devicectl device install app --device "$device_id" "$IOS_DEVICE_APP_PATH"
+  xcrun devicectl device process launch --device "$device_id" --terminate-existing "$IOS_BUNDLE_ID"
+}
+
+run_mac_client() {
+  osascript -e "quit app id \"$MAC_CLIENT_BUNDLE_ID\"" >/dev/null 2>&1 || true
+  sleep 1
+
+  xcodebuild \
+    -project "apps/client-mac/PrismClient.xcodeproj" \
+    -scheme PrismClient \
+    -configuration Debug \
+    -derivedDataPath "apps/client-mac/DerivedData" \
+    build
+
+  open -n "$MAC_CLIENT_APP_PATH"
+}
+
+run_mac_server() {
+  osascript -e "quit app id \"$MAC_SERVER_BUNDLE_ID\"" >/dev/null 2>&1 || true
+  sleep 1
+
+  xcodebuild \
+    -project "apps/server-mac/PrismServer.xcodeproj" \
+    -scheme PrismServer \
+    -configuration Debug \
+    -derivedDataPath "apps/server-mac/DerivedData" \
+    build
+
+  open -n "$MAC_SERVER_APP_PATH"
+}
+
+cd "$REPO_ROOT"
+
+case "${1:-}" in
+  ios | iphone)
+    run_ios
+    ;;
+  phone)
+    run_phone
+    ;;
+  mac-client | client)
+    run_mac_client
+    ;;
+  mac-server | server)
+    run_mac_server
+    ;;
+  help | -h | --help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 64
+    ;;
+esac

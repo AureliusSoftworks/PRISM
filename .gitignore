@@ -27,3 +27,4 @@ apps/api/data/
 *.mobileprovision
 AuthKey_*.p8
 ExportOptions.plist
+.cursor/rules/native-quick-launch.mdc

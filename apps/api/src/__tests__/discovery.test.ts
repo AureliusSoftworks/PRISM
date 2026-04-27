@@ -9,7 +9,7 @@ import {
 
 function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
-    apiPort: 8787,
+    apiPort: 18787,
     serverName: "Test Prism",
     discoveryEnabled: true,
     sessionCookieName: "localai_session",
@@ -42,7 +42,7 @@ describe("buildDiscoveryServiceDescriptor", () => {
     assert.equal(descriptor.options.name, "Test Prism");
     assert.equal(descriptor.options.type, "prism");
     assert.equal(descriptor.options.protocol, "tcp");
-    assert.equal(descriptor.options.port, 8787);
+    assert.equal(descriptor.options.port, 18787);
     assert.deepEqual(descriptor.options.txt, buildDiscoveryTxt());
   });
 });

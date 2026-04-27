@@ -1,6 +1,9 @@
 import Foundation
 
 struct ServerConfig: Equatable {
+    private static let lanWebBindHost = "0.0.0.0"
+    private static let localAPIOriginHost = "127.0.0.1"
+
     var serverName: String
     var apiPort: Int
     var webPort: Int
@@ -15,8 +18,8 @@ struct ServerConfig: Equatable {
 
     static let defaults = ServerConfig(
         serverName: "Prism Server",
-        apiPort: 8787,
-        webPort: 3000,
+        apiPort: 18_787,
+        webPort: 18_788,
         discoveryEnabled: true,
         sessionCookieName: "localai_session",
         sessionTtlHours: 24,
@@ -31,8 +34,8 @@ struct ServerConfig: Equatable {
         var env: [String: String] = [
             "API_PORT": String(apiPort),
             "PORT": String(webPort),
-            "HOSTNAME": "127.0.0.1",
-            "LOCALAI_API_ORIGIN": "http://127.0.0.1:\(apiPort)",
+            "HOSTNAME": Self.lanWebBindHost,
+            "LOCALAI_API_ORIGIN": "http://\(Self.localAPIOriginHost):\(apiPort)",
             "PRISM_SERVER_NAME": serverName,
             "PRISM_DISCOVERY_ENABLED": discoveryEnabled ? "true" : "false",
             "SESSION_COOKIE_NAME": sessionCookieName,

@@ -21,13 +21,14 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=18788
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./.next/static
 COPY --from=builder /app/apps/web/public ./public
 
-EXPOSE 3000
+EXPOSE 18788
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://localhost:3000').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://localhost:18788').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"
 
 CMD ["node", "server.js"]

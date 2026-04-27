@@ -8,6 +8,7 @@ final class PairingExchangeService {
 
         let ok: Bool
         let token: String
+        let clientAccessToken: String
         let expiresAt: String
         let user: User
     }
@@ -36,6 +37,7 @@ final class PairingExchangeService {
         return PairedServer(
             serverURL: serverURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
             token: decoded.token,
+            clientAccessToken: decoded.clientAccessToken,
             expiresAt: try Self.decodeDate(decoded.expiresAt),
             displayName: decoded.user.displayName
         )

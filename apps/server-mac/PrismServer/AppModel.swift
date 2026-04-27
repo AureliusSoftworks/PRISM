@@ -54,6 +54,15 @@ final class AppModel: ObservableObject {
                     }
                 }
             )
+            notificationObservers.append(
+                NotificationCenter.default.addObserver(
+                    forName: .prismServerWillTerminate,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.stop()
+                }
+            )
             Task {
                 await refreshDependencies()
                 showSetupWindow()

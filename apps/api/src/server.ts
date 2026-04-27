@@ -4,7 +4,13 @@ import { createDatabase } from "./db.ts";
 import { clearCookie, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
-import { requireValidSession, resolveSessionToken } from "./auth.ts";
+import {
+  createClientAccessToken,
+  requireValidClientAccess,
+  requireValidSession,
+  resolveClientAccessToken,
+  resolveSessionToken,
+} from "./auth.ts";
 import { buildHealthResponse } from "./health.ts";
 import { consumePairingCode, createPairingCode } from "./pairing.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
@@ -96,6 +102,10 @@ function requireAuth(ctx: RequestContext): string {
   ctx.userId = session.userId;
   touchUserActivity(session.userId);
   return session.userId;
+}
+
+function requireClientAccess(ctx: RequestContext): void {
+  requireValidClientAccess(db, resolveClientAccessToken(ctx.req.headers));
 }
 
 function isLoopbackRequest(ctx: RequestContext): boolean {
@@ -236,6 +246,7 @@ async function deleteUserAccount(userId: string): Promise<void> {
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM client_access_tokens WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM conversation_exports WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM images WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM bots WHERE user_id = ?").run(userId);
@@ -389,6 +400,10 @@ function buildRoutes(): RouteDefinition[] {
         user: toUserProfile(row)
       });
     }),
+    route("GET", "/api/client-access/me", async (ctx) => {
+      requireClientAccess(ctx);
+      json(ctx.res, 200, { ok: true });
+    }),
     route("POST", "/api/pairing/codes", async (ctx) => {
       const userId = requireAuth(ctx);
       const pairingCode = createPairingCode(db, userId);
@@ -405,11 +420,14 @@ function buildRoutes(): RouteDefinition[] {
       const code = readString(body.code, "code");
       const { userId } = consumePairingCode(db, code);
       const { token, expiresAt } = createSession(userId);
+      const clientAccess = createClientAccessToken(db, userId, config.sessionTtlHours);
       touchUserActivity(userId);
       const row = getUserRow(userId);
       json(ctx.res, 200, {
         ok: true,
         token,
+        clientAccessToken: clientAccess.token,
+        clientAccessExpiresAt: clientAccess.expiresAt,
         expiresAt,
         user: toUserProfile(row)
       });

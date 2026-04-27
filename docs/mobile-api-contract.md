@@ -15,7 +15,7 @@ Server base URL directly.
 Example native base URL:
 
 ```text
-http://prism-server.local:8787/api
+http://prism-server.local:18787/api
 ```
 
 The current route inventory is:
@@ -51,12 +51,18 @@ Authorization: Bearer <session-token>
 Implemented rules:
 
 - Cookie sessions remain the browser/web contract.
-- Bearer sessions are for native clients and are stored in the Keychain.
+- Bearer user sessions are for native API access and are stored in the Keychain.
 - Protected routes accept either the existing cookie token or the bearer token,
   resolving both through the same `sessions` table. Bearer takes precedence if
   both are supplied.
 - Logout should invalidate the server-side session token regardless of transport.
 - CORS allows `authorization` for browser-based mobile-auth testing.
+- Native clients also receive a separate `clientAccessToken` from
+  `POST /api/pairing/exchange`. That token is not a user login session; it only
+  unlocks the hosted WebKit shell so direct browser visits to the web port can
+  show an "open Prism in the app" screen.
+- `GET /api/client-access/me` validates the native-client access token from the
+  `prism_client_access` cookie.
 
 ## Readiness Endpoint
 
@@ -95,7 +101,7 @@ Implemented discovery channel:
 
 - Bonjour/mDNS service type: `_prism._tcp.`
 - Service name: `PRISM_SERVER_NAME`, such as `Jared's Prism`
-- Port: API port, normally `8787` for direct API access
+- Port: API port, normally `18787` for direct API access
 - TXT records:
   - `api=1`
   - `version=0.1.0`

@@ -60,9 +60,9 @@ Initial packaging stance:
 
 ## Prism iOS/Mac
 
-Prism iOS/Mac is the official paid frontend. It should be native enough to
-justify App Store distribution and should not depend on a `WKWebView` as the
-primary experience.
+Prism iOS/Mac is the official paid frontend. The near-term iOS implementation
+is a hybrid client: native pairing/session ownership first, then the existing
+mobile-friendly Prism interface in a controlled `WKWebView`.
 
 Responsibilities:
 
@@ -74,13 +74,14 @@ Responsibilities:
   failure.
 - QR/pairing-code exchange with Prism Server.
 - Keychain-backed bearer session storage.
-- Native chat, conversation list, basic settings, and bot selection.
+- Authenticated Prism interface in a controlled WebKit kiosk for the first
+  vertical slice.
 - Face ID/Touch ID app lock where available.
 
 MVP non-goals:
 
 - Running models on-device.
-- Rebuilding the full Sandbox/customizer surface.
+- Rebuilding the full Sandbox/customizer surface natively.
 - Replacing the existing web UI for desktop administration.
 - Blocking community clients at the protocol layer.
 
@@ -99,7 +100,7 @@ Recommended flow:
 4. **Fallback**: allow manual URL entry if discovery fails.
 5. **Pair**: scan QR code or enter a pairing code shown by Prism Server.
 6. **Secure Session**: store the returned session in the Keychain.
-7. **Open Prism**: land in the conversation list or new-chat screen.
+7. **Open Prism**: land in the authenticated Prism web interface.
 
 If no server is found, the app should explain how to download Prism Server from
 GitHub Releases and include a non-intrusive link to the public repository or

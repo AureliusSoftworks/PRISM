@@ -12,8 +12,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .showPrismServerWindow, object: nil)
         return true
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        NotificationCenter.default.post(name: .prismServerWillTerminate, object: nil)
+    }
 }
 
 extension Notification.Name {
     static let showPrismServerWindow = Notification.Name("showPrismServerWindow")
+    static let prismServerWillTerminate = Notification.Name("prismServerWillTerminate")
 }

@@ -9,6 +9,8 @@ final class RuntimeManager {
     private var webProcess: Process?
     private var apiLogHandle: FileHandle?
     private var webLogHandle: FileHandle?
+    private var apiLogPipe: Pipe?
+    private var webLogPipe: Pipe?
     private let startsBundledWebDashboard = true
 
     init(configStore: ConfigStore) {
@@ -50,7 +52,8 @@ final class RuntimeManager {
             logHandle: apiLogHandle
         )
 
-        apiProcess = api
+        apiProcess = api.process
+        apiLogPipe = api.logPipe
         if startsBundledWebDashboard {
             let web = try startNodeProcess(
                 name: "Web",
@@ -60,12 +63,18 @@ final class RuntimeManager {
                 environment: environment,
                 logHandle: webLogHandle
             )
-            webProcess = web
+            webProcess = web.process
+            webLogPipe = web.logPipe
         }
         onStateChange?(.running)
     }
 
     func stop() {
+        detachLogging(from: webLogPipe)
+        detachLogging(from: apiLogPipe)
+        webLogPipe = nil
+        apiLogPipe = nil
+
         stop(process: webProcess)
         stop(process: apiProcess)
         webProcess = nil
@@ -107,7 +116,7 @@ final class RuntimeManager {
         workingDirectoryRelativePath: String,
         environment: [String: String],
         logHandle: FileHandle?
-    ) throws -> Process {
+    ) throws -> (process: Process, logPipe: Pipe) {
         let entryURL = runtimeURL.appendingPathComponent(entryRelativePath)
         guard FileManager.default.fileExists(atPath: entryURL.path) else {
             throw RuntimeError.missingRuntime("\(name) entrypoint is missing at \(entryURL.path).")
@@ -125,14 +134,14 @@ final class RuntimeManager {
             process.arguments = ["node", entryURL.path]
         }
 
-        attachLogging(to: process, logHandle: logHandle, processName: name)
+        let logPipe = attachLogging(to: process, logHandle: logHandle, processName: name)
         process.terminationHandler = { [weak self] terminatedProcess in
             guard terminatedProcess.terminationStatus != 0 else { return }
             self?.onStateChange?(.failed("\(name) exited with status \(terminatedProcess.terminationStatus)."))
         }
 
         try process.run()
-        return process
+        return (process, logPipe)
     }
 
     private func bundledNodeURL() -> URL? {
@@ -143,7 +152,7 @@ final class RuntimeManager {
         return FileManager.default.isExecutableFile(atPath: nodeURL.path) ? nodeURL : nil
     }
 
-    private func attachLogging(to process: Process, logHandle: FileHandle?, processName: String) {
+    private func attachLogging(to process: Process, logHandle: FileHandle?, processName: String) -> Pipe {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -153,6 +162,11 @@ final class RuntimeManager {
             guard !data.isEmpty else { return }
             logHandle?.write(data)
         }
+        return pipe
+    }
+
+    private func detachLogging(from pipe: Pipe?) {
+        pipe?.fileHandleForReading.readabilityHandler = nil
     }
 
     private func makeLogHandle(named name: String) throws -> FileHandle {

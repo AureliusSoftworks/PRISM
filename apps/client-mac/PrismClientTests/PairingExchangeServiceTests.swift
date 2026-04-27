@@ -4,12 +4,12 @@ import XCTest
 final class PairingExchangeServiceTests: XCTestCase {
     func testNormalizesServerURL() throws {
         XCTAssertEqual(
-            try PairingExchangeService.normalizedServerURL("127.0.0.1:8787/").absoluteString,
-            "http://127.0.0.1:8787"
+            try PairingExchangeService.normalizedServerURL("127.0.0.1:18787/").absoluteString,
+            "http://127.0.0.1:18787"
         )
         XCTAssertEqual(
-            try PairingExchangeService.normalizedServerURL("0.0.0.0:8787").absoluteString,
-            "http://127.0.0.1:8787"
+            try PairingExchangeService.normalizedServerURL("0.0.0.0:18787").absoluteString,
+            "http://127.0.0.1:18787"
         )
     }
 
