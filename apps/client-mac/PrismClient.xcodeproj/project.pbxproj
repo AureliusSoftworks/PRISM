@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		C00000000000000000000101 /* PrismClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000201 /* PrismClientApp.swift */; };
+		C0000000000000000000010A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000020C /* AppDelegate.swift */; };
 		C00000000000000000000102 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000202 /* AppModel.swift */; };
 		C00000000000000000000103 /* PairedServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000203 /* PairedServer.swift */; };
 		C00000000000000000000104 /* ClientConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000204 /* ClientConfigStore.swift */; };
@@ -30,6 +31,7 @@
 
 /* Begin PBXFileReference section */
 		C00000000000000000000201 /* PrismClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismClientApp.swift; sourceTree = "<group>"; };
+		C0000000000000000000020C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		C00000000000000000000202 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		C00000000000000000000203 /* PairedServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedServer.swift; sourceTree = "<group>"; };
 		C00000000000000000000204 /* ClientConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientConfigStore.swift; sourceTree = "<group>"; };
@@ -61,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				C00000000000000000000201 /* PrismClientApp.swift */,
+				C0000000000000000000020C /* AppDelegate.swift */,
 				C00000000000000000000202 /* AppModel.swift */,
 				C00000000000000000000603 /* Models */,
 				C00000000000000000000604 /* Services */,
@@ -195,6 +198,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C00000000000000000000101 /* PrismClientApp.swift in Sources */,
+				C0000000000000000000010A /* AppDelegate.swift in Sources */,
 				C00000000000000000000102 /* AppModel.swift in Sources */,
 				C00000000000000000000103 /* PairedServer.swift in Sources */,
 				C00000000000000000000104 /* ClientConfigStore.swift in Sources */,

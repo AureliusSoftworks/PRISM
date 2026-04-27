@@ -77,6 +77,22 @@ PY
   rm -f "$devices_json"
 }
 
+wait_for_app_exit() {
+  local bundle_id="$1"
+  local process_pattern="$2"
+  local attempts=0
+
+  while pgrep -f "$process_pattern" >/dev/null 2>&1 && [[ "$attempts" -lt 30 ]]; do
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
+
+  if pgrep -f "$process_pattern" >/dev/null 2>&1; then
+    echo "Timed out waiting for $bundle_id to quit." >&2
+    exit 1
+  fi
+}
+
 run_ios() {
   local simulator_id="${SIMULATOR_ID:-$DEFAULT_IOS_SIMULATOR_ID}"
 
@@ -117,7 +133,7 @@ run_phone() {
 
 run_mac_client() {
   osascript -e "quit app id \"$MAC_CLIENT_BUNDLE_ID\"" >/dev/null 2>&1 || true
-  sleep 1
+  wait_for_app_exit "$MAC_CLIENT_BUNDLE_ID" "$MAC_CLIENT_APP_PATH/Contents/MacOS/Prism"
 
   xcodebuild \
     -project "apps/client-mac/PrismClient.xcodeproj" \
@@ -126,12 +142,12 @@ run_mac_client() {
     -derivedDataPath "apps/client-mac/DerivedData" \
     build
 
-  open -n "$MAC_CLIENT_APP_PATH"
+  open "$MAC_CLIENT_APP_PATH"
 }
 
 run_mac_server() {
   osascript -e "quit app id \"$MAC_SERVER_BUNDLE_ID\"" >/dev/null 2>&1 || true
-  sleep 1
+  wait_for_app_exit "$MAC_SERVER_BUNDLE_ID" "$MAC_SERVER_APP_PATH/Contents/MacOS/Prism Server"
 
   xcodebuild \
     -project "apps/server-mac/PrismServer.xcodeproj" \
@@ -140,7 +156,7 @@ run_mac_server() {
     -derivedDataPath "apps/server-mac/DerivedData" \
     build
 
-  open -n "$MAC_SERVER_APP_PATH"
+  open "$MAC_SERVER_APP_PATH"
 }
 
 cd "$REPO_ROOT"

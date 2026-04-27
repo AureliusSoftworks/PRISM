@@ -69,7 +69,7 @@ xcodebuild \
   -configuration Debug \
   -derivedDataPath "apps/client-mac/DerivedData" \
   build && \
-open -n "apps/client-mac/DerivedData/Build/Products/Debug/Prism.app"
+open "apps/client-mac/DerivedData/Build/Products/Debug/Prism.app"
 ```
 
 ## Mac Server
@@ -83,6 +83,6 @@ xcodebuild \
   -configuration Debug \
   -derivedDataPath "apps/server-mac/DerivedData" \
   build && \
-open -n "apps/server-mac/DerivedData/Build/Products/Debug/Prism Server.app"
+open "apps/server-mac/DerivedData/Build/Products/Debug/Prism Server.app"
 ```
 
