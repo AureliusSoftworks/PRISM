@@ -6533,6 +6533,7 @@ function HomeContent(): React.JSX.Element {
     y: number;
     anchor: MessageMenuAnchor;
   } | null>(null);
+  const [contextFocusedMessageId, setContextFocusedMessageId] = useState<string | null>(null);
   const [mobileFocusedMessageId, setMobileFocusedMessageId] = useState<string | null>(null);
   /** Message-actions popover (`role="menu"`) root for tap-outside + touch dismiss. */
   const messageActionsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -7805,7 +7806,6 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (viewportWidth > PICKER_MOBILE_BREAKPOINT) {
       setMobileFocusedMessageId(null);
-      setMessageContextMenu(null);
     }
   }, [viewportWidth]);
 
@@ -8551,6 +8551,7 @@ function HomeContent(): React.JSX.Element {
 
   const closeMessageContextOverlay = useCallback(() => {
     setMessageContextMenu(null);
+    setContextFocusedMessageId(null);
     setMobileFocusedMessageId(null);
     setModelRevealMessageId(null);
   }, []);
@@ -8594,6 +8595,7 @@ function HomeContent(): React.JSX.Element {
         y: Math.min(Math.max(y, minY), maxY),
         anchor,
       });
+      setContextFocusedMessageId(msg.id);
 
       const vpMobile = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
       if (opts?.mobileActivate && vpMobile) {
@@ -12293,9 +12295,9 @@ function HomeContent(): React.JSX.Element {
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
                 : undefined;
             const mobileFocusAccentStyle =
-              mobileFocusedMessageId === msg.id
+              contextFocusedMessageId === msg.id
                 ? ({
-                    "--mobile-msg-focus-accent": deriveMobileMessageFocusAccent(msg),
+                    "--message-context-accent": deriveMobileMessageFocusAccent(msg),
                   } as React.CSSProperties)
                 : undefined;
             const copied = copiedMessageId === msg.id;
@@ -12315,10 +12317,13 @@ function HomeContent(): React.JSX.Element {
                 data-msg-mobile-focus-root={
                   mobileFocusedMessageId === msg.id ? "true" : undefined
                 }
+                data-msg-context-root={
+                  contextFocusedMessageId === msg.id ? "true" : undefined
+                }
                 data-mobile-context={mobileContextMenu ? "true" : undefined}
                 data-message-id={msg.id}
                 data-message-edge={messageEdge}
-                onContextMenu={event => {
+                onContextMenuCapture={event => {
                   event.preventDefault();
                   event.stopPropagation();
                   openMessageContextMenu(msg, event.clientX, event.clientY, {
@@ -13346,9 +13351,9 @@ function HomeContent(): React.JSX.Element {
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
                 : undefined;
             const mobileFocusAccentStyle =
-              mobileFocusedMessageId === msg.id
+              contextFocusedMessageId === msg.id
                 ? ({
-                    "--mobile-msg-focus-accent": deriveMobileMessageFocusAccent(msg),
+                    "--message-context-accent": deriveMobileMessageFocusAccent(msg),
                   } as React.CSSProperties)
                 : undefined;
             const copied = copiedMessageId === msg.id;
@@ -13368,10 +13373,13 @@ function HomeContent(): React.JSX.Element {
                 data-msg-mobile-focus-root={
                   mobileFocusedMessageId === msg.id ? "true" : undefined
                 }
+                data-msg-context-root={
+                  contextFocusedMessageId === msg.id ? "true" : undefined
+                }
                 data-mobile-context={mobileContextMenu ? "true" : undefined}
                 data-message-id={msg.id}
                 data-message-edge={messageEdge}
-                onContextMenu={event => {
+                onContextMenuCapture={event => {
                   event.preventDefault();
                   event.stopPropagation();
                   openMessageContextMenu(msg, event.clientX, event.clientY, {

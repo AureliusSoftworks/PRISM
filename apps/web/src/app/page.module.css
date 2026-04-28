@@ -4529,6 +4529,24 @@
   background: var(--bg-hover);
 }
 
+.message[data-msg-context-root="true"] {
+  overflow: visible;
+  border-radius: 14px !important;
+  position: relative;
+  z-index: 851;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 88%, transparent),
+    0 0 24px color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 26%, transparent);
+}
+
+.messageUser[data-msg-context-root="true"] {
+  border-right-color: transparent;
+}
+
+.messageAssistant[data-msg-context-root="true"]::before {
+  opacity: 0;
+}
+
 .messageCopyToast {
   position: absolute;
   right: 10px;
@@ -8913,21 +8931,10 @@
 
   .messageAssistant[data-msg-mobile-focus-root="true"],
   .messageUser[data-msg-mobile-focus-root="true"] {
-    overflow: visible;
-    border-radius: 14px !important;
-    position: relative;
-    z-index: 851;
     filter: none !important;
     opacity: 1 !important;
     pointer-events: auto;
-    box-shadow:
-      0 0 0 0 transparent,
-      0 0 0 transparent;
     animation: mobileMsgFocusUnifiedFrame 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  }
-
-  .messageAssistant[data-msg-mobile-focus-root="true"]::before {
-    opacity: 0;
   }
 
   .messageUser[data-msg-mobile-focus-root="true"] {
@@ -8943,8 +8950,8 @@
 
     100% {
       box-shadow:
-        0 0 0 3px color-mix(in srgb, var(--mobile-msg-focus-accent, var(--accent-ink)) 92%, transparent),
-        0 0 26px color-mix(in srgb, var(--mobile-msg-focus-accent, var(--accent-ink)) 32%, transparent);
+        0 0 0 3px color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 92%, transparent),
+        0 0 26px color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 32%, transparent);
     }
   }
 

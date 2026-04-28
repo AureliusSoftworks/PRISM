@@ -228,7 +228,15 @@ Run `scripts/windows-install-startup-task.ps1` as Administrator to register a ta
 Place a shortcut to `scripts/windows-startup.bat` in `shell:startup`.
 
 ### Option D: One-click native launcher (no Docker)
-Double-click `start.bat` at the repo root. On first run it verifies/installs Node 22 LTS (via Chocolatey if needed), creates `.env` from `.env.example` and opens it in Notepad for your secrets, installs all workspace dependencies, then builds and launches both services:
+Double-click `start.bat` at the repo root. On first run it verifies/installs Node 22 LTS (via Chocolatey if needed), creates `.env` from `.env.example` and opens it in Notepad for your secrets, installs all workspace dependencies, then launches both services.
+
+`start.bat` is the single Windows launcher:
+
+- On the `dev` branch, double-clicking defaults to watch-mode dev servers (`Web :18790`, `API :18789`, dev DB).
+- On other branches, double-clicking defaults to production mode.
+- You can force either mode explicitly with `start.bat dev` or `start.bat prod`.
+
+Production mode:
 
 - **API** runs in a secondary console titled *"LocalAI API"* via `node --experimental-strip-types apps/api/src/server.ts` and listens on `0.0.0.0:18787`.
 - **Frontend** is built with Next.js `output: "standalone"` and served by `node .next/standalone/apps/web/server.js` on `0.0.0.0:18788`. `start.bat` also stages `.next/static/` and `public/` into the standalone bundle after each build — without this step the browser would load HTML successfully but all JS/CSS would 404.

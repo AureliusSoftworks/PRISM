@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Prism — Dev Launcher (macOS)
-# Mirrors start-dev.bat. Web :3003 + API :8788 against localai-dev.db.
+# macOS dev launcher. Windows equivalent: start.bat dev.
+# Web :3003 + API :8788 against localai-dev.db.
 # Can run alongside start.command (prod on :3000/:8787) without conflict.
 
 set -u
