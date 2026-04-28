@@ -2042,7 +2042,7 @@
   left: 14px;
   z-index: 2147483646;
   width: min(460px, calc(100vw - 28px));
-  max-height: calc(100dvh - 96px);
+  max-height: calc(100dvh - 72px);
   overflow: auto;
   display: grid;
   gap: 10px;
@@ -7519,10 +7519,9 @@
 .glyphGridShell {
   position: relative;
   width: 100%;
-  /* Taller than before so the denser grid surfaces 10+ rows in one
-     glance without scrolling (vs. ~6 rows in the old 180px + 8-col
-     layout). Matches the popover's new wider footprint. */
-  height: 280px;
+  /* Viewport-aware height so the expanded catalog can breathe on tall screens
+     without overflowing short laptop/mobile windows. */
+  height: clamp(320px, 44dvh, 560px);
   border-radius: 10px;
   overflow: hidden;
   isolation: isolate;
@@ -9139,13 +9138,13 @@
     bottom: auto;
     width: min(320px, calc(100vw - 48px));
     height: min(
-      520px,
-      66dvh,
-      calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 128px)
+      680px,
+      82dvh,
+      calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 72px)
     );
     max-height: none;
     padding: 10px;
-    grid-template-rows: clamp(112px, 22dvh, 148px) auto minmax(0, 1fr);
+    grid-template-rows: clamp(104px, 18dvh, 144px) auto minmax(0, 1fr);
     align-content: stretch;
     justify-items: stretch;
     border-radius: 16px;
