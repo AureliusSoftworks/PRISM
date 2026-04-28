@@ -49,20 +49,36 @@ describe("processChatMessage starter prompts", () => {
       "INSERT INTO bots (id, name, color, glyph) VALUES (?, ?, ?, ?)"
     ).run("bot-1", "Storm Bot", "#5b8cff", "weather");
 
-    let providerBody: { messages?: Array<{ role: string; content: string }> } | null = null;
+    type ProviderBodies = Array<{
+      messages?: Array<{ role: string; content: string }>;
+    }>;
+    const bodies: ProviderBodies = [];
+    let fetchCount = 0;
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
-      providerBody = JSON.parse(String(init?.body ?? "{}")) as typeof providerBody;
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of surreal weather should we explore first?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
       return new Response(
         JSON.stringify({
           message: {
-            content: "What kind of surreal weather should we explore first?",
+            content:
+              '{"suggestions":["Warm rain at dusk","A storm as metaphor","Anything but blue sky","Tell me more about surreal"]}',
           },
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }) as typeof fetch;
 
-    const conversation = await processChatMessage(
+    const result = await processChatMessage(
       db,
       "user-1",
       "",
@@ -79,6 +95,7 @@ describe("processChatMessage starter prompts", () => {
       }
     );
 
+    const { conversation, conversationStarters } = result;
     assert.equal(conversation.title, "Storm Bot starter");
     assert.equal(conversation.messages.length, 1);
     assert.equal(conversation.messages[0]?.role, "assistant");
@@ -87,6 +104,12 @@ describe("processChatMessage starter prompts", () => {
       "What kind of surreal weather should we explore first?"
     );
     assert.equal(conversation.messages[0]?.botName, "Storm Bot");
+    assert.deepEqual(conversationStarters, [
+      "Warm rain at dusk",
+      "A storm as metaphor",
+      "Anything but blue sky",
+      "Tell me more about surreal",
+    ]);
 
     const rowCounts = db
       .prepare("SELECT role, COUNT(*) AS n FROM messages GROUP BY role")
@@ -96,16 +119,22 @@ describe("processChatMessage starter prompts", () => {
       [{ role: "assistant", n: 1 }]
     );
 
-    assert.equal(providerBody?.messages?.[0]?.role, "system");
-    assert.match(providerBody?.messages?.[0]?.content ?? "", /Storm Bot/);
-    assert.equal(providerBody?.messages?.[1]?.role, "user");
+    const starterBody = bodies[0];
+    assert.equal(starterBody?.messages?.[0]?.role, "system");
+    assert.match(starterBody?.messages?.[0]?.content ?? "", /Storm Bot/);
+    assert.equal(starterBody?.messages?.[1]?.role, "user");
     assert.match(
-      providerBody?.messages?.[1]?.content ?? "",
-      /Use your current system\/persona instructions as context/
+      starterBody?.messages?.[1]?.content ?? "",
+      /Functionally simple/
     );
+
+    const inferBody = bodies[1];
+    assert.equal(inferBody?.messages?.[0]?.role, "system");
+    assert.match(inferBody?.messages?.[1]?.content ?? "", /Respond with compact JSON/);
+    assert.equal(fetchCount, 2);
   });
 
-  it("keeps private chats ephemeral while honoring the selected provider", async () => {
+  it("keeps private chats ephemeral while honoring the selected provider and bot", async () => {
     const db = createChatTestDb();
 
     let providerUrl = "";
@@ -127,7 +156,7 @@ describe("processChatMessage starter prompts", () => {
       );
     }) as typeof fetch;
 
-    const conversation = await processChatMessage(
+    const { conversation } = await processChatMessage(
       db,
       "user-1",
       "Keep this out of history.",
@@ -138,7 +167,8 @@ describe("processChatMessage starter prompts", () => {
         openAiApiKey: "sk-test",
         botId: "bot-1",
         incognito: true,
-        botSystemPrompt: "You are Storm Bot. This should not be used.",
+        starterPromptLabel: "Storm Bot",
+        botSystemPrompt: "You are Storm Bot. Keep the skies strange.",
         mode: "chat",
         ephemeralMessages: [
           {
@@ -163,15 +193,18 @@ describe("processChatMessage starter prompts", () => {
     assert.equal(providerUrl, "https://api.openai.com/v1/chat/completions");
     assert.deepEqual(
       providerBody?.messages?.map((message) => message.role),
-      ["user", "assistant", "user"]
+      ["system", "user", "assistant", "user"]
     );
-    assert.equal(providerBody?.messages?.[0]?.content, "Earlier private thought");
-    assert.equal(providerBody?.messages?.[2]?.content, "Keep this out of history.");
+    assert.match(providerBody?.messages?.[0]?.content ?? "", /Storm Bot/);
+    assert.equal(providerBody?.messages?.[1]?.content, "Earlier private thought");
+    assert.equal(providerBody?.messages?.[3]?.content, "Keep this out of history.");
 
     assert.equal(conversation.id, "private-session-1");
     assert.equal(conversation.incognito, true);
-    assert.equal(conversation.botId, null);
+    assert.equal(conversation.botId, "bot-1");
+    assert.equal(conversation.lastBotId, "bot-1");
     assert.equal(conversation.messages.length, 4);
+    assert.equal(conversation.messages[3]?.botName, "Storm Bot");
     assert.equal(conversation.messages[3]?.provider, "openai");
 
     const conversationCount = db

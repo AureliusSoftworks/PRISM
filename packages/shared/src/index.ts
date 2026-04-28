@@ -145,7 +145,15 @@ export interface ChatRequestPayload {
   ephemeralMessages?: ChatMessage[];
 }
 
-export interface ChatResponsePayload {
+/**
+ * Optional quick-reply labels inferred from the assistant's opening turn when
+ * the user starts via "Talk to me!" ({@link ChatRequestPayload.starterPrompt}).
+ */
+export interface StarterChatExtras {
+  conversationStarters?: string[];
+}
+
+export interface ChatResponsePayload extends StarterChatExtras {
   conversation: Conversation;
   assistantMessage: ChatMessage;
 }

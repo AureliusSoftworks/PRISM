@@ -598,7 +598,10 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const effectiveBotId = incognito ? null : botId;
+      // Incognito still needs the selected bot's prompt identity. Memory and
+      // persistence are disabled later via the incognito flags, not by erasing
+      // the bot before prompt composition.
+      const effectiveBotId = botId;
       const explicitModelOverride = readOptionalString(body.modelOverride);
       const ephemeralMessages = Array.isArray(body.ephemeralMessages)
         ? body.ephemeralMessages as ChatMessage[]
@@ -660,7 +663,7 @@ function buildRoutes(): RouteDefinition[] {
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
 
-      const conversation = await processChatMessage(
+      const { conversation, conversationStarters } = await processChatMessage(
         db,
         userId,
         message,
@@ -680,7 +683,11 @@ function buildRoutes(): RouteDefinition[] {
         },
         conversationId
       );
-      json(ctx.res, 200, { ok: true, conversation });
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
+        ...(conversationStarters ? { conversationStarters } : {}),
+      });
     }),
     route("GET", "/api/memories", async (ctx) => {
       const userId = requireAuth(ctx);

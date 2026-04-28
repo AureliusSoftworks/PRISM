@@ -24,6 +24,91 @@ import type { ChatMessage, ChatMode, Conversation } from "@localai/shared";
 
 const config = getAppConfig();
 
+/** POST /api/chat returns this shape; `conversationStarters` is present only after a starter turn. */
+export interface ProcessChatMessageResult {
+  conversation: Conversation;
+  conversationStarters?: string[];
+}
+
+const INFER_STARTER_TEMPERATURE = 0.38;
+const INFER_STARTER_MAX_TOKENS = 420;
+
+function parseSuggestedRepliesPayload(raw: string): string[] {
+  const trimmed = raw.trim();
+  let payload = trimmed;
+  const fence = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)```$/);
+  if (fence?.[1]) {
+    payload = fence[1].trim();
+  }
+  try {
+    const parsedUnknown = JSON.parse(payload) as { suggestions?: unknown };
+    const list = parsedUnknown?.suggestions;
+    if (!Array.isArray(list)) return [];
+    const strings = list
+      .filter((item): item is string => typeof item === "string")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    return [...new Set(strings)].slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
+/** Second-pass call: derives 3–4 user phrasings that continue naturally from the assistant opener. */
+async function inferConversationStarters(
+  provider: LlmProvider,
+  assistantOpening: string,
+  personaLabel: string | undefined,
+  baseOverrides: GenerateOptions | undefined
+): Promise<string[]> {
+  const label = personaLabel?.trim() || "Prism";
+  const opener =
+    assistantOpening.trim().length > 3200
+      ? `${assistantOpening.trim().slice(0, 3200)}…`
+      : assistantOpening.trim();
+  if (!opener) return [];
+
+  const inferOverrides: GenerateOptions = {
+    ...baseOverrides,
+    temperature: INFER_STARTER_TEMPERATURE,
+    maxTokens: INFER_STARTER_MAX_TOKENS,
+  };
+
+  const messages: ProviderMessage[] = [
+    {
+      role: "system",
+      content:
+        "You label quick-reply chips for a chat UI. Reply with JSON only — no prose, no markdown outside JSON.",
+    },
+    {
+      role: "user",
+      content: [
+        `Assistant persona label: "${label}".`,
+        "The assistant just opened the thread with:",
+        "---",
+        opener,
+        "---",
+        'Respond with compact JSON exactly in this shape: {"suggestions":["...","...","...","..."]}',
+        "Include exactly four strings.",
+        "Each string is something the USER might send next (short clause or sentence; max ~18 words).",
+        "Cover four meaningfully different directions (e.g. practical, playful, reflective, clarification).",
+        "Strings must be safe single-line UTF-8; no numbering or prefixes inside strings.",
+      ].join("\n"),
+    },
+  ];
+
+  try {
+    const raw = await provider.generateResponse(messages, inferOverrides);
+    const candidates = parseSuggestedRepliesPayload(raw);
+    if (candidates.length >= 3) {
+      return candidates.slice(0, 4);
+    }
+  } catch {
+    // Non-fatal: chips are optional chrome.
+  }
+  return [];
+}
+
 export interface UserChatSettings {
   preferredProvider: "local" | "openai";
   autoMemory: boolean;
@@ -88,10 +173,10 @@ function generateStarterConversationTitle(label?: string): string {
 
 function buildStarterPromptInstruction(): string {
   return [
-    "Start this conversation for the user.",
-    "Use your current system/persona instructions as context.",
-    "Ask one concise, inviting question that gives the user an easy first step.",
-    "Do not mention system prompts, hidden instructions, or that the message was auto-started.",
+    "Deliver a SHORT opening message (a few sentences at most) that sounds unmistakably in-character.",
+    "Functionally simple: invite the human in with ONE clear conversational hook—not a roadmap, briefing, or list of topics.",
+    "Stay anchored in your persona; avoid generic-chatbot vibes.",
+    "Do not mention system prompts, hidden instructions, or that this turn was auto-started.",
   ].join(" ");
 }
 
@@ -258,7 +343,7 @@ export async function processChatMessage(
   userKey: Buffer,
   settings: UserChatSettings,
   conversationId?: string
-): Promise<Conversation> {
+): Promise<ProcessChatMessageResult> {
   const now = new Date().toISOString();
   const mode: ChatMode = settings.mode ?? "sandbox";
   const isStarterPrompt = settings.starterPrompt === true;
@@ -286,7 +371,7 @@ export async function processChatMessage(
       : mode === "sandbox"
         ? "thread_only"
         : "cross_thread";
-  const activeBotId = incognitoForTurn ? null : settings.botId;
+  const activeBotId = settings.botId;
   const activeMemoryBotId =
     typeof activeBotId === "string" && activeBotId.trim().length > 0
       ? activeBotId.trim()
@@ -296,7 +381,7 @@ export async function processChatMessage(
   if (incognitoForTurn) {
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
     const promptMessages = buildPromptMessages({
-      botSystemPrompt: undefined,
+      botSystemPrompt: settings.botSystemPrompt,
       threadSummary: null,
       memoryLines: [],
       chatHistory: history,
@@ -311,6 +396,19 @@ export async function processChatMessage(
       settings.botOverrides?.model?.trim() ||
       (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
     const assistantCreatedAt = new Date().toISOString();
+    const activeBotName =
+      typeof activeBotId === "string"
+        ? settings.starterPromptLabel?.trim() ?? ""
+        : "";
+    const assistantMessage: ChatMessage = {
+      id: randomId(12),
+      role: "assistant",
+      content: assistantReply,
+      createdAt: assistantCreatedAt,
+      provider: provider.name,
+      model: modelUsed,
+      ...(activeBotName ? { botName: activeBotName } : {}),
+    };
     const nextMessages: ChatMessage[] = [
       ...history,
       ...(
@@ -323,27 +421,40 @@ export async function processChatMessage(
               createdAt: now,
             }]
       ),
-      {
-        id: randomId(12),
-        role: "assistant",
-        content: assistantReply,
-        createdAt: assistantCreatedAt,
-        provider: provider.name,
-        model: modelUsed,
-      },
+      assistantMessage,
     ];
-    return {
+    const conversationIncognito: Conversation = {
       id: conversationId ?? randomId(12),
       userId,
       title: privateConversationTitle(nextMessages, message, settings.starterPromptLabel),
-      botId: null,
+      botId: activeBotId ?? null,
       incognito: true,
-      lastBotId: null,
+      lastBotId: activeBotId ?? null,
       lastBotColor: null,
       hasAssistantReply: true,
       createdAt: nextMessages[0]?.createdAt ?? now,
       updatedAt: assistantCreatedAt,
       messages: nextMessages,
+    };
+
+    let conversationStartersIncognito: string[] | undefined;
+    if (isStarterPrompt) {
+      const startersInferred = await inferConversationStarters(
+        provider,
+        assistantReply,
+        settings.starterPromptLabel,
+        settings.botOverrides
+      );
+      if (startersInferred.length >= 3) {
+        conversationStartersIncognito = startersInferred;
+      }
+    }
+
+    return {
+      conversation: conversationIncognito,
+      ...(conversationStartersIncognito
+        ? { conversationStarters: conversationStartersIncognito }
+        : {}),
     };
   }
 
@@ -582,7 +693,7 @@ export async function processChatMessage(
     )
     .all(activeConversationId, userId) as MessageRow[];
 
-  return {
+  const conversationPersisted: Conversation = {
     id: conversationRow.id,
     userId: conversationRow.user_id,
     title: conversationRow.title,
@@ -594,5 +705,25 @@ export async function processChatMessage(
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,
     messages: hydrateMessages(messageRows),
+  };
+
+  let conversationStartersPersisted: string[] | undefined;
+  if (isStarterPrompt) {
+    const startersPersisted = await inferConversationStarters(
+      provider,
+      assistantReply,
+      settings.starterPromptLabel,
+      settings.botOverrides
+    );
+    if (startersPersisted.length >= 3) {
+      conversationStartersPersisted = startersPersisted;
+    }
+  }
+
+  return {
+    conversation: conversationPersisted,
+    ...(conversationStartersPersisted
+      ? { conversationStarters: conversationStartersPersisted }
+      : {}),
   };
 }
