@@ -18,8 +18,6 @@ export type BotGlyphCategoryId =
   | "symbols"
   | "time";
 
-export type BotGlyphCategoryFilterId = "all" | BotGlyphCategoryId;
-
 interface LucideGlyphGroup {
   id: Exclude<BotGlyphCategoryId, "original">;
   label: string;
@@ -29,7 +27,6 @@ interface LucideGlyphGroup {
 export interface LucideBotGlyphDefinition {
   label: string;
   category: BotGlyphCategoryId;
-  searchText: string;
   icon: LucideIcon;
 }
 
@@ -46,12 +43,18 @@ function glyphIdForIcon(iconName: string): string {
 
 function labelForIcon(iconName: string): string {
   return iconName
+    // Strip trailing variant digits (Clock1-12, Music2-4, Volume1-2, Dice1-6,
+    // etc.) so tooltips don't surface internal Lucide variant suffixes; the
+    // visual glyph still distinguishes variants in the picker.
+    .replace(/(\D)\d+$/, "$1")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .replace(/\bXml\b/g, "XML")
     .replace(/\bCpu\b/g, "CPU")
     .replace(/\bUsb\b/g, "USB")
     .replace(/\bNfc\b/g, "NFC")
+    .replace(/\bCctv\b/g, "CCTV")
+    .replace(/\bId\b/g, "ID")
     .replace(/\bWifi\b/g, "Wi-Fi");
 }
 
@@ -118,7 +121,7 @@ export const LUCIDE_BOT_GLYPH_GROUPS: readonly LucideGlyphGroup[] = [
     id: "food",
     label: "Food",
     icons: icons(`
-      Apple Beef Beer BreadSlice Cake Carrot Cherry Citrus Coffee Croissant CupSoda Dessert
+      Apple Beef Beer Cake Carrot Cherry Citrus Coffee Croissant CupSoda Dessert
       Donut Drumstick Egg Fish Grape Ham IceCreamBowl Martini Milk Pizza Popcorn Salad Sandwich
       Soup Utensils Wine
     `),
@@ -205,26 +208,7 @@ export const LUCIDE_BOT_GLYPHS: Record<string, LucideBotGlyphDefinition> =
         const id = glyphIdForIcon(iconName);
         const label = labelForIcon(iconName);
         const icon = iconComponents[iconName] ?? fallbackIcon;
-        return [
-          [
-            id,
-            {
-              label,
-              category: group.id,
-              searchText: `${label} ${iconName} ${id} ${group.label}`.toLocaleLowerCase(),
-              icon,
-            },
-          ],
-        ];
+        return [[id, { label, category: group.id, icon }]];
       })
     )
   );
-
-export const BOT_GLYPH_CATEGORY_FILTERS: readonly {
-  id: BotGlyphCategoryFilterId;
-  label: string;
-}[] = [
-  { id: "all", label: "All" },
-  { id: "original", label: "Original" },
-  ...LUCIDE_BOT_GLYPH_GROUPS.map(({ id, label }) => ({ id, label })),
-];
