@@ -2397,10 +2397,34 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 async function writeClipboardText(text: string): Promise<void> {
-  if (!navigator.clipboard) {
-    throw new Error("Clipboard API unavailable.");
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall through to the legacy path below; LAN dev over plain HTTP is not
+      // always treated as a secure context even when the user explicitly clicks.
+    }
   }
-  await navigator.clipboard.writeText(text);
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) {
+      throw new Error("Clipboard copy command failed.");
+    }
+  } finally {
+    textarea.remove();
+  }
 }
 
 function clearNativeSessionToken(): void {
