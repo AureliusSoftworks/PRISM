@@ -20,6 +20,12 @@ import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
+import {
+  BOT_GLYPH_CATEGORY_FILTERS,
+  LUCIDE_BOT_GLYPHS,
+  LUCIDE_BOT_GLYPH_ORDER,
+  type BotGlyphCategoryFilterId,
+} from "./glyphCatalog";
 import styles from "./page.module.css";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
@@ -2478,13 +2484,26 @@ function IconKey(): React.JSX.Element {
 // bot color on cards, and muted in the sidebar.
 interface BotGlyphDefinition {
   label: string;
+  paths?: React.ReactNode;
+  icon?: React.ComponentType<{
+    className?: string;
+    size?: number;
+    strokeWidth?: number;
+    "aria-hidden"?: boolean;
+  }>;
+  category: BotGlyphCategoryFilterId;
+  searchText: string;
+}
+
+interface InlineBotGlyphDefinition {
+  label: string;
   paths: React.ReactNode;
 }
 
 // Ordered so related concepts cluster together in the picker grid — players
 // tend to scan by category (nature, animals, tech, …) rather than alphabetical
 // order. Keep additions grouped with their neighbors.
-const BOT_GLYPH_ORDER = [
+const LEGACY_BOT_GLYPH_ORDER = [
   // ── Core / abstract identity ────────────────────────────────────────
   "bot",
   "sparkles",
@@ -2650,7 +2669,12 @@ const BOT_GLYPH_ORDER = [
   "calendar",
 ] as const;
 
-type BotGlyphName = (typeof BOT_GLYPH_ORDER)[number];
+const BOT_GLYPH_ORDER = [
+  ...LEGACY_BOT_GLYPH_ORDER,
+  ...LUCIDE_BOT_GLYPH_ORDER,
+] as const;
+
+type BotGlyphName = string;
 
 // The triangle mark belongs to Prism/Default identity; custom bots choose
 // from the same registry minus that reserved glyph.
@@ -2658,7 +2682,7 @@ const CUSTOM_BOT_GLYPH_ORDER = BOT_GLYPH_ORDER.filter(
   (key) => key !== "triangle"
 );
 
-const BOT_GLYPHS: Record<BotGlyphName, BotGlyphDefinition> = {
+const INLINE_BOT_GLYPHS: Record<string, InlineBotGlyphDefinition> = {
   bot: {
     label: "Bot",
     paths: (
@@ -4122,6 +4146,20 @@ const BOT_GLYPHS: Record<BotGlyphName, BotGlyphDefinition> = {
   },
 };
 
+const BOT_GLYPHS: Record<string, BotGlyphDefinition> = {
+  ...Object.fromEntries(
+    Object.entries(INLINE_BOT_GLYPHS).map(([id, definition]) => [
+      id,
+      {
+        ...definition,
+        category: "original",
+        searchText: `${definition.label} ${id} original`.toLocaleLowerCase(),
+      },
+    ])
+  ),
+  ...LUCIDE_BOT_GLYPHS,
+};
+
 const DEFAULT_BOT_GLYPH: BotGlyphName = "bot";
 
 function isBotGlyphName(value: string | null | undefined): value is BotGlyphName {
@@ -4305,6 +4343,19 @@ function BotGlyph({
   const key: BotGlyphName = isBotGlyphName(name) ? name : DEFAULT_BOT_GLYPH;
   const definition = BOT_GLYPHS[key];
   const resolvedStrokeWidth = strokeWidth ?? botGlyphStrokeForSize(size);
+
+  if (definition.icon) {
+    const Icon = definition.icon;
+    return (
+      <Icon
+        className={className}
+        size={size}
+        strokeWidth={resolvedStrokeWidth}
+        aria-hidden={true}
+      />
+    );
+  }
+
   return (
     <svg
       className={className}
@@ -4495,30 +4546,83 @@ const BOT_GLYPH_PICKER_STROKE_WIDTH = 0.85;
 
 function BotGlyphPicker({ value, onChange }: BotGlyphPickerProps): React.JSX.Element {
   const selected: BotGlyphName = isBotGlyphName(value) ? value : DEFAULT_BOT_GLYPH;
+  const [glyphSearch, setGlyphSearch] = useState("");
+  const [glyphCategory, setGlyphCategory] =
+    useState<BotGlyphCategoryFilterId>("all");
+  const normalizedGlyphSearch = glyphSearch.trim().toLocaleLowerCase();
+  const visibleGlyphs = useMemo(
+    () =>
+      CUSTOM_BOT_GLYPH_ORDER.filter((key) => {
+        const definition = BOT_GLYPHS[key];
+        if (!definition) return false;
+        if (glyphCategory !== "all" && definition.category !== glyphCategory) {
+          return false;
+        }
+        if (normalizedGlyphSearch.length === 0) return true;
+        return definition.searchText.includes(normalizedGlyphSearch);
+      }),
+    [glyphCategory, normalizedGlyphSearch]
+  );
+
   return (
-    <div className={styles.glyphPicker} role="radiogroup" aria-label="Bot glyph">
-      {CUSTOM_BOT_GLYPH_ORDER.map((key) => {
-        const isSelected = key === selected;
-        return (
-          <button
-            key={key}
-            type="button"
-            role="radio"
-            aria-checked={isSelected}
-            className={`${styles.glyphOption} ${isSelected ? styles.glyphOptionSelected : ""}`}
-            onClick={() => onChange(key)}
-            title={BOT_GLYPHS[key].label}
-            aria-label={BOT_GLYPHS[key].label}
-          >
-            <BotGlyph
-              name={key}
-              size={BOT_GLYPH_PICKER_GLYPH_SIZE}
-              strokeWidth={BOT_GLYPH_PICKER_STROKE_WIDTH}
-              className={styles.glyphOptionIcon}
-            />
-          </button>
-        );
-      })}
+    <div className={styles.glyphPicker}>
+      <div className={styles.glyphPickerControls}>
+        <input
+          type="search"
+          value={glyphSearch}
+          onChange={(event) => setGlyphSearch(event.currentTarget.value)}
+          className={styles.glyphPickerSearch}
+          placeholder="Search glyphs..."
+          aria-label="Search bot glyphs"
+        />
+        <div className={styles.glyphPickerCategories} aria-label="Glyph categories">
+          {BOT_GLYPH_CATEGORY_FILTERS.map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              className={`${styles.glyphCategoryButton} ${
+                glyphCategory === category.id ? styles.glyphCategoryButtonActive : ""
+              }`}
+              onClick={() => setGlyphCategory(category.id)}
+              aria-pressed={glyphCategory === category.id}
+            >
+              {category.label}
+            </button>
+          ))}
+        </div>
+        <div className={styles.glyphPickerCount} aria-live="polite">
+          {visibleGlyphs.length}/{CUSTOM_BOT_GLYPH_ORDER.length} glyphs
+        </div>
+      </div>
+      <div className={styles.glyphPickerGrid} role="radiogroup" aria-label="Bot glyph">
+        {visibleGlyphs.length === 0 ? (
+          <div className={styles.glyphPickerEmpty}>No glyphs match.</div>
+        ) : (
+          visibleGlyphs.map((key) => {
+            const definition = BOT_GLYPHS[key];
+            const isSelected = key === selected;
+            return (
+              <button
+                key={key}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                className={`${styles.glyphOption} ${isSelected ? styles.glyphOptionSelected : ""}`}
+                onClick={() => onChange(key)}
+                title={definition.label}
+                aria-label={definition.label}
+              >
+                <BotGlyph
+                  name={key}
+                  size={BOT_GLYPH_PICKER_GLYPH_SIZE}
+                  strokeWidth={BOT_GLYPH_PICKER_STROKE_WIDTH}
+                  className={styles.glyphOptionIcon}
+                />
+              </button>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
