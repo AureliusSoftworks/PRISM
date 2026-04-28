@@ -23,6 +23,90 @@ SIMULATOR_ID="Simulator UDID" prism ios
 PHONE_DEVICE_ID="Device UDID" prism phone
 ```
 
+## Merge Main + Build Runbook
+
+Use this when local `dev` work has already been committed and tested, and you
+want to merge it into `main`, verify the web production bundle, then launch the
+iPhone simulator build.
+
+### One-Line Happy Path
+
+Run from the repository root:
+
+```bash
+git switch main && \
+git merge dev && \
+npm run build -w apps/web && \
+./scripts/prism ios && \
+git status --short --branch
+```
+
+Expected result:
+
+- `git merge dev` fast-forwards or creates a clean merge into `main`.
+- `npm run build -w apps/web` completes successfully.
+- `./scripts/prism ios` builds, installs, and launches the simulator app.
+- Final status shows `main` clean, usually ahead of `origin/main` until pushed.
+
+### Step-By-Step Version
+
+1. Confirm `dev` is clean before switching branches:
+
+   ```bash
+   git status --short --branch
+   ```
+
+   Expected result: no tracked file changes.
+
+2. Switch to `main` and merge `dev`:
+
+   ```bash
+   git switch main
+   git merge dev
+   ```
+
+   Expected result: merge completes without conflicts.
+
+3. Build the web app:
+
+   ```bash
+   npm run build -w apps/web
+   ```
+
+   Expected result: Next.js production build succeeds.
+
+4. Build and launch the iPhone simulator app:
+
+   ```bash
+   ./scripts/prism ios
+   ```
+
+   Expected result: Xcode build succeeds and Prism launches in the simulator.
+
+5. Verify final repo state:
+
+   ```bash
+   git status --short --branch
+   ```
+
+   Expected result: clean working tree on `main`.
+
+### Decision Points
+
+- If `dev` has uncommitted tracked changes: stop, commit or stash intentionally,
+  then restart this runbook.
+- If `git merge dev` reports conflicts: resolve conflicts on `main`, run the web
+  and native builds again, then commit the merge if needed.
+- If the web build fails: fix the web/API/shared issue first; do not run the
+  native launch as a substitute for the failed production build.
+- If `./scripts/prism ios` fails with an Xcode/SQLite/package database lock:
+  wait 15 seconds and retry once; if it fails again, wait 30 seconds and retry
+  once more before treating another build process as the likely blocker.
+- If a physical iPhone build is desired instead of simulator, replace
+  `./scripts/prism ios` with `./scripts/prism phone`.
+- Do not push automatically. Push `main` only when the merge and builds have
+  passed and the developer explicitly wants to publish it.
+
 ## iPhone Client
 
 Default simulator: the booted local `iPhone 16 Pro`. Override with
