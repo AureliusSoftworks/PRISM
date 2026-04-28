@@ -8,9 +8,18 @@ import {
   useState,
   useCallback,
   useRef,
+  useImperativeHandle,
+  forwardRef,
   useSyncExternalStore,
 } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { Markdown } from "@tiptap/markdown";
+import Link from "@tiptap/extension-link";
+import Placeholder from "@tiptap/extension-placeholder";
 import styles from "./page.module.css";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
@@ -53,6 +62,9 @@ const DELETE_ALL_BOTS_KEY = "__delete_all_bots__";
 // Developer Tools are enabled by default for Prism's local/native builds.
 // Set NEXT_PUBLIC_DEV_TOOLS=0 only when a distribution build must hide them.
 const DEV_TOOLS_ENABLED = process.env.NEXT_PUBLIC_DEV_TOOLS !== "0";
+// The pairing placeholder is a production/native shell affordance. Local `next dev`
+// should always render the full web UI so frontend iteration is not blocked.
+const CLIENT_ACCESS_REQUIRED = process.env.NODE_ENV === "production";
 
 const DEV_TOOLS_BOT_QUANTITY_MIN = 0;
 const DEV_TOOLS_BOT_QUANTITY_DEFAULT = 10;
@@ -64,7 +76,10 @@ const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
-
+const MOBILE_SIDEBAR_SWIPE_EDGE_PX = 32;
+const MOBILE_SIDEBAR_SWIPE_OPEN_PX = 56;
+const MOBILE_SIDEBAR_SWIPE_VERTICAL_CANCEL_PX = 44;
+const MOBILE_SIDEBAR_SWIPE_DIRECTION_RATIO = 1.25;
 type DevToolsBotQuantity = number | "";
 type DevToolsPanelPosition = { x: number; y: number };
 type DevToolsPanelDragState = {
@@ -72,6 +87,13 @@ type DevToolsPanelDragState = {
   offsetX: number;
   offsetY: number;
 };
+type SidebarEdgeSwipeState = {
+  touchId: number;
+  startX: number;
+  startY: number;
+};
+
+type MessageMenuAnchor = "center" | "below";
 
 const MESSAGE_COPY_FEEDBACK_MS = 1600;
 
@@ -387,6 +409,7 @@ const PICKER_FEW_BOT_TILE_SIZE_DESKTOP = 104;
 const PICKER_LOW_COUNT_TILE_SIZE_MOBILE = 72;
 const PICKER_LOW_COUNT_TILE_SIZE_DESKTOP = 76;
 const PICKER_TILE_NAME_MIN_SIZE = PICKER_LOW_COUNT_TILE_SIZE_MOBILE;
+const PICKER_TILE_COMPACT_NAME_MAX_SIZE = 92;
 const PICKER_LOW_COUNT_FRAME_VERTICAL_PAD = 24;
 const PICKER_THREE_STACK_TILE_SIZE_MOBILE = 128;
 const PICKER_DEFAULT_GLYPH_RATIO = 0.5;
@@ -749,9 +772,23 @@ function firstLinesOf(text: string | null | undefined, maxChars = 140): string {
 function pickerGridShape(
   totalTiles: number,
   pickerWidth: number,
-  pickerHeight: number
+  pickerHeight: number,
+  preferredRows?: number,
+  preferredCols?: number
 ): { cols: number; rows: number } {
   if (totalTiles <= 1) return { cols: 1, rows: 1 };
+  if (preferredRows && preferredCols && totalTiles <= preferredRows * preferredCols) {
+    return {
+      cols: preferredCols,
+      rows: preferredRows,
+    };
+  }
+  if (preferredRows && totalTiles > preferredRows) {
+    return {
+      cols: Math.ceil(totalTiles / preferredRows),
+      rows: preferredRows,
+    };
+  }
   const aspectRatio = Math.max(1, pickerWidth / Math.max(1, pickerHeight));
   if (aspectRatio > 1.2 && totalTiles <= 4) {
     return { cols: totalTiles, rows: 1 };
@@ -793,10 +830,17 @@ function pickerFormationCells<T>(
   return cells;
 }
 
+interface PickerGeometryOptions {
+  balanceOddRows?: boolean;
+  preferredRows?: number;
+  preferredCols?: number;
+}
+
 function pickerGeometry(
   totalTiles: number,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  options: PickerGeometryOptions = {}
 ): PickerGeometry {
   // Mobile owns the old square frame; desktop owns a widescreen frame whose
   // width scales with the available viewport. Density thresholds use the
@@ -870,14 +914,18 @@ function pickerGeometry(
   // Breakpoints scale with available width. The ladder now removes one
   // visual affordance at a time: gradient, then larger glyphs, then glyphs,
   // then card chrome/pixel gaps, then the fully abstract rainbow field.
-  const leadingFillerCell = totalTiles > 10 && totalTiles % 2 === 1;
+  const balanceOddRows = options.balanceOddRows ?? true;
+  const leadingFillerCell =
+    balanceOddRows && totalTiles > 10 && totalTiles % 2 === 1;
   const namedFlatTile =
     totalTiles >= namedFlatTileCountMin && totalTiles < flatTileCountMin;
   const gridOccupancyCount = totalTiles + (leadingFillerCell ? 1 : 0);
   const { cols, rows } = pickerGridShape(
     gridOccupancyCount,
     pickerWidth,
-    pickerHeight
+    pickerHeight,
+    options.preferredRows,
+    options.preferredCols
   );
   const fillerCells = cols * rows - gridOccupancyCount;
   const gap = isCompactPixelGrid
@@ -960,7 +1008,7 @@ function pickerGeometry(
     mobileColumnStack: !isDesktop && totalTiles >= 5 && totalTiles <= 10,
     leadingFillerCell,
     namedFlatTile,
-    suppressMobileHeroCopy: !isDesktop && totalTiles >= namedFlatTileCountMin,
+    suppressMobileHeroCopy: false,
     flattenTile: totalTiles >= flatTileCountMin,
     enlargeGlyph,
     hideGlyphByDefault,
@@ -971,6 +1019,12 @@ function pickerGeometry(
     selectedDotGlyph,
     radialRainbowGradient,
   };
+}
+
+function pickerUsesHueNavigation(geom: PickerGeometry, viewportWidth: number): boolean {
+  const mobileLargeGrid =
+    viewportWidth <= PICKER_MOBILE_BREAKPOINT && geom.enlargeGlyph;
+  return mobileLargeGrid || geom.hideGlyphByDefault || geom.solidSwatch || geom.compactPixelGrid;
 }
 
 function updatePickerParallax(
@@ -1417,6 +1471,12 @@ interface ConversationDetail {
   hasAssistantReply: boolean;
   messages: Message[];
 }
+
+/** POST /api/chat success envelope — `conversationStarters` only appears after “Talk to me!”. */
+interface ChatPostEnvelope {
+  conversation: ConversationDetail;
+  conversationStarters?: string[];
+}
 interface UserSettings {
   theme: Theme;
   preferredProvider: Provider;
@@ -1468,15 +1528,15 @@ interface Bot {
 const BOT_COLOR_SORT_GRAYSCALE_SATURATION_MAX = 6;
 const BOT_COLOR_SORT_GRAYSCALE_GROUP = 10;
 const BOT_COLOR_SORT_COLORLESS_GROUP = 11;
-// Hue lens filter — refracts the visible bot population to a single
-// hue band so a 3000-bot grid can collapse back into a selectable
-// subset without paginating. The filter is inactive by default
-// (`hueFilterCenter === null`); moving the slider activates it.
-// The tolerance is measured in the compressed slider's 0..359 coordinate
-// space. This keeps filtering fluid across hard-stop track segments:
-// adjacent families overlap slightly near segment boundaries instead of
-// behaving like discrete pages.
-const HUE_LENS_FILTER_TOLERANCE = 42;
+// Hue lens ribbon — active lens movement pans a fixed-size window across
+// a circular hue-sorted bot strip. Sparse libraries can show every bot,
+// while dense libraries move through many more bots over the same slider
+// travel because the center index scales with total ribbon length.
+const HUE_RIBBON_MIN_VISIBLE_BOTS = 3;
+const HUE_RIBBON_DESKTOP_COLUMNS = 12;
+const HUE_RIBBON_DESKTOP_ROWS = 3;
+const HUE_RIBBON_MOBILE_COLUMNS = 5;
+const HUE_RIBBON_MOBILE_ROWS = 6;
 const BOT_PICKER_RETURN_ANIMATION_MS = 360;
 const BOT_PANEL_DASHBOARD_MIN_BOTS = 1;
 const BOT_PANEL_COLOR_HARMONY_MIN_BOTS = 40;
@@ -1634,11 +1694,6 @@ function botHasFilterableColor(bot: Bot): boolean {
   return s > BOT_COLOR_SORT_GRAYSCALE_SATURATION_MAX;
 }
 
-// Apply the hue lens to a bot list. Inactive filter (`hueCenter === null`)
-// returns the input untouched so callers can use the same downstream
-// rendering path. When active, only bots within the tolerance band
-// survive; uncolored/grayscale bots are dropped because they cannot
-// meaningfully sit in a hue band.
 // Hue availability buckets — the lens slider's gradient and the dense
 // color-map's snap behavior both need a histogram of which hue families
 // the user actually owns. Twelve 30° buckets keep adjacent families
@@ -1714,16 +1769,6 @@ function hueLensPositionForHue(hue: number): number {
   const maxOffset = segmentWidth / 2 - 1;
   const offset = Math.max(-maxOffset, Math.min(maxOffset, signedHueOffset * maxOffset));
   return Math.max(0, Math.min(359, center + offset));
-}
-
-function filterBotsByHue(bots: Bot[], hueCenter: number | null): Bot[] {
-  if (hueCenter === null) return bots;
-  return bots.filter((bot) => {
-    if (!botHasFilterableColor(bot)) return false;
-    const { h } = hexToHsl(bot.color!.trim());
-    const lensPosition = hueLensPositionForHue(h);
-    return Math.abs(lensPosition - hueCenter) <= HUE_LENS_FILTER_TOLERANCE;
-  });
 }
 
 function computeHueLensTrackSegments(bots: readonly Bot[]): HueLensTrackSegment[] {
@@ -1809,6 +1854,120 @@ function hueLensSliderValueForFilterCenter(
   );
 }
 
+function compareBotsByHueRibbonPosition(a: Bot, b: Bot): number {
+  const aColor = a.color?.trim();
+  const bColor = b.color?.trim();
+  const aPosition = aColor ? hueLensPositionForHue(hexToHsl(aColor).h) : 0;
+  const bPosition = bColor ? hueLensPositionForHue(hexToHsl(bColor).h) : 0;
+  return (
+    aPosition - bPosition ||
+    a.name.localeCompare(b.name) ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+function hueRibbonWindowSize(
+  totalBots: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  preferredRows?: number,
+  preferredCols?: number
+): number {
+  if (totalBots <= 0) return 0;
+  if (preferredRows && preferredCols) {
+    return Math.min(totalBots, preferredRows * preferredCols);
+  }
+  const { flatTileCountMin } = pickerDensityBreakpoints(
+    viewportWidth,
+    viewportHeight
+  );
+  const showAllMax = Math.max(
+    HUE_RIBBON_MIN_VISIBLE_BOTS,
+    flatTileCountMin - 1
+  );
+  const targetCount =
+    totalBots <= showAllMax
+      ? totalBots
+      : Math.min(
+          totalBots,
+          Math.max(HUE_RIBBON_MIN_VISIBLE_BOTS, flatTileCountMin)
+        );
+
+  for (let offset = 0; offset < totalBots; offset += 1) {
+    const larger = targetCount + offset;
+    if (
+      larger <= totalBots &&
+      hueRibbonWindowFillsGrid(larger, viewportWidth, viewportHeight, preferredRows)
+    ) {
+      return larger;
+    }
+
+    const smaller = targetCount - offset;
+    if (
+      smaller >= HUE_RIBBON_MIN_VISIBLE_BOTS &&
+      hueRibbonWindowFillsGrid(smaller, viewportWidth, viewportHeight, preferredRows)
+    ) {
+      return smaller;
+    }
+  }
+
+  return targetCount;
+}
+
+function hueRibbonWindowFillsGrid(
+  count: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  preferredRows?: number
+): boolean {
+  const geom = pickerGeometry(count, viewportWidth, viewportHeight, {
+    balanceOddRows: false,
+    preferredRows,
+  });
+  return geom.fillerCells === 0;
+}
+
+function hueRibbonWindowBots(
+  bots: Bot[],
+  hueCenter: number | null,
+  trackSegments: readonly HueLensTrackSegment[],
+  viewportWidth: number,
+  viewportHeight: number,
+  preferredRows?: number,
+  preferredCols?: number
+): Bot[] {
+  if (hueCenter === null) return bots;
+
+  const ribbon = bots
+    .filter(botHasFilterableColor)
+    .sort(compareBotsByHueRibbonPosition);
+  const windowSize = hueRibbonWindowSize(
+    ribbon.length,
+    viewportWidth,
+    viewportHeight,
+    preferredRows,
+    preferredCols
+  );
+  if (windowSize <= 0) return [];
+  if (windowSize >= ribbon.length) return ribbon;
+
+  const sliderValue = hueLensSliderValueForFilterCenter(
+    hueCenter,
+    trackSegments
+  );
+  const sliderProgress = Math.max(
+    0,
+    Math.min(1, sliderValue / HUE_LENS_SLIDER_RANGE)
+  );
+  const centerIndex = Math.floor(sliderProgress * ribbon.length) % ribbon.length;
+  const startIndex =
+    centerIndex - Math.floor(windowSize / 2) + ribbon.length;
+
+  return Array.from({ length: windowSize }, (_, offset) => (
+    ribbon[(startIndex + offset) % ribbon.length]
+  ));
+}
+
 // Slider's native [0..359] range maps linearly to a 0..100 percentage that
 // approximates the thumb's center as a fraction of the track. The native
 // thumb has a small inset relative to the track ends, so this isn't pixel-
@@ -1826,33 +1985,23 @@ function hueLensSliderPercent(
   return Math.max(0, Math.min(100, (sliderValue / HUE_LENS_SLIDER_RANGE) * 100));
 }
 
-// Saturation/lightness for the continuous-hue tint the slider drives onto
-// the page accent. Vivid enough to read as "the lens is doing something"
-// but inside a band that `normalizeAccentForTheme` can safely pull into
-// either light or dark mode. The hue itself is the only variable across
-// the slider's full travel — S/L are constant — which is what gives the
-// orb its smooth RGB-cycle feel as the user drags.
-const HUE_LENS_ACCENT_SATURATION_PCT = 70;
-const HUE_LENS_ACCENT_LIGHTNESS_PCT = 55;
-
-// Map the slider's raw 0..359 position onto the full color wheel so the
-// orb cycles through a TRUE RGB hue as the user drags — distinct from the
-// meter track's compacted Prism stops, which only color the spans where
-// bots actually live. The slider position is the master input here; the
-// filter center is a derived "snap to the closest populated family"
-// signal used by the bot list, not by this preview color.
+// Match the page accent to the compacted PRISM track segment currently
+// under the slider thumb. This keeps the hero triangle and ambient glow
+// visually anchored to the user's actual thumb position instead of drifting
+// around a separate full-spectrum hue wheel.
 function hueLensSliderTintHex(
   hueCenter: number | null,
   segments: readonly HueLensTrackSegment[]
 ): string | null {
   if (hueCenter === null) return null;
   const sliderValue = hueLensSliderValueForFilterCenter(hueCenter, segments);
-  const hueDeg = ((sliderValue % 360) + 360) % 360;
-  return hslToHex(
-    hueDeg,
-    HUE_LENS_ACCENT_SATURATION_PCT,
-    HUE_LENS_ACCENT_LIGHTNESS_PCT
+  if (segments.length === 0) return null;
+  const compactSegmentWidth = 360 / segments.length;
+  const compactIndex = Math.min(
+    segments.length - 1,
+    Math.floor(Math.max(0, Math.min(359, sliderValue)) / compactSegmentWidth)
   );
+  return segments[compactIndex]?.color ?? null;
 }
 
 function panelBotDisplayAccent(
@@ -2173,6 +2322,23 @@ function HomeGlyph(): React.ReactElement {
       <path d="M2.5 7.25 8 2.75l5.5 4.5" />
       <path d="M4.25 6.75v6h7.5v-6" />
       <path d="M6.75 12.75V9h2.5v3.75" />
+    </svg>
+  );
+}
+
+/** Wrench — clearer than a gear for “conversation tools” (overflow menu). */
+function WrenchGlyph(): React.ReactElement {
+  return (
+    <svg
+      className={styles.chatGearGlyph}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
     </svg>
   );
 }
@@ -3978,40 +4144,101 @@ function sampleBotNames(count: number): string[] {
   return Array.from({ length: count }, () => randomBotName());
 }
 
-const LOREM_IPSUM_SENTENCES = [
-  "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
-  "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
-  "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-  "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
-  "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
-  "Curabitur pretium tincidunt lacus.",
-  "Nulla gravida orci a odio.",
-  "Nullam varius, turpis et commodo pharetra, est eros bibendum elit.",
-  "Donec quis orci eget orci vehicula condimentum.",
-  "Curabitur tempor ultrices ipsum.",
-  "Vestibulum sit amet nulla et velit elementum viverra.",
-  "Praesent vestibulum molestie lacus.",
-  "Aenean nonummy hendrerit mauris.",
-  "Phasellus porta, fusce suscipit varius mi.",
-  "Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus.",
-  "Nulla dui, fusce feugiat malesuada odio.",
-  "Morbi nunc odio, gravida at, cursus nec, luctus a, lorem.",
-  "Maecenas tristique orci ac sem.",
-  "Duis ultricies pharetra magna, donec accumsan malesuada orci.",
-  "Aenean lectus, pellentesque eget nunc.",
+const RANDOM_BOT_PROMPT_SINGLE_OBJECTS = [
+  "lemons", "bacon", "rainy windows", "old maps", "green tea", "sea glass",
+  "campfire stories", "elevator music", "ginger candy", "cloud watching",
+  "library ladders", "moon jelly", "warm socks", "neon signs", "paper boats",
+  "pocket notebooks", "lavender soap", "orange peels", "soft thunder",
+  "brass keys", "turtle facts", "blueberries", "train whistles", "dandelions",
+  "rubber ducks", "velvet chairs", "mint chip ice cream", "alphabet soup",
+  "tiny spoons", "midnight snacks",
 ] as const;
 
-function randomLoremIpsum(): string {
-  const minSentences = 2;
-  const maxSentences = 5;
-  const sentenceCount =
-    minSentences + Math.floor(Math.random() * (maxSentences - minSentences + 1));
-  const pool = [...LOREM_IPSUM_SENTENCES];
-  for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
+const RANDOM_BOT_PROMPT_ADJECTIVES = [
+  "tiny", "polished", "blue", "borrowed", "haunted", "cozy", "shiny",
+  "paper", "velvet", "sleepy", "brass", "moonlit", "lucky", "crooked",
+  "gentle", "sparkly", "ceramic", "wooden", "secret", "glowing", "striped",
+  "minty", "stormy", "quiet",
+] as const;
+
+const RANDOM_BOT_PROMPT_NOUNS = [
+  "spoons", "lemons", "maps", "buttons", "socks", "teacups", "keys",
+  "notebooks", "rubber ducks", "shells", "pinecones", "marbles", "stickers",
+  "candles", "paper boats", "postcards", "umbrellas", "coins",
+  "train tickets", "mugs", "bells", "scarves", "pebbles", "bookmarks",
+  "balloons", "pencils", "oranges", "lanterns", "comets", "snails",
+  "biscuits", "clouds", "apples", "magnets", "crayons", "acorns", "corks",
+  "pancakes", "jellybeans", "bacon",
+] as const;
+
+type RandomBotPromptSinglePattern = (object: string) => string;
+type RandomBotPromptPairPattern = (adjective: string, noun: string) => string;
+
+const RANDOM_BOT_PROMPT_SINGLE_PATTERNS: readonly RandomBotPromptSinglePattern[] = [
+  (object) => `Really likes ${object}.`,
+  (object) => `Allergic to ${object}.`,
+  (object) => `Always mentions ${object}.`,
+  (object) => `Gets distracted by ${object}.`,
+  (object) => `Has strong opinions about ${object}.`,
+  (object) => `Uses ${object} as metaphors.`,
+] as const;
+
+const RANDOM_BOT_PROMPT_PAIR_PATTERNS: readonly RandomBotPromptPairPattern[] = [
+  (adjective, noun) => `Collects ${adjective} ${noun}.`,
+  (adjective, noun) => `Only trusts ${adjective} ${noun}.`,
+  (adjective, noun) => `Dreams about ${adjective} ${noun}.`,
+  (adjective, noun) => `Writes poems about ${adjective} ${noun}.`,
+  (adjective, noun) => `Secretly rates ${adjective} ${noun}.`,
+  (adjective, noun) => `Afraid of ${adjective} ${noun}.`,
+  (adjective, noun) => `Draws ${adjective} ${noun} in margins.`,
+  (adjective, noun) => `Keeps notes about ${adjective} ${noun}.`,
+] as const;
+
+function randomString(values: readonly string[]): string {
+  return values[Math.floor(Math.random() * values.length)] ?? "";
+}
+
+function buildRandomBotSystemPrompt(): string {
+  if (Math.random() < 0.35) {
+    const pattern = RANDOM_BOT_PROMPT_SINGLE_PATTERNS[
+      Math.floor(Math.random() * RANDOM_BOT_PROMPT_SINGLE_PATTERNS.length)
+    ];
+    return pattern(randomString(RANDOM_BOT_PROMPT_SINGLE_OBJECTS));
   }
-  return pool.slice(0, sentenceCount).join(" ");
+
+  const pattern = RANDOM_BOT_PROMPT_PAIR_PATTERNS[
+    Math.floor(Math.random() * RANDOM_BOT_PROMPT_PAIR_PATTERNS.length)
+  ];
+  return pattern(
+    randomString(RANDOM_BOT_PROMPT_ADJECTIVES),
+    randomString(RANDOM_BOT_PROMPT_NOUNS)
+  );
+}
+
+function randomBotSystemPrompt(usedPrompts: Set<string>): string {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const prompt = buildRandomBotSystemPrompt();
+    if (!usedPrompts.has(prompt)) {
+      usedPrompts.add(prompt);
+      return prompt;
+    }
+  }
+
+  for (const pattern of RANDOM_BOT_PROMPT_PAIR_PATTERNS) {
+    for (const adjective of RANDOM_BOT_PROMPT_ADJECTIVES) {
+      for (const noun of RANDOM_BOT_PROMPT_NOUNS) {
+        const prompt = pattern(adjective, noun);
+        if (!usedPrompts.has(prompt)) {
+          usedPrompts.add(prompt);
+          return prompt;
+        }
+      }
+    }
+  }
+
+  const fallback = `Enjoys odd little mysteries ${usedPrompts.size + 1}.`;
+  usedPrompts.add(fallback);
+  return fallback;
 }
 
 interface BotGlyphProps {
@@ -4075,15 +4302,19 @@ function BotGlyph({
 function EmptyStateBotGlyph({
   bot,
   resolvedTheme,
+  privateMode = false,
 }: {
   bot: Bot;
   resolvedTheme: "light" | "dark";
+  privateMode?: boolean;
 }): React.JSX.Element {
   const style = botAccentStyle(bot.color, resolvedTheme);
 
   return (
     <span
-      className={styles.emptyStateBotGlyph}
+      className={`${styles.emptyStateBotGlyph} ${
+        privateMode ? styles.emptyStatePrivateBotGlyph : ""
+      }`}
       aria-hidden="true"
       style={style}
     >
@@ -4101,9 +4332,9 @@ function EmptyStateBotGlyph({
 //      light mode gets the hue-rotating rainbow triangle with its static
 //      drop-shadow.
 //
-//   2. `privateHero` set → hub-style black Prism tile with grayscale glow.
-//      Private strips hue out of the surrounding chat surface, so the mark
-//      uses a white-on-black tile instead of the rainbow auth treatment.
+//   2. `privateHero` set → private styling. Default/Prism keeps the
+//      hub-style black tile with grayscale glow; selected bots keep their
+//      glyph/color but render through a more restrained inverted private tile.
 //
 //   3. `previewBot` set → Prism triangle, but tinted to the hovered bot's
 //      normalized color. This keeps hover feeling like Prism is focusing
@@ -4123,8 +4354,8 @@ interface EmptyStateIconProps {
   previewBot?: Bot | null;
   previewAsBotGlyph?: boolean;
   /**
-   * Private chats borrow the hub/profile avatar treatment: a black Prism
-   * triangle tile with grayscale ambient glow, never a hue-tinted bot mark.
+   * Private chats borrow the hub/profile avatar treatment for Default, while
+   * selected bots render as a subdued inverted bot glyph.
    */
   privateHero?: boolean;
   /**
@@ -4151,6 +4382,16 @@ function EmptyStateIcon({
   forceTrianglePreview = false,
   resolvedTheme,
 }: EmptyStateIconProps): React.JSX.Element {
+  if (privateHero && bot) {
+    return (
+      <EmptyStateBotGlyph
+        bot={bot}
+        resolvedTheme={resolvedTheme}
+        privateMode
+      />
+    );
+  }
+
   if (privateHero) {
     return (
       <div
@@ -5874,9 +6115,346 @@ interface MessageBodyProps {
   content: string;
 }
 
-function MessageBody({ content }: MessageBodyProps): React.JSX.Element {
-  return <p>{content}</p>;
+const MARKDOWN_TOOLBAR_ACTIONS = [
+  { id: "bold", label: "Bold", shortLabel: "B", title: "Bold" },
+  { id: "italic", label: "Italic", shortLabel: "I", title: "Italic" },
+  { id: "code", label: "Code", shortLabel: "</>", title: "Inline code" },
+  { id: "link", label: "Link", shortLabel: "Link", title: "Link" },
+  { id: "list", label: "List", shortLabel: "List", title: "Bulleted list" },
+  { id: "quote", label: "Quote", shortLabel: "Quote", title: "Quote" },
+] as const;
+
+type MarkdownToolbarActionId = (typeof MARKDOWN_TOOLBAR_ACTIONS)[number]["id"];
+
+/** Imperative focus for plain textarea vs TipTap WYSIWYG compose field. */
+interface ComposerInputHandle {
+  focus: (options?: FocusOptions) => void;
 }
+
+interface ComposerInputProps {
+  enabled: boolean;
+  value: string;
+  placeholder: string;
+  submitDisabled: boolean;
+  submitLabel: string;
+  onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  onValueChange: (value: string) => void;
+  onFocus: () => void;
+  hideSubmitButton?: boolean;
+}
+
+function useMobileKeyboardInset(active: boolean): number {
+  const [inset, setInset] = useState(0);
+
+  useEffect(() => {
+    if (!active || typeof window === "undefined" || !window.visualViewport) {
+      return;
+    }
+
+    const viewport = window.visualViewport;
+    let frame = 0;
+    const updateInset = () => {
+      const nextInset = Math.max(
+        0,
+        Math.round(window.innerHeight - viewport.height - viewport.offsetTop)
+      );
+      setInset(nextInset);
+    };
+    const scheduleUpdate = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(updateInset);
+    };
+
+    scheduleUpdate();
+    viewport.addEventListener("resize", scheduleUpdate);
+    viewport.addEventListener("scroll", scheduleUpdate);
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      viewport.removeEventListener("resize", scheduleUpdate);
+      viewport.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+    };
+  }, [active]);
+
+  return active ? inset : 0;
+}
+
+function MessageBody({ content }: MessageBodyProps): React.JSX.Element {
+  return (
+    <div className={styles.markdownBody}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  );
+}
+
+interface DesktopMarkdownComposerHandle {
+  focus: (options?: FocusOptions) => void;
+}
+
+interface DesktopMarkdownComposerProps {
+  value: string;
+  placeholder: string;
+  onValueChange: (value: string) => void;
+  onFocus: () => void;
+  submitDisabled: boolean;
+  submitLabel: string;
+  /** Omit Send pill on narrow viewports when empty — IME Send / Enter submits. */
+  hideSubmitButton?: boolean;
+}
+
+const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, DesktopMarkdownComposerProps>(
+  function DesktopMarkdownComposer(
+    {
+      value,
+      placeholder,
+      onValueChange,
+      onFocus,
+      submitDisabled,
+      submitLabel,
+      hideSubmitButton,
+    },
+    ref
+  ): React.JSX.Element {
+    const lastEmittedRef = useRef(value);
+    const onValueChangeRef = useRef(onValueChange);
+    const onFocusRef = useRef(onFocus);
+
+    useLayoutEffect(() => {
+      onValueChangeRef.current = onValueChange;
+      onFocusRef.current = onFocus;
+    }, [onFocus, onValueChange]);
+
+    const editor = useEditor(
+      {
+        immediatelyRender: false,
+        extensions: [
+          StarterKit.configure({
+            heading: { levels: [1, 2, 3] },
+          }),
+          Link.configure({
+            openOnClick: false,
+            autolink: true,
+            defaultProtocol: "https",
+          }),
+          Placeholder.configure({ placeholder }),
+          Markdown.configure({
+            markedOptions: {
+              gfm: true,
+              breaks: false,
+            },
+          }),
+        ],
+        content: value,
+        contentType: "markdown",
+        editorProps: {
+          attributes: {
+            class: styles.markdownTiptapContent,
+            spellcheck: "true",
+          },
+          handleDOMEvents: {
+            focus: () => {
+              onFocusRef.current();
+              return false;
+            },
+          },
+          handleKeyDown: (_view, event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              const form = (event.target as HTMLElement).closest("form");
+              form?.requestSubmit();
+              return true;
+            }
+            return false;
+          },
+        },
+        onUpdate: ({ editor: ed }) => {
+          const md = ed.getMarkdown();
+          if (md === lastEmittedRef.current) return;
+          lastEmittedRef.current = md;
+          onValueChangeRef.current(md);
+        },
+      },
+      [placeholder]
+    );
+
+    useEffect(() => {
+      if (!editor || editor.isDestroyed) return;
+      const current = editor.getMarkdown();
+      if (current === value) return;
+      lastEmittedRef.current = value;
+      editor.commands.setContent(value || "", { contentType: "markdown" });
+    }, [value, editor]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        focus: (options?: FocusOptions) => {
+          const dom = editor?.view.dom;
+          if (dom && typeof dom.focus === "function") {
+            dom.focus(options);
+          } else {
+            editor?.commands.focus();
+          }
+        },
+      }),
+      [editor]
+    );
+
+    const applyToolbarAction = useCallback(
+      (actionId: MarkdownToolbarActionId) => {
+        if (!editor || editor.isDestroyed) return;
+        const chain = editor.chain().focus();
+        switch (actionId) {
+          case "bold":
+            chain.toggleBold().run();
+            break;
+          case "italic":
+            chain.toggleItalic().run();
+            break;
+          case "code":
+            chain.toggleCode().run();
+            break;
+          case "link":
+            if (editor.state.selection.empty) {
+              chain
+                .insertContent("[link text](https://)", { contentType: "markdown" })
+                .run();
+            } else {
+              chain.setLink({ href: "https://" }).run();
+            }
+            break;
+          case "list":
+            chain.toggleBulletList().run();
+            break;
+          case "quote":
+            chain.toggleBlockquote().run();
+            break;
+        }
+      },
+      [editor]
+    );
+
+    return (
+      <div className={styles.markdownComposerSurface}>
+        <div className={styles.markdownSideToolbar} aria-label="Markdown formatting tools">
+          <span className={styles.markdownToolbarLabelVertical} aria-hidden="true">
+            MD
+          </span>
+          {MARKDOWN_TOOLBAR_ACTIONS.map(action => (
+            <button
+              key={action.id}
+              type="button"
+              className={styles.markdownToolbarButton}
+              title={action.title}
+              aria-label={action.title}
+              onPointerDown={event => event.preventDefault()}
+              onClick={() => applyToolbarAction(action.id)}
+            >
+              <span className={styles.markdownToolbarButtonText}>{action.label}</span>
+              <span className={styles.markdownToolbarButtonShort}>{action.shortLabel}</span>
+            </button>
+          ))}
+        </div>
+        <div className={styles.markdownComposerMain}>
+          <div
+            className={`${styles.markdownComposerInputRow} ${hideSubmitButton ? styles.markdownComposerInputRowSingle : ""}`}
+          >
+            <div
+              className={styles.markdownRichEditorHost}
+              data-markdown-cm-host="true"
+            >
+              <EditorContent editor={editor} />
+            </div>
+            {!hideSubmitButton && (
+              <button type="submit" disabled={submitDisabled}>
+                {submitLabel}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+);
+
+DesktopMarkdownComposer.displayName = "DesktopMarkdownComposer";
+
+const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(function ComposerInput(
+  {
+    enabled,
+    value,
+    placeholder,
+    submitDisabled,
+    submitLabel,
+    onChange,
+    onValueChange,
+    onFocus,
+    hideSubmitButton,
+  },
+  ref
+): React.JSX.Element {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const wysiwygRef = useRef<DesktopMarkdownComposerHandle | null>(null);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: (options?: FocusOptions) => {
+        if (enabled) {
+          wysiwygRef.current?.focus(options);
+        } else {
+          textareaRef.current?.focus(options);
+        }
+      },
+    }),
+    [enabled]
+  );
+
+  return (
+      <div
+      className={styles.composeEditorShell}
+      data-markdown-enabled={enabled ? "true" : undefined}
+    >
+      {enabled ? (
+        <DesktopMarkdownComposer
+          ref={wysiwygRef}
+          value={value}
+          placeholder={placeholder}
+          onValueChange={onValueChange}
+          onFocus={onFocus}
+          submitDisabled={submitDisabled}
+          submitLabel={submitLabel}
+          hideSubmitButton={hideSubmitButton}
+        />
+      ) : (
+        <div
+          className={`${styles.composeInner} ${hideSubmitButton ? styles.composeInnerSingle : ""}`}
+        >
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={onChange}
+            onFocus={onFocus}
+            placeholder={placeholder}
+            spellCheck
+            autoCorrect="on"
+            autoCapitalize="sentences"
+            enterKeyHint="send"
+            lang="en"
+          />
+          {!hideSubmitButton && (
+            <button type="submit" disabled={submitDisabled}>
+              {submitLabel}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
+ComposerInput.displayName = "ComposerInput";
 
 function HomeContent(): React.JSX.Element {
   const searchParams = useSearchParams();
@@ -5897,7 +6475,9 @@ function HomeContent(): React.JSX.Element {
   }, [router]);
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [displayName, setDisplayName] = useState("");
   const [user, setUser] = useState<SessionUser | null>(null);
-  const [clientAccessState, setClientAccessState] = useState<ClientAccessState>("checking");
+  const [clientAccessState, setClientAccessState] = useState<ClientAccessState>(
+    CLIENT_ACCESS_REQUIRED ? "checking" : "allowed"
+  );
   // Two error states on purpose:
   //   - `error` is the global / compose-adjacent surface. It catches auth,
   //     sidebar actions (switch provider, theme, delete chat), and chat send
@@ -5916,6 +6496,12 @@ function HomeContent(): React.JSX.Element {
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [draft, setDraft] = useState("");
   const [composerPrimed, setComposerPrimed] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
+  /** Quick-replies after “Talk to me!”; scoped to `conversationId` so thread switches cannot show stale chips. */
+  const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
+    conversationId: string;
+    prompts: string[];
+  } | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [openAiKey, setOpenAiKey] = useState("");
@@ -5945,7 +6531,11 @@ function HomeContent(): React.JSX.Element {
     message: Message;
     x: number;
     y: number;
+    anchor: MessageMenuAnchor;
   } | null>(null);
+  const [mobileFocusedMessageId, setMobileFocusedMessageId] = useState<string | null>(null);
+  /** Message-actions popover (`role="menu"`) root for tap-outside + touch dismiss. */
+  const messageActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const revealMessageModel = useCallback((id: string) => {
     if (modelRevealTimerRef.current) {
       clearTimeout(modelRevealTimerRef.current);
@@ -5970,6 +6560,9 @@ function HomeContent(): React.JSX.Element {
   const [botPanelLibraryEnabled, setBotPanelLibraryEnabled] = useState(true);
   const botLibraryCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /** Memories / Edit bot / Export / Delete overflow — mirrors ☰ toggle styling on mobile. */
+  const [chatOverflowMenuOpen, setChatOverflowMenuOpen] = useState(false);
+  const chatOverflowMenuRef = useRef<HTMLDivElement>(null);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [devToolsBusy, setDevToolsBusy] = useState(false);
   const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
@@ -6025,7 +6618,8 @@ function HomeContent(): React.JSX.Element {
   // client-held: the server returns an in-memory detail but never creates a
   // conversation row or message history. Sandbox can arm the same path from
   // its sidebar, but private sends route through the Chat-mode server
-  // contract so they still mean no memory + Default persona.
+  // contract so they still mean no memory/no history while preserving
+  // the selected bot as prompt identity.
   const [pendingIncognito, setPendingIncognito] = useState(false);
   // Pending mid-thread bot switch for the OPEN Chat-mode conversation.
   // Three-valued so the dropdown can distinguish "match the server's
@@ -6103,7 +6697,6 @@ function HomeContent(): React.JSX.Element {
   // block delete and vice versa). Auto-disarms on the same window.
   const [pendingResendId, setPendingResendId] = useState<string | null>(null);
   const pendingResendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const starterSubmitPointerDownRef = useRef(false);
   // Hold-to-delete-all gesture: `holdingKey` tracks which button is currently
   // being pressed, which the CSS keys off (via `data-holding`) to light up
   // the held × / header button AND — through the list-level
@@ -6141,6 +6734,7 @@ function HomeContent(): React.JSX.Element {
   // Sentinel at the tail of the message stream. The scroll effect brings it
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
   // Bot currently being hover-PREVIEWED in the Chat-mode empty-state
   // picker. Desktop-only: set by onPointerEnter with pointerType mouse,
@@ -6159,9 +6753,10 @@ function HomeContent(): React.JSX.Element {
   const botPickerReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const botPickerReturnEndAtRef = useRef(0);
   const lastBotPickerPointerTypeRef = useRef<string | null>(null);
+  const sidebarEdgeSwipeRef = useRef<SidebarEdgeSwipeState | null>(null);
   const emptyStateSearchInputRef = useRef<HTMLInputElement | null>(null);
   const emptyStateSearchRef = useRef<HTMLDivElement | null>(null);
-  const draftInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const draftComposerRef = useRef<ComposerInputHandle | null>(null);
   const emptyStateSearchOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const HOVER_DWELL_MS = 180;
   // Theme preference used before a user has logged in (or when the user
@@ -6171,6 +6766,91 @@ function HomeContent(): React.JSX.Element {
   const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
   const viewportWidth = useViewportWidth();
   const viewportHeight = useViewportHeight();
+  const mobileKeyboardInset = useMobileKeyboardInset(
+    composerFocused && viewportWidth <= PICKER_MOBILE_BREAKPOINT
+  );
+  useEffect(() => {
+    if (sidebarOpen || panel !== null) setChatOverflowMenuOpen(false);
+  }, [sidebarOpen, panel]);
+
+  useEffect(() => {
+    setChatOverflowMenuOpen(false);
+  }, [detail?.id]);
+
+  useEffect(() => {
+    if (!chatOverflowMenuOpen) return;
+    function onDocMouseDown(event: MouseEvent) {
+      const root = chatOverflowMenuRef.current;
+      if (!root?.contains(event.target as Node)) {
+        setChatOverflowMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [chatOverflowMenuOpen]);
+
+  useEffect(() => {
+    if (!chatOverflowMenuOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setChatOverflowMenuOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chatOverflowMenuOpen]);
+
+  const beginSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    if (viewportWidth > PICKER_MOBILE_BREAKPOINT) return;
+    if (sidebarOpen || panel !== null) return;
+    if (event.touches.length !== 1) return;
+
+    const touch = event.touches[0];
+    if (touch.clientX > MOBILE_SIDEBAR_SWIPE_EDGE_PX) return;
+
+    sidebarEdgeSwipeRef.current = {
+      touchId: touch.identifier,
+      startX: touch.clientX,
+      startY: touch.clientY,
+    };
+  }, [panel, sidebarOpen, viewportWidth]);
+
+  const continueSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    const swipe = sidebarEdgeSwipeRef.current;
+    if (!swipe) return;
+
+    const touch = Array.from(event.touches).find(
+      candidate => candidate.identifier === swipe.touchId
+    );
+    if (!touch) return;
+
+    const dx = touch.clientX - swipe.startX;
+    const dy = Math.abs(touch.clientY - swipe.startY);
+
+    if (dx < 0 || (dy > MOBILE_SIDEBAR_SWIPE_VERTICAL_CANCEL_PX && dy > dx)) {
+      sidebarEdgeSwipeRef.current = null;
+      return;
+    }
+
+    if (
+      dx >= MOBILE_SIDEBAR_SWIPE_OPEN_PX &&
+      dx > dy * MOBILE_SIDEBAR_SWIPE_DIRECTION_RATIO
+    ) {
+      event.preventDefault();
+      sidebarEdgeSwipeRef.current = null;
+      setSidebarOpen(true);
+    }
+  }, []);
+
+  const endSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    const swipe = sidebarEdgeSwipeRef.current;
+    if (!swipe) return;
+
+    const touchEnded = Array.from(event.changedTouches).some(
+      candidate => candidate.identifier === swipe.touchId
+    );
+    if (touchEnded) {
+      sidebarEdgeSwipeRef.current = null;
+    }
+  }, []);
   const startDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const panel = devToolsPanelRef.current;
@@ -6329,15 +7009,17 @@ function HomeContent(): React.JSX.Element {
     };
   }, []);
 
-  // The empty-message "Talk to me!" affordance should only stay armed while
-  // the user is still interacting with the composer or starter bot picker.
+  // Starter "hello" intent (composerPrimed) disarms on outside taps — keep
+  // hero / compose / picker surfaces from clearing each other accidentally.
   useEffect(() => {
     if (!composerPrimed) return;
     function handlePointerDown(event: PointerEvent) {
       const target = event.target;
       if (
         target instanceof Element &&
-        target.closest("[data-starter-compose-surface='true'], [data-starter-bot-affordance='true']")
+        target.closest(
+          "[data-starter-compose-surface='true'], [data-starter-bot-affordance='true'], [data-bot-talk-hero='true']"
+        )
       ) {
         return;
       }
@@ -6480,11 +7162,10 @@ function HomeContent(): React.JSX.Element {
   //   5. The empty-state picker's `hoveredBotId` — the mouse-preview bot.
   //   6. Null — falls through to the PRISM home/default identity.
   //
-  // Private chats (`detail.incognito === true`) force the accent OFF by
-  // resolving `activeBot` to null regardless of the persisted bot. This
-  // is the "B&W only" clause of the private-chat spec — the bot glyph is
-  // still available to the empty state via the brand-mark fallback, but
-  // no hue ever bleeds into the shell variables.
+  // Private chats with Default/Prism still resolve to null for the monochrome
+  // Prism treatment. Private chats with a selected custom bot keep that bot
+  // for prompt identity and subdued visual identity; memory/history isolation
+  // is handled by the incognito request path, not by hiding the bot.
   //
   const privateChatActive = detail?.incognito === true || pendingIncognito;
 
@@ -6493,7 +7174,10 @@ function HomeContent(): React.JSX.Element {
     explicitDefault: boolean;
   }>(() => {
     if (privateChatActive) {
-      return { botId: null, explicitDefault: false };
+      return {
+        botId: detail?.botId ?? selectedBotId,
+        explicitDefault: false,
+      };
     }
     if (view === "sandbox") {
       if (detail) {
@@ -6534,6 +7218,7 @@ function HomeContent(): React.JSX.Element {
     bots,
     visualBotSelection.botId,
   ]);
+  const privateCustomBotActive = privateChatActive && activeBot !== null;
 
   const defaultConversationUsesPrismIdentity =
     !privateChatActive &&
@@ -6550,7 +7235,7 @@ function HomeContent(): React.JSX.Element {
   }, [activeBot, resolvedTheme]);
 
   const composeBotAccentId = useMemo<string | null>(() => {
-    if (privateChatActive) return null;
+    if (privateChatActive) return detail?.botId ?? selectedBotId;
     if (view === "chat") {
       if (chatBotOverride !== undefined) return chatBotOverride;
       if (detail) return detail.botId;
@@ -6565,48 +7250,52 @@ function HomeContent(): React.JSX.Element {
   ]);
 
   const selectedComposeBotAccent = useMemo<string | null>(() => {
-    if (privateChatActive) return null;
     const raw = composeBotAccentId
       ? bots.find((bot) => bot.id === composeBotAccentId)?.color?.trim()
       : null;
     return raw ? normalizeAccentForTheme(raw, resolvedTheme) : null;
-  }, [bots, composeBotAccentId, privateChatActive, resolvedTheme]);
+  }, [bots, composeBotAccentId, resolvedTheme]);
 
-  const composeStyle = selectedComposeBotAccent
-    ? ({ "--compose-bot-color": selectedComposeBotAccent } as React.CSSProperties)
-    : undefined;
+  const composeStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!selectedComposeBotAccent && mobileKeyboardInset <= 0) return undefined;
+    const style = {} as React.CSSProperties & Record<string, string>;
+    if (selectedComposeBotAccent) {
+      style["--compose-bot-color"] = selectedComposeBotAccent;
+    }
+    if (mobileKeyboardInset > 0) {
+      style["--compose-keyboard-inset"] = `${mobileKeyboardInset}px`;
+    }
+    return style;
+  }, [mobileKeyboardInset, selectedComposeBotAccent]);
 
-  // Bot that "owns" the currently-open Chat-mode conversation — used to
-  // render the in-stream intro (glyph + name + description) that sits
-  // above the first message and scrolls out naturally as messages pile
-  // up. Prefer the live bot row (gives us system_prompt for the
-  // description preview), and fall back to whatever bot metadata the
-  // first assistant message was joined with so deleted bots still show
-  // a usable intro instead of a ghost row.
-  const conversationBot = useMemo<Bot | null>(() => {
-    if (view !== "chat") return null;
-    if (!detail?.botId) return null;
-    if (detail.incognito) return null;
-    const live = bots.find(b => b.id === detail.botId);
-    if (live) return live;
-    const firstAssistant = detail.messages.find(
-      m => m.role === "assistant" && (m.botName || m.botColor || m.botGlyph)
-    );
-    if (!firstAssistant?.botName) return null;
+  const privateChatButtonStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!selectedComposeBotAccent) return undefined;
     return {
-      id: detail.botId,
-      name: firstAssistant.botName,
-      system_prompt: "",
-      model: null,
-      local_model: null,
-      online_model: null,
-      temperature: 0,
-      max_tokens: 0,
-      chat_enabled: 1,
-      color: firstAssistant.botColor ?? null,
-      glyph: firstAssistant.botGlyph ?? null,
+      ["--private-chat-color" as string]: selectedComposeBotAccent,
     };
-  }, [view, detail?.botId, detail?.incognito, detail?.messages, bots]);
+  }, [selectedComposeBotAccent]);
+
+  /** Normalized hue for user ink + mobile focus ring fallback (any mode with a thread bot). */
+  const threadConversationAccentInk = useMemo(() => {
+    if (!detail || detail.incognito) return undefined;
+    const liveBot = detail.botId ? bots.find((b) => b.id === detail.botId) : undefined;
+    const fromLive = liveBot?.color?.trim();
+    const fromAssistant = detail.messages.find((m) => m.role === "assistant" && m.botColor?.trim());
+    const raw = fromLive ?? fromAssistant?.botColor?.trim();
+    if (!raw) return undefined;
+    return normalizeAccentForTheme(raw, resolvedTheme);
+  }, [detail, bots, resolvedTheme]);
+
+  const deriveMobileMessageFocusAccent = useCallback(
+    (msg: Message): string => {
+      if (!detail?.incognito && msg.role === "assistant" && msg.botColor?.trim()) {
+        return normalizeAccentForTheme(msg.botColor.trim(), resolvedTheme);
+      }
+      if (threadConversationAccentInk) return threadConversationAccentInk;
+      return resolvedTheme === "light" ? "#312b24" : "#d7cfc3";
+    },
+    [detail?.incognito, resolvedTheme, threadConversationAccentInk]
+  );
 
   const headerIdentity = useMemo<{
     name: string;
@@ -6754,15 +7443,47 @@ function HomeContent(): React.JSX.Element {
   );
   const pickerSourceBots = bots;
 
-  // Hue lens filters the large empty-state picker before a thread begins.
-  // Once a chat has messages, the composer popout receives the raw bot
-  // list and treats the hue value as a scroll/focus target instead, so
-  // other colors remain visible.
+  const hueLensTrackSegments = useMemo(
+    () => computeHueLensTrackSegments(pickerSourceBots),
+    [pickerSourceBots]
+  );
+  const hueLensFilterableBotCount = useMemo(
+    () => pickerSourceBots.filter(botHasFilterableColor).length,
+    [pickerSourceBots]
+  );
+  const hueLensWindowCapacity =
+    viewportWidth > PICKER_MOBILE_BREAKPOINT
+      ? HUE_RIBBON_DESKTOP_COLUMNS * HUE_RIBBON_DESKTOP_ROWS
+      : HUE_RIBBON_MOBILE_COLUMNS * HUE_RIBBON_MOBILE_ROWS;
+  // Active hue lens turns the large empty-state picker into a moving
+  // window over a circular hue-sorted ribbon. Once a chat has messages,
+  // the composer popout receives the raw bot list and treats the hue
+  // value as a scroll/focus target instead, so other colors remain visible.
   const normalizedEmptyStateBotNameFilter =
     emptyStateBotNameFilter.trim().toLocaleLowerCase();
   const filteredBots = useMemo(
     () => {
-      const hueFilteredBots = filterBotsByHue(pickerSourceBots, hueFilterCenter);
+      const hueLensActive = hueFilterCenter !== null;
+      const isDesktopViewport = viewportWidth > PICKER_MOBILE_BREAKPOINT;
+      const hueLensPreferredRows = !hueLensActive
+        ? undefined
+        : isDesktopViewport
+          ? HUE_RIBBON_DESKTOP_ROWS
+          : HUE_RIBBON_MOBILE_ROWS;
+      const hueLensPreferredCols = !hueLensActive
+        ? undefined
+        : isDesktopViewport
+          ? HUE_RIBBON_DESKTOP_COLUMNS
+          : HUE_RIBBON_MOBILE_COLUMNS;
+      const hueFilteredBots = hueRibbonWindowBots(
+        pickerSourceBots,
+        hueFilterCenter,
+        hueLensTrackSegments,
+        viewportWidth,
+        viewportHeight,
+        hueLensPreferredRows,
+        hueLensPreferredCols
+      );
       if (normalizedEmptyStateBotNameFilter.length === 0) {
         return hueFilteredBots;
       }
@@ -6770,22 +7491,40 @@ function HomeContent(): React.JSX.Element {
         bot.name.toLocaleLowerCase().includes(normalizedEmptyStateBotNameFilter)
       );
     },
-    [pickerSourceBots, hueFilterCenter, normalizedEmptyStateBotNameFilter]
+    [
+      pickerSourceBots,
+      hueFilterCenter,
+      hueLensTrackSegments,
+      normalizedEmptyStateBotNameFilter,
+      viewportWidth,
+      viewportHeight,
+    ]
   );
+  const activeHueLensGridOptions = useMemo<PickerGeometryOptions>(() => {
+    if (hueFilterCenter === null) return { balanceOddRows: true };
+    const isDesktopViewport = viewportWidth > PICKER_MOBILE_BREAKPOINT;
+    return {
+      balanceOddRows: false,
+      preferredRows: isDesktopViewport
+        ? HUE_RIBBON_DESKTOP_ROWS
+        : HUE_RIBBON_MOBILE_ROWS,
+      preferredCols: isDesktopViewport
+        ? HUE_RIBBON_DESKTOP_COLUMNS
+        : HUE_RIBBON_MOBILE_COLUMNS,
+    };
+  }, [hueFilterCenter, viewportWidth]);
   const emptyStateSearchActive =
     emptyStateSearchOpen || normalizedEmptyStateBotNameFilter.length > 0;
   const emptyStateTypingSearchAvailable =
     pickerSourceBots.length > 0 &&
     (!detail || detail.messages.length === 0) &&
     !privateChatActive;
-  const hueLensTrackSegments = useMemo(
-    () => computeHueLensTrackSegments(pickerSourceBots),
-    [pickerSourceBots]
-  );
-  // A single color category has nothing useful to filter between, even
-  // when several bots sit inside that category. Hide the lens until at
-  // least two PRISM families are represented.
-  const hueLensAvailable = hueLensTrackSegments.length > 1;
+  // Hide the lens until it can actually reveal hidden color territory.
+  // If every filterable bot already fits in the active ribbon window,
+  // the slider is decorative friction rather than useful navigation.
+  const hueLensAvailable =
+    hueLensTrackSegments.length > 1 &&
+    hueLensFilterableBotCount > hueLensWindowCapacity;
   const hueFilterActive = hueFilterCenter !== null;
   const hueLensTrackGradient = useMemo(
     () => hueLensGradient(hueLensTrackSegments),
@@ -6817,6 +7556,8 @@ function HomeContent(): React.JSX.Element {
   //     thread chat, hover preview. Lens-driven hue (the existing
   //     `var(--accent)` orb behavior).
   const activeConversationIsEmpty = !detail || detail.messages.length === 0;
+  /** Plain textarea only — rich markdown compose (TipTap) is off everywhere. */
+  const composerMarkdownEditorEnabled = false;
   const messagesFrameMode = useMemo<"private" | "home" | "engaged">(() => {
     if (privateChatActive) return "private";
     if (defaultConversationUsesPrismIdentity) return "home";
@@ -7010,6 +7751,10 @@ function HomeContent(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
+    if (!CLIENT_ACCESS_REQUIRED) {
+      setClientAccessState("allowed");
+      return;
+    }
     let cancelled = false;
     async function validateClientAccess(): Promise<void> {
       try {
@@ -7051,7 +7796,18 @@ function HomeContent(): React.JSX.Element {
   //   - the visible typing indicator toggles on/off
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-  }, [detail?.id, detail?.messages.length, pendingReplyVisible]);
+  }, [
+    detail?.id,
+    detail?.messages.length,
+    pendingReplyVisible,
+  ]);
+
+  useEffect(() => {
+    if (viewportWidth > PICKER_MOBILE_BREAKPOINT) {
+      setMobileFocusedMessageId(null);
+      setMessageContextMenu(null);
+    }
+  }, [viewportWidth]);
 
   // Drop any pending mid-thread bot override whenever the open
   // conversation changes OR the post-auth surface flips. Without this,
@@ -7205,8 +7961,8 @@ function HomeContent(): React.JSX.Element {
   //     the in-memory session without writing rows.
   //   - Sandbox: regular sends keep the existing per-send bot picker and
   //     thread-only memory behavior. Private sends intentionally reuse the
-  //     Chat-mode incognito contract so they stay ephemeral/no-memory/default
-  //     persona in one known path.
+  //     Chat-mode incognito contract so they stay ephemeral/no-memory while
+  //     keeping the selected bot as prompt identity.
   function buildChatRequestBody(
     message: string,
     options: { starterPrompt?: boolean; ephemeralMessages?: Message[] } = {}
@@ -7247,11 +8003,12 @@ function HomeContent(): React.JSX.Element {
       ...(options.starterPrompt ? { starterPrompt: true } : {}),
       mode,
       // Chat mode ALWAYS sends botId (string or null) so the server can
-      // persist mid-thread switches. Private sends also send null so no
-      // Sandbox bot pick can leak into an incognito conversation. Regular
-      // Sandbox keeps the legacy "undefined drops the key" behavior since
-      // its bot picks never write back to conversations.bot_id.
-      botId: privateForSend ? null : isChatMode ? chatBotId : (selectedBotId ?? undefined),
+      // persist mid-thread switches. Private sends also send botId, but the
+      // server treats it as prompt identity only: no conversation/message rows,
+      // memory writes, or summaries are created. Regular Sandbox keeps the
+      // legacy "undefined drops the key" behavior since its bot picks never
+      // write back to conversations.bot_id.
+      botId: isChatMode || privateForSend ? chatBotId : (selectedBotId ?? undefined),
       ...(mode === "chat" ? { incognito: privateForSend } : {}),
       ...(privateForSend
         ? { ephemeralMessages: options.ephemeralMessages ?? detail?.messages ?? [] }
@@ -7272,6 +8029,10 @@ function HomeContent(): React.JSX.Element {
       options.starterPrompt === true &&
       (!detail || detail.messages.length === 0);
     if ((!trimmed && !isStarterPrompt) || pendingReply) return;
+    // Any typed/chosen follow-up supersedes the starter quick-replies row.
+    if (!isStarterPrompt) {
+      setConversationStarterPrompts(null);
+    }
     const requestConversationId =
       detail?.id && detail.id !== "pending"
         ? detail.id
@@ -7286,12 +8047,11 @@ function HomeContent(): React.JSX.Element {
     const previousDetail = detail;
     const previousPendingIncognito = pendingIncognito;
     const optimisticIncognito = detail?.incognito === true || pendingIncognito;
-    const optimisticBotId = optimisticIncognito
-      ? null
-      : detail?.botId ?? (view === "chat" ? selectedBotId ?? null : null);
-    const optimisticLastBotId = optimisticIncognito
-      ? null
-      : detail?.lastBotId ?? (view === "sandbox" ? selectedBotId ?? null : optimisticBotId);
+    const optimisticBotId =
+      detail?.botId ?? ((view === "chat" || optimisticIncognito) ? selectedBotId ?? null : null);
+    const optimisticLastBotId =
+      detail?.lastBotId ??
+      (view === "sandbox" && !optimisticIncognito ? selectedBotId ?? null : optimisticBotId);
     const optimisticLastBotColor =
       detail?.lastBotColor
       ?? (optimisticLastBotId
@@ -7346,7 +8106,7 @@ function HomeContent(): React.JSX.Element {
     setDraft("");
 
     try {
-      const d = await api<{ conversation: ConversationDetail }>("/api/chat", {
+      const d = await api<ChatPostEnvelope>("/api/chat", {
         method: "POST",
         body: JSON.stringify(
           buildChatRequestBody(isStarterPrompt ? "" : trimmed, {
@@ -7383,6 +8143,19 @@ function HomeContent(): React.JSX.Element {
             ? previous
             : [...previous, d.conversation.id]
         );
+      }
+      if (stillViewingRequest && isStarterPrompt) {
+        if (
+          Array.isArray(d.conversationStarters) &&
+          d.conversationStarters.length >= 3
+        ) {
+          setConversationStarterPrompts({
+            conversationId: d.conversation.id,
+            prompts: d.conversationStarters.slice(0, 4),
+          });
+        } else {
+          setConversationStarterPrompts(null);
+        }
       }
       // Pending private intent has now become the open detail returned by
       // the server. For private chats that detail is ephemeral, not a saved
@@ -7425,6 +8198,48 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  function handleConversationStarterPick(prompt: string): void {
+    setConversationStarterPrompts(null);
+    const syntheticSubmit = {
+      preventDefault: () => {
+        /* no-op — used so sendMessage can share the submit pathway */
+      },
+    } as React.FormEvent<HTMLFormElement>;
+    void sendMessage(syntheticSubmit, { draftOverride: prompt });
+  }
+
+  function renderConversationStarterRail(): React.ReactNode {
+    const ready =
+      conversationStarterPrompts &&
+      detail?.id !== undefined &&
+      detail.id !== "pending" &&
+      detail.id === conversationStarterPrompts.conversationId &&
+      conversationStarterPrompts.prompts.length > 0;
+    if (!ready || !conversationStarterPrompts) {
+      return null;
+    }
+    const { prompts } = conversationStarterPrompts;
+    return (
+      <div
+        role="group"
+        aria-label="Suggested replies"
+        className={styles.conversationStarterRail}
+      >
+        {prompts.map((prompt, chipIndex) => (
+          <button
+            key={`${prompt.slice(0, 48)}-${chipIndex}`}
+            type="button"
+            disabled={pendingReply}
+            className={styles.conversationStarterChip}
+            onClick={() => handleConversationStarterPick(prompt)}
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function isStarterPromptAvailable(value: string): boolean {
     return value.trim().length === 0 && (!detail || detail.messages.length === 0);
   }
@@ -7434,43 +8249,17 @@ function HomeContent(): React.JSX.Element {
   }
 
   function composerSubmitLabel(value: string): string {
-    if (value.trim().length > 0) return "Send";
-    return isStarterPromptReady(value) ? "Talk to me!" : "";
+    return value.trim().length > 0 ? "Send" : "";
   }
 
   function composerSubmitDisabled(value: string): boolean {
-    return pendingReply || (value.trim().length === 0 && !isStarterPromptReady(value));
-  }
-
-  function getSubmitter(event: React.FormEvent<HTMLFormElement>): HTMLElement | null {
-    const nativeEvent = event.nativeEvent;
-    if (!("submitter" in nativeEvent)) return null;
-    return nativeEvent.submitter instanceof HTMLElement ? nativeEvent.submitter : null;
+    return pendingReply || value.trim().length === 0;
   }
 
   function handleComposerSubmit(e: React.FormEvent<HTMLFormElement>) {
-    const submitter = getSubmitter(e);
-    const starterSubmitButtonClicked =
-      submitter?.dataset.starterSubmitButton === "true" &&
-      starterSubmitPointerDownRef.current;
-    starterSubmitPointerDownRef.current = false;
     void sendMessage(e, {
-      starterPrompt:
-        isStarterPromptReady(draft) ||
-        (starterSubmitButtonClicked && isStarterPromptAvailable(draft)),
+      starterPrompt: isStarterPromptReady(draft),
     });
-  }
-
-  function handleComposerSubmitButtonPointerDown() {
-    if (isStarterPromptReady(draft)) {
-      starterSubmitPointerDownRef.current = true;
-    }
-  }
-
-  function handleComposerSubmitButtonPointerUp() {
-    window.setTimeout(() => {
-      starterSubmitPointerDownRef.current = false;
-    }, 0);
   }
 
   const primeStarterComposer = useCallback((value: string) => {
@@ -7479,41 +8268,70 @@ function HomeContent(): React.JSX.Element {
     }
   }, [detail]);
 
-  function handleComposerChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const nextDraft = e.currentTarget.value;
-    const wasFilled = draft.trim().length > 0;
+  function updateComposerDraft(nextDraft: string) {
     setDraft(nextDraft);
-    if (wasFilled && nextDraft.trim().length === 0) {
-      primeStarterComposer(nextDraft);
-    }
+  }
+
+  function handleComposerChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    updateComposerDraft(e.currentTarget.value);
   }
 
   function handleComposerFocus() {
+    setComposerFocused(true);
     setHoveredBotId(null);
-    primeStarterComposer(draft);
   }
 
   function handleComposerBlur(e: React.FocusEvent<HTMLFormElement>) {
-    if (starterSubmitPointerDownRef.current) return;
     const nextFocus = e.relatedTarget;
     if (nextFocus instanceof Node && e.currentTarget.contains(nextFocus)) return;
+    setComposerFocused(false);
     setComposerPrimed(false);
   }
 
   function handleComposerKeyDown(e: React.KeyboardEvent<HTMLFormElement>) {
     if (e.key !== "Enter" || e.shiftKey) return;
-    if (!(e.target instanceof HTMLTextAreaElement)) return;
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    const fromMarkdownEditor = target.closest("[data-markdown-cm-host='true']") !== null;
+    const fromPlainTextarea = target instanceof HTMLTextAreaElement;
+    if (!fromMarkdownEditor && !fromPlainTextarea) return;
     e.preventDefault();
     void sendMessage(e, {
-      draftOverride: e.target.value,
-      starterPrompt: isStarterPromptAvailable(e.target.value),
+      starterPrompt: isStarterPromptReady(draft),
     });
   }
 
+  /** Narrow screens omit the Send pill while empty — IME “send” / Enter submits. */
+  const hideMobileEmptySend =
+    viewportWidth <= PICKER_MOBILE_BREAKPOINT && draft.trim().length === 0;
+
   function startFreshConversation(privateMode: boolean) {
+    const normalStarterBotId = detail ? null : selectedBotId;
+    const privateStarterBotId = privateMode
+      ? chatBotOverride !== undefined
+        ? chatBotOverride
+        : detail?.botId ?? selectedBotId
+      : null;
+    const starterBotId = privateMode ? privateStarterBotId : normalStarterBotId;
+    // A selected Chat-mode bot should leave the picker surface immediately;
+    // the real saved conversation is still created by the first send.
+    const draftConversation: ConversationDetail | null =
+      view === "chat" && !privateMode && starterBotId
+        ? {
+            id: "pending",
+            title: "New chat",
+            botId: starterBotId,
+            incognito: false,
+            lastBotId: starterBotId,
+            lastBotColor: bots.find((bot) => bot.id === starterBotId)?.color ?? null,
+            hasAssistantReply: false,
+            messages: [],
+          }
+        : null;
+    setConversationStarterPrompts(null);
     setSelectedId(null);
-    setDetail(null);
-    setSelectedBotId(null);
+    setDetail(draftConversation);
+    setSelectedBotId(starterBotId);
     setHoveredBotId(null);
     setChatBotOverride(undefined);
     closeEmptyStateBotSearch();
@@ -7531,8 +8349,28 @@ function HomeContent(): React.JSX.Element {
   }
 
   function resetChatHeaderToNewChat() {
+    if (!detail && (selectedBotId !== null || hoveredBotId !== null)) {
+      resetEmptyStateToPrismHome();
+      setComposerPrimed(false);
+      return;
+    }
     startFreshConversation(false);
     setComposerPrimed(false);
+  }
+
+  /** Click-to-start: dispatches a starter prompt request as if the user typed
+   *  nothing and submitted. The bot (or default Prism) opens the conversation
+   *  with its own first message. */
+  function handleHeroStartConversation(
+    event: React.MouseEvent<HTMLButtonElement>
+  ): void {
+    event.stopPropagation();
+    if (pendingReply) return;
+    if (!isStarterPromptAvailable(draft)) return;
+    void sendMessage(
+      { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>,
+      { starterPrompt: true }
+    );
   }
 
   function resetChatHeaderToSpotlight() {
@@ -7711,13 +8549,62 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  const openMessageContextMenu = useCallback((msg: Message, x: number, y: number) => {
-    setMessageContextMenu({
-      message: msg,
-      x: Math.min(Math.max(x, 88), window.innerWidth - 88),
-      y: Math.min(Math.max(y, 96), window.innerHeight - 96),
-    });
+  const closeMessageContextOverlay = useCallback(() => {
+    setMessageContextMenu(null);
+    setMobileFocusedMessageId(null);
+    setModelRevealMessageId(null);
   }, []);
+
+  // Mobile spotlight: backdrop is visually present but ignores pointer-events so the
+  // focused bubble stays tappable; we dismiss on taps outside bubble + menu.
+  useEffect(() => {
+    if (!mobileFocusedMessageId || !messageContextMenu) return;
+    const onPointerDownCapture = (event: PointerEvent) => {
+      const node = event.target as Node | null;
+      const menuRoot = messageActionsMenuRef.current;
+      if (node && menuRoot?.contains(node)) return;
+      const focusRoot =
+        typeof document !== "undefined"
+          ? document.querySelector("[data-msg-mobile-focus-root='true']")
+          : null;
+      if (node && focusRoot?.contains(node)) return;
+      closeMessageContextOverlay();
+    };
+    document.addEventListener("pointerdown", onPointerDownCapture, true);
+    return () =>
+      document.removeEventListener("pointerdown", onPointerDownCapture, true);
+  }, [mobileFocusedMessageId, messageContextMenu, closeMessageContextOverlay]);
+
+  const openMessageContextMenu = useCallback(
+    (
+      msg: Message,
+      x: number,
+      y: number,
+      opts?: {
+        anchor?: MessageMenuAnchor;
+        mobileActivate?: boolean;
+      }
+    ) => {
+      const anchor: MessageMenuAnchor = opts?.anchor ?? "center";
+      const minY = anchor === "below" ? 64 : 96;
+      const maxY = anchor === "below" ? window.innerHeight - 120 : window.innerHeight - 96;
+      setMessageContextMenu({
+        message: msg,
+        x: Math.min(Math.max(x, 88), window.innerWidth - 88),
+        y: Math.min(Math.max(y, minY), maxY),
+        anchor,
+      });
+
+      const vpMobile = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
+      if (opts?.mobileActivate && vpMobile) {
+        setMobileFocusedMessageId(msg.id);
+        if (msg.role === "assistant") {
+          setModelRevealMessageId(msg.id);
+        }
+      }
+    },
+    [viewportWidth]
+  );
 
   // Rewind this conversation to just before `msg`, then resubmit its
   // original text through the normal /api/chat pipeline so whatever bot
@@ -7739,7 +8626,7 @@ function HomeContent(): React.JSX.Element {
   //      sees their history (the server's transaction rolls back too
   //      if step 2 threw).
   async function resendFromMessage(msg: Message): Promise<void> {
-    setMessageContextMenu(null);
+    closeMessageContextOverlay();
     disarmResend();
     if (!selectedId) return;
     if (pendingReply) return;
@@ -7760,7 +8647,7 @@ function HomeContent(): React.JSX.Element {
     try {
       if (previousDetail.incognito) {
         const rewoundMessages = previousDetail.messages.slice(0, cutoffIdx);
-        const d = await api<{ conversation: ConversationDetail }>("/api/chat", {
+        const d = await api<ChatPostEnvelope>("/api/chat", {
           method: "POST",
           body: JSON.stringify(
             buildChatRequestBody(msg.content, {
@@ -7779,7 +8666,7 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify({ messageId: msg.id }),
         }
       );
-      const d = await api<{ conversation: ConversationDetail }>("/api/chat", {
+      const d = await api<ChatPostEnvelope>("/api/chat", {
         method: "POST",
         body: JSON.stringify(buildChatRequestBody(rewind.message)),
       });
@@ -7872,10 +8759,21 @@ function HomeContent(): React.JSX.Element {
     setEmptyStateBotNameFilter("");
   }, [cancelPendingEmptyStateSearchOpen]);
 
+  function resetEmptyStateToPrismHome(): void {
+    closeEmptyStateBotSearch();
+    resetEmptyStateBotSelection();
+    setPendingIncognito(false);
+    if (hueFilterCenter !== null) {
+      startBotPickerReturnToAll();
+    } else {
+      setHueFilterCenter(null);
+    }
+  }
+
   const focusDraftInput = useCallback(() => {
     setHoveredBotId(null);
     window.setTimeout(() => {
-      draftInputRef.current?.focus({ preventScroll: true });
+      draftComposerRef.current?.focus({ preventScroll: true });
     }, 0);
   }, []);
 
@@ -7894,9 +8792,8 @@ function HomeContent(): React.JSX.Element {
     setHoveredBotId(null);
     setEmptyStateSearchOpen(false);
     setEmptyStateBotNameFilter("");
-    primeStarterComposer(draft);
     focusDraftInput();
-  }, [cancelPendingEmptyStateSearchOpen, draft, focusDraftInput, primeStarterComposer]);
+  }, [cancelPendingEmptyStateSearchOpen, focusDraftInput]);
 
   const openEmptyStateBotSearchFromTyping = useCallback((typedCharacter: string) => {
     cancelPendingEmptyStateSearchOpen();
@@ -8019,17 +8916,30 @@ function HomeContent(): React.JSX.Element {
     return () => document.removeEventListener("click", handleDocumentClick);
   }, [closeEmptyStateBotSearch, emptyStateSearchActive]);
 
+  const relocateHueLensToBot = useCallback(
+    (botId: string, geom: PickerGeometry): boolean => {
+      if (emptyStateSearchActive || hueFilterCenter !== null) return false;
+      if (!pickerUsesHueNavigation(geom, viewportWidth)) return false;
+      const bot = pickerSourceBots.find((candidate) => candidate.id === botId);
+      if (!bot || !botHasFilterableColor(bot)) return false;
+      const { h } = hexToHsl(bot.color!.trim());
+      setHueFilterCenter(hueLensPositionForHue(h));
+      setSelectedBotId(null);
+      setHoveredBotId(null);
+      return true;
+    },
+    [emptyStateSearchActive, hueFilterCenter, pickerSourceBots, viewportWidth]
+  );
+
   // Touch keyboard-balloon handlers. Shared by both the Chat-mode and
   // Sandbox-mode empty-state picker frames. Active only when the gesture
-  // is genuine touch input AND the picker is at a high-density stage
-  // (`hideGlyphByDefault` true, i.e. stage 4 onward) where the glyph
-  // would normally be hidden and the user can't identify a tile by sight
-  // anymore. Below that stage the existing per-tile onClick path handles
-  // selection unchanged.
+  // is genuine touch input AND the picker is in hue-navigation territory:
+  // Stage 3+ on mobile, Stage 4+ elsewhere. The first tap zooms/snaps the
+  // hue lens; once narrowed, taps select individual bots again.
   const handleTouchPickerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, geom: PickerGeometry) => {
       if (event.pointerType !== "touch") return;
-      if (!geom.hideGlyphByDefault) return;
+      if (!pickerUsesHueNavigation(geom, viewportWidth)) return;
       // Capture so subsequent move/up events route here even if the
       // finger drifts off this element. Without capture, the user's
       // finger crossing into a child tile would lose the gesture.
@@ -8041,7 +8951,7 @@ function HomeContent(): React.JSX.Element {
         setHoveredBotId(botId);
       }
     },
-    []
+    [viewportWidth]
   );
 
   const handleTouchPickerMove = useCallback(
@@ -8055,11 +8965,14 @@ function HomeContent(): React.JSX.Element {
   );
 
   const handleTouchPickerUp = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
+    (event: React.PointerEvent<HTMLDivElement>, geom: PickerGeometry) => {
       if (event.pointerId !== touchPreviewPointerIdRef.current) return;
       const botId = findBotIdAtPoint(event.clientX, event.clientY);
       if (botId) {
-        commitEmptyStateBotSelection(botId);
+        const relocated = relocateHueLensToBot(botId, geom);
+        if (!relocated) {
+          commitEmptyStateBotSelection(botId);
+        }
       } else {
         // Released over a gap or off the picker — clear hover preview
         // so the hero/title don't keep showing the last touched bot.
@@ -8071,7 +8984,7 @@ function HomeContent(): React.JSX.Element {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
     },
-    [commitEmptyStateBotSelection]
+    [commitEmptyStateBotSelection, relocateHueLensToBot]
   );
 
   const handleTouchPickerCancel = useCallback(
@@ -8191,7 +9104,7 @@ function HomeContent(): React.JSX.Element {
     event.preventDefault();
 
     if (messageContextMenu) {
-      setMessageContextMenu(null);
+      closeMessageContextOverlay();
       return;
     }
     if (pendingDeleteKey) {
@@ -8218,14 +9131,6 @@ function HomeContent(): React.JSX.Element {
       closeEmptyStateBotSearch();
       return;
     }
-    if (detail || selectedId || pendingIncognito) {
-      setSelectedId(null);
-      setDetail(null);
-      setPendingIncognito(false);
-      setChatBotOverride(undefined);
-      setComposerPrimed(false);
-      return;
-    }
     if (selectedBotId !== null) {
       resetEmptyStateBotSelection();
       return;
@@ -8235,9 +9140,9 @@ function HomeContent(): React.JSX.Element {
     }
   }, [
     closeEmptyStateBotSearch,
+    closeMessageContextOverlay,
     closePanel,
     colorWheelOpen,
-    detail,
     disarmDelete,
     disarmResend,
     emptyStateSearchActive,
@@ -8245,11 +9150,9 @@ function HomeContent(): React.JSX.Element {
     messageContextMenu,
     panel,
     pendingDeleteKey,
-    pendingIncognito,
     pendingResendId,
     resetEmptyStateBotSelection,
     selectedBotId,
-    selectedId,
     sidebarOpen,
     startBotPickerReturnToAll,
   ]);
@@ -8668,6 +9571,7 @@ function HomeContent(): React.JSX.Element {
     if (batchSize <= 0) return;
 
     const names = sampleBotNames(batchSize);
+    const usedPrompts = new Set<string>();
     for (let start = 0; start < names.length; start += DEV_TOOLS_BOT_CREATE_CHUNK_SIZE) {
       const chunk = names.slice(start, start + DEV_TOOLS_BOT_CREATE_CHUNK_SIZE);
       await Promise.all(
@@ -8676,7 +9580,7 @@ function HomeContent(): React.JSX.Element {
             method: "POST",
             body: JSON.stringify({
               name,
-              systemPrompt: randomLoremIpsum(),
+              systemPrompt: randomBotSystemPrompt(usedPrompts),
               color: randomHex(),
               glyph: randomBotGlyph(),
             }),
@@ -9067,17 +9971,20 @@ function HomeContent(): React.JSX.Element {
   function renderMessageContextMenu(): React.JSX.Element | null {
     if (!messageContextMenu) return null;
     const msg = messageContextMenu.message;
-    const isUser = msg.role === "user";
+    const showFork = !detail?.incognito;
     return (
       <>
         <button
           type="button"
           className={styles.messageContextBackdrop}
           aria-label="Close message actions"
-          onClick={() => setMessageContextMenu(null)}
+          data-msg-focus-overlay={mobileFocusedMessageId ? "true" : undefined}
+          onClick={() => closeMessageContextOverlay()}
         />
         <div
+          ref={messageActionsMenuRef}
           className={styles.messageContextMenu}
+          data-anchor={messageContextMenu.anchor}
           style={{
             left: `${messageContextMenu.x}px`,
             top: `${messageContextMenu.y}px`,
@@ -9089,29 +9996,18 @@ function HomeContent(): React.JSX.Element {
             type="button"
             role="menuitem"
             onClick={() => {
-              setMessageContextMenu(null);
+              closeMessageContextOverlay();
               void copyMessageToClipboard(msg);
             }}
           >
             Copy
           </button>
-          {isUser ? (
+          {showFork && (
             <button
               type="button"
               role="menuitem"
               onClick={() => {
-                setMessageContextMenu(null);
-                void resendFromMessage(msg);
-              }}
-            >
-              Resend
-            </button>
-          ) : detail?.incognito ? null : (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setMessageContextMenu(null);
+                closeMessageContextOverlay();
                 void forkChat(msg.id);
               }}
             >
@@ -9352,38 +10248,160 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  // ── Header Delete button ─────────────────────────────────────────────
-  // Same hold-gesture contract as the sidebar × buttons (press-and-hold
-  // for 900 ms to arm a global delete-all), expressed on a text pill
-  // rather than a glyph. The button ITSELF only carries the
-  // "Delete" → "✓ Confirm" text swap for the single-chat flow; during a
-  // hold it glows (via `data-holding`), and once the threshold crosses
-  // it joins the sidebar ×'s in the iOS jiggle (via `data-shaking`)
-  // while the modal takes over the actual decision.
-  const renderHeaderDeleteButton = (currentChatId: string) => {
-    const isArmedSingle = pendingDeleteKey === HEADER_DELETE_KEY;
+  /** Conversation tools — Memories / Edit bot / Export / Delete.
+   *  Desktop renders inline in the chat header bar.
+   *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
+  const renderChatOverflowGear = (): React.JSX.Element | null => {
+    if (!detail && !activeBot) return null;
+    const gearHidden = sidebarOpen || panel !== null;
+    const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
+    const canBotActions = Boolean(activeBot);
+    const canExport = Boolean(detail && selectedId);
+    const canDelete = Boolean(detail && selectedId);
+    const isMobileGear = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
+
+    const closeMenu = () => setChatOverflowMenuOpen(false);
+
+    const handleMemories = () => {
+      closeMenu();
+      openActiveBotMemoriesPanel();
+    };
+    const handleEditBot = () => {
+      closeMenu();
+      openActiveBotCustomizer();
+    };
+    const handleExport = () => {
+      closeMenu();
+      void exportChat();
+    };
+    const handleDelete = () => {
+      if (!selectedId) return;
+      if (deleteArmed) {
+        void deleteConversation(selectedId);
+        closeMenu();
+      } else {
+        armDelete(HEADER_DELETE_KEY);
+        closeMenu();
+      }
+    };
+
+    if (!isMobileGear) {
+      // Desktop: surface the four actions directly in the chat header so
+      // there's no extra click to reach Memories / Edit bot / Export / Delete.
+      return (
+        <div
+          className={`${styles.chatHeaderActions} ${
+            gearHidden ? styles.chatHeaderActionsHidden : ""
+          }`}
+          aria-label="Conversation tools"
+        >
+          <button
+            type="button"
+            className={styles.chatHeaderAction}
+            disabled={!canBotActions}
+            onClick={handleMemories}
+            title="Bot memories"
+          >
+            Memories
+          </button>
+          <button
+            type="button"
+            className={styles.chatHeaderAction}
+            disabled={!canBotActions}
+            onClick={handleEditBot}
+            title="Edit bot"
+          >
+            Edit bot
+          </button>
+          <button
+            type="button"
+            className={styles.chatHeaderAction}
+            disabled={!canExport}
+            onClick={handleExport}
+            title="Export chat as Markdown"
+          >
+            Export .md
+          </button>
+          <button
+            type="button"
+            className={`${styles.chatHeaderAction} ${
+              deleteArmed ? styles.chatHeaderActionDanger : ""
+            }`}
+            disabled={!canDelete}
+            data-delete-affordance="true"
+            aria-label={
+              deleteArmed ? "Confirm delete this chat" : "Delete this chat"
+            }
+            title={deleteArmed ? "Tap to confirm" : "Delete chat"}
+            onClick={handleDelete}
+          >
+            {deleteArmed ? "✓ Confirm" : "Delete"}
+          </button>
+        </div>
+      );
+    }
 
     return (
-      <button
-        type="button"
-        className={isArmedSingle ? styles.headerDeleteArmed : styles.headerDelete}
-        data-delete-affordance="true"
-        aria-label={
-          isArmedSingle
-            ? "Confirm delete this chat"
-            : "Delete this chat"
-        }
-        title={isArmedSingle ? undefined : "Delete chat"}
-        onClick={() => {
-          if (isArmedSingle) {
-            void deleteConversation(currentChatId);
-          } else {
-            armDelete(HEADER_DELETE_KEY);
-          }
-        }}
+      <div
+        ref={chatOverflowMenuRef}
+        className={`${styles.chatGearAnchor} ${gearHidden ? styles.chatGearAnchorHidden : ""}`}
       >
-        {isArmedSingle ? "✓ Confirm" : "Delete"}
-      </button>
+        <button
+          type="button"
+          className={styles.chatGearButton}
+          aria-expanded={chatOverflowMenuOpen}
+          aria-haspopup="menu"
+          aria-label="Conversation tools menu"
+          title="Conversation tools"
+          onClick={() => setChatOverflowMenuOpen(open => !open)}
+        >
+          <WrenchGlyph />
+        </button>
+        {chatOverflowMenuOpen && (
+          <div className={styles.chatOverflowMenu} role="menu" aria-label="Conversation tools">
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.chatOverflowMenuItem}
+              disabled={!canBotActions}
+              onClick={handleMemories}
+            >
+              Memories
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.chatOverflowMenuItem}
+              disabled={!canBotActions}
+              onClick={handleEditBot}
+            >
+              Edit bot
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.chatOverflowMenuItem}
+              disabled={!canExport}
+              onClick={handleExport}
+            >
+              Export .md
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={`${styles.chatOverflowMenuItem} ${deleteArmed ? styles.chatOverflowMenuItemDanger : ""}`}
+              disabled={!canDelete}
+              data-delete-affordance="true"
+              aria-label={
+                deleteArmed ? "Confirm delete this chat" : "Delete this chat"
+              }
+              onClick={handleDelete}
+            >
+              {deleteArmed ? "✓ Confirm delete" : "Delete chat"}
+            </button>
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -10611,8 +11629,13 @@ function HomeContent(): React.JSX.Element {
     <main
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
+      data-accent-active={appShellStyle ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
+      onTouchStart={beginSidebarEdgeSwipe}
+      onTouchMove={continueSidebarEdgeSwipe}
+      onTouchEnd={endSidebarEdgeSwipe}
+      onTouchCancel={endSidebarEdgeSwipe}
     >
       {/* Hide the fixed hamburger whenever a drawer is open on either
           side — it otherwise pokes through the sidebar profile tile
@@ -10640,13 +11663,13 @@ function HomeContent(): React.JSX.Element {
             New chat
           </button>
           {/* Private chat = chat-mode-only sibling. One click seeds the
-              next send as { incognito: true } + clears any pending bot
-              pick so the monochrome private Prism persona renders. The
-              returned detail stays in memory only; no conversation row or
-              messages are saved. */}
+              next send as { incognito: true } and preserves the selected
+              bot as prompt identity. The returned detail stays in memory
+              only; no conversation row or messages are saved. */}
           <button
             type="button"
             className={`${styles.privateChatButton} ${pendingIncognito ? styles.privateChatButtonActive : ""}`}
+            style={privateChatButtonStyle}
             onClick={() => startFreshConversation(true)}
             aria-pressed={pendingIncognito}
             title="Private chat — no saved history or memory"
@@ -10751,7 +11774,10 @@ function HomeContent(): React.JSX.Element {
         </div>
       </aside>
 
-      <section className={styles.chatPane}>
+      <section
+        className={styles.chatPane}
+        data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
+      >
         <header className={styles.chatHeader}>
           <button
             type="button"
@@ -10763,6 +11789,7 @@ function HomeContent(): React.JSX.Element {
             {headerIdentity ? (
               <span
                 className={styles.headerIdentity}
+                data-private-bot={privateCustomBotActive ? "true" : undefined}
                 style={
                   headerIdentity.color
                     ? ({
@@ -10784,31 +11811,21 @@ function HomeContent(): React.JSX.Element {
             )}
           </button>
           <h2>{detail?.title ?? "New conversation"}</h2>
-          {activeBot && (
-            <button
-              type="button"
-              className={`${styles.badge} ${styles.memoryBadge}`}
-              onClick={openActiveBotMemoriesPanel}
-              aria-label={`Open ${activeBot.name} memories`}
-              title={`Open ${activeBot.name} memories`}
-            >
-              <span>MEMORIES</span>
-            </button>
-          )}
-          <div className={styles.headerActions}>
-            {detail && selectedId && renderHeaderDeleteButton(selectedId)}
-          </div>
+          {renderChatOverflowGear()}
         </header>
 
         <div
           className={styles.messagesFrame}
           data-mode={messagesFrameMode}
+          data-private-bot={privateCustomBotActive ? "true" : undefined}
           style={messagesFrameStyle}
         >
           <div
             className={`${styles.messages} ${
               !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
             }`}
+            ref={messagesScrollRef}
+            data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
           >
             {!detail && !pendingReplyVisible && (() => {
             // Chat-mode empty state:
@@ -10818,44 +11835,67 @@ function HomeContent(): React.JSX.Element {
             //     to the hovered bot's normalized color. Title still
             //     previews the bot, and the shell accent swaps to that bot.
             //   • ARMED — hero becomes the bot's full-color glyph, the
-            //     selected tile stays visible, and the hero turns into
-            //     click-to-deselect until the first message sends.
+            //     selected tile stays visible; tapping the hero primes the
+            //     starter hello + focuses compose (tap outside clears bot).
             // `activeBot` resolves the right bot (hover > armed >
             // persisted), so title/hint/shell just read from it. The hero
             // receives the hovered bot as a separate preview input so it
             // can stay Prism-branded until a click arms the bot.
-            // Density math runs against the FILTERED bot subset, not the
-            // full library. That's what lets the hue lens collapse a
-            // 3000-bot wall back into a low-density grid as soon as the
-            // user picks a hue band — the active stage follows what's
-            // visible, not what exists. Tiles are also placed in color
-            // order via `pickerBots` so the unfiltered grid trends
-            // toward a navigable color map.
+            // Density math runs against the visible bot window, not the
+            // full library. The hue lens pans that window over a circular
+            // hue-sorted ribbon so dense libraries move quickly while
+            // sparse libraries linger.
             const pickerGeom =
               !pendingIncognito && pickerBots.length > 0
-                ? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight)
+                ? pickerGeometry(
+                    pickerBots.length,
+                    viewportWidth,
+                    viewportHeight,
+                    activeHueLensGridOptions
+                  )
                 : null;
             const suppressHeroCopy =
               pickerGeom?.suppressMobileHeroCopy === true && !emptyStateSearchActive;
-            const isArmed =
-              !pendingIncognito &&
-              selectedBotId !== null &&
-              activeBot?.id === selectedBotId;
             const isPreviewing =
               !pendingIncognito && hoveredBotId !== null && activeBot?.id === hoveredBotId;
-            const heroBot = pendingIncognito ? null : activeBot;
+            const heroBot = activeBot;
+            const privateBotName = pendingIncognito ? heroBot?.name?.trim() : "";
             const title = pendingIncognito
-              ? "Private chat"
+              ? privateBotName
+                ? `Private chat with ${privateBotName}`
+                : "Private chat"
               : heroBot?.name?.trim() || "What\u2019s on your mind?";
             const descriptionPreview = heroBot
               ? firstLinesOf(heroBot.system_prompt)
               : "";
-            const hint = pendingIncognito
-              ? "No memories are saved."
-              : descriptionPreview ||
-                (bots.length > 0
-                  ? "Pick a bot below, or just start typing."
-                  : "Say anything. Prism keeps what matters and lets the rest go.");
+            const selectedBotPromptPreview =
+              !pendingIncognito && selectedBotId !== null && heroBot?.id === selectedBotId
+                ? descriptionPreview
+                : "";
+            // While the hue lens has zoomed into a color group AND nothing is
+            // armed/hovered yet, the hero is just a tinted Prism placeholder
+            // — tapping it would commit the user to a "start with default"
+            // conversation when their actual intent is "let me pick from this
+            // filtered group." Block the click + nudge them to pick a tile.
+            const heroLensPlaceholder =
+              hueFilterCenter !== null && !heroBot;
+            const heroStartLabel = pendingIncognito
+              ? privateBotName
+                ? `Tap the symbol above to begin a private chat with ${privateBotName}.`
+                : "Tap the symbol above to begin a private chat."
+              : heroLensPlaceholder
+                ? "Pick a bot from the filtered grid below to begin."
+                : heroBot?.name?.trim()
+                  ? `Tap the symbol above to have ${heroBot.name.trim()} start the conversation.`
+                  : bots.length > 0
+                    ? "Tap the symbol above to begin, or pick a bot below."
+                    : "Tap the symbol above to begin.";
+            const hint = (() => {
+              if (pendingIncognito) return `${heroStartLabel} No memories are saved.`;
+              if (selectedBotPromptPreview) return selectedBotPromptPreview;
+              if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
+              return heroStartLabel;
+            })();
             const emptyStateStyle = heroBot
               ? botAccentStyle(heroBot.color, resolvedTheme)
               : undefined;
@@ -10884,38 +11924,43 @@ function HomeContent(): React.JSX.Element {
                 resolvedTheme={resolvedTheme}
               />
             );
+            const heroStartDisabled =
+              pendingReply ||
+              !isStarterPromptAvailable(draft) ||
+              heroLensPlaceholder;
+            const heroStartTitle = heroLensPlaceholder
+              ? "Pick a bot from the filtered grid to begin"
+              : heroBot?.name?.trim()
+                ? `Tap to have ${heroBot.name.trim()} start the conversation`
+                : "Tap to start the conversation";
+            const heroStartAriaLabel = heroLensPlaceholder
+              ? "Pick a bot from the filtered grid to begin"
+              : heroBot?.name?.trim()
+                ? `Start conversation with ${heroBot.name.trim()}`
+                : "Start conversation";
             return (
               <div
                 className={emptyStateClassName}
                 style={emptyStateStyle}
                 onClick={handleEmptyStateBackgroundClick}
               >
-                {/* Hero is non-interactive until the user has armed
-                    a pick — then it becomes the single deselect
-                    affordance (click / tap returns to default). */}
-                {!suppressHeroCopy && (isArmed ? (
+                {/* Tap any hero (armed bot or default Prism) to dispatch a
+                    starter prompt — the bot opens the conversation with its
+                    own first message. Disabled mid-draft so accidental clicks
+                    don't drop the user's typed text. */}
+                {!suppressHeroCopy && (
                   <button
                     type="button"
                     className={styles.emptyStateIconButton}
-                    onClick={resetEmptyStateBotSelection}
-                    title="Change bot"
-                    aria-label={`Change bot \u2014 currently ${heroBot?.name ?? "selected"}`}
+                    data-bot-talk-hero="true"
+                    onClick={handleHeroStartConversation}
+                    disabled={heroStartDisabled}
+                    title={heroStartTitle}
+                    aria-label={heroStartAriaLabel}
                   >
                     {renderHero()}
                   </button>
-                ) : !pendingIncognito && bots.length > 0 ? (
-                  <button
-                    type="button"
-                    className={`${styles.emptyStateIconButton} ${styles.emptyStateSearchTrigger}`}
-                    onClick={openEmptyStateBotSearch}
-                    title="Search bots"
-                    aria-label="Search bots"
-                  >
-                    {renderHero()}
-                  </button>
-                ) : (
-                  renderHero()
-                ))}
+                )}
                 {!suppressHeroCopy && <div className={styles.emptyStateTitle}>{title}</div>}
                 {emptyStateSearchActive ? (
                   renderEmptyStateBotSearch()
@@ -10947,10 +11992,15 @@ function HomeContent(): React.JSX.Element {
                     no-selection state. Sending with nothing armed
                     routes to the PRISM Default persona (botId
                     omitted from the request). To go back to default
-                    after arming, click the hero. */}
+                    after arming, tap outside the picker on empty chrome. */}
                 {!pendingIncognito && pickerBots.length > 0 && (() => {
                   const geom =
-                    pickerGeom ?? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight);
+                    pickerGeom ?? pickerGeometry(
+                      pickerBots.length,
+                      viewportWidth,
+                      viewportHeight,
+                    activeHueLensGridOptions
+                    );
                   // Outer frame is square on mobile and widescreen on
                   // desktop; inner picker is pinned to the computed grid
                   // width so the formation stays centered inside it.
@@ -11011,7 +12061,7 @@ function HomeContent(): React.JSX.Element {
                       }}
                       onPointerDown={e => handleTouchPickerDown(e, geom)}
                       onPointerMove={handleTouchPickerMove}
-                      onPointerUp={handleTouchPickerUp}
+                      onPointerUp={e => handleTouchPickerUp(e, geom)}
                       onPointerCancel={handleTouchPickerCancel}
                     >
                       <div
@@ -11022,7 +12072,12 @@ function HomeContent(): React.JSX.Element {
                       >
                         {pickerCells.map((b, cellIndex) => {
                         if (!b) {
-                          if (geom.threeBotStack || geom.mobileColumnStack) return null;
+                          if (
+                            hueFilterActive ||
+                            pickerBots.length < pickerSourceBots.length ||
+                            geom.threeBotStack ||
+                            geom.mobileColumnStack
+                          ) return null;
                           return (
                             <span
                               key={`blank-${cellIndex}`}
@@ -11060,11 +12115,15 @@ function HomeContent(): React.JSX.Element {
                         const showTileGlyph =
                           !geom.hideGlyphByDefault || showPixelGridGlyph;
                         const showFeaturedName =
-                          (geom.namedFlatTile || !geom.flattenTile) &&
+                          !geom.compactPixelGrid &&
                           geom.tileSize >= PICKER_TILE_NAME_MIN_SIZE;
                         if (showFeaturedName) {
                           tileClassName += ` ${styles.chatBotTileWithName}`;
-                          if (geom.namedFlatTile) {
+                          if (
+                            geom.namedFlatTile ||
+                            geom.flattenTile ||
+                            geom.tileSize <= PICKER_TILE_COMPACT_NAME_MAX_SIZE
+                          ) {
                             tileClassName += ` ${styles.chatBotTileNamedFlat}`;
                           }
                         }
@@ -11113,7 +12172,6 @@ function HomeContent(): React.JSX.Element {
                               updatePickerParallax(e);
                             }}
                             onClick={(e) => {
-                              primeStarterComposer(draft);
                               // Explicit click beats the dwell timer —
                               // the user made a deliberate choice, no
                               // reason to wait the 180ms dwell window.
@@ -11121,12 +12179,13 @@ function HomeContent(): React.JSX.Element {
                                 clearTimeout(hoverDwellTimerRef.current);
                                 hoverDwellTimerRef.current = null;
                               }
-                              // Dense color-map mode starts at Stage 4
-                              // (glyphless cards): the first click snaps
-                              // the hue lens to this bot's color group
-                              // instead of selecting the individual bot.
-                              // Once the lens narrows the visible set,
-                              // normal per-tile selection resumes.
+                              // Dense color-map mode starts at Stage 3 on
+                              // mobile and Stage 4 elsewhere: the first
+                              // click snaps the hue lens to this bot's
+                              // color group instead of selecting the
+                              // individual bot. Once the lens narrows the
+                              // visible set, normal per-tile selection
+                              // resumes.
                               // Grayscale/colorless bots still fall
                               // through because the lens cannot
                               // meaningfully target them.
@@ -11139,9 +12198,7 @@ function HomeContent(): React.JSX.Element {
                                 botHasFilterableColor(b) &&
                                 (isDesktopMousePixelClick ||
                                   (!hueFilterActive &&
-                                    (geom.hideGlyphByDefault ||
-                                      geom.solidSwatch ||
-                                      geom.compactPixelGrid)));
+                                    pickerUsesHueNavigation(geom, viewportWidth)));
                               if (
                                 shouldRelocateHue
                               ) {
@@ -11200,33 +12257,6 @@ function HomeContent(): React.JSX.Element {
               </div>
             );
           })()}
-          {/* Conversation intro — surfaces AFTER the first message is
-              sent, sits above the message list, and scrolls naturally
-              out of view as the thread grows. Gives the user a "who
-              am I talking to" anchor without pinning it to the viewport.
-              Only rendered when the open conversation has a persisted
-              bot (no bot = default persona, which has no name/glyph of
-              its own to show). */}
-          {detail && conversationBot && (() => {
-            const introStyle = botAccentStyle(conversationBot.color, resolvedTheme);
-            const description = firstLinesOf(conversationBot.system_prompt, 220);
-            return (
-              <div className={styles.conversationIntro} style={introStyle}>
-                <EmptyStateIcon
-                  bot={conversationBot}
-                  resolvedTheme={resolvedTheme}
-                />
-                <div className={styles.conversationIntroName}>
-                  {conversationBot.name}
-                </div>
-                {description && (
-                  <p className={styles.conversationIntroDescription}>
-                    {description}
-                  </p>
-                )}
-              </div>
-            );
-          })()}
           {detail?.messages.map(msg => {
             const status = getMessageStatus(msg);
             const modelLabel =
@@ -11258,28 +12288,55 @@ function HomeContent(): React.JSX.Element {
                     )
                   } as React.CSSProperties)
                 : undefined;
+            const userInkStyle =
+              msg.role === "user" && threadConversationAccentInk
+                ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
+                : undefined;
+            const mobileFocusAccentStyle =
+              mobileFocusedMessageId === msg.id
+                ? ({
+                    "--mobile-msg-focus-accent": deriveMobileMessageFocusAccent(msg),
+                  } as React.CSSProperties)
+                : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             return (
               <article
                 key={msg.id}
-                className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
-                style={messageStyle}
+                className={`${styles.message} ${
+                  msg.role === "user" ? styles.messageUser : styles.messageAssistant
+                }`}
+                style={{
+                  ...(messageStyle ?? {}),
+                  ...userInkStyle,
+                  ...mobileFocusAccentStyle,
+                }}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
+                data-msg-mobile-focus-root={
+                  mobileFocusedMessageId === msg.id ? "true" : undefined
+                }
                 data-mobile-context={mobileContextMenu ? "true" : undefined}
                 data-message-id={msg.id}
                 data-message-edge={messageEdge}
                 onContextMenu={event => {
                   event.preventDefault();
-                  openMessageContextMenu(msg, event.clientX, event.clientY);
+                  event.stopPropagation();
+                  openMessageContextMenu(msg, event.clientX, event.clientY, {
+                    anchor: "center",
+                    mobileActivate: mobileContextMenu,
+                  });
                 }}
-                onClick={event => {
-                  if (mobileContextMenu) {
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    openMessageContextMenu(msg, rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
+                onClick={(event) => {
+                  if (!mobileContextMenu) {
+                    if (modelRevealLabel) revealMessageModel(msg.id);
                     return;
                   }
-                  if (modelRevealLabel) revealMessageModel(msg.id);
+                  event.preventDefault();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openMessageContextMenu(msg, rect.left + rect.width * 0.5, rect.bottom + 14, {
+                    anchor: "below",
+                    mobileActivate: true,
+                  });
                 }}
               >
                 <h4>
@@ -11416,6 +12473,7 @@ function HomeContent(): React.JSX.Element {
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
+          data-keyboard-lifted={mobileKeyboardInset > 0 ? "true" : undefined}
           style={composeStyle}
           onSubmit={handleComposerSubmit}
           onBlur={handleComposerBlur}
@@ -11447,9 +12505,9 @@ function HomeContent(): React.JSX.Element {
              Privacy stays conversation-level (sidebar "Private chat"
              button at chat start). If the open chat is private
              (detail.incognito) or a brand-new chat is armed as private
-             (pendingIncognito), the bot control is disabled — private
-             chats always run as the Default persona — but the provider
-             toggle remains usable. */}
+             (pendingIncognito), the bot control is disabled — the starter
+             bot is locked for the private session — but the provider toggle
+             remains usable. */}
           {(() => {
             const isLocal = settings?.preferredProvider === "local";
             const chatLocked =
@@ -11499,7 +12557,7 @@ function HomeContent(): React.JSX.Element {
               !detail ||
               bots.length === 0;
             const botTitle = chatLocked
-              ? "Private chats always run as the Default persona."
+              ? "Private chats keep their starter bot and do not save memories."
               : !detail
                 ? "Send your first message to change bots mid-thread."
                 : pendingReply
@@ -11601,35 +12659,24 @@ function HomeContent(): React.JSX.Element {
               </div>
             );
           })()}
-          <div className={styles.composeInner}>
-            <textarea
-              ref={draftInputRef}
-              value={draft}
-              onChange={handleComposerChange}
-              onFocus={handleComposerFocus}
-              placeholder="Say something..."
-              spellCheck
-              autoCorrect="on"
-              autoCapitalize="sentences"
-              enterKeyHint="send"
-              lang="en"
-            />
-            <button
-              type="submit"
-              disabled={composerSubmitDisabled(draft)}
-              data-starter-submit-button="true"
-              onPointerDown={handleComposerSubmitButtonPointerDown}
-              onPointerUp={handleComposerSubmitButtonPointerUp}
-              onPointerCancel={handleComposerSubmitButtonPointerUp}
-            >
-              {composerSubmitLabel(draft)}
-            </button>
-          </div>
+          {renderConversationStarterRail()}
+          <ComposerInput
+            ref={draftComposerRef}
+            enabled={composerMarkdownEditorEnabled}
+            value={draft}
+            placeholder="Say something..."
+            submitDisabled={composerSubmitDisabled(draft)}
+            submitLabel={composerSubmitLabel(draft)}
+            hideSubmitButton={hideMobileEmptySend}
+            onChange={handleComposerChange}
+            onValueChange={updateComposerDraft}
+            onFocus={handleComposerFocus}
+          />
         </form>
+        {renderMessageContextMenu()}
       </section>
 
       {renderSharedPanels()}
-      {renderMessageContextMenu()}
       {renderDeleteAllModal()}
       {renderDevToolsPanel()}
       {touchPreview && (
@@ -11655,8 +12702,13 @@ function HomeContent(): React.JSX.Element {
     <main
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
+      data-accent-active={appShellStyle ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
+      onTouchStart={beginSidebarEdgeSwipe}
+      onTouchMove={continueSidebarEdgeSwipe}
+      onTouchEnd={endSidebarEdgeSwipe}
+      onTouchCancel={endSidebarEdgeSwipe}
     >
       {/* Mobile menu toggle — faded out while either drawer is open
           (sidebar on the left, Settings/Bots/Images panel on the right)
@@ -11688,6 +12740,7 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={`${styles.privateChatButton} ${pendingIncognito ? styles.privateChatButtonActive : ""}`}
+            style={privateChatButtonStyle}
             onClick={() => startFreshConversation(true)}
             aria-pressed={pendingIncognito}
             title="Private chat — no saved history or memory"
@@ -11791,7 +12844,10 @@ function HomeContent(): React.JSX.Element {
       </aside>
 
       {/* Chat */}
-      <section className={styles.chatPane}>
+      <section
+        className={styles.chatPane}
+        data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
+      >
         <header className={styles.chatHeader}>
           <button
             type="button"
@@ -11803,6 +12859,7 @@ function HomeContent(): React.JSX.Element {
             {headerIdentity ? (
               <span
                 className={styles.headerIdentity}
+                data-private-bot={privateCustomBotActive ? "true" : undefined}
                 style={
                   headerIdentity.color
                     ? ({
@@ -11824,49 +12881,21 @@ function HomeContent(): React.JSX.Element {
             )}
           </button>
           <h2>{detail?.title ?? "New conversation"}</h2>
-          {activeBot && (
-            <button
-              type="button"
-              className={`${styles.badge} ${styles.memoryBadge}`}
-              onClick={openActiveBotMemoriesPanel}
-              aria-label={`Open ${activeBot.name} memories`}
-              title={`Open ${activeBot.name} memories`}
-            >
-              <span>MEMORIES</span>
-            </button>
-          )}
-          {activeBot && (
-            <button
-              type="button"
-              className={`${styles.badge} ${styles.editBotBadge}`}
-              onClick={openActiveBotCustomizer}
-              aria-label={`Edit ${activeBot.name}`}
-              title={`Edit ${activeBot.name}`}
-              style={botAccentStyle(activeBot.color, resolvedTheme)}
-            >
-              <span>EDIT BOT</span>
-            </button>
-          )}
-          <div className={styles.headerActions}>
-            {/* Whole-conversation Fork was retired in favor of the per-
-                message Fork/Resend affordances on bot/user bubbles —
-                forking from nothing in particular was rarely the right
-                action. Export + Delete stay in the header since they
-                still operate on the whole chat. */}
-            {detail && <button type="button" onClick={() => void exportChat()}>Export .md</button>}
-            {detail && selectedId && renderHeaderDeleteButton(selectedId)}
-          </div>
+          {renderChatOverflowGear()}
         </header>
 
         <div
           className={styles.messagesFrame}
           data-mode={messagesFrameMode}
+          data-private-bot={privateCustomBotActive ? "true" : undefined}
           style={messagesFrameStyle}
         >
           <div
             className={`${styles.messages} ${
               !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
             }`}
+            ref={messagesScrollRef}
+            data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
           >
             {!detail && !pendingReplyVisible && (() => {
             // Sandbox empty state — mirrors the Chat-mode empty state so
@@ -11877,43 +12906,68 @@ function HomeContent(): React.JSX.Element {
             //     to the hovered bot's normalized color. Title/hint still
             //     preview the bot, and the shell accent swaps to that bot.
             //   • ARMED — hero becomes the bot's full-color glyph, the
-            //     selected tile stays visible, compose dropdown
-            //     auto-populates, and the hero turns into
-            //     click-to-deselect until a message sends.
+            //     selected tile stays visible; tapping the hero primes the
+            //     starter hello + focuses compose (tap outside clears bot).
             //
             // The compose bot dropdown stays DISABLED while !detail so
             // the tile picker is the single arming path pre-chat;
             // once the first send lands, detail exists and the dropdown
             // takes over as the mid-thread bot switcher.
             //
-            // Picker geometry runs against the FILTERED subset so the
-            // hue lens can step the density stage back when the band
-            // contains far fewer bots than the full library.
+            // Picker geometry runs against the visible bot window so the
+            // hue lens can step the density stage back when the ribbon
+            // window contains far fewer bots than the full library.
             const pickerGeom =
               !pendingIncognito && pickerBots.length > 0
-                ? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight)
+                ? pickerGeometry(
+                    pickerBots.length,
+                    viewportWidth,
+                    viewportHeight,
+                    activeHueLensGridOptions
+                  )
                 : null;
             const suppressHeroCopy =
               pickerGeom?.suppressMobileHeroCopy === true && !emptyStateSearchActive;
-            const isArmed =
-              !pendingIncognito &&
-              selectedBotId !== null &&
-              activeBot?.id === selectedBotId;
             const isPreviewing =
               !pendingIncognito && hoveredBotId !== null && activeBot?.id === hoveredBotId;
-            const heroBot = pendingIncognito ? null : activeBot;
+            const heroBot = activeBot;
+            const privateBotName = pendingIncognito ? heroBot?.name?.trim() : "";
             const title = pendingIncognito
-              ? "Private chat"
+              ? privateBotName
+                ? `Private chat with ${privateBotName}`
+                : "Private chat"
               : heroBot?.name?.trim() || "Start a new conversation";
             const descriptionPreview = heroBot
               ? firstLinesOf(heroBot.system_prompt)
               : "";
-            const hint = pendingIncognito
-              ? "No memories are saved."
-              : descriptionPreview ||
-              (bots.length > 0
-                ? "Pick a bot below, or just start typing. You can swap bots between sends."
-                : "Type a message below to begin. Hover any bubble to fork a reply or resend your own. Exports and custom bots live in the header.");
+            const selectedBotPromptPreview =
+              !pendingIncognito && selectedBotId !== null && heroBot?.id === selectedBotId
+                ? descriptionPreview
+                : "";
+            // While the hue lens has zoomed into a color group AND nothing is
+            // armed/hovered yet, the hero is just a tinted Prism placeholder
+            // — tapping it would commit the user to a "start with default"
+            // conversation when their actual intent is "let me pick from this
+            // filtered group." Block the click + nudge them to pick a tile.
+            const heroLensPlaceholder =
+              hueFilterCenter !== null && !heroBot;
+            const heroStartLabel = pendingIncognito
+              ? privateBotName
+                ? `Tap the symbol above to begin a private chat with ${privateBotName}.`
+                : "Tap the symbol above to begin a private chat."
+              : heroLensPlaceholder
+                ? "Pick a bot from the filtered grid below to begin."
+                : heroBot?.name?.trim()
+                  ? `Tap the symbol above to have ${heroBot.name.trim()} start the conversation.`
+                  : bots.length > 0
+                    ? "Tap the symbol above to begin, or pick a bot below."
+                    : "Tap the symbol above to begin.";
+            const hint = (() => {
+              if (pendingIncognito) return `${heroStartLabel} No memories are saved.`;
+              if (selectedBotPromptPreview) return selectedBotPromptPreview;
+              if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
+              return heroStartLabel;
+            })();
             const emptyStateStyle = heroBot
               ? botAccentStyle(heroBot.color, resolvedTheme)
               : undefined;
@@ -11942,38 +12996,43 @@ function HomeContent(): React.JSX.Element {
                 resolvedTheme={resolvedTheme}
               />
             );
+            const heroStartDisabled =
+              pendingReply ||
+              !isStarterPromptAvailable(draft) ||
+              heroLensPlaceholder;
+            const heroStartTitle = heroLensPlaceholder
+              ? "Pick a bot from the filtered grid to begin"
+              : heroBot?.name?.trim()
+                ? `Tap to have ${heroBot.name.trim()} start the conversation`
+                : "Tap to start the conversation";
+            const heroStartAriaLabel = heroLensPlaceholder
+              ? "Pick a bot from the filtered grid to begin"
+              : heroBot?.name?.trim()
+                ? `Start conversation with ${heroBot.name.trim()}`
+                : "Start conversation";
             return (
               <div
                 className={emptyStateClassName}
                 style={emptyStateStyle}
                 onClick={handleEmptyStateBackgroundClick}
               >
-                {/* Hero becomes a deselect button once a bot is armed —
-                    click it to drop back to Default while keeping the
-                    grid available until a message sends. */}
-                {!suppressHeroCopy && (isArmed ? (
+                {/* Tap any hero (armed bot or default Prism) to dispatch a
+                    starter prompt — the bot opens the conversation with its
+                    own first message. Disabled mid-draft so accidental clicks
+                    don't drop the user's typed text. */}
+                {!suppressHeroCopy && (
                   <button
                     type="button"
                     className={styles.emptyStateIconButton}
-                    onClick={resetEmptyStateBotSelection}
-                    title="Change bot"
-                    aria-label={`Change bot \u2014 currently ${heroBot?.name ?? "selected"}`}
+                    data-bot-talk-hero="true"
+                    onClick={handleHeroStartConversation}
+                    disabled={heroStartDisabled}
+                    title={heroStartTitle}
+                    aria-label={heroStartAriaLabel}
                   >
                     {renderHero()}
                   </button>
-                ) : !pendingIncognito && bots.length > 0 ? (
-                  <button
-                    type="button"
-                    className={`${styles.emptyStateIconButton} ${styles.emptyStateSearchTrigger}`}
-                    onClick={openEmptyStateBotSearch}
-                    title="Search bots"
-                    aria-label="Search bots"
-                  >
-                    {renderHero()}
-                  </button>
-                ) : (
-                  renderHero()
-                ))}
+                )}
                 {!suppressHeroCopy && <div className={styles.emptyStateTitle}>{title}</div>}
                 {emptyStateSearchActive ? (
                   renderEmptyStateBotSearch()
@@ -11988,7 +13047,12 @@ function HomeContent(): React.JSX.Element {
                   // hue-lens-filtered library) so the unfiltered grid
                   // reads as a navigable color map.
                   const geom =
-                    pickerGeom ?? pickerGeometry(pickerBots.length, viewportWidth, viewportHeight);
+                    pickerGeom ?? pickerGeometry(
+                      pickerBots.length,
+                      viewportWidth,
+                      viewportHeight,
+                      activeHueLensGridOptions
+                    );
                   const rowWidth =
                     geom.gridCols * geom.tileSize +
                     (geom.gridCols - 1) * geom.tileGap;
@@ -12045,7 +13109,7 @@ function HomeContent(): React.JSX.Element {
                       }}
                       onPointerDown={e => handleTouchPickerDown(e, geom)}
                       onPointerMove={handleTouchPickerMove}
-                      onPointerUp={handleTouchPickerUp}
+                      onPointerUp={e => handleTouchPickerUp(e, geom)}
                       onPointerCancel={handleTouchPickerCancel}
                     >
                       <div
@@ -12056,7 +13120,12 @@ function HomeContent(): React.JSX.Element {
                       >
                         {pickerCells.map((b, cellIndex) => {
                         if (!b) {
-                          if (geom.threeBotStack || geom.mobileColumnStack) return null;
+                          if (
+                            hueFilterActive ||
+                            pickerBots.length < pickerSourceBots.length ||
+                            geom.threeBotStack ||
+                            geom.mobileColumnStack
+                          ) return null;
                           return (
                             <span
                               key={`blank-${cellIndex}`}
@@ -12094,11 +13163,15 @@ function HomeContent(): React.JSX.Element {
                         const showTileGlyph =
                           !geom.hideGlyphByDefault || showPixelGridGlyph;
                         const showFeaturedName =
-                          (geom.namedFlatTile || !geom.flattenTile) &&
+                          !geom.compactPixelGrid &&
                           geom.tileSize >= PICKER_TILE_NAME_MIN_SIZE;
                         if (showFeaturedName) {
                           tileClassName += ` ${styles.chatBotTileWithName}`;
-                          if (geom.namedFlatTile) {
+                          if (
+                            geom.namedFlatTile ||
+                            geom.flattenTile ||
+                            geom.tileSize <= PICKER_TILE_COMPACT_NAME_MAX_SIZE
+                          ) {
                             tileClassName += ` ${styles.chatBotTileNamedFlat}`;
                           }
                         }
@@ -12147,7 +13220,6 @@ function HomeContent(): React.JSX.Element {
                               updatePickerParallax(e);
                             }}
                             onClick={(e) => {
-                              primeStarterComposer(draft);
                               // Explicit click beats the dwell timer —
                               // the user made a deliberate choice, no
                               // reason to wait the 180ms dwell window.
@@ -12159,10 +13231,11 @@ function HomeContent(): React.JSX.Element {
                                 hoverDwellTimerRef.current = null;
                               }
                               // Dense color-map mode mirrors the Chat
-                              // picker. Stage 4 snaps to a hue region
-                              // before individual selection; Stage 5+
-                              // desktop mouse clicks select the exact
-                              // pixel and also move the hue lens there.
+                              // picker. Mobile Stage 3+ / desktop Stage 4+
+                              // snaps to a hue region before individual
+                              // selection; Stage 5+ desktop mouse clicks
+                              // select the exact pixel and also move the
+                              // hue lens there.
                               // Grayscale bots fall through to direct
                               // selection because the lens cannot target
                               // them.
@@ -12175,9 +13248,7 @@ function HomeContent(): React.JSX.Element {
                                 botHasFilterableColor(b) &&
                                 (isDesktopMousePixelClick ||
                                   (!hueFilterActive &&
-                                    (geom.hideGlyphByDefault ||
-                                      geom.solidSwatch ||
-                                      geom.compactPixelGrid)));
+                                    pickerUsesHueNavigation(geom, viewportWidth)));
                               if (
                                 shouldRelocateHue
                               ) {
@@ -12270,28 +13341,55 @@ function HomeContent(): React.JSX.Element {
             const messageStyle = normalizedBotColor
               ? ({ "--message-accent": normalizedBotColor } as React.CSSProperties)
               : undefined;
+            const userInkStyle =
+              msg.role === "user" && threadConversationAccentInk
+                ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
+                : undefined;
+            const mobileFocusAccentStyle =
+              mobileFocusedMessageId === msg.id
+                ? ({
+                    "--mobile-msg-focus-accent": deriveMobileMessageFocusAccent(msg),
+                  } as React.CSSProperties)
+                : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             return (
               <article
                 key={msg.id}
-                className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
-                style={messageStyle}
+                className={`${styles.message} ${
+                  msg.role === "user" ? styles.messageUser : styles.messageAssistant
+                }`}
+                style={{
+                  ...(messageStyle ?? {}),
+                  ...userInkStyle,
+                  ...mobileFocusAccentStyle,
+                }}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
+                data-msg-mobile-focus-root={
+                  mobileFocusedMessageId === msg.id ? "true" : undefined
+                }
                 data-mobile-context={mobileContextMenu ? "true" : undefined}
                 data-message-id={msg.id}
                 data-message-edge={messageEdge}
                 onContextMenu={event => {
                   event.preventDefault();
-                  openMessageContextMenu(msg, event.clientX, event.clientY);
+                  event.stopPropagation();
+                  openMessageContextMenu(msg, event.clientX, event.clientY, {
+                    anchor: "center",
+                    mobileActivate: mobileContextMenu,
+                  });
                 }}
-                onClick={event => {
-                  if (mobileContextMenu) {
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    openMessageContextMenu(msg, rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
+                onClick={(event) => {
+                  if (!mobileContextMenu) {
+                    if (modelRevealLabel) revealMessageModel(msg.id);
                     return;
                   }
-                  if (modelRevealLabel) revealMessageModel(msg.id);
+                  event.preventDefault();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openMessageContextMenu(msg, rect.left + rect.width * 0.5, rect.bottom + 14, {
+                    anchor: "below",
+                    mobileActivate: true,
+                  });
                 }}
               >
                 <h4>
@@ -12425,6 +13523,7 @@ function HomeContent(): React.JSX.Element {
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
+          data-keyboard-lifted={mobileKeyboardInset > 0 ? "true" : undefined}
           style={composeStyle}
           onSubmit={handleComposerSubmit}
           onBlur={handleComposerBlur}
@@ -12564,35 +13663,24 @@ function HomeContent(): React.JSX.Element {
               );
             })()}
           </div>
-          <div className={styles.composeInner}>
-            <textarea
-              ref={draftInputRef}
-              value={draft}
-              onChange={handleComposerChange}
-              onFocus={handleComposerFocus}
-              placeholder="Ask anything..."
-              spellCheck
-              autoCorrect="on"
-              autoCapitalize="sentences"
-              enterKeyHint="send"
-              lang="en"
-            />
-            <button
-              type="submit"
-              disabled={composerSubmitDisabled(draft)}
-              data-starter-submit-button="true"
-              onPointerDown={handleComposerSubmitButtonPointerDown}
-              onPointerUp={handleComposerSubmitButtonPointerUp}
-              onPointerCancel={handleComposerSubmitButtonPointerUp}
-            >
-              {composerSubmitLabel(draft)}
-            </button>
-          </div>
+          {renderConversationStarterRail()}
+          <ComposerInput
+            ref={draftComposerRef}
+            enabled={composerMarkdownEditorEnabled}
+            value={draft}
+            placeholder="Ask anything..."
+            submitDisabled={composerSubmitDisabled(draft)}
+            submitLabel={composerSubmitLabel(draft)}
+            hideSubmitButton={hideMobileEmptySend}
+            onChange={handleComposerChange}
+            onValueChange={updateComposerDraft}
+            onFocus={handleComposerFocus}
+          />
         </form>
+        {renderMessageContextMenu()}
       </section>
 
       {renderSharedPanels()}
-      {renderMessageContextMenu()}
       {renderDeleteAllModal()}
       {renderDevToolsPanel()}
       {touchPreview && (

@@ -4,6 +4,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-04-27 · [UX]
+**Trigger**: The user wanted a true live markdown editor in the compose surface, not a split view or rendered preview pane.
+**Lesson**: Desktop markdown authoring should use a WYSIWYG surface (TipTap + `@tiptap/markdown`) so formatting is visible while editing, with Markdown as the wire format to match bubble rendering. Use a vertical tool rail beside the field; mobile stays plain textarea; chat bubbles keep safe `react-markdown` rendering.
+**Applies to**: `apps/web/src/app/page.tsx` composer (`ComposerInput`) and `apps/web/src/app/page.module.css` markdown composer styling.
+
 ### 2026-04-25 · [UX]
 **Trigger**: A sidebar Conversations delete-all header × was first aligned to the outer sidebar edge, then overcorrected too far left before landing on the row delete column.
 **Lesson**: Sidebar header actions that correspond to row actions should align to the row action column inside the conversation list inset, not the outer sidebar edge or label width. For the Conversations delete-all ×, use the same effective gutter as `.conversationDelete` rather than `space-between` across the whole sidebar.

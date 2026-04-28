@@ -5,7 +5,7 @@ ChatGPT Gov, the systems-focus and creative-permission of FL Studio. Runs
 headless on a user-owned machine and reachable across the LAN from any
 trusted device. Every account is its own sandbox — encrypted memory,
 customizable chatbots, OpenAI image generation, forkable conversations,
-markdown export.
+Markdown rendering in chat and Markdown conversation export.
 
 **Current release:** v0.2.0. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
@@ -207,6 +207,7 @@ npm run dev
   - Incognito opts out of both paths for the turn and forces the provider to LOCAL.
 - **Customizable chatbots** with system prompts, temperature, and model overrides
 - **Forkable chats** — branch from any message in a conversation (Sandbox)
+- **Markdown in message bubbles** — assistant and user messages render GitHub-flavored Markdown safely in the thread (`react-markdown` + `remark-gfm`); the compose field is plain text.
 - **Per-chat deletion** — remove individual chats from the sidebar (subtle × that embosses red on hover, click-to-confirm) or from the chat header. **Press-and-hold any × (or the header Delete button) for ~1 s** to clear *every* chat at once: on pointerdown every × immediately glows red and tilts to its own small angle; at the 900 ms threshold the whole row shakes like iOS edit-mode while a centered confirmation modal ("Delete all chats?" · Cancel / Delete all) takes over the decision. Release before the threshold to snap the ×'s back. Messages and exports are purged; generated images and extracted memories are preserved.
 - **OpenAI image generation** (DALL-E 3) with gallery (Sandbox)
 - **Conversation export** to Markdown files persisted in the database (Sandbox)

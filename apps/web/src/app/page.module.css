@@ -909,6 +909,40 @@
       color-mix(in srgb, var(--header-identity-color) 18%, transparent);
 }
 
+.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] {
+  color: var(--fg);
+}
+
+.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
+  color: color-mix(in srgb, var(--header-identity-color) 42%, var(--fg) 58%);
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--fg) 14%, transparent),
+      transparent 64%
+    ),
+    color-mix(in srgb, var(--bg-deep) 86%, var(--fg) 14%);
+  border-color: color-mix(in srgb, var(--header-identity-color) 22%, var(--line));
+  box-shadow:
+    var(--shadow-sm),
+    0 0 20px color-mix(in srgb, var(--header-identity-color) 8%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent);
+}
+
+.themeLight.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--fg) 8%, transparent),
+      transparent 66%
+    ),
+    color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
+  border-color: color-mix(in srgb, var(--header-identity-color) 18%, var(--line-strong));
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px color-mix(in srgb, var(--header-identity-color) 10%, transparent);
+}
+
 .headerIdentityName {
   max-width: min(28vw, 220px);
   overflow: hidden;
@@ -957,6 +991,20 @@
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+}
+
+.appLayout[data-private-active="true"][data-accent-active="true"] {
+  background-image:
+    radial-gradient(
+      ellipse at top left,
+      color-mix(in srgb, var(--fg) 10%, transparent),
+      transparent 54%
+    ),
+    radial-gradient(
+      ellipse at bottom right,
+      color-mix(in srgb, var(--fg) 6%, transparent),
+      transparent 56%
+    );
 }
 
 .appLayout input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
@@ -1147,6 +1195,71 @@
   color: #000000;
 }
 
+.appLayout[data-accent-active="true"] .newChatButton {
+  border-color: color-mix(in srgb, var(--accent-ink) 30%, color-mix(in srgb, #ffffff 46%, transparent));
+  background:
+    radial-gradient(
+      circle at 82% 50%,
+      color-mix(in srgb, var(--accent) 26%, transparent),
+      transparent 58%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #ffffff 72%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 10%, color-mix(in srgb, #ffffff 50%, transparent)) 38%,
+      color-mix(in srgb, var(--accent) 22%, color-mix(in srgb, #ffffff 34%, transparent)) 100%
+    ),
+    radial-gradient(
+      circle at 18% 18%,
+      color-mix(in srgb, #ffffff 44%, transparent),
+      transparent 38%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 16%, transparent),
+      color-mix(in srgb, #ff9f1c 12%, transparent) 25%,
+      color-mix(in srgb, var(--accent) 16%, transparent) 50%,
+      color-mix(in srgb, #2fd3e3 12%, transparent) 72%,
+      color-mix(in srgb, #7b5cff 16%, transparent)
+    );
+  color: #000000;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 55%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000000 16%, transparent),
+    0 0 18px -14px color-mix(in srgb, var(--accent) 58%, transparent);
+}
+
+.appLayout[data-accent-active="true"] .newChatButton:hover {
+  border-color: color-mix(in srgb, var(--accent-ink) 38%, color-mix(in srgb, #ffffff 58%, transparent));
+  background:
+    radial-gradient(
+      circle at 82% 50%,
+      color-mix(in srgb, var(--accent) 34%, transparent),
+      transparent 60%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #ffffff 82%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 14%, color-mix(in srgb, #ffffff 58%, transparent)) 38%,
+      color-mix(in srgb, var(--accent) 28%, color-mix(in srgb, #ffffff 42%, transparent)) 100%
+    ),
+    radial-gradient(
+      circle at 18% 18%,
+      color-mix(in srgb, #ffffff 52%, transparent),
+      transparent 38%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 20%, transparent),
+      color-mix(in srgb, #ff9f1c 15%, transparent) 25%,
+      color-mix(in srgb, var(--accent) 22%, transparent) 50%,
+      color-mix(in srgb, #2fd3e3 15%, transparent) 72%,
+      color-mix(in srgb, #7b5cff 20%, transparent)
+    );
+  color: #000000;
+}
+
 .newChatButton:active {
   transform: translateY(1px);
 }
@@ -1161,14 +1274,12 @@
   text-align: center;
 }
 
-/* Private chat — secondary, paired with New chat as a sidebar set. It is
-   intentionally monochrome: New chat is white-filled/black text, Private
-   chat is the inverse white-outline/white text, independent of the active
-   accent color. */
+/* Private chat — secondary, paired with New chat as a sidebar set. It follows
+   the selected bot color when present, otherwise the theme foreground. */
 .privateChatButton {
-  border: 1px solid #ffffff;
+  border: 1px solid var(--private-chat-color, var(--fg));
   background: transparent;
-  color: #ffffff;
+  color: var(--private-chat-color, var(--fg));
   border-radius: 10px;
   padding: 9px 11px;
   cursor: pointer;
@@ -1185,9 +1296,9 @@
 }
 
 .privateChatButton:hover {
-  border-color: #ffffff;
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 10%, transparent);
+  border-color: var(--private-chat-color, var(--fg));
+  color: var(--private-chat-color, var(--fg));
+  background: color-mix(in srgb, var(--private-chat-color, var(--fg)) 10%, transparent);
 }
 
 .privateChatButton:active {
@@ -1196,22 +1307,22 @@
 
 .privateChatButton:focus-visible {
   outline: none;
-  border-color: #ffffff;
-  box-shadow: 0 0 0 3px color-mix(in srgb, #ffffff 28%, transparent);
+  border-color: var(--private-chat-color, var(--fg));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--private-chat-color, var(--fg)) 28%, transparent);
 }
 
 /* "Armed" state — user clicked Private chat and the next send will
    create an incognito conversation. Subtle accent fill, still secondary. */
 .privateChatButtonActive {
-  border-color: #ffffff;
-  color: #ffffff;
-  background: color-mix(in srgb, #ffffff 14%, transparent);
+  border-color: var(--private-chat-color, var(--fg));
+  color: var(--private-chat-color, var(--fg));
+  background: color-mix(in srgb, var(--private-chat-color, var(--fg)) 14%, transparent);
 }
 
 .privateChatButtonActive:hover {
-  border-color: #ffffff;
-  background: color-mix(in srgb, #ffffff 18%, transparent);
-  color: #ffffff;
+  border-color: var(--private-chat-color, var(--fg));
+  background: color-mix(in srgb, var(--private-chat-color, var(--fg)) 18%, transparent);
+  color: var(--private-chat-color, var(--fg));
 }
 
 .privateChatButtonIcon {
@@ -2559,13 +2670,25 @@
     );
 }
 
-/* Private chat — mono mood. Local --accent override flows into the
-   ::after gradients (and into any descendant that consumes --accent
-   inside this surface) so the orb glow tints to the theme foreground
-   (white in dark mode, black in light) instead of leaking a hue.
-   Reinforces Private's "no color leaks" design pillar at the orb. */
-.messagesFrame[data-mode="private"] {
+/* Private chat — mono mood by default. Custom-bot private chats keep only
+   small bot-color cues so incognito reads first and bot identity second. */
+.messagesFrame[data-mode="private"]:not([data-private-bot="true"]) {
   --accent: var(--fg);
+}
+
+.messagesFrame[data-mode="private"][data-private-bot="true"] {
+  --accent-glow: color-mix(in srgb, var(--fg) 14%, transparent);
+  background:
+    radial-gradient(
+      ellipse 62% 46% at 50% 0%,
+      color-mix(in srgb, var(--fg) 5%, transparent),
+      transparent 72%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb, var(--accent) 3%, transparent) 100%
+    );
 }
 
 /* Home / zoomed-out — rainbow mood. Empty-state surface, regular
@@ -2706,6 +2829,20 @@
   max-width: none;
 }
 
+/* Empty state never needs scroll chrome — the conversation pane is the only
+   surface that should show a scrollbar (per UX rule). Content stays scrollable
+   for keyboards / a11y, just visually unbarred. */
+.messages:has(> .emptyState),
+.messagesEmptyState {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.messages:has(> .emptyState)::-webkit-scrollbar,
+.messagesEmptyState::-webkit-scrollbar {
+  display: none;
+}
+
 @media (min-width: 721px) {
   .messages:has(> .emptyState),
   .messagesEmptyState {
@@ -2720,6 +2857,8 @@
 }
 
 .emptyState {
+  --empty-state-hero-copy-offset: 12px;
+
   /* Flex column (was grid) so a child can opt into margin-top: auto
      to anchor itself to the bottom of the pane. Visually equivalent
      to the old grid — single-column stack with centered children and
@@ -2741,6 +2880,7 @@
 .emptyStateSearching {
   /* Search is an overlay, so opening it must not reflow the hero or picker. */
   --empty-state-search-active: 1;
+  --empty-state-search-top: 168px;
 }
 
 /* Empty-state icon — Default/private Prism variants.
@@ -2866,6 +3006,35 @@
   height: 34px;
 }
 
+.emptyStatePrivateBotGlyph {
+  color: color-mix(in srgb, var(--bot-color, var(--fg)) 46%, var(--fg) 54%);
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--fg) 14%, transparent) 0 44%,
+      transparent 74%
+    ),
+    color-mix(in srgb, var(--bg-deep) 88%, var(--fg) 12%);
+  box-shadow:
+    0 0 30px color-mix(in srgb, var(--fg) 12%, transparent),
+    0 0 18px color-mix(in srgb, var(--bot-color, var(--fg)) 8%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--bot-color, var(--fg)) 18%, transparent),
+    inset 0 0 18px color-mix(in srgb, #000000 24%, transparent);
+}
+
+.themeLight .emptyStatePrivateBotGlyph {
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--fg) 9%, transparent) 0 44%,
+      transparent 74%
+    ),
+    color-mix(in srgb, var(--bg) 92%, var(--fg) 8%);
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--fg) 8%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--bot-color, var(--fg)) 16%, transparent);
+}
+
 /* Clickable hero in the COMMITTED state — wraps EmptyStateIcon so the
    user has an obvious-enough-but-not-cluttered way to go back to
    default. Transparent chrome by default; a subtle ring + scale lift
@@ -2941,7 +3110,7 @@
   display: grid;
   gap: 8px;
   position: absolute;
-  top: 154px;
+  top: var(--empty-state-search-top, 154px);
   left: 24px;
   right: 24px;
   z-index: 4;
@@ -3051,6 +3220,11 @@
   color: var(--bot-ink, var(--fg));
   letter-spacing: 0.03em;
   line-height: 1.18;
+  margin-top: var(--empty-state-hero-copy-offset);
+}
+
+.appLayout[data-private-active="true"] .emptyStateTitle {
+  color: var(--fg);
 }
 
 .emptyStateHint {
@@ -3741,6 +3915,11 @@
   box-shadow: none;
 }
 
+.chatBotTileSelected .chatBotTileFeaturedName {
+  color: currentColor;
+  opacity: 1;
+}
+
 .chatBotTileSelected:hover {
   color: var(--bg);
   background: var(--fg);
@@ -3938,42 +4117,6 @@
    without a separate override. Keep this selector around as a no-op
    anchor in case future per-theme tuning is needed. */
 
-/* Conversation intro — glyph + name + description block that sits at
-   the top of the message stream once a Chat-mode conversation has a
-   persisted bot. Renders INSIDE .messages so it scrolls out naturally
-   with the thread (the spec: "let messages push it off-screen"), rather
-   than pinning to the viewport top. Inherits --bot-color from the React
-   layer so the name + divider tint themselves to the bot's hue, echoing
-   the same visual vocabulary used by .botCardGlyph / .chatBotTile. */
-.conversationIntro {
-  display: grid;
-  justify-items: center;
-  gap: 10px;
-  padding: 20px 24px 24px;
-  text-align: center;
-  color: var(--fg-muted);
-  border-bottom: 1px solid
-    color-mix(in srgb, var(--bot-color, var(--line)) 35%, var(--line));
-  margin: 0 0 8px;
-}
-
-.conversationIntroName {
-  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
-  font-size: 18px;
-  font-weight: var(--font-weight-title, 300);
-  color: var(--bot-ink, var(--bot-color, var(--fg)));
-  letter-spacing: 0.025em;
-}
-
-.conversationIntroDescription {
-  font-size: 13px;
-  font-weight: var(--font-weight-subtext, 600);
-  color: var(--fg-muted);
-  max-width: 420px;
-  line-height: 1.55;
-  margin: 0;
-}
-
 /* Respect users who prefer reduced motion: kill the spring transform
    transition and the sibling-shrink shift, but keep the color/shadow
    feedback so hover affordance still reads. */
@@ -4069,7 +4212,7 @@
 }
 
 .messageAssistant[data-message-edge="private"]::before {
-  background: var(--fg);
+  background: color-mix(in srgb, var(--accent) 30%, var(--fg) 70%);
 }
 
 .messageAssistant::after {
@@ -4099,7 +4242,7 @@
 .messageAssistant[data-message-edge="private"]::after {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--fg) 10%, transparent),
+    color-mix(in srgb, var(--accent) 8%, transparent),
     transparent
   );
 }
@@ -4112,6 +4255,20 @@
   padding: 12px 14px;
   border-radius: 14px 14px 4px 14px;
   box-shadow: var(--shadow-sm);
+}
+
+.messagesFrame[data-mode="private"] .messageUser {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 84%, var(--fg) 16%),
+      color-mix(in srgb, var(--bg-deep) 84%, var(--fg) 16%)
+    );
+  border: 1px solid color-mix(in srgb, var(--fg) 18%, var(--line));
+  color: var(--fg);
+  box-shadow:
+    var(--shadow-sm),
+    inset -3px 0 0 color-mix(in srgb, var(--accent) 26%, var(--fg) 74%);
 }
 
 .message h4 {
@@ -4225,6 +4382,99 @@
   font-size: var(--font-size-message);
 }
 
+.markdownBody {
+  display: grid;
+  gap: 0.65em;
+  overflow-x: auto;
+  word-break: break-word;
+  font-size: var(--font-size-message);
+  line-height: 1.55;
+}
+
+.markdownBody > :first-child {
+  margin-top: 0;
+}
+
+.markdownBody > :last-child {
+  margin-bottom: 0;
+}
+
+.markdownBody p {
+  white-space: normal;
+}
+
+.markdownBody ul,
+.markdownBody ol {
+  margin: 0;
+  padding-left: 1.35em;
+}
+
+.markdownBody li {
+  margin: 0.18em 0;
+}
+
+.markdownBody blockquote {
+  margin: 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid color-mix(in srgb, currentColor 32%, transparent);
+  color: color-mix(in srgb, currentColor 82%, transparent);
+}
+
+.markdownBody code {
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 6px;
+  padding: 0.08em 0.32em;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.markdownBody pre {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 12px;
+  padding: 12px;
+  background: color-mix(in srgb, #000000 22%, transparent);
+}
+
+.themeLight .markdownBody pre {
+  background: color-mix(in srgb, #ffffff 58%, var(--fg) 8%);
+}
+
+.markdownBody pre code {
+  display: block;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+}
+
+.markdownBody a {
+  color: currentColor;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.markdownBody table {
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+
+.markdownBody th,
+.markdownBody td {
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  padding: 0.4em 0.55em;
+  text-align: left;
+}
+
+.markdownBody th {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
 .messageContextBackdrop {
   position: fixed;
   inset: 0;
@@ -4233,9 +4483,16 @@
   background: transparent;
 }
 
+.messageContextBackdrop[data-msg-focus-overlay="true"] {
+  /* Row-level blur dims the thread; fullscreen layer is tint only so the
+     tapped bubble stays above and receives touches (backdrop ignores pointer-events). */
+  background: color-mix(in srgb, var(--bg) 38%, transparent);
+  pointer-events: none;
+}
+
 .messageContextMenu {
   position: fixed;
-  z-index: 851;
+  z-index: 852;
   min-width: 132px;
   display: grid;
   gap: 4px;
@@ -4244,9 +4501,16 @@
   border-radius: 14px;
   background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
   box-shadow: var(--shadow-lg);
-  transform: translate(-50%, -50%);
   backdrop-filter: blur(12px) saturate(1.08);
   -webkit-backdrop-filter: blur(12px) saturate(1.08);
+}
+
+.messageContextMenu[data-anchor="center"] {
+  transform: translate(-50%, -50%);
+}
+
+.messageContextMenu[data-anchor="below"] {
+  transform: translate(-50%, 14px);
 }
 
 .messageContextMenu button {
@@ -4429,22 +4693,97 @@
     0 -8px 24px -22px color-mix(in srgb, var(--accent) 34%, transparent);
 }
 
+.appLayout[data-private-active="true"] .compose {
+  background:
+    radial-gradient(
+      ellipse 72% 42% at var(--lens-thumb-x, 50%) 0%,
+      color-mix(in srgb, var(--fg) 8%, transparent) 0%,
+      transparent 74%
+    ),
+    var(--bg-surface);
+  box-shadow:
+    0 -8px 24px -22px color-mix(in srgb, var(--fg) 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--compose-bot-color, var(--fg)) 12%, transparent);
+}
+
 .composeError {
-  max-width: 860px;
+  max-width: min(1240px, 100%);
   margin: 0 auto 10px;
   display: block;
 }
 
 /* Thin utility row above the textarea for the LOCAL/ONLINE mode toggle and
-   any future compose-adjacent controls. */
+   any future compose-adjacent controls. Width matches `.composeEditorShell`
+   so the row's left edge lines up with the textarea below it. */
 .composeTools {
-  max-width: 860px;
+  max-width: min(1240px, 100%);
   margin: 0 auto 8px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.conversationStarterRail {
+  max-width: min(1240px, 100%);
+  margin: 0 auto 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+@media (max-width: 620px) {
+  .conversationStarterRail {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    gap: 6px;
+  }
+}
+
+.conversationStarterChip {
+  flex-shrink: 0;
+  max-width: min(100%, 22rem);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line) 72%);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg-elevated));
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 580;
+  line-height: 1.35;
+  padding: 8px 14px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.05s;
+}
+
+.conversationStarterChip:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line) 48%);
+  background: color-mix(in srgb, var(--accent-soft) 68%, var(--bg-hover));
+}
+
+.conversationStarterChip:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg-surface),
+    0 0 0 4px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.conversationStarterChip:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.conversationStarterChip:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .composeUtilityActions {
@@ -4455,6 +4794,349 @@
 
 .composeUtilityButton {
   flex-shrink: 0;
+}
+
+/* Outer deck — matches the messages column width so the compose surface
+   visually aligns with the thread above it on desktop, and goes edge-to-edge
+   on mobile via the @media (max-width: 720px) override. */
+.composeEditorShell {
+  max-width: min(1240px, 100%);
+  width: 100%;
+  margin: 0 auto;
+  display: grid;
+  gap: 8px;
+}
+
+.markdownToolbarButton {
+  -webkit-appearance: none;
+  appearance: none;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-deep);
+  color: var(--fg-muted);
+  min-height: 30px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+}
+
+.markdownToolbarButton:hover,
+.markdownToolbarButton:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.markdownToolbarButton:active {
+  transform: translateY(1px);
+}
+
+.markdownToolbarButtonText {
+  display: inline;
+}
+
+.markdownToolbarButtonShort {
+  display: none;
+}
+
+.markdownComposerSurface {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg) 86%, var(--bg-surface) 14%);
+  padding: 8px 10px 8px 8px;
+}
+
+.markdownSideToolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 4px 10px 4px 2px;
+  border-right: 1px solid var(--line);
+  margin-right: 8px;
+}
+
+.markdownToolbarLabelVertical {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--fg-subtle);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  user-select: none;
+  padding-bottom: 2px;
+}
+
+.markdownSideToolbar .markdownToolbarButton {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 6px;
+  border-radius: 10px;
+}
+
+.markdownSideToolbar .markdownToolbarButtonText {
+  display: none;
+}
+
+.markdownSideToolbar .markdownToolbarButtonShort {
+  display: inline;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.markdownComposerMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.markdownComposerInputRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.markdownComposerInputRowSingle {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.markdownRichEditorHost {
+  min-width: 0;
+  min-height: 78px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: 12px;
+}
+
+.markdownTiptapContent {
+  outline: none;
+}
+
+.markdownRichEditorHost :global(.tiptap) {
+  min-height: 70px;
+  outline: none;
+  color: var(--fg);
+  font-size: var(--font-size-compose);
+  line-height: 1.55;
+}
+
+.markdownRichEditorHost :global(.tiptap p) {
+  margin: 0.28em 0;
+}
+
+.markdownRichEditorHost :global(.tiptap p.is-editor-empty.is-empty::before) {
+  content: attr(data-placeholder);
+  color: var(--fg-subtle);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  font-style: italic;
+}
+
+.markdownRichEditorHost :global(.tiptap h1),
+.markdownRichEditorHost :global(.tiptap h2),
+.markdownRichEditorHost :global(.tiptap h3) {
+  margin: 0.45em 0 0.25em;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.markdownRichEditorHost :global(.tiptap h1) {
+  font-size: 1.25em;
+}
+
+.markdownRichEditorHost :global(.tiptap h2) {
+  font-size: 1.12em;
+}
+
+.markdownRichEditorHost :global(.tiptap h3) {
+  font-size: 1.05em;
+}
+
+.markdownRichEditorHost :global(.tiptap ul),
+.markdownRichEditorHost :global(.tiptap ol) {
+  margin: 0.28em 0;
+  padding-left: 1.35em;
+}
+
+.markdownRichEditorHost :global(.tiptap blockquote) {
+  margin: 0.35em 0;
+  padding: 0.15em 0 0.15em 0.85em;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 42%, var(--line) 58%);
+  color: color-mix(in srgb, var(--fg) 88%, var(--fg-muted) 12%);
+}
+
+.markdownRichEditorHost :global(.tiptap code) {
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 6px;
+  padding: 0.06em 0.28em;
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.markdownRichEditorHost :global(.tiptap pre) {
+  margin: 0.4em 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  background: color-mix(in srgb, var(--bg-deep) 80%, transparent);
+  overflow-x: auto;
+}
+
+.markdownRichEditorHost :global(.tiptap pre code) {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 0.88em;
+}
+
+.markdownRichEditorHost :global(.tiptap a) {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.markdownRichEditorHost :global(.tiptap hr) {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0.6em 0;
+}
+
+.markdownComposerInputRow textarea {
+  min-height: 78px;
+  max-height: 180px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.compose[data-compose-ready="true"] .markdownComposerInputRow textarea,
+.compose[data-compose-ready="true"][data-compose-bot-selected="true"] .markdownComposerInputRow textarea,
+.compose[data-compose-ready="true"] .markdownComposerInputRow textarea:focus,
+.compose[data-compose-ready="true"][data-compose-bot-selected="true"] .markdownComposerInputRow textarea:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.markdownComposerInputRow > button {
+  align-self: end;
+  border-radius: 12px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  min-width: 88px;
+  padding: 14px 18px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-compose);
+  font-weight: 600;
+  opacity: 0.52;
+  filter: saturate(0.72);
+  transition:
+    background 0.25s,
+    border-color 0.25s,
+    color 0.25s,
+    filter 0.18s ease,
+    opacity 0.18s ease,
+    transform 0.18s ease;
+  box-shadow: none;
+}
+
+.compose[data-compose-ready="true"] .markdownComposerInputRow > button:not(:disabled) {
+  opacity: 1;
+  filter: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.markdownComposerSurface:focus-within .markdownComposerInputRow > button:not(:disabled),
+.markdownComposerSurface:hover .markdownComposerInputRow > button:not(:disabled) {
+  opacity: 0.88;
+  filter: saturate(0.9);
+  transform: translateX(-2px);
+}
+
+.compose[data-compose-ready="true"] .markdownComposerSurface:focus-within .markdownComposerInputRow > button:not(:disabled),
+.compose[data-compose-ready="true"] .markdownComposerSurface:hover .markdownComposerInputRow > button:not(:disabled) {
+  opacity: 1;
+  filter: none;
+}
+
+.markdownComposerInputRow > button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.compose[data-compose-bot-selected="true"] .markdownComposerInputRow > button:not(:disabled) {
+  border-color: var(--compose-bot-color, var(--accent));
+  background: var(--compose-bot-color, var(--accent));
+  color: var(--accent-text);
+}
+
+.appLayout[data-private-active="true"]
+  .compose[data-compose-bot-selected="true"]
+  .markdownComposerInputRow
+  > button:not(:disabled) {
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-deep) 78%, var(--fg) 22%),
+      color-mix(in srgb, var(--bg-surface) 82%, var(--fg) 18%)
+    );
+  color: var(--fg);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 12%, transparent);
+}
+
+.compose[data-compose-bot-selected="true"] .markdownComposerInputRow > button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 88%,
+    var(--fg) 12%
+  );
+}
+
+.appLayout[data-private-active="true"]
+  .compose[data-compose-bot-selected="true"]
+  .markdownComposerInputRow
+  > button:hover:not(:disabled) {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-deep) 72%, var(--fg) 28%),
+      color-mix(in srgb, var(--bg-surface) 76%, var(--fg) 24%)
+    );
+}
+
+.markdownComposerInputRow > button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.markdownComposerInputRow > button:disabled {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg-deep) 86%, var(--fg) 14%);
+  color: var(--fg-muted);
+  filter: saturate(0);
+  opacity: 0.44;
+  cursor: not-allowed;
 }
 
 .composeModelControl {
@@ -5235,28 +5917,41 @@
 }
 
 .composeInner {
-  max-width: 860px;
+  max-width: 100%;
+  width: 100%;
   margin: 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 10px;
   align-items: end;
 }
 
+.composeInnerSingle {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .compose textarea {
-  border-radius: 14px;
+  width: 100%;
+  border-radius: 16px;
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--fg);
-  min-height: 56px;
-  max-height: 200px;
+  min-height: 60px;
+  max-height: 220px;
   resize: none;
-  padding: 14px 16px;
+  padding: 16px 18px;
   font: inherit;
   font-size: var(--font-size-compose);
   line-height: 1.5;
   min-width: 0;
   transition: border-color 0.15s, box-shadow 0.15s;
+  /* Hide internal scrollbar — only the conversation pane should scroll. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.compose textarea::-webkit-scrollbar {
+  display: none;
 }
 
 .compose[data-compose-ready="true"] textarea {
@@ -5273,6 +5968,21 @@
   box-shadow: inset -18px 0 24px -24px color-mix(
     in srgb,
     var(--compose-bot-color, var(--accent)) 72%,
+    transparent
+  );
+}
+
+.appLayout[data-private-active="true"]
+  .compose[data-compose-ready="true"][data-compose-bot-selected="true"]
+  textarea {
+  border-color: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 24%,
+    var(--line)
+  );
+  box-shadow: inset -18px 0 24px -24px color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 24%,
     transparent
   );
 }
@@ -5304,6 +6014,23 @@
     );
 }
 
+.appLayout[data-private-active="true"]
+  .compose[data-compose-ready="true"][data-compose-bot-selected="true"]
+  textarea:focus {
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--fg));
+  box-shadow:
+    0 0 0 3px color-mix(
+      in srgb,
+      var(--compose-bot-color, var(--accent)) 14%,
+      transparent
+    ),
+    inset -18px 0 24px -24px color-mix(
+      in srgb,
+      var(--compose-bot-color, var(--accent)) 24%,
+      transparent
+    );
+}
+
 .compose[data-compose-bot-selected="true"] textarea::placeholder {
   color: color-mix(
     in srgb,
@@ -5313,15 +6040,27 @@
   opacity: 1;
 }
 
+.appLayout[data-private-active="true"] .compose[data-compose-bot-selected="true"] textarea::placeholder {
+  color: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 24%,
+    var(--fg-muted) 76%
+  );
+}
+
 /* Scoped to composeInner so the mode-toggle chips above the textarea don't
-   inherit the primary-button (accent fill) styling intended for Send. */
+   inherit the primary-button (accent fill) styling intended for Send.
+   Matches textarea border-radius (16px) so the input + button row reads
+   as a single capsule on both desktop and mobile. */
 .composeInner button {
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid var(--accent);
   background: var(--accent);
   color: var(--accent-text);
-  min-width: 88px;
-  padding: 14px 18px;
+  align-self: stretch;
+  min-width: 96px;
+  min-height: 60px;
+  padding: 0 20px;
   cursor: pointer;
   font: inherit;
   font-size: var(--font-size-compose);
@@ -5370,12 +6109,41 @@
   color: var(--accent-text);
 }
 
+.appLayout[data-private-active="true"]
+  .compose[data-compose-bot-selected="true"]
+  .composeInner
+  button:not(:disabled) {
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-deep) 78%, var(--fg) 22%),
+      color-mix(in srgb, var(--bg-surface) 82%, var(--fg) 18%)
+    );
+  color: var(--fg);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 12%, transparent);
+}
+
 .compose[data-compose-bot-selected="true"] .composeInner button:hover:not(:disabled) {
   background: color-mix(
     in srgb,
     var(--compose-bot-color, var(--accent)) 88%,
     var(--fg) 12%
   );
+}
+
+.appLayout[data-private-active="true"]
+  .compose[data-compose-bot-selected="true"]
+  .composeInner
+  button:hover:not(:disabled) {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-deep) 72%, var(--fg) 28%),
+      color-mix(in srgb, var(--bg-surface) 76%, var(--fg) 24%)
+    );
 }
 
 .composeInner button:active:not(:disabled) {
@@ -7568,6 +8336,169 @@
   pointer-events: none;
 }
 
+/* Chat overflow (wrench) — visual sibling to ☰ on mobile (fixed top-right). */
+.chatGearGlyph {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  stroke-width: 1.65;
+}
+
+.chatGearAnchor {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.chatGearAnchorHidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Inline desktop chat-header buttons — replaces the wrench popout while
+   the viewport is wide enough. Inherits the bot's normalized accent from
+   `--accent-ink` / `--accent-soft` (set by `botAccentStyle` on the chat pane
+   ancestor), matching the prior MEMORIES badge look. */
+.chatHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  transition: opacity 0.18s ease;
+}
+
+.chatHeaderActionsHidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chatHeaderAction {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent);
+  border-radius: 999px;
+  height: 30px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.chatHeaderAction:hover:not(:disabled),
+.chatHeaderAction:focus-visible:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: color-mix(in srgb, var(--accent-ink) 55%, transparent);
+  color: var(--accent-text);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.chatHeaderAction:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.chatHeaderActionDanger {
+  background: color-mix(in srgb, var(--danger) 18%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--danger) 48%, transparent);
+  color: var(--danger);
+}
+
+.chatHeaderActionDanger:hover:not(:disabled),
+.chatHeaderActionDanger:focus-visible:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.chatGearButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  background: var(--bg-surface);
+  color: var(--accent-ink);
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font: inherit;
+  box-shadow: var(--shadow-sm);
+  transition: color 0.18s ease, opacity 0.2s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.chatGearButton:hover {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+}
+
+.chatGearButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.chatOverflowMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 11.5rem;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm), 0 12px 40px color-mix(in srgb, var(--bg-deep) 35%, transparent);
+  z-index: 260;
+}
+
+.chatOverflowMenuItem {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.chatOverflowMenuItem:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.chatOverflowMenuItem:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.chatOverflowMenuItemDanger {
+  color: var(--danger);
+}
+
+.chatOverflowMenuItemDanger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
 /* ── Mobile ── */
 @media (max-width: 720px) {
   /* ── Hub: full-bleed, inverted elevation ────────────────────────
@@ -7738,34 +8669,148 @@
     }
   }
 
+  /* On mobile, the ☰ + wrench live INSIDE the chat header bar. Stripping
+     pill chrome makes them read as embedded icons so the bar visually wraps
+     all three (☰ · identity · wrench) as one continuous top deck. */
   .menuToggle {
     display: inline-flex;
     position: fixed;
     top: calc(env(safe-area-inset-top) + 12px);
     left: max(12px, calc(env(safe-area-inset-left) + 12px));
     z-index: 201;
-    border: 1px solid var(--line);
-    background: var(--bg-surface);
-    color: var(--fg);
+    border: 0;
+    background: transparent;
+    color: var(--accent-ink);
     border-radius: 10px;
     padding: 8px 12px;
     cursor: pointer;
     font: inherit;
     font-size: 16px;
-    box-shadow: var(--shadow-sm);
+    box-shadow: none;
     align-items: center;
     justify-content: center;
-    transition: opacity 0.2s ease;
+    transition: color 0.18s ease, opacity 0.2s ease, background 0.18s ease;
   }
 
+  .menuToggle:hover,
+  .menuToggle:focus-visible {
+    background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+    outline: none;
+  }
+
+  /* Mirror ☰ — fixed top-right overflow gear + shared hide-with-drawers behavior. */
+  .chatGearAnchor {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 12px);
+    right: max(12px, calc(env(safe-area-inset-right) + 12px));
+    left: auto;
+    margin-left: 0;
+    z-index: 201;
+  }
+
+  .chatGearButton {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 8px 12px;
+  }
+
+  .chatGearButton:hover,
+  .chatGearButton:focus-visible {
+    background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+    border-color: transparent;
+  }
+
+  /* Solid top deck that explicitly wraps both buttons + the identity. Flex
+     centering lines the PRISM wordmark / bot identity up with the floating
+     ☰ + wrench at the same vertical midline, so the bar reads as one row. */
   .chatHeader {
-    padding-top: calc(env(safe-area-inset-top) + 14px);
-    padding-left: 60px;
-    padding-right: 60px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--line);
+    padding: env(safe-area-inset-top) 60px 0;
+    min-height: calc(env(safe-area-inset-top) + 56px);
+    box-shadow: 0 6px 16px -16px color-mix(in srgb, var(--accent-ink) 24%, transparent);
+    max-height: 180px;
+    overflow: hidden;
+    transition:
+      max-height 0.22s ease,
+      padding 0.22s ease,
+      opacity 0.16s ease,
+      transform 0.22s ease,
+      border-color 0.22s ease;
+  }
+
+  /* h2 has visibility:hidden on desktop to reserve title space; on mobile
+     PRISM / bot identity is the only visible element and the bar is sized
+     by min-height instead, so the placeholder can drop out entirely. */
+  .chatHeader h2 {
+    display: none;
+  }
+
+  /* In-flow now (no absolute positioning). Flex centering on `.chatHeader`
+     handles both H + V alignment automatically against the floating buttons. */
+  .chatHeader .hubHomeButton {
+    position: relative;
+    left: auto;
+    transform: none;
+    margin: 0;
+    max-width: min(64vw, 300px);
+    justify-content: center;
+    z-index: 1;
+  }
+
+  .chatHeader .hubHomeButton:active {
+    transform: translateY(1px);
+  }
+
+  .chatHeader .headerIdentityName {
+    max-width: min(36vw, 200px);
   }
 
   .messages {
     padding: 18px 14px;
+    /* Reduce scroll-anchoring feedback loops with the collapsing header + threshold logic. */
+    overflow-anchor: none;
+  }
+
+  /* Left/right pads match `.menuToggle` and `.chatGearAnchor` (mobile) so the
+     toolbar's first/last items line up with the floating ☰ + wrench above. */
+  .compose {
+    padding:
+      12px max(12px, calc(env(safe-area-inset-right) + 12px))
+      calc(env(safe-area-inset-bottom) + 14px)
+      max(12px, calc(env(safe-area-inset-left) + 12px));
+  }
+
+  .compose[data-keyboard-lifted="true"] {
+    margin-bottom: var(--compose-keyboard-inset, 0px);
+  }
+
+  .composeTools,
+  .composeEditorShell,
+  .composeInner {
+    max-width: none;
+  }
+
+  .compose textarea {
+    border-radius: 14px;
+    min-height: 52px;
+    padding: 12px 14px;
+  }
+
+  .composeInner {
+    gap: 8px;
+  }
+
+  .composeInner button {
+    min-width: 76px;
+    min-height: 52px;
+    padding: 0 14px;
+    border-radius: 12px;
   }
 
   /* On touch devices the × is already visible in the baseline (0.45),
@@ -7780,7 +8825,136 @@
   }
 
   .message {
-    max-width: 92%;
+    max-width: 100%;
+    width: 100%;
+    gap: 4px;
+  }
+
+  .messageAssistant,
+  .messageUser {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    color: var(--fg);
+    padding: 8px 12px 8px 18px;
+  }
+
+  .messageAssistant::before {
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 3px;
+    border-radius: 999px;
+  }
+
+  .messageAssistant::after {
+    display: none;
+  }
+
+  .messageUser {
+    align-self: stretch;
+    padding: 8px 18px 8px 12px;
+    border-right: 3px solid color-mix(in srgb, var(--accent-ink) 82%, transparent);
+  }
+
+  .messageUser h4 {
+    color: var(--fg-muted);
+  }
+
+  /* User body: slightly off-white, tinted by the conversation bot hue via --user-msg-tink. */
+  .themeDark .messageUser .markdownBody,
+  .themeDark .messageUser .markdownBody p {
+    color: color-mix(
+      in srgb,
+      var(--user-msg-tink, var(--accent-ink)) 26%,
+      color-mix(in srgb, #faf7f3 92%, var(--bg))
+    );
+  }
+
+  .themeLight .messageUser .markdownBody,
+  .themeLight .messageUser .markdownBody p {
+    color: color-mix(in srgb, var(--user-msg-tink, var(--accent-ink)) 30%, var(--fg));
+  }
+
+  /* Tap-to-focus: blur/dim header, compose, and other messages (not the focused row). */
+  .chatPane[data-chat-mobile-msg-focus="true"] > .chatHeader {
+    filter: blur(12px);
+    opacity: 0.48;
+    pointer-events: none;
+    transition:
+      filter 0.22s ease,
+      opacity 0.22s ease;
+  }
+
+  .chatPane[data-chat-mobile-msg-focus="true"] > .compose {
+    filter: blur(12px);
+    opacity: 0.48;
+    pointer-events: none;
+    transition:
+      filter 0.22s ease,
+      opacity 0.22s ease;
+  }
+
+  .messages[data-mobile-msg-focus="true"] > :not([data-msg-mobile-focus-root="true"]) {
+    filter: blur(11px);
+    opacity: 0.44;
+    pointer-events: none;
+    transition:
+      filter 0.22s ease,
+      opacity 0.22s ease;
+  }
+
+  /* Assistant bubbles use `overflow: clip` so the inset gradient tails stay
+     inside rounded corners — but that clips an outer pseudo-element ring (see
+     assistant screenshot: only corners visible). Visible overflow + framing on
+     the bubble itself avoids that. User bubbles have a side accent stripe; hide
+     it while focused so one accent-colored frame wraps the row (no double edge). */
+
+  .messageAssistant[data-msg-mobile-focus-root="true"],
+  .messageUser[data-msg-mobile-focus-root="true"] {
+    overflow: visible;
+    border-radius: 14px !important;
+    position: relative;
+    z-index: 851;
+    filter: none !important;
+    opacity: 1 !important;
+    pointer-events: auto;
+    box-shadow:
+      0 0 0 0 transparent,
+      0 0 0 transparent;
+    animation: mobileMsgFocusUnifiedFrame 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .messageAssistant[data-msg-mobile-focus-root="true"]::before {
+    opacity: 0;
+  }
+
+  .messageUser[data-msg-mobile-focus-root="true"] {
+    border-right: 0 !important;
+  }
+
+  @keyframes mobileMsgFocusUnifiedFrame {
+    0% {
+      box-shadow:
+        0 0 0 0 transparent,
+        0 0 0 transparent;
+    }
+
+    100% {
+      box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--mobile-msg-focus-accent, var(--accent-ink)) 92%, transparent),
+        0 0 26px color-mix(in srgb, var(--mobile-msg-focus-accent, var(--accent-ink)) 32%, transparent);
+    }
+  }
+
+  .messageUser .messageActions button {
+    border-color: color-mix(in srgb, var(--accent-ink) 28%, transparent);
+    color: color-mix(in srgb, var(--accent-ink) 86%, transparent);
+  }
+
+  .providerDotHuman {
+    background: var(--accent-ink);
   }
 
   .message[data-copy-tap="true"] {
@@ -8130,5 +9304,319 @@
   .imageGrid {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 12px;
+  }
+}
+
+/* Hamburger-visible screens and touch devices should not rely on hover.
+   Narrow desktop windows can still have a mouse, so this follows the same
+   720px breakpoint that reveals ☰ instead of only checking pointer type.
+   Keep focus, active, selected, and armed states intact; only suppress
+   hover-only movement, dimming, glows, and reveal affordances. */
+@media (max-width: 720px), (hover: none), (pointer: coarse) {
+  .appLayout :where(button:hover:not(:active), a:hover:not(:active), [role="button"]:hover:not(:active)),
+  .authLayout :where(button:hover:not(:active), a:hover:not(:active), [role="button"]:hover:not(:active)) {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .emptyStateIconButton:hover:not(:active):not(:focus-visible) {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .emptyStateSearchTrigger:hover:not(:focus-visible)::after {
+    opacity: 0 !important;
+    transform: scale(0.82) !important;
+  }
+
+  .emptyStateIconButton:hover:not(:focus-visible) .emptyStateBotGlyph {
+    box-shadow:
+      0 0 34px
+        color-mix(
+          in srgb,
+          var(--bot-color, var(--fg-muted)) 22%,
+          transparent
+        ),
+      inset 0 0 0 1px
+        color-mix(
+          in srgb,
+          var(--bot-color, var(--fg-muted)) 16%,
+          transparent
+        ) !important;
+  }
+
+  .chatBotPicker:not(.chatBotPickerSolidSwatch):hover .chatBotTile:not(:hover),
+  .chatBotPicker:not(.chatBotPickerSolidSwatch):has(.chatBotTile:hover) .chatBotTile:not(:hover),
+  .chatBotPickerPixelGrid:hover .chatBotTile:not(:hover):not(.chatBotTileSelected),
+  .chatBotPickerRainbowGradient:hover .chatBotTile:not(:hover):not(.chatBotTileSelected) {
+    transform: none !important;
+    opacity: 1 !important;
+  }
+
+  .chatBotTile:hover:not(:active):not(:focus-visible),
+  .chatBotPickerPixelGrid .chatBotTile:hover:not(:active):not(:focus-visible),
+  .chatBotPickerPixelGrid .chatBotTileSelected:hover:not(:active):not(:focus-visible) {
+    transform: none !important;
+    z-index: auto !important;
+    box-shadow: none !important;
+  }
+
+  .chatBotTile:hover:not(:active):not(:focus-visible):not(.chatBotTileSelected) {
+    color: var(--bot-color, var(--fg-muted)) !important;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 14%, var(--bg-surface)),
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 6%, var(--bg-surface))
+    ) !important;
+    border-color: color-mix(
+      in srgb,
+      var(--bot-color, var(--fg-muted)) 34%,
+      var(--line)
+    ) !important;
+  }
+
+  .chatBotTileWithName:hover:not(:active):not(:focus-visible) {
+    background:
+      radial-gradient(
+        circle at 50% 36%,
+        color-mix(in srgb, var(--bot-color, var(--fg-muted)) 26%, transparent),
+        transparent 46%
+      ),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--bot-color, var(--fg-muted)) 18%, var(--bg-surface)),
+        color-mix(in srgb, var(--bot-color, var(--fg-muted)) 8%, var(--bg))
+      ) !important;
+  }
+
+  .chatBotPickerSingle .chatBotTile:hover:not(:active):not(:focus-visible) {
+    background:
+      radial-gradient(
+        circle at 50% 38%,
+        color-mix(in srgb, var(--bot-color, var(--fg-muted)) 30%, transparent),
+        transparent 42%
+      ),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--bot-color, var(--fg-muted)) 18%, var(--bg-surface)),
+        color-mix(in srgb, var(--bot-color, var(--fg-muted)) 8%, var(--bg))
+      ) !important;
+  }
+
+  .chatBotTileSelected:hover:not(:active):not(:focus-visible) {
+    background: var(--fg) !important;
+    border-color: var(--fg) !important;
+    color: var(--bg) !important;
+    box-shadow: none !important;
+  }
+
+  .chatBotTile:not(.chatBotTileSelected):hover:not(:focus-visible) .chatBotTileBotGlyph {
+    opacity: 1 !important;
+  }
+
+  .chatBotTileFlat:hover:not(:active):not(:focus-visible) {
+    background: color-mix(
+      in srgb,
+      var(--bot-color, var(--fg-muted)) 17%,
+      var(--bg-surface)
+    ) !important;
+  }
+
+  .chatBotTileSwatchOnly:hover:not(:active):not(:focus-visible) {
+    background: color-mix(
+      in srgb,
+      var(--bot-color, var(--fg-muted)) 30%,
+      var(--bg-surface)
+    ) !important;
+  }
+
+  .chatBotTileSolidSwatch:hover:not(:active):not(:focus-visible) {
+    background: color-mix(
+      in srgb,
+      var(--bot-color, var(--fg-muted)) 48%,
+      transparent
+    ) !important;
+  }
+
+  .chatBotPickerPixelGrid .chatBotTile:hover:not(:focus-visible) .chatBotTileBotGlyph,
+  .chatBotPickerPixelGrid .chatBotTileSelected:hover:not(:focus-visible) .chatBotTileSelectedHoverGlyph {
+    display: none !important;
+    opacity: 0 !important;
+  }
+
+  .chatBotPickerPixelGrid .chatBotTileSelected:hover:not(:focus-visible) .chatBotTileSelectedDotGlyph {
+    display: block !important;
+  }
+
+  .message:hover .providerLabel {
+    opacity: 0 !important;
+  }
+
+  .message:hover .messageActionsSlot:not([data-armed="true"]):not([data-copied="true"]):not([data-model-revealed="true"]) {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translateY(4px) scale(0.98) !important;
+  }
+
+  .markdownComposerSurface:hover .markdownComposerInputRow > button:not(:disabled),
+  .composeInner:hover button:not(:disabled) {
+    opacity: 0.42 !important;
+  }
+
+  .compose[data-compose-ready="true"] .markdownComposerSurface:hover .markdownComposerInputRow > button:not(:disabled),
+  .compose[data-compose-ready="true"] .composeInner:hover button:not(:disabled) {
+    opacity: 1 !important;
+  }
+
+  .botCard:hover:not(:focus-within) {
+    background: var(--bg) !important;
+    border-color: var(--line) !important;
+    box-shadow: none !important;
+  }
+
+  .hubTile:hover:not(:disabled):not(:active):not(:focus-visible) {
+    background: var(--bg-surface) !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .menuToggle:hover:not(:active):not(:focus-visible),
+  .chatGearButton:hover:not(:active):not(:focus-visible),
+  .chatOverflowMenuItem:hover:not(:disabled):not(:active):not(:focus-visible),
+  .chatOverflowMenuItemDanger:hover:not(:disabled):not(:active):not(:focus-visible),
+  .privateChatButton:hover:not(:active):not(:focus-visible),
+  .messageActions button:hover:not(:active):not(:focus-visible),
+  .messageUser .messageActions button:hover:not(:active):not(:focus-visible),
+  .panelClose:hover:not(:active):not(:focus-visible),
+  .memoryList button:hover:not(:active):not(:focus-visible) {
+    background: transparent !important;
+    border-color: transparent !important;
+    color: inherit !important;
+  }
+
+  .chatGearButton:hover:not(:active):not(:focus-visible) {
+    border-color: transparent !important;
+  }
+
+  .privateChatButton:hover:not(:active):not(:focus-visible) {
+    border-color: var(--private-chat-color, var(--fg)) !important;
+    color: var(--private-chat-color, var(--fg)) !important;
+  }
+
+  .privateChatButtonActive:hover:not(:active):not(:focus-visible) {
+    background: color-mix(in srgb, var(--private-chat-color, var(--fg)) 14%, transparent) !important;
+  }
+
+  .sidebarSelect:hover:not(:focus) {
+    border-color: var(--line) !important;
+  }
+
+  .conversationTitleButton:hover:not(.selected):not(:active):not(:focus-visible) {
+    background:
+      linear-gradient(
+        color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent),
+        color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent)
+      ) !important;
+    color: var(--row-text-color, var(--fg-muted)) !important;
+  }
+
+  .conversationRow[style*="--row-color"] .conversationTitleButton:hover:not(.selected):not(:active):not(:focus-visible) {
+    background:
+      radial-gradient(
+        ellipse 720px 420px at 92% var(--row-glow-y, 12%),
+        color-mix(in srgb, var(--row-color) var(--row-depth-glow), transparent),
+        color-mix(in srgb, var(--row-color) var(--row-depth-fill), transparent) 38%,
+        transparent 72%
+      ),
+      radial-gradient(
+        ellipse 720px 420px at 12% var(--row-counter-y, 88%),
+        color-mix(in srgb, var(--row-color) var(--row-depth-fill), transparent),
+        transparent 66%
+      ),
+      linear-gradient(
+        color-mix(in srgb, var(--row-color) var(--row-depth-base), transparent),
+        color-mix(in srgb, var(--row-color) var(--row-depth-base), transparent)
+      ),
+      linear-gradient(
+        color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent),
+        color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent)
+      ) !important;
+    color: var(--fg) !important;
+  }
+
+  .conversationRow[data-private="true"] .conversationTitleButton:hover:not(.selected)::before {
+    opacity: 0.55 !important;
+  }
+
+  .conversationDelete:hover:not(.conversationDeleteArmed):not([data-holding="true"]):not(:focus-visible) {
+    opacity: 0.45 !important;
+    color: var(--fg-muted) !important;
+    text-shadow: none !important;
+  }
+
+  .sidebarFooter button:hover:not(:active):not(:focus-visible),
+  .conversationStarterChip:hover:not(:disabled):not(:active):not(:focus-visible),
+  .hueLensClear:hover:not(:active):not(:focus-visible),
+  .modeControl:hover:not(:active):not(:focus-visible),
+  .accountLogoutButton:hover:not(:disabled):not(:active):not(:focus-visible),
+  .dangerButton:hover:not(:disabled):not(:active):not(:focus-visible),
+  .imageGrid a:hover:not(:active):not(:focus-visible) {
+    background: transparent !important;
+    border-color: var(--line) !important;
+    color: inherit !important;
+    transform: none !important;
+  }
+
+  .newChatButton:hover:not(:active):not(:focus-visible) {
+    border-color: color-mix(in srgb, #ffffff 50%, transparent) !important;
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, #ffffff 72%, transparent) 0%,
+        color-mix(in srgb, #ffffff 50%, transparent) 38%,
+        color-mix(in srgb, #ffffff 34%, transparent) 100%
+      ),
+      radial-gradient(
+        circle at 18% 18%,
+        color-mix(in srgb, #ffffff 44%, transparent),
+        transparent 38%
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, #ff4d6d 18%, transparent),
+        color-mix(in srgb, #ff9f1c 14%, transparent) 25%,
+        color-mix(in srgb, #b7e63a 14%, transparent) 48%,
+        color-mix(in srgb, #2fd3e3 14%, transparent) 72%,
+        color-mix(in srgb, #7b5cff 18%, transparent)
+      ) !important;
+  }
+
+  .appLayout[data-accent-active="true"] .newChatButton:hover:not(:active):not(:focus-visible) {
+    border-color: color-mix(in srgb, var(--accent-ink) 30%, color-mix(in srgb, #ffffff 46%, transparent)) !important;
+    background:
+      radial-gradient(
+        circle at 82% 50%,
+        color-mix(in srgb, var(--accent) 26%, transparent),
+        transparent 58%
+      ),
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, #ffffff 72%, transparent) 0%,
+        color-mix(in srgb, var(--accent) 10%, color-mix(in srgb, #ffffff 50%, transparent)) 38%,
+        color-mix(in srgb, var(--accent) 22%, color-mix(in srgb, #ffffff 34%, transparent)) 100%
+      ),
+      radial-gradient(
+        circle at 18% 18%,
+        color-mix(in srgb, #ffffff 44%, transparent),
+        transparent 38%
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, #ff4d6d 16%, transparent),
+        color-mix(in srgb, #ff9f1c 12%, transparent) 25%,
+        color-mix(in srgb, var(--accent) 16%, transparent) 50%,
+        color-mix(in srgb, #2fd3e3 12%, transparent) 72%,
+        color-mix(in srgb, #7b5cff 16%, transparent)
+      ) !important;
   }
 }
