@@ -24,6 +24,12 @@ import { spawn } from "node:child_process";
 
 const SHUTDOWN_GRACE_MS = 3000;
 const IS_POSIX = process.platform !== "win32";
+const apiPort = process.env.API_PORT?.trim() || "18787";
+const webEnv = {
+  ...process.env,
+  LOCALAI_API_ORIGIN:
+    process.env.LOCALAI_API_ORIGIN?.trim() || `http://127.0.0.1:${apiPort}`,
+};
 
 const children = [];
 let shuttingDown = false;
@@ -37,6 +43,7 @@ function start(name) {
     // Windows: leave attached; npm is a .cmd shim that needs shell resolution.
     detached: IS_POSIX,
     shell: !IS_POSIX,
+    env: name === "web" ? webEnv : process.env,
   });
   children.push({ name, child });
   child.on("exit", (code, signal) => {

@@ -126,5 +126,11 @@ export function resolveNextSettings(
     openAiKeyIntent = { action: "clear" };
   }
 
-  return { theme, preferredProvider, providerLocked, autoMemory, openAiKeyIntent };
+  return {
+    theme,
+    preferredProvider,
+    providerLocked,
+    autoMemory,
+    openAiKeyIntent,
+  };
 }
