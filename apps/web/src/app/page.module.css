@@ -2042,7 +2042,7 @@
   left: 14px;
   z-index: 2147483646;
   width: min(460px, calc(100vw - 28px));
-  max-height: calc(100dvh - 72px);
+  max-height: calc(100dvh - 48px);
   overflow: auto;
   display: grid;
   gap: 10px;
@@ -2374,6 +2374,7 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  grid-template-rows: auto auto minmax(0, 1fr);
   text-overflow: ellipsis;
   white-space: nowrap;
   visibility: hidden;
@@ -7521,7 +7522,7 @@
   width: 100%;
   /* Viewport-aware height so the expanded catalog can breathe on tall screens
      without overflowing short laptop/mobile windows. */
-  height: clamp(320px, 44dvh, 560px);
+  height: clamp(360px, 58dvh, 720px);
   border-radius: 10px;
   overflow: hidden;
   isolation: isolate;
@@ -7667,6 +7668,38 @@
   transition: transform 0.38s cubic-bezier(0.2, 1, 0.3, 1);
   will-change: transform;
   padding: 6px 6px 10px;
+}
+
+.colorGlyphApplyBar {
+  display: none;
+}
+
+.colorGlyphApplyPreview {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--bot-color, var(--accent));
+  color: var(--bot-tile-ink, var(--accent-text));
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--bot-color, var(--accent)) 24%, transparent);
+}
+
+.colorGlyphApplyPreview > svg {
+  width: 24px;
+  height: 24px;
+}
+
+.colorGlyphApplyButton {
+  flex: 1 1 auto;
+  min-height: 44px;
+  border: 1px solid var(--fg);
+  border-radius: 12px;
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 @keyframes popIn {
@@ -9132,25 +9165,27 @@
 
   .colorGlyphPopover {
     position: fixed;
-    top: 50%;
-    left: 50%;
+    inset: 0;
+    top: 0;
+    left: 0;
     right: auto;
     bottom: auto;
-    width: min(320px, calc(100vw - 48px));
-    height: min(
-      680px,
-      82dvh,
-      calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 72px)
-    );
+    width: 100vw;
+    height: 100dvh;
     max-height: none;
-    padding: 10px;
-    grid-template-rows: clamp(104px, 18dvh, 144px) auto minmax(0, 1fr);
+    padding:
+      calc(env(safe-area-inset-top) + 12px)
+      max(12px, calc(env(safe-area-inset-right) + 12px))
+      calc(env(safe-area-inset-bottom) + 12px)
+      max(12px, calc(env(safe-area-inset-left) + 12px));
+    grid-template-rows: clamp(150px, 26dvh, 230px) auto minmax(0, 1fr) auto;
     align-content: stretch;
     justify-items: stretch;
-    border-radius: 16px;
+    border: 0;
+    border-radius: 0;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
-    transform: translate(-50%, -50%);
-    animation: popModalIn 0.18s ease-out;
+    transform: none;
+    animation: popIn 0.18s ease-out;
   }
 
   .colorSquare,
@@ -9162,6 +9197,13 @@
   .glyphGridInner {
     min-height: 100%;
     padding: 6px 6px 14px;
+  }
+
+  .colorGlyphApplyBar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 4px;
   }
 
   .deleteAllModalBackdrop {

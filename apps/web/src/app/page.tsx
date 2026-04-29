@@ -5443,10 +5443,15 @@ function ColorGlyphPicker({
   ariaLabel = "Bot color and glyph. Click to open the picker, right-click for random.",
   resolvedTheme,
 }: ColorGlyphPickerProps): React.JSX.Element {
+  const [mobilePickerActive, setMobilePickerActive] = useState(false);
+  const [draftColor, setDraftColor] = useState(color);
+  const [draftGlyph, setDraftGlyph] = useState<BotGlyphName>(glyph);
+  const pickerColor = mobilePickerActive && open ? draftColor : color;
+  const pickerGlyph = mobilePickerActive && open ? draftGlyph : glyph;
   // Everything the swatch paints keys off the band-clamped color, not the
   // raw hex. The editor preview intentionally uses a solid selected-tile
   // treatment; the empty-state hero gets its own softer ambient styling.
-  const displayColor = normalizeAccentForTheme(color, resolvedTheme);
+  const displayColor = normalizeAccentForTheme(pickerColor, resolvedTheme);
   const readable = pickReadableText(displayColor);
   // Indicator position on the square tracks the current color so users
   // see where they are without a sliders UI. X → hue, Y → lightness
@@ -5460,6 +5465,55 @@ function ColorGlyphPicker({
   const indicatorLeft = (currentHue / 360) * 100;
   const indicatorTop =
     ((bandMax - currentLightness) / lightnessRange) * 100;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 799px)");
+    const update = () => setMobilePickerActive(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    media.addListener?.(update);
+    return () => {
+      media.removeEventListener?.("change", update);
+      media.removeListener?.(update);
+    };
+  }, []);
+
+  const togglePicker = useCallback(() => {
+    if (!open) {
+      setDraftColor(color);
+      setDraftGlyph(glyph);
+    }
+    onToggle();
+  }, [color, glyph, onToggle, open]);
+
+  const commitColorPick = useCallback(
+    (next: string) => {
+      if (mobilePickerActive) {
+        setDraftColor(next);
+        return;
+      }
+      onColorChange(next);
+    },
+    [mobilePickerActive, onColorChange]
+  );
+
+  const commitGlyphPick = useCallback(
+    (next: BotGlyphName) => {
+      if (mobilePickerActive) {
+        setDraftGlyph(next);
+        return;
+      }
+      onGlyphChange(next);
+    },
+    [mobilePickerActive, onGlyphChange]
+  );
+
+  const applyMobileDraft = useCallback(() => {
+    onColorChange(draftColor);
+    onGlyphChange(draftGlyph);
+    onToggle();
+  }, [draftColor, draftGlyph, onColorChange, onGlyphChange, onToggle]);
 
   // Refs for the two glyph-grid layers. shell = outermost clip + camera
   // target for the vignette/rim light; parallaxRef points at the scroll
@@ -5554,8 +5608,8 @@ function ColorGlyphPicker({
     const rect = dragRectRef.current;
     if (!pending || !rect) return;
     pendingPointRef.current = null;
-    onColorChange(computePickedColor(pending.clientX, pending.clientY, rect));
-  }, [onColorChange, computePickedColor]);
+    commitColorPick(computePickedColor(pending.clientX, pending.clientY, rect));
+  }, [commitColorPick, computePickedColor]);
 
   const schedulePickFlush = useCallback(() => {
     if (dragFrameRef.current != null) return;
@@ -5577,11 +5631,11 @@ function ColorGlyphPicker({
       dragRectRef.current = target.getBoundingClientRect();
       // Commit the landing position synchronously so a tap (no drag)
       // feels instant; subsequent moves are rAF-coalesced.
-      onColorChange(
+      commitColorPick(
         computePickedColor(event.clientX, event.clientY, dragRectRef.current)
       );
     },
-    [onColorChange, computePickedColor]
+    [commitColorPick, computePickedColor]
   );
 
   const handleSquarePointerMove = useCallback(
@@ -5608,7 +5662,7 @@ function ColorGlyphPicker({
       const pending = pendingPointRef.current;
       const rect = dragRectRef.current;
       if (pending && rect) {
-        onColorChange(computePickedColor(pending.clientX, pending.clientY, rect));
+        commitColorPick(computePickedColor(pending.clientX, pending.clientY, rect));
       }
       pendingPointRef.current = null;
       dragRectRef.current = null;
@@ -5619,7 +5673,7 @@ function ColorGlyphPicker({
         // (e.g. on some touch-end paths); releasing twice throws.
       }
     },
-    [onColorChange, computePickedColor]
+    [commitColorPick, computePickedColor]
   );
 
   // Mirror of Up for interrupted drags (OS alerts, touch cancellation,
@@ -5777,13 +5831,13 @@ function ColorGlyphPicker({
           ["--bot-color" as string]: displayColor,
           ["--bot-tile-ink" as string]: readable,
         } as React.CSSProperties}
-        onClick={onToggle}
+        onClick={togglePicker}
         aria-label={ariaLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
         title="Click to pick color and glyph"
       >
-        <BotGlyph name={glyph} />
+        <BotGlyph name={pickerGlyph} />
       </button>
       {open && (
         // Popover is a pure picking surface — no reroll affordance lives
@@ -5859,9 +5913,28 @@ function ColorGlyphPicker({
           >
             <div className={styles.glyphGridScroll}>
               <div ref={parallaxRef} className={styles.glyphGridInner}>
-                <BotGlyphPicker value={glyph} onChange={onGlyphChange} />
+                <BotGlyphPicker value={pickerGlyph} onChange={commitGlyphPick} />
               </div>
             </div>
+          </div>
+          <div className={styles.colorGlyphApplyBar}>
+            <div
+              className={styles.colorGlyphApplyPreview}
+              style={{
+                ["--bot-color" as string]: displayColor,
+                ["--bot-tile-ink" as string]: readable,
+              } as React.CSSProperties}
+              aria-hidden="true"
+            >
+              <BotGlyph name={pickerGlyph} />
+            </div>
+            <button
+              type="button"
+              className={styles.colorGlyphApplyButton}
+              onClick={applyMobileDraft}
+            >
+              Apply
+            </button>
           </div>
         </div>
       )}
