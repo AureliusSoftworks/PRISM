@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  parseHiddenBotModelIds,
   resolveNextSettings,
   sanitizeOpenAiKeyInput,
   type CurrentSettings,
@@ -21,6 +22,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     preferredProvider: "local",
     providerLocked: 0,
     autoMemory: 1,
+    hiddenBotModelIds: "[]",
     ...overrides,
   };
 }
@@ -118,6 +120,36 @@ describe("resolveNextSettings — autoMemory", () => {
 
   it("keeps the stored value when the field is missing", () => {
     assert.equal(resolveNextSettings({}, baseline({ autoMemory: 1 })).autoMemory, 1);
+  });
+});
+
+describe("resolveNextSettings — hiddenBotModelIds", () => {
+  it("accepts a unique trimmed string list", () => {
+    const next = resolveNextSettings(
+      { hiddenBotModelIds: [" llama3.2 ", "llava", "llava", 42] },
+      baseline()
+    );
+    assert.deepEqual(next.hiddenBotModelIds, ["llama3.2", "llava"]);
+  });
+
+  it("keeps the stored list when the field is missing or invalid", () => {
+    const current = baseline({
+      hiddenBotModelIds: JSON.stringify(["gpt-3.5-turbo"]),
+    });
+    assert.deepEqual(
+      resolveNextSettings({}, current).hiddenBotModelIds,
+      ["gpt-3.5-turbo"]
+    );
+    assert.deepEqual(
+      resolveNextSettings({ hiddenBotModelIds: "nope" }, current).hiddenBotModelIds,
+      ["gpt-3.5-turbo"]
+    );
+  });
+});
+
+describe("parseHiddenBotModelIds", () => {
+  it("falls back to an empty list for malformed stored JSON", () => {
+    assert.deepEqual(parseHiddenBotModelIds("not-json"), []);
   });
 });
 

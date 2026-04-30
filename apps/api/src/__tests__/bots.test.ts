@@ -2,6 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  parseStoredBotPrompt,
+  serializeStoredBotPrompt,
+} from "@localai/shared";
+import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
@@ -60,6 +64,19 @@ describe("composeBotSystemPrompt", () => {
     assert.equal(composeBotSystemPrompt(null, null), undefined);
     assert.equal(composeBotSystemPrompt("", ""), undefined);
     assert.equal(composeBotSystemPrompt("   ", "   "), undefined);
+  });
+
+  it("strips structured bot-editor metadata before composing with name", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.purpose.statement = "a meticulous proofreader";
+    profile.core.traits = "careful, specific, allergic to vague wording";
+    const stored = serializeStoredBotPrompt(profile, "Rita");
+    const prompt = composeBotSystemPrompt("Rita", stored);
+    assert.ok(prompt);
+    assert.doesNotMatch(prompt!, /PRISM_BOT_META/);
+    assert.match(prompt!, /^You are Rita\./);
+    assert.match(prompt!, /Purpose:\nYou are Rita, a meticulous proofreader\./);
+    assert.match(prompt!, /Traits: careful, specific, allergic to vague wording/);
   });
 
   it("handles odd-character names without crashing or mangling", () => {

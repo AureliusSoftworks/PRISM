@@ -22,6 +22,7 @@ export interface CurrentSettings {
   preferredProvider: Provider;
   providerLocked: number;
   autoMemory: number;
+  hiddenBotModelIds: string;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -30,6 +31,7 @@ export interface NextSettings {
   preferredProvider: Provider;
   providerLocked: number;
   autoMemory: number;
+  hiddenBotModelIds: string[];
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -46,6 +48,36 @@ function isTheme(value: unknown): value is Theme {
 
 function isProvider(value: unknown): value is Provider {
   return value === "local" || value === "openai";
+}
+
+export function parseHiddenBotModelIds(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return Array.from(
+      new Set(
+        parsed
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      )
+    );
+  } catch {
+    return [];
+  }
+}
+
+function readHiddenBotModelIds(value: unknown, fallback: string): string[] {
+  if (!Array.isArray(value)) return parseHiddenBotModelIds(fallback);
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
 }
 
 /**
@@ -108,6 +140,10 @@ export function resolveNextSettings(
     typeof body.autoMemory === "boolean"
       ? Number(body.autoMemory)
       : current.autoMemory;
+  const hiddenBotModelIds = readHiddenBotModelIds(
+    body.hiddenBotModelIds,
+    current.hiddenBotModelIds
+  );
 
   let openAiKeyIntent: NextSettings["openAiKeyIntent"] = { action: "keep" };
   if (typeof body.openAiApiKey === "string") {
@@ -131,6 +167,7 @@ export function resolveNextSettings(
     preferredProvider,
     providerLocked,
     autoMemory,
+    hiddenBotModelIds,
     openAiKeyIntent,
   };
 }

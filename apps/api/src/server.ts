@@ -22,7 +22,7 @@ import {
   deleteBot,
   deleteBots,
 } from "./bots.ts";
-import { resolveNextSettings } from "./settings.ts";
+import { parseHiddenBotModelIds, resolveNextSettings } from "./settings.ts";
 import { buildModelCatalog } from "./providers.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
@@ -59,6 +59,7 @@ interface UserDbRow {
   provider_locked: number;
   auto_memory: number;
   auto_switch_model: number;
+  hidden_bot_model_ids: string;
   openai_key_ciphertext: string | null;
   openai_key_iv: string | null;
   openai_key_tag: string | null;
@@ -161,7 +162,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, hidden_bot_model_ids, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -597,7 +598,7 @@ function buildRoutes(): RouteDefinition[] {
           : undefined;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
-      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      let effectiveProvider = requestedProvider ?? user.preferred_provider;
       // Incognito still needs the selected bot's prompt identity. Memory and
       // persistence are disabled later via the incognito flags, not by erasing
       // the bot before prompt composition.
@@ -609,14 +610,12 @@ function buildRoutes(): RouteDefinition[] {
 
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
+      let botForcesLocalProvider = false;
       const generationOverrides: GenerateOptions = {};
-      if (explicitModelOverride) {
-        generationOverrides.model = explicitModelOverride;
-      }
       if (effectiveBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, model, local_model, online_model, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, model, local_model, online_model, online_enabled, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(effectiveBotId, userId) as
           | {
@@ -625,6 +624,7 @@ function buildRoutes(): RouteDefinition[] {
               model?: string | null;
               local_model?: string | null;
               online_model?: string | null;
+              online_enabled?: number | null;
               temperature?: number | null;
               max_tokens?: number | null;
             }
@@ -636,11 +636,16 @@ function buildRoutes(): RouteDefinition[] {
           // user left the prompt field blank. Unit-tested in
           // `__tests__/bots.test.ts`.
           botSystemPrompt = composeBotSystemPrompt(bot.name, bot.system_prompt);
+          if (bot.online_enabled === 0 && effectiveProvider === "openai") {
+            effectiveProvider = "local";
+            botForcesLocalProvider = true;
+          }
           const botPreferredModel = effectiveProvider === "local"
             ? readOptionalString(bot.local_model) ?? readOptionalString(bot.model)
             : readOptionalString(bot.online_model);
           const resolvedModelOverride =
-            explicitModelOverride ?? botPreferredModel;
+            (botForcesLocalProvider ? undefined : explicitModelOverride)
+              ?? botPreferredModel;
           if (resolvedModelOverride) generationOverrides.model = resolvedModelOverride;
           if (typeof bot.temperature === "number") {
             generationOverrides.temperature = bot.temperature;
@@ -649,6 +654,9 @@ function buildRoutes(): RouteDefinition[] {
             generationOverrides.maxTokens = bot.max_tokens;
           }
         }
+      }
+      if (explicitModelOverride && !botForcesLocalProvider && !generationOverrides.model) {
+        generationOverrides.model = explicitModelOverride;
       }
       if (!starterPromptLabel && effectiveBotId === null) {
         starterPromptLabel = "Prism";
@@ -761,6 +769,7 @@ function buildRoutes(): RouteDefinition[] {
           preferredProvider: user.preferred_provider,
           providerLocked: Boolean(user.provider_locked),
           autoMemory: Boolean(user.auto_memory),
+          hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
@@ -789,6 +798,7 @@ function buildRoutes(): RouteDefinition[] {
         preferredProvider: user.preferred_provider,
         providerLocked: user.provider_locked,
         autoMemory: user.auto_memory,
+        hiddenBotModelIds: user.hidden_bot_model_ids,
       });
 
       let openAiCipher = user.openai_key_ciphertext;
@@ -811,7 +821,7 @@ function buildRoutes(): RouteDefinition[] {
       // another migration.
       db.prepare(`
         UPDATE users
-        SET theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?,
+        SET theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, hidden_bot_model_ids = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
         WHERE id = ?
       `).run(
@@ -819,6 +829,7 @@ function buildRoutes(): RouteDefinition[] {
         next.preferredProvider,
         next.providerLocked,
         next.autoMemory,
+        JSON.stringify(next.hiddenBotModelIds),
         openAiCipher,
         openAiIv,
         openAiTag,
@@ -902,6 +913,7 @@ function buildRoutes(): RouteDefinition[] {
       const model = readOptionalString(body.model);
       const localModel = readOptionalString(body.localModel);
       const onlineModel = readOptionalString(body.onlineModel);
+      const onlineEnabled = body.onlineEnabled === false ? 0 : 1;
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
       const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 2048;
       // Accept any non-empty string for color (CSS parses the value at render
@@ -921,8 +933,8 @@ function buildRoutes(): RouteDefinition[] {
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, model, local_model, online_model, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
-      ).run(botId, userId, name, systemPrompt, model, localModel, onlineModel, temperature, maxTokens, color, glyph, chatEnabled, now, now);
+        "INSERT INTO bots (id, user_id, name, system_prompt, model, local_model, online_model, online_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(botId, userId, name, systemPrompt, model, localModel, onlineModel, onlineEnabled, temperature, maxTokens, color, glyph, chatEnabled, now, now);
       json(ctx.res, 201, {
         ok: true,
         bot: {
@@ -932,6 +944,7 @@ function buildRoutes(): RouteDefinition[] {
           model,
           local_model: localModel,
           online_model: onlineModel,
+          online_enabled: onlineEnabled,
           temperature,
           maxTokens,
           color,
@@ -943,7 +956,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, model, local_model, online_model, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, model, local_model, online_model, online_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -967,6 +980,10 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.onlineModel === "string") {
         fields.push("online_model = ?");
         values.push(readOptionalString(body.onlineModel));
+      }
+      if (typeof body.onlineEnabled === "boolean") {
+        fields.push("online_enabled = ?");
+        values.push(body.onlineEnabled ? 1 : 0);
       }
       if (typeof body.temperature === "number") { fields.push("temperature = ?"); values.push(body.temperature); }
       if (typeof body.maxTokens === "number") { fields.push("max_tokens = ?"); values.push(body.maxTokens); }

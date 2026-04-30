@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { stripBotProfileMetaSuffix } from "@localai/shared";
 
 /**
  * Build the system-prompt string sent to the model for a selected bot.
@@ -16,6 +17,8 @@ import type { DatabaseSync } from "node:sqlite";
  *   - If a system prompt is present, it follows the preamble. Because the
  *     user's prompt comes last, it still wins when it contradicts the
  *     preamble (e.g. "Respond as a pirate" overrides the identity tone).
+ *   - Structured bot-editor metadata (`<<<PRISM_BOT_META>>>` …), when present,
+ *     is stripped before this helper runs so providers never see JSON tails.
  *   - Returns undefined when neither a usable name nor prompt is present,
  *     so the chat pipeline sends no system message at all (the Default
  *     "Always on" bot case).
@@ -26,7 +29,9 @@ export function composeBotSystemPrompt(
 ): string | undefined {
   const trimmedName = typeof name === "string" ? name.trim() : "";
   const trimmedPrompt =
-    typeof systemPrompt === "string" ? systemPrompt.trim() : "";
+    typeof systemPrompt === "string"
+      ? stripBotProfileMetaSuffix(systemPrompt).trim()
+      : "";
 
   if (!trimmedName && !trimmedPrompt) return undefined;
   if (!trimmedName) return trimmedPrompt || undefined;
