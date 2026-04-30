@@ -99,7 +99,15 @@ Ollama and Ollama models are never removed by Prism Server's uninstaller.
 
 ## Local Build
 
-From the repository root on Windows:
+For repeated installer smoke tests on Windows, run the batch wrapper from the repository root:
+
+```bat
+apps\server-windows\scripts\test-installer.bat 0.2.0
+```
+
+It installs Node dependencies, runs the .NET tests, publishes `Prism Server.exe`, stages the runtime with bundled Node and Qdrant, builds the Inno Setup installer, then asks whether to launch it.
+
+The equivalent manual commands are:
 
 ```powershell
 dotnet publish apps/server-windows/src/PrismServer.csproj `
