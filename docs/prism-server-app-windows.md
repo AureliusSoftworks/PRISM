@@ -33,6 +33,14 @@ Runtime data and logs:
 %LOCALAPPDATA%\Prism\Qdrant\storage\
 ```
 
+The Windows shell writes its own startup/crash log before any child process starts:
+
+```text
+%LOCALAPPDATA%\Prism\Logs\windows-app.log
+```
+
+The Logs window includes `windows-app.log`, `api.log`, `web.log`, and `qdrant.log`. If the app crashes during launch, inspect `windows-app.log` first.
+
 The installer adds:
 
 - Start Menu shortcut: `Prism Server`

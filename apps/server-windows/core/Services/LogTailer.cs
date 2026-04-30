@@ -11,20 +11,30 @@ public sealed class LogTailer
         _paths = paths;
     }
 
+    public string WindowsAppLogPath => Path.Combine(_paths.LogDirectory, "windows-app.log");
     public string ApiLogPath => Path.Combine(_paths.LogDirectory, "api.log");
     public string WebLogPath => Path.Combine(_paths.LogDirectory, "web.log");
     public string QdrantLogPath => Path.Combine(_paths.LogDirectory, "qdrant.log");
 
     public string ReadCombinedLog(int maxBytes = 32_768)
     {
-        var api = ReadTail(ApiLogPath, maxBytes / 2);
-        var web = ReadTail(WebLogPath, maxBytes / 2);
+        var chunk = maxBytes / 4;
+        var app = ReadTail(WindowsAppLogPath, chunk);
+        var api = ReadTail(ApiLogPath, chunk);
+        var web = ReadTail(WebLogPath, chunk);
+        var qdrant = ReadTail(QdrantLogPath, chunk);
         return $"""
+            === Windows App ===
+            {app}
+
             === API ===
             {api}
 
             === Web ===
             {web}
+
+            === Qdrant ===
+            {qdrant}
             """;
     }
 

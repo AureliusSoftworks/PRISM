@@ -3,6 +3,7 @@ using System.Drawing;
 using System.IO.Pipes;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Threading;
 using PrismServer.Core.Services;
 using PrismServer.ViewModels;
 using PrismServer.Views;
@@ -16,6 +17,8 @@ public partial class App : System.Windows.Application
     private const string PipeName = "com.localai.prism-server.show";
 
     private Mutex? _singleInstanceMutex;
+    private bool _ownsSingleInstanceMutex;
+    private bool _isHandlingFatalException;
     private CancellationTokenSource? _pipeCancellation;
     private WinForms.NotifyIcon? _notifyIcon;
     private SetupWindow? _setupWindow;
@@ -24,34 +27,61 @@ public partial class App : System.Windows.Application
 
     public AppViewModel Model { get; private set; } = null!;
 
+    public App()
+    {
+        ConfigureExceptionLogging();
+    }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
-        base.OnStartup(e);
-
-        _singleInstanceMutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
-        if (!createdNew)
+        try
         {
-            await SignalExistingInstanceAsync().ConfigureAwait(true);
-            Shutdown();
-            return;
+            WindowsAppLog.Write("Prism Server launch starting.");
+            base.OnStartup(e);
+
+            _singleInstanceMutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
+            _ownsSingleInstanceMutex = createdNew;
+            if (!createdNew)
+            {
+                WindowsAppLog.Write("Duplicate launch detected; signaling existing Prism Server instance.");
+                await SignalExistingInstanceAsync().ConfigureAwait(true);
+                Shutdown();
+                return;
+            }
+
+            Model = CreateViewModel();
+            Model.PropertyChanged += ModelOnPropertyChanged;
+            CreateTrayIcon();
+            StartPipeListener();
+            ShowSetupWindow();
+
+            await Model.BootstrapAsync().ConfigureAwait(true);
+            RefreshTrayMenu();
+            WindowsAppLog.Write("Prism Server launch completed.");
         }
-
-        Model = CreateViewModel();
-        Model.PropertyChanged += ModelOnPropertyChanged;
-        CreateTrayIcon();
-        StartPipeListener();
-        ShowSetupWindow();
-
-        await Model.BootstrapAsync().ConfigureAwait(true);
-        RefreshTrayMenu();
+        catch (Exception ex)
+        {
+            HandleFatalException("Fatal startup crash", ex);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        WindowsAppLog.Write($"Prism Server exiting with code {e.ApplicationExitCode}.");
         _pipeCancellation?.Cancel();
         _notifyIcon?.Dispose();
         Model?.Dispose();
-        _singleInstanceMutex?.ReleaseMutex();
+        if (_ownsSingleInstanceMutex)
+        {
+            try
+            {
+                _singleInstanceMutex?.ReleaseMutex();
+            }
+            catch (Exception ex)
+            {
+                WindowsAppLog.WriteException("Failed to release single-instance mutex", ex);
+            }
+        }
         _singleInstanceMutex?.Dispose();
         base.OnExit(e);
     }
@@ -124,10 +154,10 @@ public partial class App : System.Windows.Application
         _notifyIcon.ContextMenuStrip = menu;
     }
 
-    private static WinForms.ToolStripMenuItem MenuItem(string text, Action action, bool enabled = true)
+    private WinForms.ToolStripMenuItem MenuItem(string text, Action action, bool enabled = true)
     {
         var item = new WinForms.ToolStripMenuItem(text) { Enabled = enabled };
-        item.Click += (_, _) => action();
+        item.Click += (_, _) => RunLoggedAction($"Tray menu: {text}", action);
         return item;
     }
 
@@ -201,8 +231,9 @@ public partial class App : System.Windows.Application
                 {
                     break;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    WindowsAppLog.WriteException("Named pipe listener error", ex);
                     await Task.Delay(500, _pipeCancellation.Token).ConfigureAwait(false);
                 }
             }
@@ -216,9 +247,82 @@ public partial class App : System.Windows.Application
             await using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
             await client.ConnectAsync(1000).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
+            WindowsAppLog.WriteException("Could not signal existing Prism Server instance", ex);
             // If the pipe is not ready, just exit; the existing tray app stays authoritative.
         }
     }
+
+    private void ConfigureExceptionLogging()
+    {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            WindowsAppLog.WriteException("Unhandled dispatcher exception", args.Exception);
+            args.Handled = true;
+            HandleFatalException("Unhandled dispatcher exception", args.Exception);
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception ex)
+            {
+                WindowsAppLog.WriteException("Unhandled AppDomain exception", ex);
+            }
+            else
+            {
+                WindowsAppLog.Write($"Unhandled AppDomain exception: {args.ExceptionObject}");
+            }
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            WindowsAppLog.WriteException("Unobserved task exception", args.Exception);
+            args.SetObserved();
+        };
+    }
+
+    private void RunLoggedAction(string context, Action action)
+    {
+        try
+        {
+            WindowsAppLog.Write(context);
+            action();
+        }
+        catch (Exception ex)
+        {
+            WindowsAppLog.WriteException(context + " failed", ex);
+            System.Windows.MessageBox.Show(
+                $"Prism Server hit an error. Details were written to:{Environment.NewLine}{WindowsAppLog.LogPath}{Environment.NewLine}{Environment.NewLine}{ex.Message}",
+                "Prism Server Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void HandleFatalException(string context, Exception exception)
+    {
+        if (_isHandlingFatalException)
+        {
+            return;
+        }
+
+        _isHandlingFatalException = true;
+        WindowsAppLog.WriteException(context, exception);
+        try
+        {
+            System.Windows.MessageBox.Show(
+                $"Prism Server crashed during launch. Details were written to:{Environment.NewLine}{WindowsAppLog.LogPath}{Environment.NewLine}{Environment.NewLine}{exception.Message}",
+                "Prism Server Crash",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch
+        {
+            // If WPF cannot display a dialog, the file log is still the source of truth.
+        }
+
+        Shutdown(1);
+    }
 }
+
