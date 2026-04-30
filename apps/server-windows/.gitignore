@@ -1,0 +1,12 @@
+bin/
+obj/
+dist/
+publish/
+src/bin/
+src/obj/
+core/bin/
+core/obj/
+tests/bin/
+tests/obj/
+src/Resources/node/
+src/Resources/qdrant/
