@@ -141,6 +141,16 @@
   margin-top: 6px;
 }
 
+.panelNotice {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent-ink) 10%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 34%, var(--line));
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
 /* Tiny mono label used for section titles in the shell. */
 .sectionLabel {
   text-transform: uppercase;
@@ -3290,6 +3300,17 @@
   .chatBotPickerFrame {
     bottom: 18px;
   }
+
+  /* N=1 reads cramped against the composer — lift farther than denser grids. */
+  .chatBotPickerFrame[data-single-bot="true"] {
+    bottom: clamp(72px, 16vh, 112px);
+  }
+}
+
+@media (min-width: 721px) {
+  .chatBotPickerFrame[data-single-bot="true"] {
+    bottom: 42px;
+  }
 }
 
 .chatBotPickerFrame[data-returning-all="true"] {
@@ -5224,7 +5245,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: min(18ch, 34vw);
+  max-width: min(13ch, 22vw);
   font-weight: 650;
 }
 
@@ -6305,7 +6326,12 @@
 
 .panelBots .form {
   margin-top: 0;
-  gap: 12px;
+  /* Tighter than default .form (10px) so name → prompt → params feel like one column */
+  gap: 8px;
+  /* Parent `.panelBots` gives this form a minmax(0,1fr) row — without
+     start alignment, extra vertical space is distributed between grid
+     tracks (huge gap between bot name row and system prompt on phone). */
+  align-content: start;
   /* Intentionally NO `both` (or `forwards`) fill — keeping the
      `transform: translateY(0)` keyframe state stuck on the form
      would create a CSS containing block, which silently re-anchors
@@ -6317,8 +6343,447 @@
   animation: botCustomizerIn 180ms cubic-bezier(0.2, 0.9, 0.2, 1);
 }
 
+/* Same stretch issue as `align-content` on the inner grid — keep the form's
+   block size tied to its fields; spare room stays below in the panel row. */
+.panelBots > form {
+  align-self: start;
+  width: 100%;
+}
+
 .panelBots .form textarea {
   min-height: clamp(92px, 16dvh, 168px);
+  /* Slightly less inset than generic .form fields — prompt box reads tighter to the label row */
+  padding: 9px 12px;
+}
+
+/* Compact optional notes — replaces the old full-height system prompt field. */
+.panelBots .form textarea.botProfileExtras {
+  min-height: 72px;
+  max-height: min(200px, 32dvh);
+  resize: vertical;
+}
+
+.botProfileFieldHint {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.settingsModelDropdown {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.settingsModelDropdown summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  display: grid;
+  gap: 2px;
+  list-style: none;
+}
+
+.settingsModelDropdown summary::-webkit-details-marker {
+  display: none;
+}
+
+.settingsModelDropdown summary span {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settingsModelDropdown summary small {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.settingsModelList {
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.settingsModelToggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  color: var(--fg);
+}
+
+.settingsModelToggle:hover {
+  background: var(--bg-hover);
+}
+
+.settingsModelToggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent-ink);
+}
+
+.settingsModelToggle span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.settingsModelToggle small {
+  color: var(--fg-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.botProfileSummaryCard {
+  gap: 9px;
+}
+
+.botProfileSummaryGrid {
+  display: grid;
+  gap: 7px;
+}
+
+.form button.botProfileSummaryButton,
+.botProfileSummaryButton {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 11px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 8%, transparent),
+      transparent 62%
+    ),
+    var(--bg);
+  color: var(--fg);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.botProfileSummaryButton[data-complete="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 56%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 15%, transparent),
+      transparent 68%
+    ),
+    var(--bg);
+}
+
+.botProfileSummaryButton[data-locked="true"] {
+  cursor: not-allowed;
+  opacity: 0.58;
+  filter: saturate(0.35);
+}
+
+.botProfileSummaryButton:hover,
+.botProfileSummaryButton:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 42%, var(--line));
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.botProfileSummaryButton span {
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.botProfileSummaryButton small {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botProfileSummaryButton strong {
+  justify-self: end;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--bg-deep);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.botProfileSummaryButton[data-complete="true"] strong {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 56%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 14%, var(--bg));
+  color: var(--fg);
+}
+
+.botProfileSummaryButton[data-locked="true"] strong {
+  border-color: var(--line);
+  background: var(--bg-deep);
+  color: var(--fg-muted);
+}
+
+.panelBots[data-profile-builder-open="true"]::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  right: var(--panel-width);
+  bottom: 0;
+  left: 0;
+  z-index: -1;
+  background: color-mix(in srgb, #000 26%, transparent);
+  pointer-events: auto;
+  animation: overlayIn 0.14s ease-out;
+}
+
+.botProfileBuilderBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  pointer-events: none;
+}
+
+.botProfileBuilder {
+  position: fixed;
+  top: max(20px, env(safe-area-inset-top));
+  right: calc(var(--panel-width) + 28px);
+  width: min(560px, calc(100vw - var(--panel-width) - 56px));
+  max-height: calc(100dvh - 40px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  color: var(--fg);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: 156px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  animation: popIn 0.16s ease-out;
+}
+
+.botProfileBuilderHeader {
+  grid-column: 1 / -1;
+  padding: 16px 16px 14px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.botProfileBuilderHeader span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.botProfileBuilderHeader h4 {
+  margin: 3px 0 4px;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.botProfileBuilderHeader p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.form .botProfileBuilderHeader button,
+.botProfileBuilderHeader button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.botProfileBuilderNav {
+  min-height: 0;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+
+.form .botProfileBuilderNav button,
+.botProfileBuilderNav button {
+  padding: 9px 10px;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  display: grid;
+  gap: 1px;
+  text-align: left;
+}
+
+.botProfileBuilderNav button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 46%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 10%, var(--bg));
+}
+
+.botProfileBuilderNav span {
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.botProfileBuilderNav small {
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.botProfileBuilderBody {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.botProfileField {
+  display: grid;
+  gap: 6px;
+}
+
+.botProfileField span,
+.botProfileScaleHeader span {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.botProfileField small {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.botProfileSubsection {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.botProfileSubsection:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.botProfileSubsection span {
+  font-size: 13px;
+  font-weight: 760;
+  color: var(--fg);
+}
+
+.botProfileSubsection small {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.botProfileField textarea {
+  min-height: 86px;
+}
+
+.botProfileScaleControl {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--bg);
+}
+
+.botProfileScaleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.botProfileScaleHeader strong {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.botProfileScaleControl input[type="range"] {
+  width: 100%;
+  accent-color: var(--editor-bot-color, var(--accent));
+  opacity: 0.98;
+}
+
+.botProfileScaleControl input[type="range"]:not([data-active="true"]) {
+  opacity: 0.48;
+}
+
+.botProfileScaleEnds {
+  display: flex;
+  justify-content: space-between;
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.form button.botProfileClearButton,
+.botProfileClearButton {
+  justify-self: start;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.botProfileClearButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.botProfileBuilderFooter {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+  padding: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+}
+
+.form .botProfileBuilderFooter button,
+.botProfileBuilderFooter button {
+  min-width: 86px;
+  padding: 9px 12px;
+  border-radius: 10px;
 }
 
 .botLibraryDrawer {
@@ -6572,6 +7037,12 @@
   line-height: 1.35;
 }
 
+.botParameterInlineHelp {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
 /* Wide-screen affordance: when there's room to the left of the bot
    editor panel, hide the inline <small> help text inside parameter
    fields and rely on the floating .botParameterHelpTooltip rendered
@@ -6582,6 +7053,11 @@
   .botParameterField fieldset > small,
   .botParameterField div > small {
     display: none;
+  }
+
+  .botParameterField > .botParameterInlineHelp,
+  .botParameterField fieldset > .botParameterInlineHelp {
+    display: block;
   }
 }
 
@@ -6628,6 +7104,58 @@
   padding: 0;
   display: grid;
   gap: 7px;
+}
+
+.botOnlineCapabilityToggle button {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-deep);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.botOnlineCapabilityToggle button::after {
+  content: "";
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 10px 50%, var(--fg-muted) 0 6px, transparent 6.5px),
+    var(--line);
+  transition: background 0.16s ease;
+}
+
+.botOnlineCapabilityToggle button[data-enabled="true"] {
+  border-color: color-mix(in srgb, var(--accent-ink) 42%, var(--line) 58%);
+  background: color-mix(in srgb, var(--accent-ink) 10%, var(--bg) 90%);
+  color: var(--fg);
+}
+
+.botOnlineCapabilityToggle button[data-enabled="true"]::after {
+  background:
+    radial-gradient(circle at 24px 50%, var(--accent-ink) 0 6px, transparent 6.5px),
+    color-mix(in srgb, var(--accent-ink) 22%, var(--line));
+}
+
+.botOnlineCapabilityToggle strong {
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.botOnlineCapabilityToggle small {
+  grid-column: 1;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 .botParameterQuestionRow {
@@ -6786,10 +7314,26 @@
   background: var(--bg-deep);
   color: var(--fg-muted);
   border-radius: 10px;
-  padding: 8px 6px;
+  padding: 9px 8px;
   font-size: 12px;
   font-weight: 650;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  text-align: left;
   transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+}
+
+.panelBots .form button.botLengthOption span {
+  color: inherit;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.panelBots .form button.botLengthOption small {
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 1.25;
 }
 
 .panelBots .form button.botLengthOption:hover {
@@ -6802,6 +7346,10 @@
   color: var(--accent-ink);
   border-color: color-mix(in srgb, var(--accent-ink) 42%, var(--line) 58%);
   background: color-mix(in srgb, var(--accent-ink) 12%, var(--bg) 88%);
+}
+
+.panelBots .form button.botLengthOption[data-selected="true"] small {
+  color: color-mix(in srgb, var(--accent-ink) 72%, var(--fg-muted));
 }
 
 /* Low-emphasis text-style button for secondary panel actions. */
@@ -7327,6 +7875,102 @@
 .botNameRow > input {
   flex: 1;
   min-width: 0;
+}
+
+.form button.botRandomizeButton,
+.botRandomizeButton {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, #ffffff 50%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #ffffff 72%, transparent) 0%,
+      color-mix(in srgb, #ffffff 50%, transparent) 38%,
+      color-mix(in srgb, #ffffff 34%, transparent) 100%
+    ),
+    radial-gradient(
+      circle at 18% 18%,
+      color-mix(in srgb, #ffffff 44%, transparent),
+      transparent 38%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 18%, transparent),
+      color-mix(in srgb, #ff9f1c 14%, transparent) 25%,
+      color-mix(in srgb, #b7e63a 14%, transparent) 48%,
+      color-mix(in srgb, #2fd3e3 14%, transparent) 72%,
+      color-mix(in srgb, #7b5cff 18%, transparent)
+    ),
+    color-mix(in srgb, #ffffff 68%, var(--bg) 32%);
+  color: #000000;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 55%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000000 16%, transparent);
+  transition: background 0.25s, border-color 0.25s, color 0.25s, transform 0.06s;
+}
+
+.botRandomizeButton:hover,
+.botRandomizeButton:focus-visible {
+  border-color: color-mix(in srgb, #ffffff 62%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #ffffff 82%, transparent) 0%,
+      color-mix(in srgb, #ffffff 58%, transparent) 38%,
+      color-mix(in srgb, #ffffff 42%, transparent) 100%
+    ),
+    radial-gradient(
+      circle at 18% 18%,
+      color-mix(in srgb, #ffffff 52%, transparent),
+      transparent 38%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 24%, transparent),
+      color-mix(in srgb, #ff9f1c 18%, transparent) 25%,
+      color-mix(in srgb, #b7e63a 18%, transparent) 48%,
+      color-mix(in srgb, #2fd3e3 18%, transparent) 72%,
+      color-mix(in srgb, #7b5cff 24%, transparent)
+    ),
+    color-mix(in srgb, #ffffff 76%, var(--bg) 24%);
+  outline: none;
+}
+
+.botRandomizeButton:active {
+  transform: translateY(1px) rotate(8deg);
+}
+
+.botPurposePrefix {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 10%, transparent),
+      transparent 68%
+    ),
+    var(--bg-deep);
+  color: var(--fg);
+  padding: 9px 11px;
+  font-size: 14px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Swatch trigger: solid bot-color tile with readable glyph ink, matching the
@@ -8646,13 +9290,16 @@
     align-content: center;
   }
 
-  /* iPad-trackpad / mouse hover: subtle bg promotion only, no
-     border color change — the border is transparent by design here
-     and flashing a line on hover would undo the clean look. */
-  .hubTile:hover:not(:disabled) {
-    background: var(--bg-hover);
-    border-color: transparent;
-    box-shadow: none;
+  /* iPad / precise mouse ONLY: faint bg tint. Touch phones omit `(hover)`
+     capability → this applies only when `:hover` is meaningful for the
+     primary pointer. Hover-suppression below still neutralizes lingering
+     `:after-tap hover` quirks. */
+  @media (hover: hover) and (pointer: fine) {
+    .hubTile:hover:not(:disabled) {
+      background: var(--bg-hover);
+      border-color: transparent;
+      box-shadow: none;
+    }
   }
 
   /* Keep the glyph at its full desktop size so it stays the visual
@@ -8742,10 +9389,15 @@
     transition: color 0.18s ease, opacity 0.2s ease, background 0.18s ease;
   }
 
-  .menuToggle:hover,
   .menuToggle:focus-visible {
     background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
     outline: none;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .menuToggle:hover:not(:focus-visible) {
+      background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+    }
   }
 
   /* Mirror ☰ — fixed top-right overflow gear + shared hide-with-drawers behavior. */
@@ -8765,10 +9417,18 @@
     padding: 8px 12px;
   }
 
-  .chatGearButton:hover,
   .chatGearButton:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-glow);
     background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
     border-color: transparent;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .chatGearButton:hover:not(:focus-visible) {
+      background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+      border-color: transparent;
+    }
   }
 
   /* Solid top deck that explicitly wraps both buttons + the identity. Flex
@@ -9083,6 +9743,72 @@
   .panelBots .form textarea {
     min-height: 54px;
     max-height: 72px;
+    padding: 8px 10px;
+  }
+
+  .panelBots .form textarea.botProfileExtras {
+    min-height: 64px;
+    max-height: 120px;
+  }
+
+  .botProfileSummaryGrid {
+    gap: 5px;
+  }
+
+  .form button.botProfileSummaryButton,
+  .botProfileSummaryButton {
+    padding: 8px 9px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
+  }
+
+  .botProfileSummaryButton span {
+    grid-column: 1;
+  }
+
+  .botProfileSummaryButton small {
+    grid-column: 1;
+  }
+
+  .botProfileSummaryButton strong {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  .botProfileBuilder {
+    inset: 0;
+    width: 100vw;
+    max-height: none;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .botProfileBuilderHeader {
+    padding:
+      calc(env(safe-area-inset-top) + 12px)
+      max(14px, calc(env(safe-area-inset-right) + 14px))
+      12px
+      max(14px, calc(env(safe-area-inset-left) + 14px));
+  }
+
+  .botProfileBuilderNav {
+    display: none;
+  }
+
+  .botProfileBuilderBody {
+    padding: 12px max(14px, calc(env(safe-area-inset-right) + 14px));
+  }
+
+  .botProfileBuilderFooter {
+    padding:
+      10px
+      max(14px, calc(env(safe-area-inset-right) + 14px))
+      calc(env(safe-area-inset-bottom) + 10px)
+      max(14px, calc(env(safe-area-inset-left) + 14px));
   }
 
   .botParameterCard,
@@ -9106,6 +9832,12 @@
     display: none;
   }
 
+  .botParameterField > .botParameterInlineHelp,
+  .botParameterField fieldset > .botParameterInlineHelp,
+  .botLengthOption small {
+    display: block;
+  }
+
   .botParameterField {
     gap: 5px;
     overflow: hidden;
@@ -9122,13 +9854,13 @@
   }
 
   .botLengthOptions {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 5px;
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 
   .panelBots .form button.botLengthOption {
     min-width: 0;
-    padding: 7px 6px;
+    padding: 8px 9px;
     font-size: 11px;
   }
 
@@ -9142,15 +9874,20 @@
   }
 
   .composeModelControl {
-    flex: 1 1 180px;
+    flex: 0 1 auto;
+    max-width: 100%;
   }
 
   .composeModelTrigger {
-    width: 100%;
+    width: auto;
+  }
+
+  .composeModelTrigger .composeControlLabel {
+    display: none;
   }
 
   .composeModelTriggerName {
-    max-width: 100%;
+    max-width: min(9ch, 22vw);
   }
 
   .botNameRow {
@@ -9355,12 +10092,9 @@
   }
 }
 
-/* Hamburger-visible screens and touch devices should not rely on hover.
-   Narrow desktop windows can still have a mouse, so this follows the same
-   720px breakpoint that reveals ☰ instead of only checking pointer type.
-   Keep focus, active, selected, and armed states intact; only suppress
-   hover-only movement, dimming, glows, and reveal affordances. */
-@media (max-width: 720px), (hover: none), (pointer: coarse) {
+/* Phones and narrow panes — `:hover` is unreliable/sticky; strip hover-only
+   chrome while preserving active/focus/`[aria-selected]`. Scoped to ≤720px. */
+@media (max-width: 720px) {
   .appLayout :where(button:hover:not(:active), a:hover:not(:active), [role="button"]:hover:not(:active)),
   .authLayout :where(button:hover:not(:active), a:hover:not(:active), [role="button"]:hover:not(:active)) {
     transform: none !important;
@@ -9666,5 +10400,37 @@
         color-mix(in srgb, #2fd3e3 12%, transparent) 72%,
         color-mix(in srgb, #7b5cff 16%, transparent)
       ) !important;
+  }
+
+  .markdownToolbarButton:hover:not(:focus-visible):not(:active),
+  .markdownSideToolbar .markdownToolbarButton:hover:not(:focus-visible):not(:active) {
+    border-color: var(--line) !important;
+    background: var(--bg-deep) !important;
+    color: var(--fg-muted) !important;
+  }
+
+  .composeModelControl:hover:not(:focus-within) {
+    border-color: var(--line) !important;
+  }
+
+  .panelBots .form button.botLengthOption:hover:not(:focus-visible):not(:active):not([data-selected="true"]) {
+    border-color: var(--line) !important;
+    background: var(--bg-deep) !important;
+    color: var(--fg-muted) !important;
+  }
+
+  .form button.colorSwatchButton:hover:not(:focus-visible):not(:active),
+  .colorSwatchButton:hover:not(:focus-visible):not(:active) {
+    filter: none !important;
+  }
+
+  .glyphPicker button.glyphOption:hover:not(.glyphOptionSelected):not(:focus-visible) {
+    border-color: var(--glyph-option-border) !important;
+  }
+
+  .memoryBubble button:hover:not(:focus-visible) {
+    background: color-mix(in srgb, var(--bg) 72%, transparent) !important;
+    color: var(--fg-muted) !important;
+    border-color: color-mix(in srgb, var(--fg) 22%, transparent) !important;
   }
 }

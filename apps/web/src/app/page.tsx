@@ -22,6 +22,17 @@ import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import styles from "./page.module.css";
+import {
+  BOT_VOICE_PRESET_LABELS,
+  defaultBotPurpose,
+  parseStoredBotPrompt,
+  randomBotProfile,
+  serializeStoredBotPrompt,
+  stripBotProfileMetaSuffix,
+  type BotProfileFields,
+  type BotProfileScaleValue,
+  type BotVoicePreset,
+} from "@localai/shared";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
 // Long enough for a deliberate confirmation click, short enough that the armed
@@ -404,7 +415,8 @@ const PICKER_DESKTOP_MAX_HEIGHT = 260;
 const PICKER_DESKTOP_ASPECT_RATIO = 16 / 9;
 const PICKER_MAX_TILE_SIZE = 220;
 const PICKER_SINGLE_BOT_TILE_SIZE_MOBILE = 168;
-const PICKER_SINGLE_BOT_TILE_SIZE_DESKTOP = 128;
+/** Larger than legacy 128 — single-bot reads as an intentional hero tile on widescreen */
+const PICKER_SINGLE_BOT_TILE_SIZE_DESKTOP = 168;
 const PICKER_FEW_BOT_TILE_SIZE_MOBILE = 124;
 const PICKER_FEW_BOT_TILE_SIZE_DESKTOP = 104;
 const PICKER_LOW_COUNT_TILE_SIZE_MOBILE = 72;
@@ -744,7 +756,8 @@ function pickerDensityStageTargets(
  * decide whether to render a fallback hint or nothing at all.
  */
 function firstLinesOf(text: string | null | undefined, maxChars = 140): string {
-  const raw = typeof text === "string" ? text.trim() : "";
+  const raw =
+    typeof text === "string" ? stripBotProfileMetaSuffix(text).trim() : "";
   if (!raw) return "";
   const firstPara = raw.split(/\n\n+/)[0]?.replace(/\n/g, " ").trim() ?? "";
   if (firstPara.length <= maxChars) return firstPara;
@@ -755,6 +768,46 @@ function firstLinesOf(text: string | null | undefined, maxChars = 140): string {
   // one-or-two-word preview.
   const cut = lastSpace > maxChars * 0.6 ? sliced.slice(0, lastSpace) : sliced;
   return `${cut.trim()}\u2026`;
+}
+
+function formatBotHeroSentence(value: string): string {
+  return value.replace(
+    /^(I am [^,]+,\s+)(A|An|The)\b/u,
+    (_match, prefix: string, article: string) =>
+      `${prefix}${article.toLocaleLowerCase()}`
+  );
+}
+
+function botHeroPreview(text: string | null | undefined, maxChars = 140): string {
+  const raw =
+    typeof text === "string" ? stripBotProfileMetaSuffix(text).trim() : "";
+  if (!raw) return "";
+  const purposeMatch = raw.match(/(?:^|\n)Purpose:\s*\n\s*(You are .+?)(?:\n\n|$)/i);
+  const purpose = purposeMatch?.[1]?.trim();
+  const source = purpose || firstLinesOf(raw, maxChars);
+  const firstPerson = formatBotHeroSentence(
+    source.replace(/^You are\b/i, "I am")
+  );
+  if (firstPerson.length <= maxChars) return firstPerson;
+  const sliced = firstPerson.slice(0, maxChars);
+  const lastSpace = sliced.lastIndexOf(" ");
+  const cut = lastSpace > maxChars * 0.6 ? sliced.slice(0, lastSpace) : sliced;
+  return `${cut.trim()}\u2026`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function botPurposeInputValue(statement: string, botName: string): string {
+  let value = statement.trim().replace(/^you\s+are\s+/i, "").trim();
+  const name = botName.trim();
+  if (name) {
+    value = value
+      .replace(new RegExp(`^${escapeRegExp(name)}\\s*,?\\s*`, "i"), "")
+      .trim();
+  }
+  return value;
 }
 
 /**
@@ -1483,6 +1536,7 @@ interface UserSettings {
   preferredProvider: Provider;
   providerLocked: boolean;
   autoMemory: boolean;
+  hiddenBotModelIds: string[];
   hasOpenAiApiKey: boolean;
   ollamaModel: string;
 }
@@ -1519,6 +1573,7 @@ interface Bot {
   model: string | null;
   local_model: string | null;
   online_model: string | null;
+  online_enabled?: number | null;
   temperature: number;
   max_tokens: number;
   color: string | null;
@@ -1573,6 +1628,155 @@ const BOT_REPLY_LENGTH_PRESETS = [
   },
 ] as const;
 const BOT_REPLY_LENGTH_DEFAULT_TOKENS = 2048;
+const BOT_RANDOM_TEMPERATURES = [0.25, 0.45, 0.7, 0.95, 1.1] as const;
+
+type BotProfileBuilderPageId = "purpose" | "personality" | "character";
+
+const BOT_PROFILE_BUILDER_PAGE_ORDER: readonly BotProfileBuilderPageId[] = [
+  "purpose",
+  "personality",
+  "character",
+] as const;
+
+const BOT_PROFILE_BUILDER_PAGE_LABELS: Record<BotProfileBuilderPageId, string> = {
+  purpose: "Purpose",
+  personality: "Personality",
+  character: "Character",
+};
+
+const BOT_PROFILE_PAGE_COPY: Record<
+  BotProfileBuilderPageId,
+  { label: string; description: string }
+> = {
+  purpose: {
+    label: "Purpose",
+    description: "The one line that explains what this bot is here to be.",
+  },
+  personality: {
+    label: "Personality",
+    description: "Temperament, style, interests, and boundaries.",
+  },
+  character: {
+    label: "Character",
+    description: "Identity, appearance, and optional worldview in one place.",
+  },
+};
+
+function blankBotProfile(): BotProfileFields {
+  return parseStoredBotPrompt("").fields;
+}
+
+function randomArrayItem<T>(values: readonly T[]): T {
+  return values[Math.floor(Math.random() * values.length)] ?? values[0];
+}
+
+function randomBotTemperatureSetting(): number {
+  return randomArrayItem(BOT_RANDOM_TEMPERATURES);
+}
+
+function randomBotReplyLengthTokens(): number {
+  return randomArrayItem(BOT_REPLY_LENGTH_PRESETS).tokens;
+}
+
+function profileTextFilled(...values: Array<string | null | undefined>): number {
+  return values.filter((value) => typeof value === "string" && value.trim()).length;
+}
+
+function profileScaleFilled(...values: Array<BotProfileScaleValue | null>): number {
+  return values.filter((value) => value !== null).length;
+}
+
+function botProfileCategoryCount(
+  profile: BotProfileFields,
+  category: BotProfileBuilderPageId
+): number {
+  switch (category) {
+    case "purpose":
+      return profileTextFilled(profile.purpose.statement, profile.purpose.legacyNotes);
+    case "personality":
+      return (
+        profileTextFilled(
+          profile.core.traits,
+          profile.core.interests,
+          profile.core.boundaries,
+          profile.core.quirks
+        ) + profileScaleFilled(profile.core.humor, profile.core.curiosity, profile.core.directness)
+      );
+    case "character":
+      return (
+        profileTextFilled(
+          profile.identity.age,
+          profile.identity.species,
+          profile.identity.pronouns,
+          profile.identity.background,
+          profile.identity.role,
+          profile.worldview.religion,
+          profile.worldview.values,
+          profile.appearance.description,
+          profile.appearance.style,
+          profile.appearance.presence
+        )
+        + profileScaleFilled(
+          profile.worldview.politicalView,
+          profile.worldview.optimism,
+          profile.worldview.tradition
+        )
+      );
+    default:
+      return 0;
+  }
+}
+
+function botProfileCategorySummary(
+  profile: BotProfileFields,
+  category: BotProfileBuilderPageId,
+  botName: string
+): string {
+  const count = botProfileCategoryCount(profile, category);
+  if (category === "purpose") {
+    return profile.purpose.statement.trim() || defaultBotPurpose(botName) || "Name the bot to seed a purpose";
+  }
+  if (count === 0) return "Optional details not set";
+  return count === 1 ? "1 detail set" : `${count} details set`;
+}
+
+function botProfileCategoryComplete(
+  profile: BotProfileFields,
+  category: BotProfileBuilderPageId,
+  botName: string
+): boolean {
+  if (category === "purpose") {
+    return Boolean(profile.purpose.statement.trim() || botName.trim());
+  }
+  return botProfileCategoryCount(profile, category) > 0;
+}
+
+function botProfileCompletionCount(profile: BotProfileFields): number {
+  return BOT_PROFILE_BUILDER_PAGE_ORDER.reduce(
+    (total, category) => total + (botProfileCategoryCount(profile, category) > 0 ? 1 : 0),
+    0
+  );
+}
+
+/** True if the top bot form has any user-authored create-mode content. */
+function createBotFormHasEnteredData(options: {
+  name: string;
+  profile: BotProfileFields;
+  localModel: string;
+  onlineModel: string;
+  onlineEnabled: boolean;
+  temperature: number;
+  maxTokens: number;
+}): boolean {
+  if (options.name.trim().length > 0) return true;
+  if (botProfileCompletionCount(options.profile) > 0) return true;
+  if (options.localModel !== AUTO_MODEL_CHOICE) return true;
+  if (options.onlineModel !== AUTO_MODEL_CHOICE) return true;
+  if (!options.onlineEnabled) return true;
+  if (options.temperature !== BOT_TEMPERATURE_DEFAULT) return true;
+  if (options.maxTokens !== BOT_REPLY_LENGTH_DEFAULT_TOKENS) return true;
+  return false;
+}
 
 function normalizeBotTemperature(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -1636,6 +1840,31 @@ function modelOptionsForProvider(
         provider: "openai",
         isDefault: true,
       }];
+}
+
+function botCustomizerModelOptionsForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider
+): ModelCatalogEntry[] {
+  const hidden = new Set(settings?.hiddenBotModelIds ?? []);
+  return modelOptionsForProvider(catalog, settings, provider).filter(
+    (model) => !hidden.has(model.id)
+  );
+}
+
+function allBotCustomizerModelOptions(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null
+): ModelCatalogEntry[] {
+  const seen = new Set<string>();
+  return (["local", "openai"] as const)
+    .flatMap((provider) => modelOptionsForProvider(catalog, settings, provider))
+    .filter((model) => {
+      if (seen.has(model.id)) return false;
+      seen.add(model.id);
+      return true;
+    });
 }
 
 function includeSelectedModelOption(
@@ -2172,11 +2401,10 @@ function botPrismGroup(hex: string | null | undefined): PrismGroupId {
   return "m"; // indigo + violet + magenta-leaning purple
 }
 
-// Accent color pre-selected in the bot creation picker. Users can change it
-// before clicking Create; existing bots with no color just render no accent.
-// No static default color anymore. The bot color picker seeds itself with
-// a fresh random hex on mount, every time the Bots panel opens, and every
-// time a bot is created — so opening the panel always feels generative.
+// Accent color for new bots defaults to randomHex() via component state on
+// first paint. Subsequent random seeds run only when the Bots panel opens
+// in create mode before the user has typed anything — closing the panel and
+// reopening preserves picks + text (see bots-panel seed useEffect below).
 interface ImageRecord { id: string; prompt: string; url: string; created_at: string; }
 
 const DEFAULT_ASSISTANT_NAME = "Prism";
@@ -4175,116 +4403,20 @@ const RANDOM_BOT_NAMES = [
 ] as const;
 
 function randomBotName(): string {
-  return RANDOM_BOT_NAMES[Math.floor(Math.random() * RANDOM_BOT_NAMES.length)];
+  return randomArrayItem(RANDOM_BOT_NAMES);
 }
 
 function sampleBotNames(count: number): string[] {
-  if (count <= RANDOM_BOT_NAMES.length) {
-    const pool = [...RANDOM_BOT_NAMES];
-    for (let i = pool.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    return pool.slice(0, count);
+  const pool = [...RANDOM_BOT_NAMES];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  return Array.from({ length: count }, () => randomBotName());
-}
-
-const RANDOM_BOT_PROMPT_SINGLE_OBJECTS = [
-  "lemons", "bacon", "rainy windows", "old maps", "green tea", "sea glass",
-  "campfire stories", "elevator music", "ginger candy", "cloud watching",
-  "library ladders", "moon jelly", "warm socks", "neon signs", "paper boats",
-  "pocket notebooks", "lavender soap", "orange peels", "soft thunder",
-  "brass keys", "turtle facts", "blueberries", "train whistles", "dandelions",
-  "rubber ducks", "velvet chairs", "mint chip ice cream", "alphabet soup",
-  "tiny spoons", "midnight snacks",
-] as const;
-
-const RANDOM_BOT_PROMPT_ADJECTIVES = [
-  "tiny", "polished", "blue", "borrowed", "haunted", "cozy", "shiny",
-  "paper", "velvet", "sleepy", "brass", "moonlit", "lucky", "crooked",
-  "gentle", "sparkly", "ceramic", "wooden", "secret", "glowing", "striped",
-  "minty", "stormy", "quiet",
-] as const;
-
-const RANDOM_BOT_PROMPT_NOUNS = [
-  "spoons", "lemons", "maps", "buttons", "socks", "teacups", "keys",
-  "notebooks", "rubber ducks", "shells", "pinecones", "marbles", "stickers",
-  "candles", "paper boats", "postcards", "umbrellas", "coins",
-  "train tickets", "mugs", "bells", "scarves", "pebbles", "bookmarks",
-  "balloons", "pencils", "oranges", "lanterns", "comets", "snails",
-  "biscuits", "clouds", "apples", "magnets", "crayons", "acorns", "corks",
-  "pancakes", "jellybeans", "bacon",
-] as const;
-
-type RandomBotPromptSinglePattern = (object: string) => string;
-type RandomBotPromptPairPattern = (adjective: string, noun: string) => string;
-
-const RANDOM_BOT_PROMPT_SINGLE_PATTERNS: readonly RandomBotPromptSinglePattern[] = [
-  (object) => `Really likes ${object}.`,
-  (object) => `Allergic to ${object}.`,
-  (object) => `Always mentions ${object}.`,
-  (object) => `Gets distracted by ${object}.`,
-  (object) => `Has strong opinions about ${object}.`,
-  (object) => `Uses ${object} as metaphors.`,
-] as const;
-
-const RANDOM_BOT_PROMPT_PAIR_PATTERNS: readonly RandomBotPromptPairPattern[] = [
-  (adjective, noun) => `Collects ${adjective} ${noun}.`,
-  (adjective, noun) => `Only trusts ${adjective} ${noun}.`,
-  (adjective, noun) => `Dreams about ${adjective} ${noun}.`,
-  (adjective, noun) => `Writes poems about ${adjective} ${noun}.`,
-  (adjective, noun) => `Secretly rates ${adjective} ${noun}.`,
-  (adjective, noun) => `Afraid of ${adjective} ${noun}.`,
-  (adjective, noun) => `Draws ${adjective} ${noun} in margins.`,
-  (adjective, noun) => `Keeps notes about ${adjective} ${noun}.`,
-] as const;
-
-function randomString(values: readonly string[]): string {
-  return values[Math.floor(Math.random() * values.length)] ?? "";
-}
-
-function buildRandomBotSystemPrompt(): string {
-  if (Math.random() < 0.35) {
-    const pattern = RANDOM_BOT_PROMPT_SINGLE_PATTERNS[
-      Math.floor(Math.random() * RANDOM_BOT_PROMPT_SINGLE_PATTERNS.length)
-    ];
-    return pattern(randomString(RANDOM_BOT_PROMPT_SINGLE_OBJECTS));
+  const names: string[] = pool.slice(0, Math.min(count, pool.length));
+  while (names.length < count) {
+    names.push(randomArrayItem(RANDOM_BOT_NAMES));
   }
-
-  const pattern = RANDOM_BOT_PROMPT_PAIR_PATTERNS[
-    Math.floor(Math.random() * RANDOM_BOT_PROMPT_PAIR_PATTERNS.length)
-  ];
-  return pattern(
-    randomString(RANDOM_BOT_PROMPT_ADJECTIVES),
-    randomString(RANDOM_BOT_PROMPT_NOUNS)
-  );
-}
-
-function randomBotSystemPrompt(usedPrompts: Set<string>): string {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const prompt = buildRandomBotSystemPrompt();
-    if (!usedPrompts.has(prompt)) {
-      usedPrompts.add(prompt);
-      return prompt;
-    }
-  }
-
-  for (const pattern of RANDOM_BOT_PROMPT_PAIR_PATTERNS) {
-    for (const adjective of RANDOM_BOT_PROMPT_ADJECTIVES) {
-      for (const noun of RANDOM_BOT_PROMPT_NOUNS) {
-        const prompt = pattern(adjective, noun);
-        if (!usedPrompts.has(prompt)) {
-          usedPrompts.add(prompt);
-          return prompt;
-        }
-      }
-    }
-  }
-
-  const fallback = `Enjoys odd little mysteries ${usedPrompts.size + 1}.`;
-  usedPrompts.add(fallback);
-  return fallback;
+  return names;
 }
 
 interface BotGlyphProps {
@@ -6590,6 +6722,339 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
 
 ComposerInput.displayName = "ComposerInput";
 
+type BotProfileTextSection = "identity" | "worldview" | "appearance";
+
+interface BotProfileBuilderProps {
+  open: boolean;
+  activePage: BotProfileBuilderPageId;
+  profile: BotProfileFields;
+  botName: string;
+  onActivePageChange: (page: BotProfileBuilderPageId) => void;
+  onProfileChange: (updater: (profile: BotProfileFields) => BotProfileFields) => void;
+  onClose: () => void;
+}
+
+function optionalScaleLabel(
+  value: BotProfileScaleValue | null,
+  labels: readonly [string, string, string, string, string]
+): string {
+  if (value === null) return "Unspecified";
+  return labels[value + 2] ?? "Unspecified";
+}
+
+function BotProfileScaleControl({
+  label,
+  value,
+  labels,
+  leftLabel,
+  rightLabel,
+  onChange,
+}: {
+  label: string;
+  value: BotProfileScaleValue | null;
+  labels: readonly [string, string, string, string, string];
+  leftLabel: string;
+  rightLabel: string;
+  onChange: (value: BotProfileScaleValue | null) => void;
+}): React.JSX.Element {
+  return (
+    <div className={styles.botProfileScaleControl}>
+      <div className={styles.botProfileScaleHeader}>
+        <span>{label}</span>
+        <strong>{optionalScaleLabel(value, labels)}</strong>
+      </div>
+      <input
+        type="range"
+        min={-2}
+        max={2}
+        step={1}
+        value={value ?? 0}
+        data-active={value !== null ? "true" : undefined}
+        onChange={(event) => onChange(Number(event.currentTarget.value) as BotProfileScaleValue)}
+        aria-label={label}
+      />
+      <div className={styles.botProfileScaleEnds} aria-hidden="true">
+        <span>{leftLabel}</span>
+        <span>{rightLabel}</span>
+      </div>
+      <button
+        type="button"
+        className={styles.botProfileClearButton}
+        onClick={() => onChange(null)}
+        disabled={value === null}
+      >
+        Leave unspecified
+      </button>
+    </div>
+  );
+}
+
+function BotProfileBuilder({
+  open,
+  activePage,
+  profile,
+  botName,
+  onActivePageChange,
+  onProfileChange,
+  onClose,
+}: BotProfileBuilderProps): React.JSX.Element | null {
+  if (!open) return null;
+
+  const activeIndex = BOT_PROFILE_BUILDER_PAGE_ORDER.indexOf(activePage);
+  const previousPage = BOT_PROFILE_BUILDER_PAGE_ORDER[Math.max(0, activeIndex - 1)];
+  const nextPage =
+    BOT_PROFILE_BUILDER_PAGE_ORDER[
+      Math.min(BOT_PROFILE_BUILDER_PAGE_ORDER.length - 1, activeIndex + 1)
+    ];
+  const pageCopy = BOT_PROFILE_PAGE_COPY[activePage];
+  const seededPurpose = defaultBotPurpose(botName);
+  const updatePurpose = (field: keyof BotProfileFields["purpose"], value: string) => {
+    onProfileChange((previous) => ({
+      ...previous,
+      purpose: { ...previous.purpose, [field]: value },
+    }));
+  };
+  const updateCore = (
+    field: keyof BotProfileFields["core"],
+    value: string | BotVoicePreset | BotProfileScaleValue | null
+  ) => {
+    onProfileChange((previous) => ({
+      ...previous,
+      core: { ...previous.core, [field]: value },
+    }));
+  };
+  const updateTextSection = (
+    section: BotProfileTextSection,
+    field: string,
+    value: string
+  ) => {
+    onProfileChange((previous) => ({
+      ...previous,
+      [section]: {
+        ...previous[section],
+        [field]: value,
+      },
+    }));
+  };
+  const updateWorldviewScale = (
+    field: keyof Pick<BotProfileFields["worldview"], "politicalView" | "optimism" | "tradition">,
+    value: BotProfileScaleValue | null
+  ) => {
+    onProfileChange((previous) => ({
+      ...previous,
+      worldview: { ...previous.worldview, [field]: value },
+    }));
+  };
+
+  const renderPage = () => {
+    switch (activePage) {
+      case "purpose":
+        return (
+          <>
+            <label className={styles.botProfileField}>
+              <span>What is my purpose?</span>
+              <div className={styles.botPurposePrefix} aria-hidden="true">
+                You are {botName.trim() || "[Name]"}...
+              </div>
+              <textarea
+                value={botPurposeInputValue(profile.purpose.statement, botName)}
+                onChange={(event) => updatePurpose("statement", event.currentTarget.value)}
+                placeholder="a gentle strategist who helps turn messy thoughts into one clear next step"
+              />
+              <small>
+                Leave blank to use <strong>{seededPurpose || "the bot name"}</strong>.
+              </small>
+            </label>
+            {profile.purpose.legacyNotes.trim() && (
+              <label className={styles.botProfileField}>
+                <span>Advanced notes</span>
+                <textarea
+                  value={profile.purpose.legacyNotes}
+                  onChange={(event) => updatePurpose("legacyNotes", event.currentTarget.value)}
+                  placeholder="Old prompt text or one-off instructions, optional"
+                />
+              </label>
+            )}
+          </>
+        );
+      case "personality":
+        return (
+          <>
+            <label className={styles.botProfileField}>
+              <span>Traits</span>
+              <input
+                value={profile.core.traits}
+                onChange={(event) => updateCore("traits", event.currentTarget.value)}
+                placeholder="patient, strange, decisive, gentle..."
+              />
+            </label>
+            <label className={styles.botProfileField}>
+              <span>Communication style</span>
+              <select
+                value={profile.core.communicationStyle}
+                onChange={(event) => updateCore("communicationStyle", event.currentTarget.value as BotVoicePreset)}
+              >
+                {(Object.keys(BOT_VOICE_PRESET_LABELS) as BotVoicePreset[]).map((preset) => (
+                  <option key={preset} value={preset}>
+                    {BOT_VOICE_PRESET_LABELS[preset]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <BotProfileScaleControl
+              label="Humor"
+              value={profile.core.humor}
+              labels={["Very dry", "Restrained", "Balanced", "Witty", "Very playful"]}
+              leftLabel="Dry"
+              rightLabel="Playful"
+              onChange={(value) => updateCore("humor", value)}
+            />
+            <label className={styles.botProfileField}>
+              <span>What they lean into</span>
+              <input
+                value={profile.core.interests}
+                onChange={(event) => updateCore("interests", event.currentTarget.value)}
+                placeholder="topics, goals, favorite angles..."
+              />
+            </label>
+            <label className={styles.botProfileField}>
+              <span>What they avoid</span>
+              <input
+                value={profile.core.boundaries}
+                onChange={(event) => updateCore("boundaries", event.currentTarget.value)}
+                placeholder="limits, refusals, sensitive areas..."
+              />
+            </label>
+            <label className={styles.botProfileField}>
+              <span>Signature flourish</span>
+              <input
+                value={profile.core.quirks}
+                onChange={(event) => updateCore("quirks", event.currentTarget.value)}
+                placeholder="catchphrases, habits, running jokes..."
+              />
+            </label>
+          </>
+        );
+      case "character":
+        return (
+          <>
+            <div className={styles.botProfileSubsection}>
+              <span>Identity</span>
+              <small>Who or what this bot is.</small>
+            </div>
+            <label className={styles.botProfileField}>
+              <span>Identity snapshot</span>
+              <textarea
+                value={profile.identity.role}
+                onChange={(event) => updateTextSection("identity", "role", event.currentTarget.value)}
+                placeholder="ageless raven oracle, they/them, former royal cartographer..."
+              />
+            </label>
+            <label className={styles.botProfileField}>
+              <span>Background</span>
+              <textarea
+                value={profile.identity.background}
+                onChange={(event) => updateTextSection("identity", "background", event.currentTarget.value)}
+                placeholder="where they come from, what shaped them..."
+              />
+            </label>
+            <div className={styles.botProfileSubsection}>
+              <span>Appearance</span>
+              <small>Useful for avatars, images, and a stronger mental picture.</small>
+            </div>
+            <label className={styles.botProfileField}>
+              <span>Visual description</span>
+              <textarea
+                value={profile.appearance.description}
+                onChange={(event) => updateTextSection("appearance", "description", event.currentTarget.value)}
+                placeholder="what they look like, how they dress, the feeling they give off..."
+              />
+            </label>
+            <div className={styles.botProfileSubsection}>
+              <span>Worldview</span>
+              <small>Optional lenses for future debates, polls, and experiments.</small>
+            </div>
+            <BotProfileScaleControl
+              label="Political perspective"
+              value={profile.worldview.politicalView}
+              labels={["Left-leaning", "Somewhat left", "Mixed / centrist", "Somewhat right", "Right-leaning"]}
+              leftLabel="Left"
+              rightLabel="Right"
+              onChange={(value) => updateWorldviewScale("politicalView", value)}
+            />
+            <label className={styles.botProfileField}>
+              <span>Worldview & values</span>
+              <textarea
+                value={profile.worldview.values}
+                onChange={(event) => updateTextSection("worldview", "values", event.currentTarget.value)}
+                placeholder="religion, values, optimism, tradition, taboos, causes..."
+              />
+            </label>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className={styles.botProfileBuilderBackdrop} role="presentation">
+      <section
+        className={styles.botProfileBuilder}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bot-profile-builder-title"
+      >
+        <header className={styles.botProfileBuilderHeader}>
+          <div>
+            <span>Bot Profile Builder</span>
+            <h4 id="bot-profile-builder-title">{pageCopy.label}</h4>
+            <p>{pageCopy.description}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close profile builder">
+            ×
+          </button>
+        </header>
+        <nav className={styles.botProfileBuilderNav} aria-label="Bot profile categories">
+          {BOT_PROFILE_BUILDER_PAGE_ORDER.map((category) => (
+            <button
+              key={category}
+              type="button"
+              data-active={activePage === category ? "true" : undefined}
+              onClick={() => onActivePageChange(category)}
+            >
+              <span>{BOT_PROFILE_BUILDER_PAGE_LABELS[category]}</span>
+              <small>
+                {botProfileCategoryCount(profile, category) > 0 ? "Filled" : "Optional"}
+              </small>
+            </button>
+          ))}
+        </nav>
+        <div className={styles.botProfileBuilderBody}>{renderPage()}</div>
+        <footer className={styles.botProfileBuilderFooter}>
+          <button
+            type="button"
+            onClick={() => onActivePageChange(previousPage)}
+            disabled={activeIndex <= 0}
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={
+              activeIndex >= BOT_PROFILE_BUILDER_PAGE_ORDER.length - 1
+                ? onClose
+                : () => onActivePageChange(nextPage)
+            }
+          >
+            {activeIndex >= BOT_PROFILE_BUILDER_PAGE_ORDER.length - 1 ? "Done" : "Next"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function HomeContent(): React.JSX.Element {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -6624,6 +7089,7 @@ function HomeContent(): React.JSX.Element {
   // everything else stays on `error`.
   const [error, setError] = useState<string | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
+  const [panelNotice, setPanelNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -6774,9 +7240,11 @@ function HomeContent(): React.JSX.Element {
   // renders; when the user clicks a bot's pencil, we hydrate these same
   // fields with that bot's values and set `editingBotId` to flip the form
   // into edit mode. No inline per-card edit form, no duplicated picker.
-  const [newBotName, setNewBotName] = useState(""); const [newBotPrompt, setNewBotPrompt] = useState("");
+  const [newBotName, setNewBotName] = useState("");
+  const [botProfile, setBotProfile] = useState<BotProfileFields>(() => blankBotProfile());
   const [newBotLocalModel, setNewBotLocalModel] = useState(AUTO_MODEL_CHOICE);
   const [newBotOnlineModel, setNewBotOnlineModel] = useState(AUTO_MODEL_CHOICE);
+  const [newBotOnlineEnabled, setNewBotOnlineEnabled] = useState(true);
   const [newBotTemperature, setNewBotTemperature] = useState(BOT_TEMPERATURE_DEFAULT);
   const [newBotMaxTokens, setNewBotMaxTokens] = useState(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
   // Lazy initializers so the very first render already picks a random seed
@@ -6784,6 +7252,9 @@ function HomeContent(): React.JSX.Element {
   const [newBotColor, setNewBotColor] = useState<string>(() => randomHex());
   const [newBotGlyph, setNewBotGlyph] = useState<BotGlyphName>(() => randomBotGlyph());
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
+  const [botProfileBuilderOpen, setBotProfileBuilderOpen] = useState(false);
+  const [botProfileActivePage, setBotProfileActivePage] =
+    useState<BotProfileBuilderPageId>("purpose");
   // Side-tooltip state for the bot editor's parameter help text. The
   // form panel sits flush against the right edge of the screen with
   // overflow: hidden, so any in-DOM tooltip would be clipped. We
@@ -6819,6 +7290,37 @@ function HomeContent(): React.JSX.Element {
   // entry point into edit mode, and the × on the card handles delete
   // (mirroring the chat-row two-stage + press-and-hold pattern).
   const [editingBotId, setEditingBotId] = useState<string | null>(null);
+  /** Set when the user manually changes color/glyph during create (swatch / grid). */
+  const createBotAppearanceTouchedRef = useRef(false);
+  /** Mirrors create-form state for the bots-panel seed effect (avoids effect deps on every keystroke). */
+  const latestCreateBotDraftRef = useRef({
+    name: "",
+    profile: blankBotProfile(),
+    localModel: AUTO_MODEL_CHOICE,
+    onlineModel: AUTO_MODEL_CHOICE,
+    onlineEnabled: true,
+    temperature: BOT_TEMPERATURE_DEFAULT,
+    maxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
+  });
+  latestCreateBotDraftRef.current = {
+    name: newBotName,
+    profile: botProfile,
+    localModel: newBotLocalModel,
+    onlineModel: newBotOnlineModel,
+    onlineEnabled: newBotOnlineEnabled,
+    temperature: newBotTemperature,
+    maxTokens: newBotMaxTokens,
+  };
+
+  const handleNewBotColorChange = useCallback((next: string) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotColor(next);
+  }, []);
+
+  const handleNewBotGlyphChange = useCallback((next: BotGlyphName) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotGlyph(next);
+  }, []);
   // Two-stage delete confirmation. `pendingDeleteKey` holds either a
   // conversation id (sidebar ×), HEADER_DELETE_KEY (header button), or the
   // DELETE_ALL_KEY sentinel (reached by holding any × past the threshold).
@@ -6851,7 +7353,7 @@ function HomeContent(): React.JSX.Element {
   const preModalFocusRef = useRef<HTMLElement | null>(null);
   // Pristine snapshot of the form values at the moment edit mode was
   // entered. The primary button's `hasEditChanges` check compares
-  // `newBotName / newBotPrompt / newBotColor / newBotGlyph` against
+  // `newBotName / serialized bot personality fields / newBotColor / newBotGlyph` against
   // THIS snapshot rather than the raw bot row so legacy bots with no
   // stored color (where we seed the picker with a random hex) don't
   // immediately appear as "dirty". Cleared when edit mode exits.
@@ -6860,6 +7362,7 @@ function HomeContent(): React.JSX.Element {
     prompt: string;
     localModel: string;
     onlineModel: string;
+    onlineEnabled: boolean;
     temperature: number;
     maxTokens: number;
     color: string;
@@ -8014,7 +8517,15 @@ function HomeContent(): React.JSX.Element {
       setBotMemories([]);
     }
   }
-  async function refreshSettings() { const d = await api<{ settings: UserSettings }>("/api/settings"); setSettings(d.settings); }
+  async function refreshSettings() {
+    const d = await api<{ settings: UserSettings }>("/api/settings");
+    setSettings({
+      ...d.settings,
+      hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
+        ? d.settings.hiddenBotModelIds
+        : [],
+    });
+  }
   async function refreshModels() { const d = await api<{ catalog: ModelCatalog }>("/api/models"); setModelCatalog(d.catalog); }
   async function refreshMemories() { const d = await api<{ memories: UserMemory[] }>("/api/memories"); setMemories(d.memories); }
   async function refreshBotMemories(botId: string) {
@@ -8537,6 +9048,22 @@ function HomeContent(): React.JSX.Element {
     } finally {
       setBusy(false);
     }
+  }
+
+  function setBotCustomizerModelVisible(modelId: string, visible: boolean) {
+    setSettings((previous) => {
+      if (!previous) return previous;
+      const current = new Set(previous.hiddenBotModelIds ?? []);
+      if (visible) {
+        current.delete(modelId);
+      } else {
+        current.add(modelId);
+      }
+      return {
+        ...previous,
+        hiddenBotModelIds: Array.from(current),
+      };
+    });
   }
 
   async function generatePairingCode() {
@@ -9474,15 +10001,29 @@ function HomeContent(): React.JSX.Element {
     };
   }, [pendingResendId, disarmResend]);
 
-  // In create mode, each Bots-panel open gets a fresh color/glyph seed.
-  // When a deep link opens the panel directly into edit mode, preserve the
-  // selected bot's saved values so the random create seed cannot overwrite
-  // the customizer fields.
+  // Create mode: seed random color/glyph when the Bots panel opens only if
+  // the compose form is still empty and the user hasn't picked a swatch/glyph
+  // yet — so closing the panel mid-draft (or after a mis-tap) preserves work.
   useEffect(() => {
     if (panel !== "bots" || editingBotId) return;
+
+    const draft = latestCreateBotDraftRef.current;
+    if (
+      createBotFormHasEnteredData(draft) ||
+      createBotAppearanceTouchedRef.current
+    ) {
+      return;
+    }
+
     setNewBotColor(randomHex());
     setNewBotGlyph(randomBotGlyph());
   }, [panel, editingBotId]);
+
+  useEffect(() => {
+    if (botProfileBuilderOpen && !newBotName.trim()) {
+      setBotProfileBuilderOpen(false);
+    }
+  }, [botProfileBuilderOpen, newBotName]);
 
   // Close the color/glyph popover on any outside click or Escape. Only
   // one picker ever lives on screen (the top form in the Bots panel), so
@@ -9568,19 +10109,50 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  function buildRandomBotDraft(name = randomBotName()) {
+    return {
+      name,
+      profile: randomBotProfile(name),
+      temperature: randomBotTemperatureSetting(),
+      maxTokens: randomBotReplyLengthTokens(),
+      color: randomHex(),
+      glyph: randomBotGlyph(),
+    };
+  }
+
+  function applyRandomBotDraft() {
+    const draft = buildRandomBotDraft();
+    setPanelNotice(null);
+    setNewBotName(draft.name);
+    setBotProfile(draft.profile);
+    setNewBotTemperature(draft.temperature);
+    setNewBotMaxTokens(draft.maxTokens);
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotColor(draft.color);
+    setNewBotGlyph(draft.glyph);
+    setColorWheelOpen(false);
+    setBotProfileBuilderOpen(false);
+    setBotProfileActivePage("purpose");
+  }
+
   // Reset the top form back to "create" mode with a fresh random
-  // color/glyph seed. Called after a successful create and when the
+  // color/glyph seed. Clears draft/touch guards so the next open behaves
+  // like an empty compose. Called after a successful create and when the
   // user cancels or deletes an in-progress edit.
   const resetBotForm = useCallback(() => {
     setNewBotName("");
-    setNewBotPrompt("");
+    setBotProfile(blankBotProfile());
     setNewBotLocalModel(AUTO_MODEL_CHOICE);
     setNewBotOnlineModel(AUTO_MODEL_CHOICE);
+    setNewBotOnlineEnabled(true);
     setNewBotTemperature(BOT_TEMPERATURE_DEFAULT);
     setNewBotMaxTokens(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
+    createBotAppearanceTouchedRef.current = false;
     setNewBotColor(randomHex());
     setNewBotGlyph(randomBotGlyph());
     setColorWheelOpen(false);
+    setBotProfileBuilderOpen(false);
+    setBotProfileActivePage("purpose");
     // Drop any stashed edit-mode snapshot so the next edit compares
     // against the correct starting state. Safe to always clear here:
     // the only places that hold a snapshot are paths that also call
@@ -9590,14 +10162,17 @@ function HomeContent(): React.JSX.Element {
 
   async function createBot() {
     setPanelError(null);
+    setPanelNotice(null);
+    const createdBotName = newBotName.trim();
     try {
       await api("/api/bots", {
         method: "POST",
         body: JSON.stringify({
           name: newBotName,
-          systemPrompt: newBotPrompt,
+          systemPrompt: serializeStoredBotPrompt(botProfile, newBotName),
           localModel: newBotLocalModel === AUTO_MODEL_CHOICE ? "" : newBotLocalModel,
           onlineModel: newBotOnlineModel === AUTO_MODEL_CHOICE ? "" : newBotOnlineModel,
+          onlineEnabled: newBotOnlineEnabled,
           temperature: newBotTemperature,
           maxTokens: newBotMaxTokens,
           color: newBotColor,
@@ -9605,6 +10180,7 @@ function HomeContent(): React.JSX.Element {
         }),
       });
       resetBotForm();
+      setPanelNotice(`${createdBotName} created.`);
       await refreshBots();
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Create bot failed.");
@@ -9613,6 +10189,7 @@ function HomeContent(): React.JSX.Element {
 
   async function deleteBot(id: string) {
     setPanelError(null);
+    setPanelNotice(null);
     disarmDelete();
     // If the deleted bot was the one loaded into the top form, collapse
     // back to create mode so the editor doesn't keep pointing at a row
@@ -9647,6 +10224,7 @@ function HomeContent(): React.JSX.Element {
   // the bot list.
   async function deleteAllBots() {
     setPanelError(null);
+    setPanelNotice(null);
     disarmDelete();
     const previousBots = bots;
     const previousSelectedBotId = selectedBotId;
@@ -9707,21 +10285,23 @@ function HomeContent(): React.JSX.Element {
     if (batchSize <= 0) return;
 
     const names = sampleBotNames(batchSize);
-    const usedPrompts = new Set<string>();
     for (let start = 0; start < names.length; start += DEV_TOOLS_BOT_CREATE_CHUNK_SIZE) {
       const chunk = names.slice(start, start + DEV_TOOLS_BOT_CREATE_CHUNK_SIZE);
       await Promise.all(
-        chunk.map((name) =>
-          api("/api/bots", {
+        chunk.map((name) => {
+          const draft = buildRandomBotDraft(name);
+          return api("/api/bots", {
             method: "POST",
             body: JSON.stringify({
-              name,
-              systemPrompt: randomBotSystemPrompt(usedPrompts),
-              color: randomHex(),
-              glyph: randomBotGlyph(),
+              name: draft.name,
+              systemPrompt: serializeStoredBotPrompt(draft.profile, draft.name),
+              temperature: draft.temperature,
+              maxTokens: draft.maxTokens,
+              color: draft.color,
+              glyph: draft.glyph,
             }),
-          })
-        )
+          });
+        })
       );
     }
   }
@@ -9866,11 +10446,15 @@ function HomeContent(): React.JSX.Element {
   // panel backdrop and the × in the panel header).
   function startEditBot(bot: Bot) {
     disarmDelete();
+    createBotAppearanceTouchedRef.current = false;
     setColorWheelOpen(false);
     const seededName = bot.name;
-    const seededPrompt = bot.system_prompt ?? "";
+    const rawStoredPrompt = bot.system_prompt ?? "";
+    const { fields: seededProfile } = parseStoredBotPrompt(rawStoredPrompt);
+    const normalizedStoredPrompt = serializeStoredBotPrompt(seededProfile, seededName);
     const seededLocalModel = normalizeModelChoice(bot.local_model ?? bot.model);
     const seededOnlineModel = normalizeModelChoice(bot.online_model);
+    const seededOnlineEnabled = bot.online_enabled !== 0;
     const seededTemperature = normalizeBotTemperature(bot.temperature);
     const seededMaxTokens = normalizeBotMaxTokens(bot.max_tokens);
     const seededColor = bot.color?.trim() || randomHex();
@@ -9878,19 +10462,23 @@ function HomeContent(): React.JSX.Element {
       ? bot.glyph
       : DEFAULT_BOT_GLYPH;
     setNewBotName(seededName);
-    setNewBotPrompt(seededPrompt);
+    setBotProfile(seededProfile);
     setNewBotLocalModel(seededLocalModel);
     setNewBotOnlineModel(seededOnlineModel);
+    setNewBotOnlineEnabled(seededOnlineEnabled);
     setNewBotTemperature(seededTemperature);
     setNewBotMaxTokens(seededMaxTokens);
     setNewBotColor(seededColor);
     setNewBotGlyph(seededGlyph);
+    setBotProfileBuilderOpen(false);
+    setBotProfileActivePage("purpose");
     setEditingBotId(bot.id);
     editOriginalRef.current = {
       name: seededName,
-      prompt: seededPrompt,
+      prompt: normalizedStoredPrompt,
       localModel: seededLocalModel,
       onlineModel: seededOnlineModel,
+      onlineEnabled: seededOnlineEnabled,
       temperature: seededTemperature,
       maxTokens: seededMaxTokens,
       color: seededColor,
@@ -10021,14 +10609,16 @@ function HomeContent(): React.JSX.Element {
     if (!trimmedName) return;
     setBusy(true);
     setPanelError(null);
+    setPanelNotice(null);
     try {
       await api(`/api/bots/${id}`, {
         method: "PATCH",
         body: JSON.stringify({
           name: trimmedName,
-          systemPrompt: newBotPrompt,
+          systemPrompt: serializeStoredBotPrompt(botProfile, trimmedName),
           localModel: newBotLocalModel === AUTO_MODEL_CHOICE ? "" : newBotLocalModel,
           onlineModel: newBotOnlineModel === AUTO_MODEL_CHOICE ? "" : newBotOnlineModel,
+          onlineEnabled: newBotOnlineEnabled,
           temperature: newBotTemperature,
           maxTokens: newBotMaxTokens,
           color: newBotColor,
@@ -10037,9 +10627,10 @@ function HomeContent(): React.JSX.Element {
       });
       editOriginalRef.current = {
         name: trimmedName,
-        prompt: newBotPrompt,
+        prompt: serializeStoredBotPrompt(botProfile, trimmedName),
         localModel: newBotLocalModel,
         onlineModel: newBotOnlineModel,
+        onlineEnabled: newBotOnlineEnabled,
         temperature: newBotTemperature,
         maxTokens: newBotMaxTokens,
         color: newBotColor,
@@ -10899,6 +11490,34 @@ function HomeContent(): React.JSX.Element {
                 </button>
               )}
               <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
+              <details className={styles.settingsModelDropdown}>
+                <summary>
+                  <span>Bot customizer models</span>
+                  <small>
+                    {settings.hiddenBotModelIds.length === 0
+                      ? "All model choices visible"
+                      : `${settings.hiddenBotModelIds.length} hidden`}
+                  </small>
+                </summary>
+                <div className={styles.settingsModelList}>
+                  {allBotCustomizerModelOptions(modelCatalog, settings).map((model) => {
+                    const visible = !settings.hiddenBotModelIds.includes(model.id);
+                    return (
+                      <label key={model.id} className={styles.settingsModelToggle}>
+                        <input
+                          type="checkbox"
+                          checked={visible}
+                          onChange={(event) =>
+                            setBotCustomizerModelVisible(model.id, event.currentTarget.checked)
+                          }
+                        />
+                        <span>{model.label}</span>
+                        <small>{model.provider === "local" ? "Offline" : "Online"}</small>
+                      </label>
+                    );
+                  })}
+                </div>
+              </details>
               <button type="submit" disabled={busy}>Save</button>
             </form>
           )}
@@ -11013,9 +11632,10 @@ function HomeContent(): React.JSX.Element {
         const editPristine = editingBot ? editOriginalRef.current : null;
         const hasEditChanges = editPristine
           ? trimmedName !== editPristine.name
-            || newBotPrompt !== editPristine.prompt
+            || serializeStoredBotPrompt(botProfile, trimmedName) !== editPristine.prompt
             || newBotLocalModel !== editPristine.localModel
             || newBotOnlineModel !== editPristine.onlineModel
+            || newBotOnlineEnabled !== editPristine.onlineEnabled
             || newBotTemperature !== editPristine.temperature
             || newBotMaxTokens !== editPristine.maxTokens
             || normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
@@ -11057,12 +11677,12 @@ function HomeContent(): React.JSX.Element {
           : undefined;
         const selectedLengthPreset = botReplyLengthPresetForTokens(newBotMaxTokens);
         const localModelOptions = includeSelectedModelOption(
-          modelOptionsForProvider(modelCatalog, settings, "local"),
+          botCustomizerModelOptionsForProvider(modelCatalog, settings, "local"),
           newBotLocalModel,
           "local"
         );
         const onlineModelOptions = includeSelectedModelOption(
-          modelOptionsForProvider(modelCatalog, settings, "openai"),
+          botCustomizerModelOptionsForProvider(modelCatalog, settings, "openai"),
           newBotOnlineModel,
           "openai"
         );
@@ -11080,11 +11700,19 @@ function HomeContent(): React.JSX.Element {
             ["--editor-bot-glow" as string]: base["--accent-glow" as keyof typeof base],
           } as React.CSSProperties;
         })();
+        const completedProfileCategories = botProfileCompletionCount(botProfile);
+        const profileSummary =
+          !nameIsPresent
+            ? "Name this bot to unlock profile details"
+            : completedProfileCategories === 0
+            ? "Purpose only"
+            : `${completedProfileCategories} profile section${completedProfileCategories === 1 ? "" : "s"} filled`;
 
         return (
           <div
             className={`${styles.panel} ${styles.panelBots}`}
             data-color-picker-open={colorWheelOpen ? "true" : undefined}
+            data-profile-builder-open={botProfileBuilderOpen ? "true" : undefined}
             data-library-expanded={
               botPanelLibraryEnabled && botLibraryExpanded ? "true" : undefined
             }
@@ -11118,20 +11746,98 @@ function HomeContent(): React.JSX.Element {
                 <ColorGlyphPicker
                   color={newBotColor}
                   glyph={newBotGlyph}
-                  onColorChange={setNewBotColor}
-                  onGlyphChange={setNewBotGlyph}
+                  onColorChange={handleNewBotColorChange}
+                  onGlyphChange={handleNewBotGlyphChange}
                   open={colorWheelOpen}
                   onToggle={() => setColorWheelOpen(o => !o)}
                   resolvedTheme={resolvedTheme}
                 />
                 <input ref={botNameInputRef} required placeholder="Bot name" value={newBotName} onChange={e => setNewBotName(e.target.value)} />
+                <button
+                  type="button"
+                  className={styles.botRandomizeButton}
+                  onClick={applyRandomBotDraft}
+                  aria-label="Randomize bot"
+                  title="Randomize bot"
+                >
+                  <BotGlyph name="dice" size={20} strokeWidth={1.8} />
+                </button>
               </div>
-              <textarea placeholder="System prompt" value={newBotPrompt} onChange={e => setNewBotPrompt(e.target.value)} />
-              <section className={styles.botParameterCard} aria-labelledby="bot-parameters-title">
+              <section
+                className={`${styles.botParameterCard} ${styles.botProfileSummaryCard}`}
+                aria-label="Profile Builder"
+              >
                 <div className={styles.botParameterHeader}>
-                  <span id="bot-parameters-title">Parameters</span>
-                  <small>Plain-language controls for how this bot answers.</small>
+                  <small>
+                    {profileSummary}. These details become hidden context for the model.
+                  </small>
                 </div>
+                <div className={styles.botProfileSummaryGrid}>
+                  {BOT_PROFILE_BUILDER_PAGE_ORDER.map((category) => (
+                    (() => {
+                      const complete = botProfileCategoryComplete(
+                        botProfile,
+                        category,
+                        trimmedName
+                      );
+                      return (
+                        <button
+                          key={category}
+                          type="button"
+                          className={styles.botProfileSummaryButton}
+                          data-complete={complete ? "true" : undefined}
+                          data-locked={!nameIsPresent ? "true" : undefined}
+                          disabled={!nameIsPresent}
+                          onClick={() => {
+                            if (!nameIsPresent) return;
+                            setColorWheelOpen(false);
+                            setBotProfileActivePage(category);
+                            setBotProfileBuilderOpen(true);
+                          }}
+                        >
+                          <span>{BOT_PROFILE_BUILDER_PAGE_LABELS[category]}</span>
+                          <small>
+                            {nameIsPresent
+                              ? botProfileCategorySummary(botProfile, category, trimmedName)
+                              : "Enter a name first"}
+                          </small>
+                          <strong>{!nameIsPresent ? "Locked" : complete ? "Complete" : "Optional"}</strong>
+                        </button>
+                      );
+                    })()
+                  ))}
+                </div>
+              </section>
+              <BotProfileBuilder
+                open={botProfileBuilderOpen}
+                activePage={botProfileActivePage}
+                profile={botProfile}
+                botName={trimmedName}
+                onActivePageChange={setBotProfileActivePage}
+                onProfileChange={setBotProfile}
+                onClose={() => setBotProfileBuilderOpen(false)}
+              />
+              <section className={styles.botParameterCard} aria-label="Response settings">
+                <div className={styles.botParameterHeader}>
+                  <small>Plain-language choices for model routing, creativity, and answer size.</small>
+                </div>
+                <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
+                  <span>Online capability</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={newBotOnlineEnabled}
+                    data-enabled={newBotOnlineEnabled ? "true" : undefined}
+                    onClick={() => setNewBotOnlineEnabled((enabled) => !enabled)}
+                  >
+                    <strong>{newBotOnlineEnabled ? "Allowed" : "Offline only"}</strong>
+                    <small>
+                      {newBotOnlineEnabled
+                        ? "This bot may use its preferred online model."
+                        : "Online model preference is ignored for this bot."}
+                    </small>
+                  </button>
+                </label>
                 <div
                   className={`${styles.botParameterField} ${styles.botParameterModelField}`}
                   onMouseEnter={(event) => showFieldHelp(
@@ -11178,6 +11884,7 @@ function HomeContent(): React.JSX.Element {
                     value={newBotOnlineModel}
                     onChange={(event) => setNewBotOnlineModel(event.currentTarget.value)}
                     aria-label="Preferred online model for this bot"
+                    disabled={!newBotOnlineEnabled}
                   >
                     <option value={AUTO_MODEL_CHOICE}>Auto</option>
                     {onlineModelOptions.map((model) => (
@@ -11186,7 +11893,11 @@ function HomeContent(): React.JSX.Element {
                       </option>
                     ))}
                   </select>
-                  <small>Used when this bot replies while the editor is set to ONLINE.</small>
+                  <small>
+                    {newBotOnlineEnabled
+                      ? "Used when this bot replies while the editor is set to ONLINE."
+                      : "Disabled while online capability is off."}
+                  </small>
                 </div>
                 <div
                   className={styles.botParameterField}
@@ -11202,9 +11913,12 @@ function HomeContent(): React.JSX.Element {
                   onBlur={hideFieldHelp}
                 >
                   <div className={styles.botParameterQuestionRow}>
-                    <span>How much should it improvise?</span>
+                    <span>Reply creativity</span>
                     <strong>{botTemperatureLabel(newBotTemperature)}</strong>
                   </div>
+                  <small className={styles.botParameterInlineHelp}>
+                    Lower values keep answers predictable; higher values allow more surprise.
+                  </small>
                   <input
                     type="range"
                     min={BOT_TEMPERATURE_MIN}
@@ -11215,7 +11929,7 @@ function HomeContent(): React.JSX.Element {
                       normalizeBotTemperature(Number(event.currentTarget.value))
                     )}
                     className={styles.botParameterRange}
-                    aria-label="How much should this bot improvise?"
+                    aria-label="Reply creativity for this bot"
                     // Drives the thumb's fill/edge color inversion in CSS:
                     // 0 = far left (color fill, black edge) → 1 = far right
                     // (black fill, color edge). Keeps the thumb visible against
@@ -11228,11 +11942,10 @@ function HomeContent(): React.JSX.Element {
                     } as React.CSSProperties}
                   />
                   <div className={styles.botParameterScale} aria-hidden="true">
-                    <span>Stay focused</span>
+                    <span>Predictable</span>
                     <span>Balanced</span>
-                    <span>Surprise me</span>
+                    <span>Inventive</span>
                   </div>
-                  <small>{botTemperatureDescription(newBotTemperature)}</small>
                 </div>
                 <fieldset
                   className={styles.botParameterField}
@@ -11247,7 +11960,10 @@ function HomeContent(): React.JSX.Element {
                   )}
                   onBlur={hideFieldHelp}
                 >
-                  <legend>How much should it say?</legend>
+                  <legend>Reply depth</legend>
+                  <small className={styles.botParameterInlineHelp}>
+                    Pick the size of answer this bot should naturally aim for.
+                  </small>
                   <div className={styles.botLengthOptions}>
                     {BOT_REPLY_LENGTH_PRESETS.map((preset) => (
                       <button
@@ -11257,13 +11973,11 @@ function HomeContent(): React.JSX.Element {
                         data-selected={newBotMaxTokens === preset.tokens ? "true" : undefined}
                         onClick={() => setNewBotMaxTokens(preset.tokens)}
                       >
-                        {preset.label}
+                        <span>{preset.label}</span>
+                        <small>{preset.description}</small>
                       </button>
                     ))}
                   </div>
-                  <small>
-                    {selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it."}
-                  </small>
                 </fieldset>
               </section>
               <button
@@ -11479,7 +12193,16 @@ function HomeContent(): React.JSX.Element {
                               <div className={styles.botCardTitleRow}>
                                 <strong>{b.name}</strong>
                               </div>
-                              <small>{b.system_prompt ? b.system_prompt.slice(0, 80) + "..." : "No system prompt"}</small>
+                              <small>
+                                {(() => {
+                                  const preview = stripBotProfileMetaSuffix(
+                                    b.system_prompt
+                                  ).trim();
+                                  if (!preview) return "No personality copy yet";
+                                  const clipped = preview.slice(0, 80);
+                                  return preview.length > 80 ? `${clipped}…` : clipped;
+                                })()}
+                              </small>
                             </div>
                           </button>
                           {renderBotDeleteButton(b)}
@@ -11498,6 +12221,7 @@ function HomeContent(): React.JSX.Element {
                 surface in the composer behind the drawer overlay. They now
                 live inside the panel next to the action that triggered
                 them. */}
+            {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
             {panelError && <p className={styles.error} role="alert">{panelError}</p>}
           </div>
         );
@@ -12002,7 +12726,7 @@ function HomeContent(): React.JSX.Element {
                 : "Private chat"
               : heroBot?.name?.trim() || "What\u2019s on your mind?";
             const descriptionPreview = heroBot
-              ? firstLinesOf(heroBot.system_prompt)
+              ? botHeroPreview(heroBot.system_prompt)
               : "";
             const selectedBotPromptPreview =
               !pendingIncognito && selectedBotId !== null && heroBot?.id === selectedBotId
@@ -12174,6 +12898,7 @@ function HomeContent(): React.JSX.Element {
                       className={styles.chatBotPickerFrame}
                       data-starter-bot-affordance="true"
                       data-bot-picker-frame="true"
+                      data-single-bot={geom.singleBot ? "true" : undefined}
                       data-returning-all={botPickerReturnAnimating ? "true" : undefined}
                       data-search-active={emptyStateSearchActive ? "true" : undefined}
                       data-touch-active={touchPreview ? "true" : undefined}
@@ -13077,7 +13802,7 @@ function HomeContent(): React.JSX.Element {
                 : "Private chat"
               : heroBot?.name?.trim() || "Start a new conversation";
             const descriptionPreview = heroBot
-              ? firstLinesOf(heroBot.system_prompt)
+              ? botHeroPreview(heroBot.system_prompt)
               : "";
             const selectedBotPromptPreview =
               !pendingIncognito && selectedBotId !== null && heroBot?.id === selectedBotId
@@ -13226,6 +13951,7 @@ function HomeContent(): React.JSX.Element {
                       className={styles.chatBotPickerFrame}
                       data-starter-bot-affordance="true"
                       data-bot-picker-frame="true"
+                      data-single-bot={geom.singleBot ? "true" : undefined}
                       data-returning-all={botPickerReturnAnimating ? "true" : undefined}
                       data-search-active={emptyStateSearchActive ? "true" : undefined}
                       data-touch-active={touchPreview ? "true" : undefined}
