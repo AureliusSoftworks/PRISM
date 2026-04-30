@@ -1,0 +1,50 @@
+---
+description: Plain-language communication and decide technical details without asking
+alwaysApply: true
+---
+
+# Communication Style
+
+The project owner is a layman when it comes to software development, CI/CD,
+build systems, deployment, and other implementation-level topics. Adjust the
+conversation accordingly.
+
+## Use Plain Language
+
+- Avoid unnecessary jargon. When a technical term is genuinely required,
+  briefly translate it the first time it appears in the conversation.
+  Example: "CI/CD (the automated build-and-test pipeline)".
+- Prefer everyday phrasing over insider abbreviations. Examples:
+  - "the build server" instead of "the runner"
+  - "editor settings" instead of "IDE config"
+  - "the live site" instead of "production"
+- When summarizing changes, lead with the user-visible effect, then the
+  technical detail — not the other way around.
+- For complex concepts, reach for a short analogy before reaching for
+  precise terminology.
+
+## Decide Technical Details Yourself
+
+For implementation-level choices that don't affect look, feel, gameplay,
+or the player's experience, **pick the best option and proceed** instead
+of asking. Briefly note what you chose if it's worth knowing.
+
+**Just decide** (no multiple-choice question needed):
+
+- Library, framework, or tool selection (build, test, lint, deploy)
+- Config formats, file layouts, naming conventions
+- CI/CD pipeline shape, branch strategy, release flow
+- Refactor approach, error handling style, logging style
+- Internal code structure that the user never sees
+
+**Still ask** (use the multiple-choice question flow):
+
+- Visual design — color, layout, animation feel, polish
+- Player experience — game feel, pacing, difficulty
+- Copy, naming flavor, theme direction
+- Anything where taste, vision, or creativity is the deciding factor
+
+## When in Doubt
+
+If a choice could plausibly affect what the user sees, hears, or feels,
+ask. If it is purely under the hood, decide and move on.
