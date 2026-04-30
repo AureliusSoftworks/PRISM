@@ -149,6 +149,20 @@ function uniqueModelIds(ids: string[]): string[] {
   return result;
 }
 
+function uniqueModelIdsByLabel(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of ids) {
+    const trimmed = id.trim();
+    if (!trimmed) continue;
+    const key = modelLabelFromId(trimmed).toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
 function toCatalogEntry(
   id: string,
   provider: "local" | "openai",
@@ -228,7 +242,7 @@ export async function buildModelCatalog(openAiApiKey?: string): Promise<ModelCat
     discoverLocalModelIds(),
     discoverOpenAiModelIds(openAiApiKey),
   ]);
-  const localIds = uniqueModelIds([config.ollamaModel, ...discoveredLocal]);
+  const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
   const onlineIds = uniqueModelIds([
     OPENAI_DEFAULT_MODEL,
     ...discoveredOnline,
