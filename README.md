@@ -85,6 +85,25 @@ installs, and guide any missing setup from a clear first-run screen. See
 [docs/prism-server-app.md](docs/prism-server-app.md) for setup, signing,
 notarization, and release steps.
 
+## Prism Server for Windows
+
+Prism Server for Windows is the native tray-app server runtime distributed as a
+per-user Inno Setup wizard. It installs `Prism Server.exe`, the staged Node
+runtime, bundled `node.exe`, and bundled `qdrant.exe` under
+`%LOCALAPPDATA%\Programs\Prism Server`, while config/data/logs live under
+`%LOCALAPPDATA%\Prism`.
+
+The tray app mirrors the Mac server flow: Setup, readiness checks, managed
+Memory Engine startup, local Ollama/model detection, logs, start/stop/restart,
+and pairing-code generation for native clients. It also adds a default-on
+"Start Prism Server when I sign in" installer option and a normal Apps &
+Features uninstaller. See [docs/prism-server-app-windows.md](docs/prism-server-app-windows.md).
+
+Release builds are produced by `.github/workflows/release-server-windows.yml`
+and uploaded to the same `server/v<version>` GitHub Release as the Mac DMG.
+The existing `start.bat` remains as a legacy/dev fallback for headless Windows
+startup, not the primary user-facing Windows distribution path.
+
 ## Prism.app (macOS Client)
 
 Prism.app is the native client shell for the paid app experience. The current
