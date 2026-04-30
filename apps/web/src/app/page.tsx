@@ -2447,19 +2447,9 @@ function PrismMessageRoleLabel(): React.JSX.Element {
 // single accent token. Private/incognito remains the only monochrome path.
 const PRISM_DEFAULT_ACCENT = PRISM_COLORS.s;
 
-function prismFallbackColorForKey(key: string): string {
-  let hash = 0;
-  for (let i = 0; i < key.length; i += 1) {
-    hash = (hash * 31 + key.charCodeAt(i)) | 0;
-  }
-  const index = Math.abs(hash) % PRISM_WORDMARK_PALETTE.length;
-  return PRISM_WORDMARK_PALETTE[index] ?? PRISM_DEFAULT_ACCENT;
-}
-
 // Resolve a sidebar conversation row's tint color from the server-side
-// denormalized `lastBotColor`, falling through a four-step chain so
-// each conversation paints the color of its CURRENT active bot when one
-// exists, or a deterministic PRISM fallback for Default/no-bot chats.
+// denormalized `lastBotColor`. Only custom bots tint rows; Default/no-bot
+// chats deliberately return null so their tabs stay neutral black/white.
 //
 // Order matters:
 //   1. Incognito wins — private rows never pick up a hue (grayscale
@@ -2468,25 +2458,22 @@ function prismFallbackColorForKey(key: string): string {
 //      responded, so it stays correct even if the bot was later deleted
 //      or recolored.
 //   3. `hasAssistantReply && !lastBotColor` means the last reply came
-//      from the Default bot (no bot_id) — paint a PRISM fallback rather
-//      than dropping to grayscale.
+//      from the Default bot (no bot_id) — keep grayscale.
 //   4. `botId` → live bots[] lookup. Catches the pre-reply window where
 //      a conversation has a locked bot but no assistant message yet.
-//   5. PRISM fallback: no locked bot and no reply either — a brand-new
-//      empty conversation created with Default, or a ghost row from a
-//      failed send.
+//   5. No locked bot and no reply either — keep grayscale.
 function resolveRowColor(
   c: ConversationSummary,
   bots: Bot[]
 ): string | null {
   if (c.incognito) return null;
   if (c.lastBotColor) return c.lastBotColor;
-  if (c.hasAssistantReply) return prismFallbackColorForKey(c.id);
+  if (c.hasAssistantReply) return null;
   if (c.botId) {
     const live = bots.find((b) => b.id === c.botId)?.color;
     if (live) return live;
   }
-  return prismFallbackColorForKey(c.id);
+  return null;
 }
 
 function ThemeGlyph({ mode }: { mode: Theme }): React.ReactElement {
@@ -10600,6 +10587,14 @@ function HomeContent(): React.JSX.Element {
       : PRISM_DEFAULT_ACCENT,
     resolvedTheme
   );
+  const memoryPanelStyle = (() => {
+    const base = deriveAccentStyle(memoryPanelAccent, resolvedTheme);
+    return {
+      ["--memory-panel-color" as string]: memoryPanelAccent,
+      ["--memory-panel-text" as string]: base["--accent-text" as keyof typeof base],
+      ["--memory-panel-ink" as string]: base["--accent-ink" as keyof typeof base],
+    } as React.CSSProperties;
+  })();
 
   function memoryBubbleStyle(memory: UserMemory, index: number): React.CSSProperties {
     const confidence = Number.isFinite(memory.confidence)
@@ -11487,9 +11482,7 @@ function HomeContent(): React.JSX.Element {
         <div
           className={`${styles.panel} ${styles.panelMemories}`}
           data-memory-scope={memoryPanelScope}
-          style={{
-            "--memory-panel-color": memoryPanelAccent,
-          } as React.CSSProperties}
+          style={memoryPanelStyle}
         >
           <div className={styles.panelHeader}>
             <h3>{memoryPanelScope === "all" ? "All memories" : "Bot memories"}</h3>
