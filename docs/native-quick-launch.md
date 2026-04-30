@@ -174,6 +174,20 @@ xcodebuild \
 open "apps/server-mac/DerivedData/Build/Products/Debug/Prism Server.app"
 ```
 
+## Windows Server
+
+The Windows server app is built and run on Windows only. From PowerShell at the
+repository root:
+
+```powershell
+.\scripts\prism.ps1 windows-server
+```
+
+Release installer builds run on `windows-latest` via
+`.github/workflows/release-server-windows.yml`. The workflow publishes the WPF
+tray app, stages the Node/Qdrant runtime, packages it with Inno Setup, and
+uploads `Prism-Server-Setup-v<version>-win-x64.exe` to the server release.
+
 ## Web Dev Server
 
 Front-end iteration in the browser. Runs `next dev` on
