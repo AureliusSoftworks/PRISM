@@ -13,6 +13,7 @@ prism ios
 prism phone
 prism mac-client
 prism mac-server
+prism web
 ```
 
 These commands call the repo-owned `scripts/prism` dispatcher. If needed, the
@@ -22,6 +23,9 @@ iPhone client still supports overriding the simulator or physical device:
 SIMULATOR_ID="Simulator UDID" prism ios
 PHONE_DEVICE_ID="Device UDID" prism phone
 ```
+
+`prism web` is the only command that runs a long-lived dev server rather than
+a build-and-launch — see [Web Dev Server](#web-dev-server) below.
 
 ## Merge Main + Build Runbook
 
@@ -169,4 +173,17 @@ xcodebuild \
   build && \
 open "apps/server-mac/DerivedData/Build/Products/Debug/Prism Server.app"
 ```
+
+## Web Dev Server
+
+Front-end iteration in the browser. Runs `next dev` on
+[http://localhost:18788](http://localhost:18788) and stays attached to the
+terminal — Ctrl+C stops it cleanly. Assumes the API is already running
+elsewhere (typically via `prism mac-server`).
+
+```bash
+prism web
+```
+
+Equivalent to `npm run dev:web` from the repo root.
 

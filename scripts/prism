@@ -22,11 +22,17 @@ Usage:
   prism phone
   prism mac-client
   prism mac-server
+  prism web
 
 Aliases:
   prism iphone
   prism client
   prism server
+
+Notes:
+  prism web runs `next dev` on http://localhost:18788 and stays in the
+  foreground; press Ctrl+C to stop. Assumes the API is already running
+  (e.g. via `prism mac-server`).
 
 Environment:
   SIMULATOR_ID="Simulator UDID" prism ios
@@ -159,6 +165,12 @@ run_mac_server() {
   open "$MAC_SERVER_APP_PATH"
 }
 
+# Foreground long-running dev server; exec replaces the script process so
+# Ctrl+C is delivered straight to `next dev` without a stray bash hop.
+run_web() {
+  exec npm run dev:web
+}
+
 cd "$REPO_ROOT"
 
 case "${1:-}" in
@@ -173,6 +185,9 @@ case "${1:-}" in
     ;;
   mac-server | server)
     run_mac_server
+    ;;
+  web)
+    run_web
     ;;
   help | -h | --help)
     usage
