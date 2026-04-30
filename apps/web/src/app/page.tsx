@@ -1850,6 +1850,25 @@ function botCustomizerModelOptionsForProvider(
   );
 }
 
+function botCustomizerModelChoiceVisible(
+  settings: UserSettings | null,
+  choice: string
+): boolean {
+  return (
+    choice === AUTO_MODEL_CHOICE ||
+    !new Set(settings?.hiddenBotModelIds ?? []).has(choice)
+  );
+}
+
+function visibleBotCustomizerModelChoice(
+  settings: UserSettings | null,
+  choice: string
+): string {
+  return botCustomizerModelChoiceVisible(settings, choice)
+    ? choice
+    : AUTO_MODEL_CHOICE;
+}
+
 function allBotCustomizerModelOptions(
   catalog: ModelCatalog | null,
   settings: UserSettings | null
@@ -9106,6 +9125,14 @@ function HomeContent(): React.JSX.Element {
   }
 
   function setBotCustomizerModelVisible(modelId: string, visible: boolean) {
+    if (!visible) {
+      setNewBotLocalModel((current) =>
+        current === modelId ? AUTO_MODEL_CHOICE : current
+      );
+      setNewBotOnlineModel((current) =>
+        current === modelId ? AUTO_MODEL_CHOICE : current
+      );
+    }
     setSettings((previous) => {
       if (!previous) return previous;
       const current = new Set(previous.hiddenBotModelIds ?? []);
@@ -10219,14 +10246,16 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     const createdBotName = newBotName.trim();
+    const localModel = visibleBotCustomizerModelChoice(settings, newBotLocalModel);
+    const onlineModel = visibleBotCustomizerModelChoice(settings, newBotOnlineModel);
     try {
       await api("/api/bots", {
         method: "POST",
         body: JSON.stringify({
           name: newBotName,
           systemPrompt: serializeStoredBotPrompt(botProfile, newBotName),
-          localModel: newBotLocalModel === AUTO_MODEL_CHOICE ? "" : newBotLocalModel,
-          onlineModel: newBotOnlineModel === AUTO_MODEL_CHOICE ? "" : newBotOnlineModel,
+          localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
+          onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
           onlineEnabled: newBotOnlineEnabled,
           temperature: newBotTemperature,
           maxTokens: newBotMaxTokens,
@@ -10681,6 +10710,8 @@ function HomeContent(): React.JSX.Element {
   async function saveBot(id: string) {
     const trimmedName = newBotName.trim();
     if (!trimmedName) return;
+    const localModel = visibleBotCustomizerModelChoice(settings, newBotLocalModel);
+    const onlineModel = visibleBotCustomizerModelChoice(settings, newBotOnlineModel);
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
@@ -10690,8 +10721,8 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify({
           name: trimmedName,
           systemPrompt: serializeStoredBotPrompt(botProfile, trimmedName),
-          localModel: newBotLocalModel === AUTO_MODEL_CHOICE ? "" : newBotLocalModel,
-          onlineModel: newBotOnlineModel === AUTO_MODEL_CHOICE ? "" : newBotOnlineModel,
+          localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
+          onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
           onlineEnabled: newBotOnlineEnabled,
           temperature: newBotTemperature,
           maxTokens: newBotMaxTokens,
@@ -10699,11 +10730,13 @@ function HomeContent(): React.JSX.Element {
           glyph: newBotGlyph,
         }),
       });
+      setNewBotLocalModel(localModel);
+      setNewBotOnlineModel(onlineModel);
       editOriginalRef.current = {
         name: trimmedName,
         prompt: serializeStoredBotPrompt(botProfile, trimmedName),
-        localModel: newBotLocalModel,
-        onlineModel: newBotOnlineModel,
+        localModel,
+        onlineModel,
         onlineEnabled: newBotOnlineEnabled,
         temperature: newBotTemperature,
         maxTokens: newBotMaxTokens,
@@ -11702,11 +11735,19 @@ function HomeContent(): React.JSX.Element {
         // reading as "dirty" the instant edit mode opens, since the
         // picker's random seed color matches the seed we captured.
         const editPristine = editingBot ? editOriginalRef.current : null;
+        const visibleLocalModelChoice = visibleBotCustomizerModelChoice(
+          settings,
+          newBotLocalModel
+        );
+        const visibleOnlineModelChoice = visibleBotCustomizerModelChoice(
+          settings,
+          newBotOnlineModel
+        );
         const hasEditChanges = editPristine
           ? trimmedName !== editPristine.name
             || serializeStoredBotPrompt(botProfile, trimmedName) !== editPristine.prompt
-            || newBotLocalModel !== editPristine.localModel
-            || newBotOnlineModel !== editPristine.onlineModel
+            || visibleLocalModelChoice !== editPristine.localModel
+            || visibleOnlineModelChoice !== editPristine.onlineModel
             || newBotOnlineEnabled !== editPristine.onlineEnabled
             || newBotTemperature !== editPristine.temperature
             || newBotMaxTokens !== editPristine.maxTokens
@@ -11750,12 +11791,12 @@ function HomeContent(): React.JSX.Element {
         const selectedLengthPreset = botReplyLengthPresetForTokens(newBotMaxTokens);
         const localModelOptions = includeSelectedModelOption(
           botCustomizerModelOptionsForProvider(modelCatalog, settings, "local"),
-          newBotLocalModel,
+          visibleLocalModelChoice,
           "local"
         );
         const onlineModelOptions = includeSelectedModelOption(
           botCustomizerModelOptionsForProvider(modelCatalog, settings, "openai"),
-          newBotOnlineModel,
+          visibleOnlineModelChoice,
           "openai"
         );
         const botLibraryTotal = bots.length + 1;
@@ -11925,7 +11966,7 @@ function HomeContent(): React.JSX.Element {
                 >
                   <span>Preferred offline model</span>
                   <select
-                    value={newBotLocalModel}
+                    value={visibleLocalModelChoice}
                     onChange={(event) => setNewBotLocalModel(event.currentTarget.value)}
                     aria-label="Preferred offline model for this bot"
                   >
@@ -11953,7 +11994,7 @@ function HomeContent(): React.JSX.Element {
                 >
                   <span>Preferred online model</span>
                   <select
-                    value={newBotOnlineModel}
+                    value={visibleOnlineModelChoice}
                     onChange={(event) => setNewBotOnlineModel(event.currentTarget.value)}
                     aria-label="Preferred online model for this bot"
                     disabled={!newBotOnlineEnabled}
