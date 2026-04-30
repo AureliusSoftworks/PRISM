@@ -11,6 +11,9 @@ if "%VERSION%"=="" set "VERSION=0.2.0"
 set "PUBLISH_DIR=apps\server-windows\src\bin\Release\net8.0-windows\win-x64\publish"
 set "RUNTIME_DIR=%PUBLISH_DIR%\runtime"
 set "INSTALLER=apps\server-windows\dist\Prism-Server-Setup-v%VERSION%-win-x64.exe"
+set "PUBLISHED_EXE=%PUBLISH_DIR%\Prism Server.exe"
+set "APP_LOG=%LOCALAPPDATA%\Prism\Logs\windows-app.log"
+set "FALLBACK_APP_LOG=%TEMP%\Prism\Logs\windows-app.log"
 
 echo ============================================
 echo   Prism Server Windows Installer Smoke Test
@@ -42,6 +45,15 @@ dotnet publish apps\server-windows\src\PrismServer.csproj ^
 if errorlevel 1 goto failed
 
 echo.
+echo [diagnostic] Published EXE: %PUBLISHED_EXE%
+echo [diagnostic] App log:       %APP_LOG%
+echo [diagnostic] Fallback log:  %FALLBACK_APP_LOG%
+echo.
+set /p RUN_PUBLISHED="Run the freshly published EXE once before packaging? [Y/N] "
+if /I "%RUN_PUBLISHED%"=="Y" start "" "%PUBLISHED_EXE%"
+if /I "%RUN_PUBLISHED%"=="YES" start "" "%PUBLISHED_EXE%"
+
+echo.
 echo [4/5] Staging runtime, Node, and Qdrant...
 pwsh -NoProfile -ExecutionPolicy Bypass -File apps\server-windows\scripts\build-runtime.ps1 ^
   -OutputDir "%RUNTIME_DIR%" ^
@@ -58,6 +70,10 @@ echo.
 echo ============================================
 echo   Installer ready:
 echo   %INSTALLER%
+echo.
+echo   If Prism Server crashes, inspect:
+echo   %APP_LOG%
+echo   %FALLBACK_APP_LOG%
 echo ============================================
 echo.
 

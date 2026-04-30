@@ -7,26 +7,47 @@ public static class WindowsAppLog
         get
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(appData))
+            {
+                appData = Path.GetTempPath();
+            }
             return Path.Combine(appData, "Prism", "Logs", "windows-app.log");
         }
     }
 
+    public static string FallbackLogPath => Path.Combine(Path.GetTempPath(), "Prism", "Logs", "windows-app.log");
+
     public static void Write(string message)
     {
-        try
+        var line = $"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}";
+        if (TryAppend(LogPath, line))
         {
-            var path = LogPath;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.AppendAllText(path, $"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}");
+            return;
         }
-        catch
-        {
-            // Logging must never become the reason the app fails to launch.
-        }
+
+        TryAppend(FallbackLogPath, line);
     }
 
     public static void WriteException(string context, Exception exception)
     {
         Write($"{context}{Environment.NewLine}{exception}");
+    }
+
+    private static bool TryAppend(string path, string line)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            File.AppendAllText(path, line);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
