@@ -8,9 +8,21 @@ import {
   randomBotProfile,
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
+  stripPurposeStatementPrefixes,
 } from "./botProfile.ts";
 
 describe("bot profile serialization", () => {
+  it("preserves spaces in purpose statement tails for the editor", () => {
+    assert.equal(
+      stripPurposeStatementPrefixes("  hello  world  ", "Ada"),
+      "  hello  world  "
+    );
+    assert.equal(
+      stripPurposeStatementPrefixes("You are Ada,  spaced  out  ", "Ada"),
+      "spaced  out  "
+    );
+  });
+
   it("round-trips the V2 profile metadata exactly enough for dirty checks", () => {
     const profile = parseStoredBotPrompt("").fields;
     profile.purpose.statement = "a moonlit pollster";

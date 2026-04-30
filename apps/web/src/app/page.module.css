@@ -2811,6 +2811,10 @@
 
 .messages {
   overflow-y: auto;
+  /* Keep thread scrolling, but hide browser chrome so no floating rail cuts
+     through the scene on desktop/mobile. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   padding: 24px 20px max(42px, 44dvh);
   display: flex;
   flex-direction: column;
@@ -2821,6 +2825,10 @@
   height: 100%;
   min-height: 0;
   margin: 0 auto;
+}
+
+.messages::-webkit-scrollbar {
+  display: none;
 }
 
 /* When the messages pane holds an empty-state block (no conversation
@@ -4767,7 +4775,9 @@
 
 .conversationStarterRail {
   max-width: min(1240px, 100%);
-  margin: 0 auto 10px;
+  /* Sits above the compose toolbar + editor so chips read as thread space,
+     not part of the input chrome. */
+  margin: 0 auto 16px;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -6486,6 +6496,8 @@
       transparent 68%
     ),
     var(--bg);
+  /* Tinted row still uses ink chosen for this bot color (same as tiles). */
+  color: var(--editor-bot-text, var(--fg));
 }
 
 .botProfileSummaryButton[data-locked="true"] {
@@ -6499,6 +6511,19 @@
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 42%, var(--line));
   background: var(--bg-hover);
   outline: none;
+}
+
+.botProfileSummaryButton[data-complete="true"]:hover,
+.botProfileSummaryButton[data-complete="true"]:focus-visible {
+  color: var(--editor-bot-text, var(--fg));
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 52%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 18%, transparent),
+      transparent 62%
+    ),
+    var(--bg-hover);
 }
 
 .botProfileSummaryButton span {
@@ -6530,8 +6555,13 @@
 
 .botProfileSummaryButton[data-complete="true"] strong {
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 56%, var(--line));
-  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 14%, var(--bg));
-  color: var(--fg);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 22%, var(--bg-surface));
+  color: var(--editor-bot-text, var(--fg));
+}
+
+.botProfileSummaryButton[data-complete="true"] small {
+  color: var(--editor-bot-text, var(--fg));
+  opacity: 0.86;
 }
 
 .botProfileSummaryButton[data-locked="true"] strong {
@@ -6646,6 +6676,12 @@
 .botProfileBuilderNav button[data-active="true"] {
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 46%, var(--line));
   background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 10%, var(--bg));
+  color: var(--editor-bot-text, var(--fg));
+}
+
+.botProfileBuilderNav button[data-active="true"] small {
+  color: var(--editor-bot-text, var(--fg));
+  opacity: 0.84;
 }
 
 .botProfileBuilderNav span {
@@ -7954,6 +7990,22 @@
   transform: translateY(1px) rotate(8deg);
 }
 
+.botPurposeEditorBlock {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.botPurposeFieldHeading {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.botPurposePrefixWrap {
+  margin: 0 0 2px;
+}
+
 .botPurposePrefix {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -7964,13 +8016,15 @@
       transparent 68%
     ),
     var(--bg-deep);
-  color: var(--fg);
+  color: var(--editor-bot-text, var(--fg));
   padding: 9px 11px;
   font-size: 14px;
   font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.35;
+  max-width: 100%;
 }
 
 /* Swatch trigger: solid bot-color tile with readable glyph ink, matching the

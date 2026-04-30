@@ -29,6 +29,7 @@ import {
   randomBotProfile,
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
+  stripPurposeStatementPrefixes,
   type BotProfileFields,
   type BotProfileScaleValue,
   type BotVoicePreset,
@@ -88,6 +89,17 @@ const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
+const RANDOM_NUDGE_STOP_WORDS = new Set([
+  "about",
+  "there",
+  "would",
+  "could",
+  "their",
+  "which",
+  "because",
+  "really",
+  "maybe",
+]);
 const MOBILE_SIDEBAR_SWIPE_EDGE_PX = 32;
 const MOBILE_SIDEBAR_SWIPE_OPEN_PX = 56;
 const MOBILE_SIDEBAR_SWIPE_VERTICAL_CANCEL_PX = 44;
@@ -793,21 +805,6 @@ function botHeroPreview(text: string | null | undefined, maxChars = 140): string
   const lastSpace = sliced.lastIndexOf(" ");
   const cut = lastSpace > maxChars * 0.6 ? sliced.slice(0, lastSpace) : sliced;
   return `${cut.trim()}\u2026`;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function botPurposeInputValue(statement: string, botName: string): string {
-  let value = statement.trim().replace(/^you\s+are\s+/i, "").trim();
-  const name = botName.trim();
-  if (name) {
-    value = value
-      .replace(new RegExp(`^${escapeRegExp(name)}\\s*,?\\s*`, "i"), "")
-      .trim();
-  }
-  return value;
 }
 
 /**
@@ -6851,20 +6848,33 @@ function BotProfileBuilder({
       case "purpose":
         return (
           <>
-            <label className={styles.botProfileField}>
-              <span>What is my purpose?</span>
-              <div className={styles.botPurposePrefix} aria-hidden="true">
-                You are {botName.trim() || "[Name]"}...
+            <div className={styles.botPurposeEditorBlock}>
+              <div className={styles.botPurposeFieldHeading} id="bot-profile-purpose-q">
+                What is my purpose?
               </div>
-              <textarea
-                value={botPurposeInputValue(profile.purpose.statement, botName)}
-                onChange={(event) => updatePurpose("statement", event.currentTarget.value)}
-                placeholder="a gentle strategist who helps turn messy thoughts into one clear next step"
-              />
-              <small>
-                Leave blank to use <strong>{seededPurpose || "the bot name"}</strong>.
-              </small>
-            </label>
+              <div className={styles.botPurposePrefixWrap} aria-hidden="true">
+                <div className={styles.botPurposePrefix}>
+                  You are {botName.trim() || "[Name]"}...
+                </div>
+              </div>
+              <label className={styles.botProfileField} htmlFor="bot-profile-purpose-input">
+                <textarea
+                  id="bot-profile-purpose-input"
+                  aria-labelledby="bot-profile-purpose-q"
+                  value={stripPurposeStatementPrefixes(
+                    profile.purpose.statement,
+                    botName
+                  )}
+                  onChange={(event) =>
+                    updatePurpose("statement", event.currentTarget.value)
+                  }
+                  placeholder="a gentle strategist who helps turn messy thoughts into one clear next step"
+                />
+                <small>
+                  Leave blank to use <strong>{seededPurpose || "the bot name"}</strong>.
+                </small>
+              </label>
+            </div>
             {profile.purpose.legacyNotes.trim() && (
               <label className={styles.botProfileField}>
                 <span>Advanced notes</span>
@@ -8853,6 +8863,56 @@ function HomeContent(): React.JSX.Element {
     void sendMessage(syntheticSubmit, { draftOverride: prompt });
   }
 
+  function randomChatNudgeFromContext(): string {
+    const activeBotId =
+      chatBotOverride !== undefined ? chatBotOverride : detail?.botId ?? selectedBotId ?? null;
+    const activeBotName =
+      activeBotId !== null
+        ? bots.find((candidate) => candidate.id === activeBotId)?.name ?? "this bot"
+        : "you";
+    const latestAssistant = [...(detail?.messages ?? [])]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    const candidateTopicWords =
+      latestAssistant?.content
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((word) => word.length >= 5)
+        .filter((word) => !RANDOM_NUDGE_STOP_WORDS.has(word)) ?? [];
+    const topicSeed = candidateTopicWords[0] ?? "that";
+    const templates = [
+      `Give me one surprising angle on ${topicSeed}.`,
+      `Ask me a thoughtful follow-up about ${topicSeed}.`,
+      `Challenge my thinking on ${topicSeed} in one short question.`,
+      `Teach me ${topicSeed} with a playful metaphor.`,
+      `What should I explore next with ${activeBotName}?`,
+      "Give me one tiny action I can do in the next 2 minutes.",
+    ];
+    return randomArrayItem(templates);
+  }
+
+  function sendRandomConversationNudge(): void {
+    if (pendingReply) return;
+    const starterPromptChoices =
+      conversationStarterPrompts &&
+      detail?.id &&
+      detail.id !== "pending" &&
+      detail.id === conversationStarterPrompts.conversationId
+        ? conversationStarterPrompts.prompts
+        : [];
+    const chosenPrompt =
+      starterPromptChoices.length > 0
+        ? randomArrayItem(starterPromptChoices)
+        : randomChatNudgeFromContext();
+    const syntheticSubmit = {
+      preventDefault: () => {
+        /* no-op — used so sendMessage can share the submit pathway */
+      },
+    } as React.FormEvent<HTMLFormElement>;
+    void sendMessage(syntheticSubmit, { draftOverride: chosenPrompt });
+  }
+
   function renderConversationStarterRail(): React.ReactNode {
     const ready =
       conversationStarterPrompts &&
@@ -8951,7 +9011,11 @@ function HomeContent(): React.JSX.Element {
     viewportWidth <= PICKER_MOBILE_BREAKPOINT && draft.trim().length === 0;
 
   function startFreshConversation(privateMode: boolean) {
-    const normalStarterBotId = detail ? null : selectedBotId;
+    const normalStarterBotId = detail
+      ? chatBotOverride !== undefined
+        ? chatBotOverride
+        : detail.botId
+      : selectedBotId;
     const privateStarterBotId = privateMode
       ? chatBotOverride !== undefined
         ? chatBotOverride
@@ -10594,6 +10658,16 @@ function HomeContent(): React.JSX.Element {
           }
         >
           <ThemeGlyph mode={effectiveThemeMode} />
+        </button>
+        <button
+          type="button"
+          className={`${styles.headerIconButton} ${styles.composeUtilityButton}`}
+          onClick={sendRandomConversationNudge}
+          aria-label="Send random suggested prompt"
+          title="Send random suggested prompt"
+          disabled={pendingReply}
+        >
+          <BotGlyph name="dice" size={16} strokeWidth={1.85} />
         </button>
         {renderDevToolsButton()}
       </div>
@@ -13344,6 +13418,7 @@ function HomeContent(): React.JSX.Element {
           onKeyDown={handleComposerKeyDown}
         >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
+          {renderConversationStarterRail()}
           {emptyStateLensVisible && (
             <HueLensControl
               bots={pickerSourceBots}
@@ -13523,7 +13598,6 @@ function HomeContent(): React.JSX.Element {
               </div>
             );
           })()}
-          {renderConversationStarterRail()}
           <ComposerInput
             ref={draftComposerRef}
             enabled={composerMarkdownEditorEnabled}
@@ -14398,6 +14472,7 @@ function HomeContent(): React.JSX.Element {
           onKeyDown={handleComposerKeyDown}
         >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
+          {renderConversationStarterRail()}
           {emptyStateLensVisible && (
             <HueLensControl
               bots={pickerSourceBots}
@@ -14531,7 +14606,6 @@ function HomeContent(): React.JSX.Element {
               );
             })()}
           </div>
-          {renderConversationStarterRail()}
           <ComposerInput
             ref={draftComposerRef}
             enabled={composerMarkdownEditorEnabled}

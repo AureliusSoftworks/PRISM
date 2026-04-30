@@ -11,6 +11,7 @@ export {
   randomBotProfile,
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
+  stripPurposeStatementPrefixes,
   type BotAppearanceProfile,
   type BotCoreProfile,
   type BotIdentityProfile,

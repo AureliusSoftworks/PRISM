@@ -226,18 +226,31 @@ export function defaultBotPurpose(botName: string | null | undefined): string {
   return name ? `You are ${name}.` : "";
 }
 
+/**
+ * Strips leading `You are …` / bot-name prefixes from a stored purpose
+ * statement so the profile UI can edit only the tail. Does not trim the
+ * string — that preserves spaces the typist is still placing at the edges.
+ */
+export function stripPurposeStatementPrefixes(
+  statement: string,
+  botName?: string | null
+): string {
+  let value = statement.replace(/^\s*you\s+are\s+/i, "");
+  const name = typeof botName === "string" ? botName.trim() : "";
+  if (name) {
+    value = value.replace(
+      new RegExp(`^\\s*${escapeRegex(name)}\\s*,?\\s*`, "i"),
+      ""
+    );
+  }
+  return value;
+}
+
 function normalizePurposeTail(
   statement: string,
   botName?: string | null
 ): string {
-  let custom = statement.trim().replace(/^you\s+are\s+/i, "").trim();
-  const name = typeof botName === "string" ? botName.trim() : "";
-  if (name) {
-    custom = custom
-      .replace(new RegExp(`^${escapeRegex(name)}\\s*,?\\s*`, "i"), "")
-      .trim();
-  }
-  return custom;
+  return stripPurposeStatementPrefixes(statement, botName);
 }
 
 function composePurposeStatement(
