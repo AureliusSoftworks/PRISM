@@ -2447,9 +2447,13 @@ function PrismMessageRoleLabel(): React.JSX.Element {
 // single accent token. Private/incognito remains the only monochrome path.
 const PRISM_DEFAULT_ACCENT = PRISM_COLORS.s;
 
-// Resolve a sidebar conversation row's tint color from the server-side
-// denormalized `lastBotColor`. Only custom bots tint rows; Default/no-bot
-// chats deliberately return null so their tabs stay neutral black/white.
+function neutralRowColor(resolvedTheme: "light" | "dark"): string {
+  return resolvedTheme === "dark" ? "#ffffff" : "#000000";
+}
+
+// Resolve a sidebar conversation row's custom-bot tint color from the server-side
+// denormalized `lastBotColor`. Default/no-bot chats are handled separately so
+// they can keep the same row-gradient structure with a neutral black/white tint.
 //
 // Order matters:
 //   1. Incognito wins — private rows never pick up a hue (grayscale
@@ -2458,10 +2462,10 @@ const PRISM_DEFAULT_ACCENT = PRISM_COLORS.s;
 //      responded, so it stays correct even if the bot was later deleted
 //      or recolored.
 //   3. `hasAssistantReply && !lastBotColor` means the last reply came
-//      from the Default bot (no bot_id) — keep grayscale.
+//      from the Default bot (no bot_id) — no custom hue.
 //   4. `botId` → live bots[] lookup. Catches the pre-reply window where
 //      a conversation has a locked bot but no assistant message yet.
-//   5. No locked bot and no reply either — keep grayscale.
+//   5. No locked bot and no reply either — no custom hue.
 function resolveRowColor(
   c: ConversationSummary,
   bots: Bot[]
@@ -10612,6 +10616,7 @@ function HomeContent(): React.JSX.Element {
     return {
       "--memory-bubble-size": `${size}px`,
       "--memory-bubble-color": shade,
+      "--memory-bubble-ink": pickReadableText(shade),
       "--memory-bubble-offset": `${offsetPattern[index % offsetPattern.length]}px`,
     } as React.CSSProperties;
   }
@@ -11491,7 +11496,7 @@ function HomeContent(): React.JSX.Element {
           {memoryPanelBot && (
             <div className={styles.memoryBotHeader}>
               <span className={styles.memoryBotGlyph} aria-hidden="true">
-                <BotGlyph name={memoryPanelBot.glyph} />
+                <BotGlyph name={memoryPanelBot.glyph} size={24} strokeWidth={1.9} />
               </span>
               <div>
                 <strong>{memoryPanelBot.name}</strong>
@@ -12649,15 +12654,14 @@ function HomeContent(): React.JSX.Element {
           {visibleConversations.map((c, index) => {
             const isSelected = c.id === selectedId;
             const isUnread = unreadConversationIds.has(c.id);
-            // Row color comes from the server-denormalized last-bot
-            // color (or falls back to the live bots list for the
-            // empty-conversation case). Passing --row-color and
-            // --row-border-mix as inline CSS vars lets the CSS side
-            // do the actual fill/border math with color-mix().
+            // Custom bots use their hue; Default/no-bot rows still enter the
+            // same gradient system, but with neutral black/white.
             const rawRowColor = privateChatActive ? null : resolveRowColor(c, bots);
             const rowAccent = rawRowColor
               ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
-              : null;
+              : !privateChatActive && !c.incognito
+                ? neutralRowColor(resolvedTheme)
+                : null;
             const rowStyle = {
               ...conversationRowGlowStyle(index),
               ...(rowAccent
@@ -13730,7 +13734,9 @@ function HomeContent(): React.JSX.Element {
             const rawRowColor = privateChatActive ? null : resolveRowColor(c, bots);
             const rowAccent = rawRowColor
               ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
-              : null;
+              : !privateChatActive && !c.incognito
+                ? neutralRowColor(resolvedTheme)
+                : null;
             const rowStyle = {
               ...conversationRowGlowStyle(index),
               ...(rowAccent
