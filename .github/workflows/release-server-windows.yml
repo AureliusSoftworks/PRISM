@@ -1,0 +1,106 @@
+name: Release Prism Server Windows App
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Shared release version without leading v (example: 0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-server-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-sign-package:
+    name: Build signed Prism Server Windows installer
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+      WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+    steps:
+      - name: Enforce main-only server app releases
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -ne "refs/heads/main") {
+            throw "Prism Server Windows release workflow is allowed only from main."
+          }
+
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+            throw "version must follow SemVer core format (example: 0.2.0)."
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run portable Windows server tests
+        shell: pwsh
+        run: dotnet test apps/server-windows/tests/PrismServer.Tests.csproj -c Release -f net8.0
+
+      - name: Publish Prism Server.exe
+        shell: pwsh
+        run: |
+          dotnet publish apps/server-windows/src/PrismServer.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:Version=${env:RELEASE_VERSION}
+
+      - name: Stage runtime, Node, and Qdrant
+        shell: pwsh
+        run: |
+          pwsh apps/server-windows/scripts/build-runtime.ps1 `
+            -OutputDir "apps/server-windows/src/bin/Release/net8.0-windows/win-x64/publish/runtime" `
+            -VendorNode `
+            -VendorQdrant
+
+      - name: Sign app payload if certificate is configured
+        shell: pwsh
+        run: pwsh apps/server-windows/scripts/sign-and-package.ps1 -Version $env:RELEASE_VERSION
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: pwsh apps/server-windows/scripts/build-installer.ps1 -Version $env:RELEASE_VERSION
+
+      - name: Sign installer if certificate is configured
+        shell: pwsh
+        run: pwsh apps/server-windows/scripts/sign-and-package.ps1 -Version $env:RELEASE_VERSION
+
+      - name: Ensure server release exists
+        shell: pwsh
+        run: gh release view "server/v${env:RELEASE_VERSION}"
+
+      - name: Upload Windows installer
+        shell: pwsh
+        run: |
+          gh release upload "server/v${env:RELEASE_VERSION}" `
+            "apps/server-windows/dist/Prism-Server-Setup-v${env:RELEASE_VERSION}-win-x64.exe" `
+            --clobber
