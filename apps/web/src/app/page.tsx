@@ -64,6 +64,10 @@ const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 // slot used for conversation deletion without id collisions.
 const BOT_DELETE_KEY_PREFIX = "bot:";
 
+const MEMORY_TRANSITION_MIN_MS = 420;
+const BOT_CONTEXT_LONG_PRESS_MS = 480;
+const BOT_CONTEXT_LONG_PRESS_MOVE_CANCEL_PX = 12;
+
 // Bot-list twin of DELETE_ALL_KEY — armed when a press-and-hold crosses the
 // threshold on any bot card ×. Kept separate so the confirmation modal can
 // tailor its copy and the bulk action routes to the bots endpoint instead
@@ -104,7 +108,9 @@ const MOBILE_SIDEBAR_SWIPE_EDGE_PX = 32;
 const MOBILE_SIDEBAR_SWIPE_OPEN_PX = 56;
 const MOBILE_SIDEBAR_SWIPE_VERTICAL_CANCEL_PX = 44;
 const MOBILE_SIDEBAR_SWIPE_DIRECTION_RATIO = 1.25;
+const DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT = 0.45;
 type DevToolsBotQuantity = number | "";
+type DevToolsMemorySeedSource = "direct" | "inferred" | "compiled";
 type DevToolsPanelPosition = { x: number; y: number };
 type DevToolsPanelDragState = {
   pointerId: number;
@@ -1548,6 +1554,8 @@ interface UserMemory {
   createdAt: string;
   confidence: number;
   text: string;
+  source?: "direct" | "inferred" | "compiled";
+  certainty?: number;
 }
 interface ModelCatalogEntry {
   id: string;
@@ -2367,6 +2375,94 @@ const GROUP_LETTER_OVERRIDES: Record<PrismGroupId, string> = {
   m: "M", // indigo/violet → 5th
 };
 
+interface MemoryFamilyDirectory {
+  id: PrismGroupId;
+  letter: string;
+  label: string;
+  color: string;
+  itemCount: number;
+  memoryCount: number;
+  style: React.CSSProperties;
+}
+
+interface MemoryClusterInnerBubble {
+  id: string;
+  style: React.CSSProperties;
+}
+
+interface MemoryFamilyBotCluster {
+  id: string;
+  botId: string | null;
+  botName: string;
+  botGlyph: string | null;
+  color: string;
+  memoryCount: number;
+  style: React.CSSProperties;
+  innerBubbles: MemoryClusterInnerBubble[];
+}
+
+const MEMORY_FAMILY_DIRECTORY_SLOTS: readonly (readonly [number, number])[] = [
+  [20, 24],
+  [50, 18],
+  [80, 25],
+  [30, 74],
+  [70, 74],
+] as const;
+
+const MEMORY_BUBBLE_CLOUD_SLOTS: readonly (readonly [number, number])[] = [
+  [18, 22],
+  [48, 17],
+  [79, 24],
+  [24, 50],
+  [52, 46],
+  [78, 52],
+  [18, 76],
+  [48, 80],
+  [74, 75],
+] as const;
+
+const MEMORY_UNCERTAIN_CONFIDENCE_MAX = 0.48;
+const MEMORY_BUBBLE_MIN_SIZE = 150;
+const MEMORY_BUBBLE_MAX_SIZE = 210;
+const MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE = 58;
+const MEMORY_UNCERTAIN_BUBBLE_MAX_SIZE = 82;
+
+function memoryConfidenceValue(memory: UserMemory): number {
+  return Number.isFinite(memory.confidence) ? Math.max(0, Math.min(1, memory.confidence)) : 0.5;
+}
+
+function isAssumptionMemory(memory: UserMemory): boolean {
+  return memory.source === "inferred" || memory.source === "compiled";
+}
+
+function assumptionMemoryOpacity(memory: UserMemory): number {
+  const certainty = Number.isFinite(memory.certainty)
+    ? Math.max(0, Math.min(1, memory.certainty as number))
+    : memoryConfidenceValue(memory);
+  return 0.2 + certainty * 0.8;
+}
+
+function memoryBubbleSignalValue(memory: UserMemory): number {
+  if (!isAssumptionMemory(memory)) return memoryConfidenceValue(memory);
+  return Number.isFinite(memory.certainty)
+    ? Math.max(0, Math.min(1, memory.certainty as number))
+    : memoryConfidenceValue(memory);
+}
+
+// Diameter (px) for bot clusters with zero memories inside the family
+// drill-down. Small enough to read as "presence indicator", still big
+// enough to be tappable on touch.
+const MEMORY_EMPTY_CLUSTER_SIZE = 40;
+
+function stableUnitValue(seed: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 0xffffffff;
+}
+
 // Build a left-to-right gradient from up to N bot colors in a group so
 // each editor dashboard button reads as an ordered slice of its bucket's
 // actual spectrum. Stops are color-mixed against `--bg` so the tile still
@@ -2589,6 +2685,13 @@ function nextThemeMode(current: Theme): Theme {
   if (current === "light") return "dark";
   if (current === "dark") return "system";
   return "light";
+}
+
+function isPrimaryPointerDismissal(event: MouseEvent | PointerEvent): boolean {
+  // Outside-click dismissal should never fire for secondary/context clicks.
+  // On macOS, Ctrl+click is also a context-menu gesture even though it can
+  // report as button 0, so keep it out of the dismissal path too.
+  return event.button === 0 && !(event.ctrlKey && (!("pointerType" in event) || event.pointerType === "mouse"));
 }
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
@@ -4851,6 +4954,7 @@ function ComposerBotPicker({
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (event: MouseEvent) => {
+      if (!isPrimaryPointerDismissal(event)) return;
       const target = event.target as Node;
       if (triggerRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
@@ -5132,6 +5236,7 @@ function ComposerModelPicker({
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (event: MouseEvent) => {
+      if (!isPrimaryPointerDismissal(event)) return;
       const target = event.target as Node;
       if (triggerRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
@@ -7130,7 +7235,13 @@ function HomeContent(): React.JSX.Element {
   const [pairingCopyStatus, setPairingCopyStatus] = useState<string | null>(null);
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [botMemories, setBotMemories] = useState<UserMemory[]>([]);
+  const [directMemoryCountsByBotId, setDirectMemoryCountsByBotId] = useState<Record<string, number>>({});
+  const [defaultDirectMemoryCount, setDefaultDirectMemoryCount] = useState(0);
   const [memoryPanelScope, setMemoryPanelScope] = useState<MemoryPanelScope>("bot");
+  const [memoryPanelBotId, setMemoryPanelBotId] = useState<string | null>(null);
+  const [memoryPanelSelectedFamily, setMemoryPanelSelectedFamily] = useState<PrismGroupId | null>(null);
+  const [focusedMemoryId, setFocusedMemoryId] = useState<string | null>(null);
+  const [memoryTransitionLoading, setMemoryTransitionLoading] = useState(false);
   const [pendingReply, setPendingReply] = useState(false);
   const [pendingReplyConversationId, setPendingReplyConversationId] =
     useState<string | null>(null);
@@ -7143,6 +7254,7 @@ function HomeContent(): React.JSX.Element {
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
   const selectedIdRef = useRef<string | null>(null);
   const detailIdRef = useRef<string | null>(null);
+  const memoryTransitionRunRef = useRef(0);
   const [modelRevealMessageId, setModelRevealMessageId] = useState<string | null>(null);
   const modelRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -7153,10 +7265,24 @@ function HomeContent(): React.JSX.Element {
     y: number;
     anchor: MessageMenuAnchor;
   } | null>(null);
+  const [botContextMenu, setBotContextMenu] = useState<{
+    botId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [contextFocusedMessageId, setContextFocusedMessageId] = useState<string | null>(null);
   const [mobileFocusedMessageId, setMobileFocusedMessageId] = useState<string | null>(null);
   /** Message-actions popover (`role="menu"`) root for tap-outside + touch dismiss. */
   const messageActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const botContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const botContextLongPressRef = useRef<{
+    pointerId: number;
+    botId: string;
+    timer: ReturnType<typeof setTimeout>;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const botContextSuppressClickRef = useRef(false);
   const revealMessageModel = useCallback((id: string) => {
     if (modelRevealTimerRef.current) {
       clearTimeout(modelRevealTimerRef.current);
@@ -7189,6 +7315,11 @@ function HomeContent(): React.JSX.Element {
   const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
   const [devToolsBotQuantity, setDevToolsBotQuantity] =
     useState<DevToolsBotQuantity>(DEV_TOOLS_BOT_QUANTITY_DEFAULT);
+  const [devToolsMemorySeedSource, setDevToolsMemorySeedSource] =
+    useState<DevToolsMemorySeedSource>("direct");
+  const [devToolsMemoryCertainty, setDevToolsMemoryCertainty] = useState(
+    DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT
+  );
   const [devToolsPanelPosition, setDevToolsPanelPosition] =
     useState<DevToolsPanelPosition>({
       x: DEV_TOOLS_PANEL_DEFAULT_X,
@@ -7201,6 +7332,18 @@ function HomeContent(): React.JSX.Element {
   const closeDevTools = useCallback(() => {
     setDevToolsOpen(false);
     setDevToolsMessage(null);
+  }, []);
+
+  const closeBotContextMenu = useCallback(() => {
+    setBotContextMenu(null);
+  }, []);
+
+  const cancelBotContextLongPress = useCallback((pointerId?: number) => {
+    const pending = botContextLongPressRef.current;
+    if (!pending) return;
+    if (pointerId !== undefined && pending.pointerId !== pointerId) return;
+    clearTimeout(pending.timer);
+    botContextLongPressRef.current = null;
   }, []);
   const [bots, setBots] = useState<Bot[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
@@ -7394,20 +7537,6 @@ function HomeContent(): React.JSX.Element {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
-  // Bot currently being hover-PREVIEWED in the Chat-mode empty-state
-  // picker. Desktop-only: set by onPointerEnter with pointerType mouse,
-  // cleared when the cursor leaves the picker container or when the
-  // user arms a bot by clicking. Drives the transient "white/black
-  // monochrome glyph + real-time accent" preview — does NOT represent a
-  // armed selection. Null means "no tile under the cursor".
-  const [hoveredBotId, setHoveredBotId] = useState<string | null>(null);
-  // Dwell timer for the picker's hover preview. Without this, a fast
-  // mouse sweep across 50+ tiny tiles would fire 50+ preview state
-  // changes back-to-back — the shell accent, hero glyph, title, and
-  // hint would all strobe in lockstep. Debouncing the JS-driven preview
-  // (but NOT the CSS-driven per-tile magnification, which stays
-  // instant) means the preview only commits once the cursor lingers.
-  const hoverDwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const botPickerReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const botPickerReturnEndAtRef = useRef(0);
   const lastBotPickerPointerTypeRef = useRef<string | null>(null);
@@ -7416,7 +7545,6 @@ function HomeContent(): React.JSX.Element {
   const emptyStateSearchRef = useRef<HTMLDivElement | null>(null);
   const draftComposerRef = useRef<ComposerInputHandle | null>(null);
   const emptyStateSearchOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const HOVER_DWELL_MS = 180;
   // Theme preference used before a user has logged in (or when the user
   // explicitly logs out). Seeded from localStorage so the auth screen
   // respects the last choice across refreshes; defaults to "system" so
@@ -7438,6 +7566,7 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!chatOverflowMenuOpen) return;
     function onDocMouseDown(event: MouseEvent) {
+      if (!isPrimaryPointerDismissal(event)) return;
       const root = chatOverflowMenuRef.current;
       if (!root?.contains(event.target as Node)) {
         setChatOverflowMenuOpen(false);
@@ -7672,6 +7801,7 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!composerPrimed) return;
     function handlePointerDown(event: PointerEvent) {
+      if (!isPrimaryPointerDismissal(event)) return;
       const target = event.target;
       if (
         target instanceof Element &&
@@ -7691,10 +7821,6 @@ function HomeContent(): React.JSX.Element {
   // or mid-return animation (route change, mode switch, logout).
   useEffect(() => {
     return () => {
-      if (hoverDwellTimerRef.current) {
-        clearTimeout(hoverDwellTimerRef.current);
-        hoverDwellTimerRef.current = null;
-      }
       if (botPickerReturnTimerRef.current) {
         clearTimeout(botPickerReturnTimerRef.current);
         botPickerReturnTimerRef.current = null;
@@ -7817,8 +7943,7 @@ function HomeContent(): React.JSX.Element {
   //      conversation's initially-locked bot for the pre-first-reply window.
   //   4. The empty-state picker's `selectedBotId` — the committed pre-chat
   //      pick before a conversation exists.
-  //   5. The empty-state picker's `hoveredBotId` — the mouse-preview bot.
-  //   6. Null — falls through to the PRISM home/default identity.
+  //   5. Null — falls through to the PRISM home/default identity.
   //
   // Private chats with Default/Prism still resolve to null for the monochrome
   // Prism treatment. Private chats with a selected custom bot keep that bot
@@ -7842,7 +7967,7 @@ function HomeContent(): React.JSX.Element {
         return { botId: selectedBotId, explicitDefault: selectedBotId === null };
       }
       return {
-        botId: selectedBotId ?? hoveredBotId,
+        botId: selectedBotId,
         explicitDefault: false,
       };
     } else if (view === "chat") {
@@ -7855,8 +7980,7 @@ function HomeContent(): React.JSX.Element {
       return {
         botId: detail?.lastBotId
           ?? detail?.botId
-          ?? selectedBotId
-          ?? hoveredBotId,
+          ?? selectedBotId,
         explicitDefault: false,
       };
     }
@@ -7864,7 +7988,6 @@ function HomeContent(): React.JSX.Element {
   }, [
     view,
     selectedBotId,
-    hoveredBotId,
     detail,
     chatBotOverride,
     privateChatActive,
@@ -8210,9 +8333,9 @@ function HomeContent(): React.JSX.Element {
   //     + the existing rainbow brand mark. This state is PRISM-owned even
   //     when the user has zero bots, so it must not depend on populated
   //     bot color families.
-  //   • "engaged"  — Anything else: filter active, bot armed, mid-
-  //     thread chat, hover preview. Lens-driven hue (the existing
-  //     `var(--accent)` orb behavior).
+  //   • "engaged"  — Anything else: filter active, bot armed, or mid-
+  //     thread chat. Lens-driven hue (the existing `var(--accent)` orb
+  //     behavior).
   const activeConversationIsEmpty = !detail || detail.messages.length === 0;
   /** Plain textarea only — rich markdown compose (TipTap) is off everywhere. */
   const composerMarkdownEditorEnabled = false;
@@ -8223,7 +8346,6 @@ function HomeContent(): React.JSX.Element {
       activeConversationIsEmpty &&
       hueFilterCenter === null &&
       !selectedBotId &&
-      !hoveredBotId &&
       !detail?.botId;
     return isUntouchedHome ? "home" : "engaged";
   }, [
@@ -8231,7 +8353,6 @@ function HomeContent(): React.JSX.Element {
     activeConversationIsEmpty,
     hueFilterCenter,
     selectedBotId,
-    hoveredBotId,
     detail?.botId,
     defaultConversationUsesPrismIdentity,
   ]);
@@ -8318,13 +8439,10 @@ function HomeContent(): React.JSX.Element {
     if (!detail && selectedBotId && !botIds.has(selectedBotId)) {
       setSelectedBotId(null);
     }
-    if (!detail && hoveredBotId && !botIds.has(hoveredBotId)) {
-      setHoveredBotId(null);
-    }
     if (chatBotOverride && !botIds.has(chatBotOverride)) {
       setChatBotOverride(undefined);
     }
-  }, [view, detail, selectedBotId, hoveredBotId, chatBotOverride, bots]);
+  }, [view, detail, selectedBotId, chatBotOverride, bots]);
 
   // Empty-state picker (Chat + Sandbox) renders bots in color order so
   // the unfiltered grid trends toward a color-wheel/color-square map.
@@ -8495,11 +8613,6 @@ function HomeContent(): React.JSX.Element {
     setSelectedId(null);
     setDetail(null);
     setSelectedBotId(null);
-    setHoveredBotId(null);
-    if (hoverDwellTimerRef.current) {
-      clearTimeout(hoverDwellTimerRef.current);
-      hoverDwellTimerRef.current = null;
-    }
     setError(null);
   }, [view]);
 
@@ -8547,7 +8660,24 @@ function HomeContent(): React.JSX.Element {
     });
   }
   async function refreshModels() { const d = await api<{ catalog: ModelCatalog }>("/api/models"); setModelCatalog(d.catalog); }
-  async function refreshMemories() { const d = await api<{ memories: UserMemory[] }>("/api/memories"); setMemories(d.memories); }
+  async function refreshMemories() {
+    const d = await api<{
+      memories: UserMemory[];
+      memoryCountsByBotId?: Record<string, number>;
+      defaultMemoryCount?: number;
+      directCountsByBotId?: Record<string, number>;
+      defaultDirectCount?: number;
+    }>("/api/memories");
+    setMemories(d.memories);
+    setDirectMemoryCountsByBotId(d.memoryCountsByBotId ?? d.directCountsByBotId ?? {});
+    setDefaultDirectMemoryCount(
+      typeof d.defaultMemoryCount === "number"
+        ? d.defaultMemoryCount
+        : typeof d.defaultDirectCount === "number"
+          ? d.defaultDirectCount
+          : 0
+    );
+  }
   async function refreshBotMemories(botId: string) {
     const d = await api<{ memories: UserMemory[] }>(
       `/api/memories?botId=${encodeURIComponent(botId)}`
@@ -8556,6 +8686,27 @@ function HomeContent(): React.JSX.Element {
   }
   async function refreshBots() { const d = await api<{ bots: Bot[] }>("/api/bots"); setBots(d.bots); }
   async function refreshImages() { const d = await api<{ images: ImageRecord[] }>("/api/images"); setImages(d.images); }
+
+  async function runMemoryTransition(work: () => void | Promise<void>) {
+    const runId = memoryTransitionRunRef.current + 1;
+    memoryTransitionRunRef.current = runId;
+    const startedAt = Date.now();
+    setMemoryTransitionLoading(true);
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+    try {
+      await work();
+    } finally {
+      const remaining = MEMORY_TRANSITION_MIN_MS - (Date.now() - startedAt);
+      if (remaining > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, remaining));
+      }
+      if (memoryTransitionRunRef.current === runId) {
+        setMemoryTransitionLoading(false);
+      }
+    }
+  }
 
   async function submitAuth(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setError(null);
@@ -8703,7 +8854,6 @@ function HomeContent(): React.JSX.Element {
         ? detail.id
         : selectedId;
     const requestStartedNewConversation = requestConversationId === null;
-    setHoveredBotId(null);
     setPendingReply(true);
     setPendingReplyConversationId(requestConversationId);
     setPendingReplyIsNewConversation(requestStartedNewConversation);
@@ -8993,7 +9143,6 @@ function HomeContent(): React.JSX.Element {
 
   function handleComposerFocus() {
     setComposerFocused(true);
-    setHoveredBotId(null);
   }
 
   function handleComposerBlur(e: React.FocusEvent<HTMLFormElement>) {
@@ -9051,7 +9200,6 @@ function HomeContent(): React.JSX.Element {
     setSelectedId(null);
     setDetail(draftConversation);
     setSelectedBotId(starterBotId);
-    setHoveredBotId(null);
     setChatBotOverride(undefined);
     closeEmptyStateBotSearch();
     if (hueFilterCenter !== null) {
@@ -9059,16 +9207,12 @@ function HomeContent(): React.JSX.Element {
     } else {
       setHueFilterCenter(null);
     }
-    if (hoverDwellTimerRef.current) {
-      clearTimeout(hoverDwellTimerRef.current);
-      hoverDwellTimerRef.current = null;
-    }
     setPendingIncognito(privateMode);
     setSidebarOpen(false);
   }
 
   function resetChatHeaderToNewChat() {
-    if (!detail && (selectedBotId !== null || hoveredBotId !== null)) {
+    if (!detail && selectedBotId !== null) {
       resetEmptyStateToPrismHome();
       setComposerPrimed(false);
       return;
@@ -9258,9 +9402,39 @@ function HomeContent(): React.JSX.Element {
 
   async function deleteMemory(id: string) {
     await api(`/api/memories/${id}`, { method: "DELETE" });
+    setFocusedMemoryId((current) => (current === id ? null : current));
     await refreshMemories();
-    if (activeBot?.id) {
-      await refreshBotMemories(activeBot.id);
+    if (memoryPanelBot?.id) {
+      await refreshBotMemories(memoryPanelBot.id);
+    }
+  }
+
+  async function editMemory(memory: UserMemory) {
+    if (isAssumptionMemory(memory)) {
+      setPanelError("Inferred memories can be deleted, but not edited.");
+      return;
+    }
+    const nextText = window.prompt("Edit memory", memory.text);
+    if (nextText === null) return;
+    const trimmedText = nextText.trim();
+    if (!trimmedText) {
+      setPanelError("Memory text cannot be empty.");
+      return;
+    }
+    if (trimmedText === memory.text) return;
+
+    setPanelError(null);
+    try {
+      await api(`/api/memories/${memory.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ text: trimmedText }),
+      });
+      await refreshMemories();
+      if (memoryPanelBot?.id) {
+        await refreshBotMemories(memoryPanelBot.id);
+      }
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Memory edit failed.");
     }
   }
 
@@ -9299,11 +9473,89 @@ function HomeContent(): React.JSX.Element {
     setModelRevealMessageId(null);
   }, []);
 
+  const openBotContextMenu = useCallback((bot: Bot, x: number, y: number) => {
+    setBotContextMenu({ botId: bot.id, x, y });
+    closeMessageContextOverlay();
+    setChatOverflowMenuOpen(false);
+  }, [closeMessageContextOverlay]);
+
+  const startBotContextLongPress = useCallback((
+    event: React.PointerEvent<HTMLElement>,
+    bot: Bot
+  ) => {
+    if (event.pointerType !== "touch") return;
+    cancelBotContextLongPress();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const pointerId = event.pointerId;
+    const timer = setTimeout(() => {
+      botContextSuppressClickRef.current = true;
+      botContextLongPressRef.current = null;
+      openBotContextMenu(bot, startX, startY);
+    }, BOT_CONTEXT_LONG_PRESS_MS);
+    botContextLongPressRef.current = {
+      pointerId,
+      botId: bot.id,
+      timer,
+      startX,
+      startY,
+    };
+  }, [cancelBotContextLongPress, openBotContextMenu]);
+
+  const handleBotContextPointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const pending = botContextLongPressRef.current;
+    if (!pending || pending.pointerId !== event.pointerId) return;
+    const dx = event.clientX - pending.startX;
+    const dy = event.clientY - pending.startY;
+    if (Math.hypot(dx, dy) > BOT_CONTEXT_LONG_PRESS_MOVE_CANCEL_PX) {
+      cancelBotContextLongPress(event.pointerId);
+    }
+  }, [cancelBotContextLongPress]);
+
+  const handleBotContextPointerEnd = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    cancelBotContextLongPress(event.pointerId);
+  }, [cancelBotContextLongPress]);
+
+  useEffect(() => {
+    if (!botContextMenu) return;
+    if (!bots.some((bot) => bot.id === botContextMenu.botId)) {
+      closeBotContextMenu();
+    }
+  }, [botContextMenu, bots, closeBotContextMenu]);
+
+  useEffect(() => {
+    if (!botContextMenu) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!isPrimaryPointerDismissal(event)) return;
+      const target = event.target;
+      if (target instanceof Node && botContextMenuRef.current?.contains(target)) {
+        return;
+      }
+      closeBotContextMenu();
+    }
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        closeBotContextMenu();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [botContextMenu, closeBotContextMenu]);
+
   // Mobile spotlight: backdrop is visually present but ignores pointer-events so the
   // focused bubble stays tappable; we dismiss on taps outside bubble + menu.
   useEffect(() => {
     if (!mobileFocusedMessageId || !messageContextMenu) return;
     const onPointerDownCapture = (event: PointerEvent) => {
+      if (!isPrimaryPointerDismissal(event)) return;
       const node = event.target as Node | null;
       const menuRoot = messageActionsMenuRef.current;
       if (node && menuRoot?.contains(node)) return;
@@ -9441,11 +9693,6 @@ function HomeContent(): React.JSX.Element {
   const resetEmptyStateBotSelection = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
     setSelectedBotId(null);
-    setHoveredBotId(null);
-    if (hoverDwellTimerRef.current) {
-      clearTimeout(hoverDwellTimerRef.current);
-      hoverDwellTimerRef.current = null;
-    }
   }, [cancelPendingEmptyStateSearchOpen]);
 
   const handleEmptyStateBackgroundClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -9477,11 +9724,6 @@ function HomeContent(): React.JSX.Element {
   const openEmptyStateBotSearch = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
     setSelectedBotId(null);
-    setHoveredBotId(null);
-    if (hoverDwellTimerRef.current) {
-      clearTimeout(hoverDwellTimerRef.current);
-      hoverDwellTimerRef.current = null;
-    }
     if (botPickerReturnEndAtRef.current > Date.now()) return;
     if (emptyStateSearchActive) {
       setEmptyStateSearchOpen(false);
@@ -9516,7 +9758,6 @@ function HomeContent(): React.JSX.Element {
   }
 
   const focusDraftInput = useCallback(() => {
-    setHoveredBotId(null);
     window.setTimeout(() => {
       draftComposerRef.current?.focus({ preventScroll: true });
     }, 0);
@@ -9534,7 +9775,6 @@ function HomeContent(): React.JSX.Element {
     // slider while `shellStyle` lets the selected bot own the interface
     // color, so the hue lens no longer competes with the bot accent.
     setSelectedBotId(botId);
-    setHoveredBotId(null);
     setEmptyStateSearchOpen(false);
     setEmptyStateBotNameFilter("");
     focusDraftInput();
@@ -9543,11 +9783,6 @@ function HomeContent(): React.JSX.Element {
   const openEmptyStateBotSearchFromTyping = useCallback((typedCharacter: string) => {
     cancelPendingEmptyStateSearchOpen();
     setSelectedBotId(null);
-    setHoveredBotId(null);
-    if (hoverDwellTimerRef.current) {
-      clearTimeout(hoverDwellTimerRef.current);
-      hoverDwellTimerRef.current = null;
-    }
     setEmptyStateBotNameFilter((current) =>
       current.length > 0 ? `${current}${typedCharacter}` : typedCharacter
     );
@@ -9670,7 +9905,6 @@ function HomeContent(): React.JSX.Element {
       const { h } = hexToHsl(bot.color!.trim());
       setHueFilterCenter(hueLensPositionForHue(h));
       setSelectedBotId(null);
-      setHoveredBotId(null);
       return true;
     },
     [emptyStateSearchActive, hueFilterCenter, pickerSourceBots, viewportWidth]
@@ -9690,11 +9924,6 @@ function HomeContent(): React.JSX.Element {
       // finger crossing into a child tile would lose the gesture.
       event.currentTarget.setPointerCapture(event.pointerId);
       touchPreviewPointerIdRef.current = event.pointerId;
-      const botId = findBotIdAtPoint(event.clientX, event.clientY);
-      setTouchPreview({ botId, x: event.clientX, y: event.clientY });
-      if (botId) {
-        setHoveredBotId(botId);
-      }
     },
     [viewportWidth]
   );
@@ -9702,26 +9931,33 @@ function HomeContent(): React.JSX.Element {
   const handleTouchPickerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (event.pointerId !== touchPreviewPointerIdRef.current) return;
-      const botId = findBotIdAtPoint(event.clientX, event.clientY);
-      setTouchPreview({ botId, x: event.clientX, y: event.clientY });
-      setHoveredBotId(botId);
+      cancelBotContextLongPress(event.pointerId);
     },
-    []
+    [cancelBotContextLongPress]
   );
 
   const handleTouchPickerUp = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, geom: PickerGeometry) => {
       if (event.pointerId !== touchPreviewPointerIdRef.current) return;
+      cancelBotContextLongPress(event.pointerId);
+      if (botContextSuppressClickRef.current) {
+        event.preventDefault();
+        setTouchPreview(null);
+        touchPreviewPointerIdRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        window.setTimeout(() => {
+          botContextSuppressClickRef.current = false;
+        }, 150);
+        return;
+      }
       const botId = findBotIdAtPoint(event.clientX, event.clientY);
       if (botId) {
         const relocated = relocateHueLensToBot(botId, geom);
         if (!relocated) {
           commitEmptyStateBotSelection(botId);
         }
-      } else {
-        // Released over a gap or off the picker — clear hover preview
-        // so the hero/title don't keep showing the last touched bot.
-        setHoveredBotId(null);
       }
       setTouchPreview(null);
       touchPreviewPointerIdRef.current = null;
@@ -9729,20 +9965,20 @@ function HomeContent(): React.JSX.Element {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
     },
-    [commitEmptyStateBotSelection, relocateHueLensToBot]
+    [cancelBotContextLongPress, commitEmptyStateBotSelection, relocateHueLensToBot]
   );
 
   const handleTouchPickerCancel = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (event.pointerId !== touchPreviewPointerIdRef.current) return;
+      cancelBotContextLongPress(event.pointerId);
       setTouchPreview(null);
-      setHoveredBotId(null);
       touchPreviewPointerIdRef.current = null;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
     },
-    []
+    [cancelBotContextLongPress]
   );
 
   const renderEmptyStateBotSearch = (): React.JSX.Element | null => {
@@ -9845,62 +10081,13 @@ function HomeContent(): React.JSX.Element {
     setPendingResendId(null);
   }, []);
 
+  // Right-click is suppressed app-wide: we intend to ship our own
+  // context menu eventually. Until then, secondary clicks should do
+  // nothing at all (no dismissal, no native menu) so the gesture
+  // doesn't conflict with future custom affordances.
   const handleAppContextMenu = useCallback((event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
-
-    if (messageContextMenu) {
-      closeMessageContextOverlay();
-      return;
-    }
-    if (pendingDeleteKey) {
-      disarmDelete();
-      return;
-    }
-    if (pendingResendId) {
-      disarmResend();
-      return;
-    }
-    if (colorWheelOpen) {
-      setColorWheelOpen(false);
-      return;
-    }
-    if (panel !== null) {
-      closePanel();
-      return;
-    }
-    if (sidebarOpen) {
-      setSidebarOpen(false);
-      return;
-    }
-    if (emptyStateSearchActive) {
-      closeEmptyStateBotSearch();
-      return;
-    }
-    if (selectedBotId !== null) {
-      resetEmptyStateBotSelection();
-      return;
-    }
-    if (hueFilterCenter !== null) {
-      startBotPickerReturnToAll();
-    }
-  }, [
-    closeEmptyStateBotSearch,
-    closeMessageContextOverlay,
-    closePanel,
-    colorWheelOpen,
-    disarmDelete,
-    disarmResend,
-    emptyStateSearchActive,
-    hueFilterCenter,
-    messageContextMenu,
-    panel,
-    pendingDeleteKey,
-    pendingResendId,
-    resetEmptyStateBotSelection,
-    selectedBotId,
-    sidebarOpen,
-    startBotPickerReturnToAll,
-  ]);
+  }, []);
 
   const armResend = useCallback((messageId: string) => {
     if (pendingResendTimerRef.current) {
@@ -10033,6 +10220,7 @@ function HomeContent(): React.JSX.Element {
     }
 
     function handlePointerDown(event: PointerEvent) {
+      if (!isPrimaryPointerDismissal(event)) return;
       const target = event.target;
       // `Element` (not HTMLElement) is deliberate: clicks on inline SVG
       // glyphs have an SVGElement target, which is NOT an HTMLElement but
@@ -10061,6 +10249,7 @@ function HomeContent(): React.JSX.Element {
     }
 
     function handlePointerDown(event: PointerEvent) {
+      if (!isPrimaryPointerDismissal(event)) return;
       const target = event.target;
       if (target instanceof Element && target.closest("[data-resend-affordance='true']")) {
         return;
@@ -10113,6 +10302,7 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!colorWheelOpen) return;
     function handlePointerDown(event: PointerEvent) {
+      if (!isPrimaryPointerDismissal(event)) return;
       const target = event.target;
       // `Element` (not HTMLElement) is deliberate: a click inside the
       // glyph grid typically lands on an SVG <path>/<circle>, which is
@@ -10301,6 +10491,40 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function cloneBot(bot: Bot) {
+    setPanelError(null);
+    setPanelNotice(null);
+    closeBotContextMenu();
+    try {
+      const result = await api<{ bot?: { id?: string } }>("/api/bots", {
+        method: "POST",
+        body: JSON.stringify({
+          name: `${bot.name} (copy)`,
+          systemPrompt: bot.system_prompt,
+          localModel: bot.local_model ?? "",
+          onlineModel: bot.online_model ?? "",
+          onlineEnabled: bot.online_enabled !== 0,
+          temperature: normalizeBotTemperature(bot.temperature),
+          maxTokens: normalizeBotMaxTokens(bot.max_tokens),
+          color: bot.color,
+          glyph: bot.glyph,
+        }),
+      });
+      await refreshBots();
+      if (result.bot?.id) {
+        setEditingBotId(result.bot.id);
+        openRightPanel("bots");
+        setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+        setBotLibraryExpanded(false);
+        setBotLibraryClosing(false);
+        setBotPanelLibraryEnabled(false);
+      }
+      setPanelNotice(`${bot.name} cloned.`);
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Clone bot failed.");
+    }
+  }
+
   // User-facing bulk wipe reached via press-and-hold on any bot card ×.
   // Mirrors `deleteAllConversations` exactly: optimistic clear, best-effort
   // server sync, snapshot rollback on failure. This belongs to the normal
@@ -10444,6 +10668,142 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  // Distribute random seed memories across every bot the user owns. Used
+  // when the Memories panel is showing the All-memories view, so the
+  // bubble cluster has something to chew on without having to wire each
+  // bot up by hand.
+  async function devToolsAddAllMemories() {
+    const count = resolvedDevToolsBotQuantity;
+    if (count <= 0) {
+      setDevToolsMessage(randomDevToolsGhostMessage());
+      return;
+    }
+    if (bots.length === 0) {
+      setDevToolsMessage("Create at least one bot before seeding memories.");
+      return;
+    }
+
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    try {
+      const seedPayload: Record<string, unknown> = {
+        count,
+        source: devToolsMemorySeedSource,
+      };
+      if (devToolsMemorySeedSource !== "direct") {
+        seedPayload.certainty = devToolsMemoryCertainty;
+      }
+      const result = await api<{ created?: number }>("/api/memories/dev-seed", {
+        method: "POST",
+        body: JSON.stringify(seedPayload),
+      });
+      await refreshMemories();
+      const created = typeof result?.created === "number" ? result.created : count;
+      setDevToolsMessage(
+        created === 1
+          ? `Added 1 ${devToolsMemorySeedSource} memory across bots.`
+          : `Added ${created} ${devToolsMemorySeedSource} memories across ${bots.length} bots.`
+      );
+    } catch (err) {
+      try { await refreshMemories(); } catch { /* best-effort refresh */ }
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Add memories failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  // Seed memories for whichever bot is currently focused in the
+  // Memories panel. Falls back to a clear status message if the panel
+  // isn't on a specific bot — keeps the operator from accidentally
+  // dumping memories on the wrong bot.
+  async function devToolsAddBotMemories() {
+    const targetBot = memoryPanelBot ?? activeBot;
+    if (!targetBot?.id) {
+      setDevToolsMessage("Open a bot's memories panel first to seed for that bot.");
+      return;
+    }
+    const count = resolvedDevToolsBotQuantity;
+    if (count <= 0) {
+      setDevToolsMessage(randomDevToolsGhostMessage());
+      return;
+    }
+
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    try {
+      const seedPayload: Record<string, unknown> = {
+        count,
+        botId: targetBot.id,
+        source: devToolsMemorySeedSource,
+      };
+      if (devToolsMemorySeedSource !== "direct") {
+        seedPayload.certainty = devToolsMemoryCertainty;
+      }
+      const result = await api<{ created?: number }>("/api/memories/dev-seed", {
+        method: "POST",
+        body: JSON.stringify(seedPayload),
+      });
+      await refreshMemories();
+      await refreshBotMemories(targetBot.id);
+      const created = typeof result?.created === "number" ? result.created : count;
+      setDevToolsMessage(
+        created === 1
+          ? `Added 1 ${devToolsMemorySeedSource} memory to ${targetBot.name}.`
+          : `Added ${created} ${devToolsMemorySeedSource} memories to ${targetBot.name}.`
+      );
+    } catch (err) {
+      try {
+        await refreshMemories();
+        await refreshBotMemories(targetBot.id);
+      } catch { /* best-effort refresh */ }
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Add bot memories failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  // Wipe every memory (global + bot-scoped) for the current user.
+  // Server-side this is `DELETE /api/memories` — there's no per-bot
+  // endpoint today, so this is intentionally a blunt instrument for
+  // dev resets.
+  async function devToolsClearAllMemories() {
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    try {
+      const result = await api<{ deleted?: number }>("/api/memories", {
+        method: "DELETE",
+      });
+      await refreshMemories();
+      if (memoryPanelBot?.id) {
+        await refreshBotMemories(memoryPanelBot.id);
+      }
+      const deleted = typeof result?.deleted === "number" ? result.deleted : 0;
+      setDevToolsMessage(
+        deleted === 0
+          ? "No memories to clear."
+          : deleted === 1
+            ? "Cleared 1 memory."
+            : `Cleared ${deleted} memories.`
+      );
+    } catch (err) {
+      try {
+        await refreshMemories();
+        if (memoryPanelBot?.id) {
+          await refreshBotMemories(memoryPanelBot.id);
+        }
+      } catch { /* best-effort refresh */ }
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Clear memories failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
   async function devToolsSetBotDensityStage(stageId: PickerDensityStageId) {
     const liveViewportWidth =
       typeof window === "undefined" ? viewportWidth : window.innerWidth;
@@ -10573,23 +10933,39 @@ function HomeContent(): React.JSX.Element {
 
   function openActiveBotCustomizer() {
     if (!activeBot) return;
+    openBotCustomizer(activeBot);
+  }
+
+  function openBotCustomizer(bot: Bot) {
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
-    startEditBot(activeBot);
+    startEditBot(bot);
     openRightPanel("bots");
     setBotLibraryExpanded(false);
     setBotLibraryClosing(false);
     setBotPanelLibraryEnabled(false);
   }
 
+  function openMemoriesPanelForBot(bot: Bot) {
+    setMemoryPanelScope("bot");
+    setMemoryPanelBotId(bot.id);
+    // Pre-select the PRISM family this bot belongs to so the bot-view
+    // back button has a sensible destination (the family drill-down)
+    // even when the user opened bot memories straight from the chat
+    // header instead of drilling in through the directory.
+    setMemoryPanelSelectedFamily(botPrismGroup(bot.color));
+    void refreshBotMemories(bot.id);
+    openRightPanel("memories");
+  }
+
   function openActiveBotMemoriesPanel() {
     if (!activeBot?.id) return;
-    setMemoryPanelScope("bot");
-    void refreshBotMemories(activeBot.id);
-    openRightPanel("memories");
+    openMemoriesPanelForBot(activeBot);
   }
 
   function openAllMemoriesPanel() {
     setMemoryPanelScope("all");
+    setMemoryPanelBotId(null);
+    setMemoryPanelSelectedFamily(null);
     void refreshMemories();
     openRightPanel("memories");
   }
@@ -10614,41 +10990,439 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
+  const memoryPanelBot = useMemo<Bot | null>(() => {
+    if (memoryPanelScope !== "bot") return null;
+    if (memoryPanelBotId) {
+      const explicit = bots.find((bot) => bot.id === memoryPanelBotId) ?? null;
+      if (explicit) return explicit;
+    }
+    return activeBot;
+  }, [memoryPanelScope, memoryPanelBotId, bots, activeBot]);
+
   const memoryPanelAccent = normalizeAccentForTheme(
     memoryPanelScope === "bot"
-      ? activeBot?.color ?? PRISM_DEFAULT_ACCENT
+      ? memoryPanelBot?.color ?? PRISM_DEFAULT_ACCENT
       : PRISM_DEFAULT_ACCENT,
     resolvedTheme
   );
   const memoryPanelStyle = (() => {
     const base = deriveAccentStyle(memoryPanelAccent, resolvedTheme);
-    return {
+    const style: React.CSSProperties = {
       ["--memory-panel-color" as string]: memoryPanelAccent,
       ["--memory-panel-text" as string]: base["--accent-text" as keyof typeof base],
       ["--memory-panel-ink" as string]: base["--accent-ink" as keyof typeof base],
-    } as React.CSSProperties;
+      ["--memory-loader-triangle-color" as string]: memoryPanelAccent,
+    };
+    // Surface the active PRISM family's color so the left-edge bar in
+    // the drill-down view can match the family being observed instead
+    // of using the global rainbow gradient. We resolve the swatch from
+    // PRISM_GROUPS directly to avoid forward-referencing
+    // `selectedMemoryFamilyDirectory`, which is declared further down.
+    if (memoryPanelScope === "all" && memoryPanelSelectedFamily) {
+      const familyGroup = PRISM_GROUPS.find(
+        (group) => group.id === memoryPanelSelectedFamily
+      );
+      if (familyGroup?.swatch) {
+        (style as Record<string, string>)["--memory-family-bar-color"] =
+          normalizeAccentForTheme(familyGroup.swatch, resolvedTheme);
+      }
+    }
+    return style;
   })();
 
-  function memoryBubbleStyle(memory: UserMemory, index: number): React.CSSProperties {
-    const confidence = Number.isFinite(memory.confidence)
-      ? Math.max(0, Math.min(1, memory.confidence))
-      : 0.5;
-    const size = Math.round(104 + confidence * 82);
-    const offsetPattern = [-18, 24, -4, 38, -30, 10];
+  const memoryFamilyDirectories = useMemo<MemoryFamilyDirectory[]>(() => {
+    const memoryCounts: Record<PrismGroupId, number> = { p: 0, r: 0, i: 0, s: 0, m: 0 };
+    const botCounts: Record<PrismGroupId, number> = { p: 0, r: 0, i: 0, s: 0, m: 0 };
+
+    for (const bot of bots) {
+      const family = botPrismGroup(bot.color);
+      botCounts[family] += 1;
+      memoryCounts[family] += directMemoryCountsByBotId[bot.id] ?? 0;
+    }
+
+    const defaultFamily = botPrismGroup(PRISM_DEFAULT_ACCENT);
+    memoryCounts[defaultFamily] += defaultDirectMemoryCount;
+    const itemCounts = PRISM_GROUPS.reduce<Record<PrismGroupId, number>>((acc, group) => {
+      acc[group.id] = botCounts[group.id] + (group.id === defaultFamily && defaultDirectMemoryCount > 0 ? 1 : 0);
+      return acc;
+    }, { p: 0, r: 0, i: 0, s: 0, m: 0 });
+    const maxCount = Math.max(1, ...Object.values(itemCounts));
+
+    return PRISM_GROUPS.map((group, index) => {
+      const itemCount = itemCounts[group.id];
+      const memoryCount = memoryCounts[group.id];
+      const size = Math.round(96 + (itemCount / maxCount) * 84);
+      const slot = MEMORY_FAMILY_DIRECTORY_SLOTS[index % MEMORY_FAMILY_DIRECTORY_SLOTS.length];
+      const jitterX = (stableUnitValue(`${group.id}:${itemCount}:x`) - 0.5) * 4;
+      const jitterY = (stableUnitValue(`${group.id}:${itemCount}:y`) - 0.5) * 4;
+      return {
+        id: group.id,
+        letter: group.letter,
+        label: group.label,
+        color: group.swatch,
+        itemCount,
+        memoryCount,
+        style: {
+          ["--memory-family-x" as string]: `${Math.max(12, Math.min(88, slot[0] + jitterX))}%`,
+          ["--memory-family-y" as string]: `${Math.max(12, Math.min(88, slot[1] + jitterY))}%`,
+          ["--memory-family-size" as string]: `${size}px`,
+          ["--memory-family-color" as string]: group.swatch,
+          ["--memory-family-delay" as string]: `${(index * 0.18).toFixed(2)}s`,
+        } as React.CSSProperties,
+      };
+    });
+  }, [bots, defaultDirectMemoryCount, directMemoryCountsByBotId]);
+
+  const selectedMemoryFamilyDirectory = useMemo(
+    () => memoryFamilyDirectories.find((family) => family.id === memoryPanelSelectedFamily) ?? null,
+    [memoryFamilyDirectories, memoryPanelSelectedFamily]
+  );
+
+  const selectedFamilyBotClusters = useMemo<MemoryFamilyBotCluster[]>(() => {
+    if (!memoryPanelSelectedFamily) return [];
+    const familyBots = bots.filter((bot) => botPrismGroup(bot.color) === memoryPanelSelectedFamily);
+    const baseClusters: Omit<MemoryFamilyBotCluster, "style" | "innerBubbles">[] = familyBots.map((bot) => ({
+      id: bot.id,
+      botId: bot.id,
+      botName: bot.name,
+      botGlyph: bot.glyph,
+      color: normalizeAccentForTheme(bot.color ?? selectedMemoryFamilyDirectory?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme),
+      memoryCount: directMemoryCountsByBotId[bot.id] ?? 0,
+    }));
+
+    if (memoryPanelSelectedFamily === botPrismGroup(PRISM_DEFAULT_ACCENT) && defaultDirectMemoryCount > 0) {
+      baseClusters.push({
+        id: "prism-default",
+        botId: null,
+        botName: "Prism",
+        botGlyph: "triangle",
+        color: PRISM_DEFAULT_ACCENT,
+        memoryCount: defaultDirectMemoryCount,
+      });
+    }
+
+    const maxCount = Math.max(1, ...baseClusters.map((cluster) => cluster.memoryCount));
+    const buildInnerBubbles = (clusterId: string, count: number): MemoryClusterInnerBubble[] => {
+      if (count <= 0) return [];
+      // Inner motes are a direct preview of memories. Cap only at high counts
+      // so a 3-memory bot never looks like it contains 6 memories.
+      const density = Math.min(1, count / 24);
+      const bubbleCount = Math.min(14, count);
+      const placed: Array<{ x: number; y: number; radius: number }> = [];
+      const bubbles: MemoryClusterInnerBubble[] = [];
+      for (let i = 0; i < bubbleCount; i += 1) {
+        // Larger memory families get slightly larger motes in addition to more
+        // of them, so volume is readable at a glance.
+        const size = 5.2 + density * 2.4 + ((i + count) % 3) * 1.25;
+        const radius = size / 2;
+        const minCenterRadius = 10 + radius;
+        const maxCenterRadius = Math.max(minCenterRadius + 1, 32 - radius);
+        let candidate: { x: number; y: number; radius: number } | null = null;
+        for (let attempt = 0; attempt < 48; attempt += 1) {
+          const angle = stableUnitValue(`${clusterId}:inner:${i}:a:${attempt}`) * Math.PI * 2;
+          // Bias outward: most motes hug the outer ring while still permitting
+          // occasional inner placements so the full orb stays alive.
+          const radialSeed = stableUnitValue(`${clusterId}:inner:${i}:r:${attempt}`);
+          const radialT = Math.pow(radialSeed, 0.36);
+          const distance = minCenterRadius + radialT * (maxCenterRadius - minCenterRadius);
+          const x = Math.cos(angle) * distance;
+          const y = Math.sin(angle) * distance;
+          const overlaps = placed.some((other) => {
+            const dx = x - other.x;
+            const dy = y - other.y;
+            const minDistance = radius + other.radius + 2.2;
+            return dx * dx + dy * dy < minDistance * minDistance;
+          });
+          if (!overlaps) {
+            candidate = { x, y, radius };
+            break;
+          }
+        }
+        if (!candidate) {
+          const fallbackAngle = ((i * 137.50776405) % 360) * (Math.PI / 180);
+          const fallbackDistance = Math.min(maxCenterRadius, 14 + i * 1.7);
+          candidate = {
+            x: Math.cos(fallbackAngle) * fallbackDistance,
+            y: Math.sin(fallbackAngle) * fallbackDistance,
+            radius,
+          };
+        }
+        placed.push(candidate);
+        bubbles.push({
+          id: `${clusterId}-inner-${i}`,
+          style: {
+            ["--memory-inner-x" as string]: `${candidate.x.toFixed(2)}px`,
+            ["--memory-inner-y" as string]: `${candidate.y.toFixed(2)}px`,
+            ["--memory-inner-size" as string]: `${size.toFixed(2)}px`,
+            ["--memory-inner-dx" as string]: `${((stableUnitValue(`${clusterId}:inner:${i}:dx`) - 0.5) * 6).toFixed(2)}px`,
+            ["--memory-inner-dy" as string]: `${((stableUnitValue(`${clusterId}:inner:${i}:dy`) - 0.5) * 6).toFixed(2)}px`,
+            ["--memory-inner-duration" as string]: `${(2.8 + stableUnitValue(`${clusterId}:inner:${i}:dur`) * 2.2).toFixed(2)}s`,
+            ["--memory-inner-delay" as string]: `${(i * 0.14).toFixed(2)}s`,
+          } as React.CSSProperties,
+        });
+      }
+      return bubbles;
+    };
+
+    const orderedClusters = baseClusters.sort(
+      (a, b) => b.memoryCount - a.memoryCount || a.botName.localeCompare(b.botName)
+    );
+    const crowdScale = Math.min(1, Math.max(0.68, Math.sqrt(8 / Math.max(1, orderedClusters.length))));
+    const placedClusters: Array<{ x: number; y: number; radiusPct: number }> = [];
+    const pxToPct = 100 / 520;
+    const placeWithoutOverlap = (
+      clusterId: string,
+      slotX: number,
+      slotY: number,
+      radiusPct: number
+    ): { x: number; y: number } => {
+      const minX = 8 + radiusPct;
+      const maxX = 92 - radiusPct;
+      const minY = 10 + radiusPct;
+      const maxY = 90 - radiusPct;
+      let bestCandidate = {
+        x: Math.max(minX, Math.min(maxX, slotX)),
+        y: Math.max(minY, Math.min(maxY, slotY)),
+      };
+      let bestPenalty = Number.POSITIVE_INFINITY;
+
+      for (let attempt = 0; attempt < 140; attempt += 1) {
+        const ring = Math.floor(attempt / 14);
+        const step = 1.55 + radiusPct * 0.34;
+        const angleSeed = stableUnitValue(`${clusterId}:layout:angle:${attempt}`);
+        const angle = angleSeed * Math.PI * 2;
+        const x = Math.max(minX, Math.min(maxX, slotX + Math.cos(angle) * ring * step));
+        const y = Math.max(minY, Math.min(maxY, slotY + Math.sin(angle) * ring * step));
+        let collision = false;
+        let penalty = 0;
+        for (const placed of placedClusters) {
+          const dx = x - placed.x;
+          const dy = y - placed.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const minDistance = radiusPct + placed.radiusPct + 0.9;
+          if (distance < minDistance) {
+            collision = true;
+            penalty += minDistance - distance;
+          }
+        }
+        if (!collision) return { x, y };
+        if (penalty < bestPenalty) {
+          bestPenalty = penalty;
+          bestCandidate = { x, y };
+        }
+      }
+      return bestCandidate;
+    };
+
+    return orderedClusters.map((cluster, index) => {
+        const slot = MEMORY_BUBBLE_CLOUD_SLOTS[index % MEMORY_BUBBLE_CLOUD_SLOTS.length];
+        const slotLoop = Math.floor(index / MEMORY_BUBBLE_CLOUD_SLOTS.length);
+        // Empty bots collapse to a small unobtrusive circle. Filled
+        // bubbles still scale up with memory count, so the family
+        // drill-down reads as "presence + volume" at a glance.
+        const baseSize = cluster.memoryCount === 0
+          ? MEMORY_EMPTY_CLUSTER_SIZE
+          : 86 + (cluster.memoryCount / maxCount) * 78;
+        let size = cluster.memoryCount === 0
+          ? MEMORY_EMPTY_CLUSTER_SIZE
+          : Math.round(baseSize * crowdScale);
+        let radiusPct = (size / 2) * pxToPct;
+        let baseX = slot[0] + ((slotLoop % 3) - 1) * 4 + (stableUnitValue(`${cluster.id}:x`) - 0.5) * 6;
+        let baseY = slot[1] + ((slotLoop % 2) * 5 - 2.5) + (stableUnitValue(`${cluster.id}:y`) - 0.5) * 6;
+        let placed = placeWithoutOverlap(cluster.id, baseX, baseY, radiusPct);
+
+        for (let shrink = 0; shrink < 3; shrink += 1) {
+          let collides = false;
+          for (const existing of placedClusters) {
+            const dx = placed.x - existing.x;
+            const dy = placed.y - existing.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < radiusPct + existing.radiusPct + 0.9) {
+              collides = true;
+              break;
+            }
+          }
+          if (!collides) break;
+          size = Math.max(58, Math.round(size * 0.9));
+          radiusPct = (size / 2) * pxToPct;
+          baseX = Math.max(8 + radiusPct, Math.min(92 - radiusPct, baseX));
+          baseY = Math.max(10 + radiusPct, Math.min(90 - radiusPct, baseY));
+          placed = placeWithoutOverlap(`${cluster.id}:shrink:${shrink}`, baseX, baseY, radiusPct);
+        }
+
+        placedClusters.push({ x: placed.x, y: placed.y, radiusPct });
+        const fill = mixHex(cluster.color, resolvedTheme === "dark" ? "#111114" : "#fbf3e6", 0.72);
+        const border = ensureContrast(
+          mixHex(cluster.color, resolvedTheme === "dark" ? "#ffffff" : "#20170f", resolvedTheme === "dark" ? 0.38 : 0.18),
+          fill,
+          2.1
+        );
+        const ink = pickReadableText(fill);
+        return {
+          ...cluster,
+          style: {
+            "--memory-bubble-size": `${size}px`,
+            "--memory-cloud-x": `${placed.x.toFixed(2)}%`,
+            "--memory-cloud-y": `${placed.y.toFixed(2)}%`,
+            "--memory-bubble-color": fill,
+            "--memory-bubble-border": border,
+            "--memory-bubble-ink": ink,
+            "--memory-bubble-source-color": cluster.color,
+            "--memory-bubble-glow": cluster.color,
+            "--memory-source-glyph-color": ensureContrast(cluster.color, fill, 2),
+            "--memory-bubble-tilt": `${Math.round((stableUnitValue(`${cluster.id}:tilt`) - 0.5) * 8)}deg`,
+            "--memory-bubble-z": `${20 + index}`,
+          } as React.CSSProperties,
+          innerBubbles: buildInnerBubbles(cluster.id, cluster.memoryCount),
+        };
+      });
+  }, [
+    memoryPanelSelectedFamily,
+    bots,
+    defaultDirectMemoryCount,
+    directMemoryCountsByBotId,
+    selectedMemoryFamilyDirectory?.color,
+    resolvedTheme,
+  ]);
+
+  const visibleMemoryBubbles = useMemo(
+    () => (
+      memoryPanelScope === "all"
+        ? []
+        : botMemories
+    ),
+    [memoryPanelScope, botMemories]
+  );
+
+  const memoryBubbleLayoutById = useMemo(() => {
+    const layoutById = new Map<string, { style: React.CSSProperties; uncertain: boolean }>();
+    if (memoryPanelScope !== "bot") return layoutById;
+    if (visibleMemoryBubbles.length === 0) return layoutById;
+
+    const pxToPct = 100 / 520;
+    const bounds = { minX: 8, maxX: 92, minY: 10, maxY: 90 };
     const shadePattern = [0.08, 0.16, 0.24, 0.12, 0.28, 0.2];
     const shadeTarget = resolvedTheme === "dark" ? "#ffffff" : "#000000";
-    const shade = mixHex(
-      memoryPanelAccent,
-      shadeTarget,
-      shadePattern[index % shadePattern.length]
-    );
-    return {
-      "--memory-bubble-size": `${size}px`,
-      "--memory-bubble-color": shade,
-      "--memory-bubble-ink": pickReadableText(shade),
-      "--memory-bubble-offset": `${offsetPattern[index % offsetPattern.length]}px`,
-    } as React.CSSProperties;
-  }
+    const placed: Array<{ x: number; y: number; radiusPct: number }> = [];
+
+    const entries = visibleMemoryBubbles.map((memory) => {
+      const confidence = memoryBubbleSignalValue(memory);
+      const uncertain = confidence <= MEMORY_UNCERTAIN_CONFIDENCE_MAX;
+      const size = uncertain
+        ? Math.round(MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE + confidence * (MEMORY_UNCERTAIN_BUBBLE_MAX_SIZE - MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE))
+        : Math.round(MEMORY_BUBBLE_MIN_SIZE + confidence * (MEMORY_BUBBLE_MAX_SIZE - MEMORY_BUBBLE_MIN_SIZE));
+      return { memory, confidence, uncertain, size };
+    });
+
+    const sorted = [...entries].sort((a, b) => b.size - a.size);
+
+    const findPlacement = (
+      seed: string,
+      anchorX: number,
+      anchorY: number,
+      radiusPct: number
+    ): { x: number; y: number } => {
+      const minX = bounds.minX + radiusPct;
+      const maxX = bounds.maxX - radiusPct;
+      const minY = bounds.minY + radiusPct;
+      const maxY = bounds.maxY - radiusPct;
+
+      let best = {
+        x: Math.max(minX, Math.min(maxX, anchorX)),
+        y: Math.max(minY, Math.min(maxY, anchorY)),
+      };
+      let bestPenalty = Number.POSITIVE_INFINITY;
+      for (let attempt = 0; attempt < 220; attempt += 1) {
+        const ring = Math.floor(attempt / 20);
+        const step = 1.4 + radiusPct * 0.3;
+        const angle = stableUnitValue(`${seed}:a:${attempt}`) * Math.PI * 2;
+        const x = Math.max(minX, Math.min(maxX, anchorX + Math.cos(angle) * ring * step));
+        const y = Math.max(minY, Math.min(maxY, anchorY + Math.sin(angle) * ring * step));
+
+        let collision = false;
+        let penalty = 0;
+        for (const other of placed) {
+          const dx = x - other.x;
+          const dy = y - other.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const minDistance = radiusPct + other.radiusPct + 0.85;
+          if (distance < minDistance) {
+            collision = true;
+            penalty += minDistance - distance;
+          }
+        }
+        if (!collision) return { x, y };
+        if (penalty < bestPenalty) {
+          bestPenalty = penalty;
+          best = { x, y };
+        }
+      }
+      return best;
+    };
+
+    sorted.forEach((entry, sortedIndex) => {
+      const slot = MEMORY_BUBBLE_CLOUD_SLOTS[sortedIndex % MEMORY_BUBBLE_CLOUD_SLOTS.length];
+      const slotLoop = Math.floor(sortedIndex / MEMORY_BUBBLE_CLOUD_SLOTS.length);
+      let size = entry.size;
+      let radiusPct = (size / 2) * pxToPct;
+      let baseX =
+        slot[0] + ((slotLoop % 3) - 1) * 4 + (stableUnitValue(`${entry.memory.id}:x`) - 0.5) * 7;
+      let baseY =
+        slot[1] + ((slotLoop % 2) * 5 - 2.5) + (stableUnitValue(`${entry.memory.id}:y`) - 0.5) * 7;
+      let placedPoint = findPlacement(entry.memory.id, baseX, baseY, radiusPct);
+
+      for (let shrink = 0; shrink < 4; shrink += 1) {
+        const overlaps = placed.some((other) => {
+          const dx = placedPoint.x - other.x;
+          const dy = placedPoint.y - other.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          return distance < radiusPct + other.radiusPct + 0.85;
+        });
+        if (!overlaps) break;
+        size = Math.max(entry.uncertain ? MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE : MEMORY_BUBBLE_MIN_SIZE, Math.round(size * 0.94));
+        radiusPct = (size / 2) * pxToPct;
+        baseX = Math.max(bounds.minX + radiusPct, Math.min(bounds.maxX - radiusPct, baseX));
+        baseY = Math.max(bounds.minY + radiusPct, Math.min(bounds.maxY - radiusPct, baseY));
+        placedPoint = findPlacement(`${entry.memory.id}:shrink:${shrink}`, baseX, baseY, radiusPct);
+      }
+
+      placed.push({ x: placedPoint.x, y: placedPoint.y, radiusPct });
+      const shade = mixHex(
+        memoryPanelAccent,
+        shadeTarget,
+        shadePattern[sortedIndex % shadePattern.length]
+      );
+      const textLength = entry.memory.text.length;
+      const fontDivisor = textLength > 92 ? 10.8 : textLength > 68 ? 9.6 : textLength > 46 ? 8.4 : 7.5;
+      const fontSize = Math.max(13, Math.min(18, Math.round(size / fontDivisor)));
+      const lineCount = size >= 190 ? 7 : size >= 165 ? 6 : 5;
+      layoutById.set(entry.memory.id, {
+        uncertain: entry.uncertain,
+        style: {
+          "--memory-bubble-size": `${size}px`,
+          "--memory-bubble-color": shade,
+          "--memory-bubble-ink": pickReadableText(shade),
+          "--memory-bubble-font-size": `${fontSize}px`,
+          "--memory-bubble-line-count": lineCount,
+          "--memory-cloud-x": `${placedPoint.x.toFixed(2)}%`,
+          "--memory-cloud-y": `${placedPoint.y.toFixed(2)}%`,
+          "--memory-bubble-tilt": `${Math.round((stableUnitValue(`${entry.memory.id}:tilt`) - 0.5) * 9)}deg`,
+          "--memory-bubble-z": `${14 + sortedIndex}`,
+        } as React.CSSProperties,
+      });
+    });
+    return layoutById;
+  }, [memoryPanelScope, visibleMemoryBubbles, memoryPanelAccent, resolvedTheme]);
+
+  useEffect(() => {
+    if (memoryPanelScope !== "bot") {
+      setFocusedMemoryId(null);
+      return;
+    }
+    if (focusedMemoryId && !visibleMemoryBubbles.some((memory) => memory.id === focusedMemoryId)) {
+      setFocusedMemoryId(null);
+    }
+  }, [focusedMemoryId, memoryPanelScope, visibleMemoryBubbles]);
 
   function renderComposeUtilityActions(): React.JSX.Element {
     return (
@@ -10703,9 +11477,6 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  const memoryPanelBot = memoryPanelScope === "bot" ? activeBot : null;
-  const visibleMemoryBubbles =
-    memoryPanelScope === "all" ? memories : botMemories;
 
   async function saveBot(id: string) {
     const trimmedName = newBotName.trim();
@@ -10850,6 +11621,65 @@ function HomeContent(): React.JSX.Element {
           )}
         </div>
       </>
+    );
+  }
+
+  function renderBotContextMenu(): React.JSX.Element | null {
+    if (!botContextMenu) return null;
+    const bot = bots.find((candidate) => candidate.id === botContextMenu.botId);
+    if (!bot) return null;
+    const menuStyle = {
+      left: `${botContextMenu.x}px`,
+      top: `${botContextMenu.y}px`,
+      "--bot-color": normalizeAccentForTheme(bot.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme),
+    } as React.CSSProperties;
+    return (
+      <div
+        ref={botContextMenuRef}
+        className={`${styles.messageContextMenu} ${styles.botContextMenu}`}
+        style={menuStyle}
+        role="menu"
+        aria-label={`${bot.name} actions`}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => void cloneBot(bot)}
+        >
+          Clone bot
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            closeBotContextMenu();
+            openBotCustomizer(bot);
+          }}
+        >
+          Edit bot
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            closeBotContextMenu();
+            openMemoriesPanelForBot(bot);
+          }}
+        >
+          View memories
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            closeBotContextMenu();
+            const confirmed = window.confirm(`Delete ${bot.name}? This cannot be undone.`);
+            if (confirmed) void deleteBot(bot.id);
+          }}
+        >
+          Delete bot
+        </button>
+      </div>
     );
   }
 
@@ -11349,6 +12179,11 @@ function HomeContent(): React.JSX.Element {
       viewportWidth,
       viewportHeight
     );
+    const devToolsMemoryPanelOpen = panel === "memories";
+    const devToolsMemoryScopeLabel =
+      memoryPanelScope === "bot" && memoryPanelBot
+        ? memoryPanelBot.name
+        : "all bots";
     return (
       <div
         ref={devToolsPanelRef}
@@ -11475,6 +12310,87 @@ function HomeContent(): React.JSX.Element {
           </div>
         </div>
 
+        {devToolsMemoryPanelOpen && (
+          <div className={styles.devToolsSection}>
+            <h3 className={styles.devToolsSectionTitle}>Memories</h3>
+            <p className={styles.devToolsSectionHint}>
+              All: <strong>{memories.length}</strong>
+              {memoryPanelScope === "bot" && memoryPanelBot ? (
+                <>
+                  {" "}· {memoryPanelBot.name}: <strong>{botMemories.length}</strong>
+                </>
+              ) : null}
+            </p>
+            <p className={styles.devToolsSectionHint}>
+              {memoryPanelScope === "bot" && memoryPanelBot
+                ? `Adds the chosen quantity to ${devToolsMemoryScopeLabel}.`
+                : "Distributes the chosen quantity randomly across all bots."}
+            </p>
+            <label className={styles.devToolsCountControl}>
+              <span>Seed type</span>
+              <select
+                value={devToolsMemorySeedSource}
+                onChange={(event) =>
+                  setDevToolsMemorySeedSource(event.currentTarget.value as DevToolsMemorySeedSource)
+                }
+                disabled={devToolsBusy}
+              >
+                <option value="direct">Direct memories</option>
+                <option value="inferred">Inferred assumptions</option>
+                <option value="compiled">Compiled assumptions</option>
+              </select>
+            </label>
+            <label className={styles.devToolsCountControl}>
+              <span>
+                Certainty{" "}
+                <strong>{Math.round(devToolsMemoryCertainty * 100)}%</strong>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={devToolsMemoryCertainty}
+                onChange={(event) =>
+                  setDevToolsMemoryCertainty(
+                    Math.max(0, Math.min(1, Number(event.currentTarget.value)))
+                  )
+                }
+                disabled={devToolsBusy || devToolsMemorySeedSource === "direct"}
+              />
+            </label>
+            <div className={styles.devToolsActions}>
+              {memoryPanelScope === "bot" ? (
+                <button
+                  type="button"
+                  className={styles.devToolsAction}
+                  onClick={() => void devToolsAddBotMemories()}
+                  disabled={devToolsBusy || !memoryPanelBot}
+                >
+                  Add {devToolsMemorySeedSource}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={styles.devToolsAction}
+                  onClick={() => void devToolsAddAllMemories()}
+                  disabled={devToolsBusy || bots.length === 0}
+                >
+                  Add {devToolsMemorySeedSource}
+                </button>
+              )}
+              <button
+                type="button"
+                className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+                onClick={() => void devToolsClearAllMemories()}
+                disabled={devToolsBusy || memories.length === 0}
+              >
+                Clear all memories
+              </button>
+            </div>
+          </div>
+        )}
+
         {devToolsMessage && (
           <p className={styles.devToolsStatus} role="status">
             {devToolsMessage}
@@ -11510,7 +12426,10 @@ function HomeContent(): React.JSX.Element {
       {panel && (
         <div
           className={styles.panelOverlay}
-          onClick={closePanel}
+          onClick={(event) => {
+            if (event.button !== 0 || event.ctrlKey) return;
+            closePanel();
+          }}
           aria-hidden="true"
         />
       )}
@@ -11520,10 +12439,58 @@ function HomeContent(): React.JSX.Element {
         <div
           className={`${styles.panel} ${styles.panelMemories}`}
           data-memory-scope={memoryPanelScope}
+          data-memory-family={
+            memoryPanelScope === "all" && memoryPanelSelectedFamily
+              ? memoryPanelSelectedFamily
+              : undefined
+          }
           style={memoryPanelStyle}
         >
           <div className={styles.panelHeader}>
-            <h3>{memoryPanelScope === "all" ? "All memories" : "Bot memories"}</h3>
+            <div className={styles.panelHeaderTitle}>
+              {memoryPanelScope === "bot" ? (
+                <button
+                  type="button"
+                  className={styles.panelBack}
+                  onClick={() => void runMemoryTransition(() => {
+                    // Drop back to the all-memories scope. If a family
+                    // is still selected (either preserved from the
+                    // drill-down or derived from the bot's color), the
+                    // user lands on that family's cluster view; if
+                    // none is set, they land on the directory root.
+                    setMemoryPanelScope("all");
+                    setMemoryPanelBotId(null);
+                    setFocusedMemoryId(null);
+                  })}
+                  aria-label={
+                    memoryPanelSelectedFamily
+                      ? "Back to PRISM family"
+                      : "Back to PRISM directories"
+                  }
+                  title={
+                    memoryPanelSelectedFamily
+                      ? "Back to PRISM family"
+                      : "Back to PRISM directories"
+                  }
+                >
+                  ←
+                </button>
+              ) : memoryPanelScope === "all" && memoryPanelSelectedFamily ? (
+                <button
+                  type="button"
+                  className={styles.panelBack}
+                  onClick={() => void runMemoryTransition(() => {
+                    setMemoryPanelSelectedFamily(null);
+                    setFocusedMemoryId(null);
+                  })}
+                  aria-label="Back to PRISM directories"
+                  title="Back to PRISM directories"
+                >
+                  ←
+                </button>
+              ) : null}
+              <h3>{memoryPanelScope === "all" ? "All memories" : "Bot memories"}</h3>
+            </div>
             <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
           </div>
           {memoryPanelBot && (
@@ -11539,40 +12506,237 @@ function HomeContent(): React.JSX.Element {
           )}
           <p className={styles.memoryPanelHint}>
             {memoryPanelScope === "all"
-              ? "All saved memories across conversations. Bubble size follows confidence."
-              : "Memories this bot has gathered across chats. Bubble size follows confidence."}
+              ? memoryPanelSelectedFamily
+                ? `${selectedMemoryFamilyDirectory?.letter ?? "?"} family: each orb is a bot; orbit dots indicate saved memories.`
+                : "PRISM directories. Bubble size follows child bot count. Tap a directory to drill in."
+              : "Memories this bot has gathered across chats. Uncertain memories appear as smaller unlabeled bubbles."}
           </p>
-          {visibleMemoryBubbles.length > 0 ? (
-            <ul className={styles.memoryBubbleCloud}>
-              {visibleMemoryBubbles.map((memory, index) => (
-                <li
-                  key={memory.id}
-                  className={styles.memoryBubble}
-                  style={memoryBubbleStyle(memory, index)}
+          {memoryPanelScope === "all" && !memoryPanelSelectedFamily ? (
+            <div className={styles.memoryBubbleCloud} role="list" aria-label="PRISM memory directories">
+              {memoryFamilyDirectories.map((family) => (
+                <button
+                  key={family.id}
+                  type="button"
+                  role="listitem"
+                  className={styles.memoryFamilyCluster}
+                  data-memory-family-empty={family.itemCount === 0 ? "true" : undefined}
+                  style={family.style}
+                  onClick={() => void runMemoryTransition(() => {
+                    setMemoryPanelSelectedFamily(family.id);
+                    setFocusedMemoryId(null);
+                  })}
+                  disabled={family.itemCount === 0}
+                  aria-label={
+                    family.itemCount > 0
+                      ? `${family.label}: ${family.itemCount} bot${family.itemCount === 1 ? "" : "s"}, ${family.memoryCount} memories. Open directory.`
+                      : `${family.label}: empty directory.`
+                  }
+                  title={
+                    family.itemCount > 0
+                      ? `${family.label}: ${family.itemCount} bot${family.itemCount === 1 ? "" : "s"}, ${family.memoryCount} memories`
+                      : `${family.label}: empty`
+                  }
                 >
-                  <p>{memory.text}</p>
-                  <small>{Math.round(memory.confidence * 100)}%</small>
-                  <button
-                    type="button"
-                    onClick={() => void deleteMemory(memory.id)}
-                    aria-label={`Delete memory: ${memory.text}`}
-                  >
-                    ×
-                  </button>
-                </li>
+                  {family.itemCount > 0 && (
+                    <>
+                      <span className={styles.memoryFamilyClusterLabel}>{family.letter}</span>
+                      <strong>{family.itemCount}</strong>
+                    </>
+                  )}
+                </button>
               ))}
+            </div>
+          ) : memoryPanelScope === "all" && memoryPanelSelectedFamily ? (
+            selectedFamilyBotClusters.length > 0 ? (
+              <ul className={styles.memoryBubbleCloud}>
+                {selectedFamilyBotClusters.map((cluster) => (
+                  <li
+                    key={cluster.id}
+                    className={styles.memoryBubble}
+                    data-clickable="true"
+                    data-source-cluster="true"
+                    data-source-cluster-empty={cluster.memoryCount === 0 ? "true" : undefined}
+                    style={cluster.style}
+                    onClick={() => void runMemoryTransition(async () => {
+                      if (!cluster.botId) return;
+                      setMemoryPanelScope("bot");
+                      setMemoryPanelBotId(cluster.botId);
+                      setFocusedMemoryId(null);
+                      // Keep `memoryPanelSelectedFamily` set so the
+                      // bot-view back button returns to this family's
+                      // drill-down view instead of jumping all the way
+                      // to the directory.
+                      await refreshBotMemories(cluster.botId);
+                    })}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (!cluster.botId) return;
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      void runMemoryTransition(async () => {
+                        if (!cluster.botId) return;
+                        setMemoryPanelScope("bot");
+                        setMemoryPanelBotId(cluster.botId);
+                        setFocusedMemoryId(null);
+                        await refreshBotMemories(cluster.botId);
+                      });
+                    }}
+                    aria-label={
+                      cluster.botId
+                        ? `${cluster.botName}: ${cluster.memoryCount} memories. Open bot memories.`
+                        : `Prism default: ${cluster.memoryCount} memories.`
+                    }
+                    title={`${cluster.botName}: ${cluster.memoryCount} memories`}
+                  >
+                    {cluster.memoryCount > 0 && (
+                      <>
+                        <span className={styles.memorySourceClusterGlyph}>
+                          <BotGlyph
+                            name={cluster.botGlyph}
+                            size={36}
+                            strokeWidth={1.95}
+                          />
+                        </span>
+                        <div className={styles.memorySourceClusterInnerBubbles} aria-hidden="true">
+                          {cluster.innerBubbles.map((dot) => (
+                            <span key={dot.id} style={dot.style} />
+                          ))}
+                        </div>
+                        <strong className={styles.memorySourceClusterCount}>
+                          {cluster.memoryCount}
+                        </strong>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className={styles.memoryEmptyState}>
+                <strong>No bots in this family</strong>
+                <p>Add or recolor bots in this PRISM category to populate it.</p>
+              </div>
+            )
+          ) : visibleMemoryBubbles.length > 0 ? (
+            <ul
+              className={styles.memoryBubbleCloud}
+              onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                  setFocusedMemoryId(null);
+                }
+              }}
+            >
+              {visibleMemoryBubbles.map((memory) => {
+                const layout = memoryBubbleLayoutById.get(memory.id);
+                const uncertain = layout?.uncertain ?? false;
+                const selected = focusedMemoryId === memory.id;
+                const dimmed = Boolean(focusedMemoryId && !selected);
+                const inferred = isAssumptionMemory(memory);
+                const signalPercent = Math.round(memoryBubbleSignalValue(memory) * 100);
+                return (
+                  <li
+                    key={memory.id}
+                    className={styles.memoryBubble}
+                    data-clickable="true"
+                    data-memory-uncertain={uncertain ? "true" : undefined}
+                    data-memory-selected={selected ? "true" : undefined}
+                    data-memory-dimmed={dimmed ? "true" : undefined}
+                    data-memory-inferred={inferred ? "true" : undefined}
+                    style={{
+                      ...layout?.style,
+                      ...(inferred
+                        ? { "--memory-assumption-opacity": assumptionMemoryOpacity(memory) } as React.CSSProperties
+                        : {}),
+                    }}
+                    title={memory.text}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`${memory.text}. ${inferred ? "Certainty" : "Confidence"} ${signalPercent} percent.`}
+                    onClick={() => {
+                      setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
+                    }}
+                  >
+                    {selected ? (
+                      <div className={styles.memoryBubbleFocusDetails}>
+                        <strong>{signalPercent}%</strong>
+                        <span>{inferred ? "certainty" : "confidence"}</span>
+                      </div>
+                    ) : uncertain ? (
+                      <span className={styles.memoryUncertainCore} aria-hidden="true" />
+                    ) : (
+                      <p>{memory.text}</p>
+                    )}
+                    {selected && (
+                      <>
+                        <button
+                          type="button"
+                          className={`${styles.memoryBubbleAction} ${styles.memoryBubbleDeleteAction}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void deleteMemory(memory.id);
+                          }}
+                          aria-label={`Delete memory: ${memory.text}`}
+                          title="Delete memory"
+                        >
+                          ×
+                        </button>
+                        {!inferred && (
+                          <button
+                            type="button"
+                            className={`${styles.memoryBubbleAction} ${styles.memoryBubbleEditAction}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void editMemory(memory);
+                            }}
+                            aria-label={`Edit memory: ${memory.text}`}
+                            title="Edit memory"
+                          >
+                            ✎
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <div className={styles.memoryEmptyState}>
               <strong>No memories yet</strong>
               <p>
                 {memoryPanelScope === "all"
-                  ? "When Prism saves memories, they will float here."
+                  ? memoryPanelSelectedFamily
+                    ? "No memories are saved in this PRISM family yet."
+                    : "When Prism saves memories, they will appear in these directories."
                   : "When this bot saves a memory, it will float here."}
               </p>
             </div>
           )}
           {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+          {memoryTransitionLoading && (
+            <div
+              className={styles.memoryLoadingScreen}
+              role="status"
+              aria-live="polite"
+              aria-label="Opening memory view"
+            >
+              <div className={styles.memoryPrismLoader}>
+                <svg
+                  className={styles.memoryPrismLoaderTriangle}
+                  viewBox="0 0 100 100"
+                  aria-hidden="true"
+                >
+                  <path d="M50 9 90 84 10 84Z" fill="none" />
+                </svg>
+                <span>Opening memory</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -12803,16 +13967,11 @@ function HomeContent(): React.JSX.Element {
             // Chat-mode empty state:
             //   • DEFAULT — no hover, no commit: rainbow brand mark,
             //     PRISM home effects, generic title/hint, full picker grid.
-            //   • HOVER PREVIEW — hero stays the Prism triangle, tinted
-            //     to the hovered bot's normalized color. Title still
-            //     previews the bot, and the shell accent swaps to that bot.
             //   • ARMED — hero becomes the bot's full-color glyph, the
             //     selected tile stays visible; tapping the hero primes the
             //     starter hello + focuses compose (tap outside clears bot).
-            // `activeBot` resolves the right bot (hover > armed >
-            // persisted), so title/hint/shell just read from it. The hero
-            // receives the hovered bot as a separate preview input so it
-            // can stay Prism-branded until a click arms the bot.
+            // `activeBot` resolves the committed bot only, so hover never
+            // changes the hero, title, hint, or shell accent.
             // Density math runs against the visible bot window, not the
             // full library. The hue lens pans that window over a circular
             // hue-sorted ribbon so dense libraries move quickly while
@@ -12828,8 +13987,7 @@ function HomeContent(): React.JSX.Element {
                 : null;
             const suppressHeroCopy =
               pickerGeom?.suppressMobileHeroCopy === true && !emptyStateSearchActive;
-            const isPreviewing =
-              !pendingIncognito && hoveredBotId !== null && activeBot?.id === hoveredBotId;
+            const isPreviewing = false;
             const heroBot = activeBot;
             const privateBotName = pendingIncognito ? heroBot?.name?.trim() : "";
             const title = pendingIncognito
@@ -12845,7 +14003,7 @@ function HomeContent(): React.JSX.Element {
                 ? descriptionPreview
                 : "";
             // While the hue lens has zoomed into a color group AND nothing is
-            // armed/hovered yet, the hero is just a tinted Prism placeholder
+            // armed yet, the hero is just a tinted Prism placeholder
             // — tapping it would commit the user to a "start with default"
             // conversation when their actual intent is "let me pick from this
             // filtered group." Block the click + nudge them to pick a tile.
@@ -12946,19 +14104,11 @@ function HomeContent(): React.JSX.Element {
                     stays visible until the first message sends.
 
                     Interaction model:
-                      • Desktop (mouse): onPointerEnter sets
-                        hoveredBotId for a transient preview. The
-                        picker container's onPointerLeave clears it
-                        when the cursor crosses back out. Click arms
-                        via setSelectedBotId.
-                      • Final compact-pixel stage: hover preview is
-                        disabled. Tap/click only arms the selected bot,
-                        updates the interface color, and follows the
-                        same "visible until Send" contract.
-                      • Touch: onPointerEnter is filtered to mouse-only
-                        so a stray touch-generated pointerenter doesn't
-                        double-fire. Click fires normally on tap and
-                        arms the selection.
+                      • Hover may animate the tile itself, but it never
+                        previews or switches the active bot.
+                      • Tap/click arms the selected bot, updates the
+                        interface color, and follows the same "visible
+                        until Send" contract.
 
                     Either way, "Default" is not a tile — it's the
                     no-selection state. Sending with nothing armed
@@ -13016,20 +14166,10 @@ function HomeContent(): React.JSX.Element {
                       data-touch-active={touchPreview ? "true" : undefined}
                       style={frameStyle}
                       onPointerLeave={e => {
-                        // Leaving the picker cancels any pending dwell
-                        // and clears the preview IMMEDIATELY — no
-                        // debounce here. If the user has already
-                        // armed a bot with their eyes, we shouldn't make
-                        // them wait for the preview to fade.
                         if (e.pointerType === "mouse") {
-                          if (hoverDwellTimerRef.current) {
-                            clearTimeout(hoverDwellTimerRef.current);
-                            hoverDwellTimerRef.current = null;
-                          }
                           if (!geom.compactPixelGrid) {
                             resetPickerParallax(e.currentTarget);
                           }
-                          setHoveredBotId(null);
                         }
                       }}
                       onPointerDown={e => handleTouchPickerDown(e, geom)}
@@ -13120,37 +14260,30 @@ function HomeContent(): React.JSX.Element {
                             data-bot-id={b.id}
                             onPointerDown={e => {
                               lastBotPickerPointerTypeRef.current = e.pointerType;
+                              startBotContextLongPress(e, b);
                             }}
+                            onPointerUp={handleBotContextPointerEnd}
+                            onPointerCancel={handleBotContextPointerEnd}
                             onPointerEnter={e => {
-                              // Debounce the JS-driven preview (hero
-                              // glyph, title/hint, shell accent) so a
-                              // fast sweep across many tiles doesn't
-                              // strobe. The CSS-driven per-tile
-                              // magnification stays instant via pure
-                              // :hover. Any pending timer from the
-                              // previous tile is cancelled — only the
-                              // CURRENT dwell target commits.
                               if (e.pointerType !== "mouse" || geom.compactPixelGrid) return;
                               updatePickerParallax(e);
-                              if (hoverDwellTimerRef.current) {
-                                clearTimeout(hoverDwellTimerRef.current);
-                              }
-                              hoverDwellTimerRef.current = setTimeout(() => {
-                                setHoveredBotId(b.id);
-                                hoverDwellTimerRef.current = null;
-                              }, HOVER_DWELL_MS);
                             }}
                             onPointerMove={e => {
+                              handleBotContextPointerMove(e);
                               if (geom.compactPixelGrid) return;
                               updatePickerParallax(e);
                             }}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              openBotContextMenu(b, event.clientX, event.clientY);
+                            }}
                             onClick={(e) => {
-                              // Explicit click beats the dwell timer —
-                              // the user made a deliberate choice, no
-                              // reason to wait the 180ms dwell window.
-                              if (hoverDwellTimerRef.current) {
-                                clearTimeout(hoverDwellTimerRef.current);
-                                hoverDwellTimerRef.current = null;
+                              if (botContextSuppressClickRef.current) {
+                                botContextSuppressClickRef.current = false;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                return;
                               }
                               // Dense color-map mode starts at Stage 3 on
                               // mobile and Stage 4 elsewhere: the first
@@ -13183,7 +14316,6 @@ function HomeContent(): React.JSX.Element {
                                   return;
                                 }
                                 setSelectedBotId(null);
-                                setHoveredBotId(null);
                                 return;
                               }
                               commitEmptyStateBotSelection(b.id);
@@ -13650,6 +14782,7 @@ function HomeContent(): React.JSX.Element {
           />
         </form>
         {renderMessageContextMenu()}
+        {renderBotContextMenu()}
       </section>
 
       {renderSharedPanels()}
@@ -13880,9 +15013,6 @@ function HomeContent(): React.JSX.Element {
             // both modes feel like the same "start a new chat" surface:
             //   • DEFAULT — no hover, no armed bot: brand mark hero, full
             //     picker grid, generic title/hint.
-            //   • HOVER PREVIEW — hero stays the Prism triangle, tinted
-            //     to the hovered bot's normalized color. Title/hint still
-            //     preview the bot, and the shell accent swaps to that bot.
             //   • ARMED — hero becomes the bot's full-color glyph, the
             //     selected tile stays visible; tapping the hero primes the
             //     starter hello + focuses compose (tap outside clears bot).
@@ -13906,8 +15036,7 @@ function HomeContent(): React.JSX.Element {
                 : null;
             const suppressHeroCopy =
               pickerGeom?.suppressMobileHeroCopy === true && !emptyStateSearchActive;
-            const isPreviewing =
-              !pendingIncognito && hoveredBotId !== null && activeBot?.id === hoveredBotId;
+            const isPreviewing = false;
             const heroBot = activeBot;
             const privateBotName = pendingIncognito ? heroBot?.name?.trim() : "";
             const title = pendingIncognito
@@ -13923,7 +15052,7 @@ function HomeContent(): React.JSX.Element {
                 ? descriptionPreview
                 : "";
             // While the hue lens has zoomed into a color group AND nothing is
-            // armed/hovered yet, the hero is just a tinted Prism placeholder
+            // armed yet, the hero is just a tinted Prism placeholder
             // — tapping it would commit the user to a "start with default"
             // conversation when their actual intent is "let me pick from this
             // filtered group." Block the click + nudge them to pick a tile.
@@ -14071,19 +15200,10 @@ function HomeContent(): React.JSX.Element {
                       data-touch-active={touchPreview ? "true" : undefined}
                       style={frameStyle}
                       onPointerLeave={e => {
-                        // Cursor out → cancel any pending dwell and
-                        // clear preview immediately. No debounce on
-                        // leave — we don't want the preview to
-                        // linger once the cursor has moved on.
                         if (e.pointerType === "mouse") {
-                          if (hoverDwellTimerRef.current) {
-                            clearTimeout(hoverDwellTimerRef.current);
-                            hoverDwellTimerRef.current = null;
-                          }
                           if (!geom.compactPixelGrid) {
                             resetPickerParallax(e.currentTarget);
                           }
-                          setHoveredBotId(null);
                         }
                       }}
                       onPointerDown={e => handleTouchPickerDown(e, geom)}
@@ -14174,41 +15294,34 @@ function HomeContent(): React.JSX.Element {
                             data-bot-id={b.id}
                             onPointerDown={e => {
                               lastBotPickerPointerTypeRef.current = e.pointerType;
+                              startBotContextLongPress(e, b);
                             }}
+                            onPointerUp={handleBotContextPointerEnd}
+                            onPointerCancel={handleBotContextPointerEnd}
                             onPointerEnter={e => {
-                              // Debounce the JS-driven preview (hero
-                              // glyph, title/hint, shell accent) so a
-                              // fast sweep across tiles doesn't strobe.
-                              // The CSS-driven per-tile magnification
-                              // stays instant via pure :hover. Any
-                              // pending timer from the previous tile is
-                              // cancelled — only the CURRENT dwell
-                              // target commits.
                               if (e.pointerType !== "mouse" || geom.compactPixelGrid) return;
                               updatePickerParallax(e);
-                              if (hoverDwellTimerRef.current) {
-                                clearTimeout(hoverDwellTimerRef.current);
-                              }
-                              hoverDwellTimerRef.current = setTimeout(() => {
-                                setHoveredBotId(b.id);
-                                hoverDwellTimerRef.current = null;
-                              }, HOVER_DWELL_MS);
                             }}
                             onPointerMove={e => {
+                              handleBotContextPointerMove(e);
                               if (geom.compactPixelGrid) return;
                               updatePickerParallax(e);
                             }}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              openBotContextMenu(b, event.clientX, event.clientY);
+                            }}
                             onClick={(e) => {
-                              // Explicit click beats the dwell timer —
-                              // the user made a deliberate choice, no
-                              // reason to wait the 180ms dwell window.
+                              if (botContextSuppressClickRef.current) {
+                                botContextSuppressClickRef.current = false;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                return;
+                              }
                               // Setting selectedBotId also makes the
                               // compose dropdown auto-populate (both
                               // read from the same state).
-                              if (hoverDwellTimerRef.current) {
-                                clearTimeout(hoverDwellTimerRef.current);
-                                hoverDwellTimerRef.current = null;
-                              }
                               // Dense color-map mode mirrors the Chat
                               // picker. Mobile Stage 3+ / desktop Stage 4+
                               // snaps to a hue region before individual
@@ -14239,7 +15352,6 @@ function HomeContent(): React.JSX.Element {
                                   return;
                                 }
                                 setSelectedBotId(null);
-                                setHoveredBotId(null);
                                 return;
                               }
                               commitEmptyStateBotSelection(b.id);
@@ -14660,6 +15772,7 @@ function HomeContent(): React.JSX.Element {
           />
         </form>
         {renderMessageContextMenu()}
+        {renderBotContextMenu()}
       </section>
 
       {renderSharedPanels()}
