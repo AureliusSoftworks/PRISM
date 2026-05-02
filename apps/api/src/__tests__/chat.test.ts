@@ -134,6 +134,50 @@ describe("processChatMessage starter prompts", () => {
     assert.equal(fetchCount, 2);
   });
 
+  it("falls back to local starter chips when inference returns non-json", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "The accordion case hums beside a locked velvet door.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: "Sure! Here are some ideas, but I forgot the JSON shape.",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      Buffer.from("test-key"),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Henry",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.conversationStarters?.length, 4);
+    assert.match(result.conversationStarters?.[1] ?? "", /Henry/);
+  });
+
   it("keeps private chats ephemeral while honoring the selected provider and bot", async () => {
     const db = createChatTestDb();
 

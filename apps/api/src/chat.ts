@@ -28,10 +28,28 @@ const config = getAppConfig();
 export interface ProcessChatMessageResult {
   conversation: Conversation;
   conversationStarters?: string[];
+  memoryLearned?: {
+    botId?: string;
+    count: number;
+    maxConfidence: number;
+  };
 }
 
 const INFER_STARTER_TEMPERATURE = 0.38;
 const INFER_STARTER_MAX_TOKENS = 420;
+const STARTER_FALLBACK_STOP_WORDS = new Set([
+  "about",
+  "there",
+  "would",
+  "could",
+  "their",
+  "which",
+  "because",
+  "really",
+  "maybe",
+  "first",
+  "should",
+]);
 
 function parseSuggestedRepliesPayload(raw: string): string[] {
   const trimmed = raw.trim();
@@ -39,6 +57,12 @@ function parseSuggestedRepliesPayload(raw: string): string[] {
   const fence = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)```$/);
   if (fence?.[1]) {
     payload = fence[1].trim();
+  } else {
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      payload = trimmed.slice(firstBrace, lastBrace + 1);
+    }
   }
   try {
     const parsedUnknown = JSON.parse(payload) as { suggestions?: unknown };
@@ -52,6 +76,26 @@ function parseSuggestedRepliesPayload(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+function fallbackConversationStarters(
+  assistantOpening: string,
+  personaLabel: string | undefined
+): string[] {
+  const label = personaLabel?.trim() || "Prism";
+  const words = assistantOpening
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length >= 5)
+    .filter((word) => !STARTER_FALLBACK_STOP_WORDS.has(word));
+  const topic = words[0] ?? "this";
+  return [
+    `What should I notice about ${topic}?`,
+    `Ask me a playful question, ${label}.`,
+    "Give me one concrete next step.",
+    "Surprise me with another angle.",
+  ];
 }
 
 /** Second-pass call: derives 3–4 user phrasings that continue naturally from the assistant opener. */
@@ -106,7 +150,7 @@ async function inferConversationStarters(
   } catch {
     // Non-fatal: chips are optional chrome.
   }
-  return [];
+  return fallbackConversationStarters(opener, personaLabel);
 }
 
 export interface UserChatSettings {
@@ -597,6 +641,7 @@ export async function processChatMessage(
   // Cross-thread facts: non-incognito turns with autoMemory on. When a
   // concrete bot is active, the memory is scoped to that bot so its
   // personality can grow across Chat and Sandbox.
+  let memoryLearned: ProcessChatMessageResult["memoryLearned"];
   if (
     !skipPersonalFacts &&
     settings.autoMemory &&
@@ -604,7 +649,7 @@ export async function processChatMessage(
   ) {
     const candidates = extractMemoryCandidates(message);
     if (candidates.length > 0) {
-      await persistMemoryCandidates(
+      const storedMemories = await persistMemoryCandidates(
         db,
         provider,
         userId,
@@ -613,6 +658,15 @@ export async function processChatMessage(
         candidates,
         userKey
       );
+      if (storedMemories.length > 0) {
+        memoryLearned = {
+          ...(activeMemoryBotId ? { botId: activeMemoryBotId } : {}),
+          count: storedMemories.length,
+          maxConfidence: Math.max(
+            ...storedMemories.map((memory) => memory.confidence)
+          ),
+        };
+      }
     }
   }
 
@@ -626,7 +680,8 @@ export async function processChatMessage(
         db,
         provider,
         userId,
-        activeConversationId
+        activeConversationId,
+        userKey
       ).catch(() => {});
     } else if (mode === "sandbox") {
       // Thread compaction is NOT gated by autoMemory — that setting is a
@@ -722,6 +777,7 @@ export async function processChatMessage(
 
   return {
     conversation: conversationPersisted,
+    ...(memoryLearned ? { memoryLearned } : {}),
     ...(conversationStartersPersisted
       ? { conversationStarters: conversationStartersPersisted }
       : {}),
