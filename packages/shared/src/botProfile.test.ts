@@ -27,7 +27,11 @@ describe("bot profile serialization", () => {
     const profile = parseStoredBotPrompt("").fields;
     profile.purpose.statement = "a moonlit pollster";
     profile.core.traits = "curious, exacting";
-    profile.core.humor = 1;
+    profile.core.openness = 2;
+    profile.core.conscientiousness = 1;
+    profile.core.extraversion = -1;
+    profile.core.agreeableness = 0;
+    profile.core.emotionalStability = 2;
     profile.identity.species = "android";
     profile.worldview.politicalView = -1;
     profile.appearance.description = "silver coat, tired eyes";
@@ -37,6 +41,63 @@ describe("bot profile serialization", () => {
 
     assert.deepEqual(parsed, profile);
     assert.equal(serializeStoredBotPrompt(parsed, "Mira"), stored);
+  });
+
+  it("composes filled OCEAN personality sliders into model-facing prose", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.core.openness = 2;
+    profile.core.conscientiousness = 1;
+    profile.core.extraversion = -2;
+    profile.core.agreeableness = -1;
+    profile.core.emotionalStability = 1;
+
+    const prose = composeBotProfileProse(profile, "Mira");
+
+    assert.match(prose, /Openness: highly exploratory and imaginative/);
+    assert.match(prose, /Conscientiousness: methodical/);
+    assert.match(prose, /Extraversion: reserved/);
+    assert.match(prose, /Agreeableness: gently questioning/);
+    assert.match(prose, /Emotional baseline: steady/);
+  });
+
+  it("keeps legacy personality sliders while defaulting missing OCEAN fields", () => {
+    const stored = [
+      "Old prose",
+      BOT_PROFILE_META_START,
+      JSON.stringify({
+        v: 2,
+        purpose: { statement: "A careful archivist.", legacyNotes: "" },
+        core: {
+          traits: "dry, patient",
+          communicationStyle: "formal",
+          humor: 1,
+          curiosity: -1,
+          directness: 2,
+          interests: "",
+          boundaries: "",
+          quirks: "",
+        },
+        identity: {},
+        worldview: {},
+        appearance: {},
+      }),
+      BOT_PROFILE_META_END,
+    ].join("\n");
+
+    const parsed = parseStoredBotPrompt(stored).fields;
+    const prose = composeBotProfileProse(parsed, "Rita");
+
+    assert.equal(parsed.core.openness, null);
+    assert.equal(parsed.core.conscientiousness, null);
+    assert.equal(parsed.core.extraversion, null);
+    assert.equal(parsed.core.agreeableness, null);
+    assert.equal(parsed.core.emotionalStability, null);
+    assert.equal(parsed.core.humor, 1);
+    assert.equal(parsed.core.curiosity, -1);
+    assert.equal(parsed.core.directness, 2);
+    assert.match(prose, /Humor: witty/);
+    assert.match(prose, /Curiosity: somewhat grounded/);
+    assert.match(prose, /Directness: blunt when useful/);
   });
 
   it("migrates raw legacy prompts into purpose fine print", () => {

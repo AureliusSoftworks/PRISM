@@ -52,8 +52,16 @@ export interface BotPurposeProfile {
 export interface BotCoreProfile {
   traits: string;
   communicationStyle: BotVoicePreset;
+  openness: BotProfileScaleValue | null;
+  conscientiousness: BotProfileScaleValue | null;
+  extraversion: BotProfileScaleValue | null;
+  agreeableness: BotProfileScaleValue | null;
+  emotionalStability: BotProfileScaleValue | null;
+  /** Legacy pre-OCEAN slider; still parsed so older saved bots keep their behavior. */
   humor: BotProfileScaleValue | null;
+  /** Legacy pre-OCEAN slider; still parsed so older saved bots keep their behavior. */
   curiosity: BotProfileScaleValue | null;
+  /** Legacy pre-OCEAN slider; still parsed so older saved bots keep their behavior. */
   directness: BotProfileScaleValue | null;
   interests: string;
   boundaries: string;
@@ -121,6 +129,11 @@ export const DEFAULT_BOT_PROFILE_FIELDS: BotProfileFields = {
   core: {
     traits: "",
     communicationStyle: "neutral",
+    openness: null,
+    conscientiousness: null,
+    extraversion: null,
+    agreeableness: null,
+    emotionalStability: null,
     humor: null,
     curiosity: null,
     directness: null,
@@ -304,6 +317,51 @@ export function composeBotProfileProse(
     addLines("Core personality", [
       core.traits ? `Traits: ${core.traits.trim()}` : "",
       describeVoiceForModel(core.communicationStyle),
+      core.openness !== null
+        ? `Openness: ${scaleLabel(core.openness, [
+            "grounded and concrete",
+            "mostly practical",
+            "balanced",
+            "imaginative",
+            "highly exploratory and imaginative",
+          ])}`
+        : "",
+      core.conscientiousness !== null
+        ? `Conscientiousness: ${scaleLabel(core.conscientiousness, [
+            "spontaneous and loose",
+            "lightly structured",
+            "balanced",
+            "methodical",
+            "highly organized and methodical",
+          ])}`
+        : "",
+      core.extraversion !== null
+        ? `Extraversion: ${scaleLabel(core.extraversion, [
+            "reserved",
+            "quietly expressive",
+            "balanced",
+            "expressive",
+            "highly energetic and expressive",
+          ])}`
+        : "",
+      core.agreeableness !== null
+        ? `Agreeableness: ${scaleLabel(core.agreeableness, [
+            "challenging and skeptical",
+            "gently questioning",
+            "balanced",
+            "cooperative",
+            "highly cooperative and accommodating",
+          ])}`
+        : "",
+      core.emotionalStability !== null
+        ? `Emotional baseline: ${scaleLabel(core.emotionalStability, [
+            "reactive and emotionally vivid",
+            "sensitive",
+            "balanced",
+            "steady",
+            "very steady and composed",
+          ])}`
+        : "",
       core.humor !== null
         ? `Humor: ${scaleLabel(core.humor, [
             "very dry",
@@ -413,6 +471,11 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
     core: {
       traits: readString(core, "traits"),
       communicationStyle: readVoicePreset(core, "communicationStyle"),
+      openness: readScaleValue(core, "openness"),
+      conscientiousness: readScaleValue(core, "conscientiousness"),
+      extraversion: readScaleValue(core, "extraversion"),
+      agreeableness: readScaleValue(core, "agreeableness"),
+      emotionalStability: readScaleValue(core, "emotionalStability"),
       humor: readScaleValue(core, "humor"),
       curiosity: readScaleValue(core, "curiosity"),
       directness: readScaleValue(core, "directness"),
@@ -933,9 +996,11 @@ export function randomBotProfile(botName?: string | null): BotProfileFields {
   profile.purpose.statement = randomPurpose(tone);
   profile.core.traits = randomFromTone(tone, RANDOM_FUNNY_TRAITS, RANDOM_SERIOUS_TRAITS);
   profile.core.communicationStyle = randomItem(VOICE_ORDER);
-  profile.core.humor = randomItem(SCALE_VALUES);
-  profile.core.curiosity = randomScale(0.55);
-  profile.core.directness = randomScale(0.45);
+  profile.core.openness = randomScale(0.85);
+  profile.core.conscientiousness = randomScale(0.75);
+  profile.core.extraversion = randomScale(0.65);
+  profile.core.agreeableness = randomScale(0.75);
+  profile.core.emotionalStability = randomScale(0.7);
   profile.core.interests = randomFromTone(tone, RANDOM_FUNNY_INTERESTS, RANDOM_SERIOUS_INTERESTS);
   profile.core.boundaries = randomString(RANDOM_BOUNDARIES);
   profile.core.quirks = randomFromTone(tone, RANDOM_FUNNY_QUIRKS, RANDOM_SERIOUS_QUIRKS);
