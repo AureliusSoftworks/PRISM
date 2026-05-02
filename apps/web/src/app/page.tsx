@@ -64,7 +64,33 @@ const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 // slot used for conversation deletion without id collisions.
 const BOT_DELETE_KEY_PREFIX = "bot:";
 
-const MEMORY_TRANSITION_MIN_MS = 420;
+// Cinematic zoom + fade transition between memory directory levels.
+// The total motion budget (~380ms) is split into matched exit and enter
+// halves so the directional zoom reads as one continuous "push through" /
+// "pull back" gesture instead of a hard cut.
+const MEMORY_TRANSITION_EXIT_MS = 190;
+const MEMORY_TRANSITION_ENTER_MS = 190;
+const MEMORY_PHYSICS_DURATION_MS = 2400;
+// Spring + damping tuned to feel like underdamped drawer-inertia:
+// a single leftward overshoot, one gentle rightward bounce, then settle.
+// Underdamped (zeta < 1) so the items breathe; not so soft that they
+// oscillate forever.
+const MEMORY_PHYSICS_SPRING = 36;
+const MEMORY_PHYSICS_DAMPING = 7.2;
+const MEMORY_PHYSICS_WALL_RESTITUTION = 0.5;
+// The drawer slides in from the right (panelIn keyframe: translateX(100% + 32px) -> 0),
+// so its deceleration imparts leftward inertia on every child. Negative = leftward.
+const MEMORY_PHYSICS_DRAWER_DIR_X = -1;
+// How far past their layout target the items "throw" before the spring
+// reels them back. Px in the cloud's local space. Tuned for a noticeable
+// but not chaotic overshoot.
+const MEMORY_PHYSICS_DRAWER_VELOCITY = 540;
+// Slight per-item variance keeps the motion from looking lockstep without
+// breaking the unified "drawer pushed everything together" feel.
+const MEMORY_PHYSICS_VELOCITY_JITTER_X = 90;
+const MEMORY_PHYSICS_VELOCITY_JITTER_Y = 140;
+const MEMORY_PHYSICS_OFFSET_JITTER_X = 18;
+const MEMORY_PHYSICS_OFFSET_JITTER_Y = 14;
 const BOT_CONTEXT_LONG_PRESS_MS = 480;
 const BOT_CONTEXT_LONG_PRESS_MOVE_CANCEL_PX = 12;
 
@@ -109,6 +135,15 @@ const MOBILE_SIDEBAR_SWIPE_OPEN_PX = 56;
 const MOBILE_SIDEBAR_SWIPE_VERTICAL_CANCEL_PX = 44;
 const MOBILE_SIDEBAR_SWIPE_DIRECTION_RATIO = 1.25;
 const DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT = 0.45;
+const MEMORY_RATIO_EMPTY_SIZE = 42;
+// MIN_SIZE is the floor for any non-empty memory bubble. It must be large
+// enough to comfortably fit the bot glyph (currently 40px) plus breathing
+// room, so the smallest orbs in a dense family drill-down still read as
+// "orb with glyph" rather than "glyph in a circle".
+const MEMORY_RATIO_MIN_SIZE = 72;
+const MEMORY_RATIO_SMALL_MAX_SIZE = 84;
+const MEMORY_RATIO_MEDIUM_MAX_SIZE = 116;
+const MEMORY_RATIO_LARGE_MAX_SIZE = 184;
 type DevToolsBotQuantity = number | "";
 type DevToolsMemorySeedSource = "direct" | "inferred" | "compiled";
 type DevToolsPanelPosition = { x: number; y: number };
@@ -126,6 +161,9 @@ type SidebarEdgeSwipeState = {
 type MessageMenuAnchor = "center" | "below";
 
 const MESSAGE_COPY_FEEDBACK_MS = 1600;
+const MEMORY_TOAST_DISMISS_MS = 7000;
+const MEMORY_TOAST_REARM_MS = 2500;
+const MEMORY_TOAST_VISIBLE_LIMIT = 3;
 
 // ── Prism logo letter palette ─────────────────────────────────────────
 // One hex per letter of "prism", mirroring the per-letter stroke colors
@@ -200,6 +238,19 @@ function randomDevToolsGhostMessage(): string {
   return ghostCount === 1
     ? "1 ghost was added."
     : `${ghostCount} ghosts were added.`;
+}
+
+function ratioBubbleSize(count: number, maxCount: number): number {
+  if (count <= 0) return MEMORY_RATIO_EMPTY_SIZE;
+  const safeMax = Math.max(1, maxCount);
+  const ratio = count / safeMax;
+  const maxSize =
+    safeMax <= 2
+      ? MEMORY_RATIO_SMALL_MAX_SIZE
+      : safeMax <= 8
+        ? MEMORY_RATIO_MEDIUM_MAX_SIZE
+        : MEMORY_RATIO_LARGE_MAX_SIZE;
+  return Math.max(MEMORY_RATIO_MIN_SIZE, Math.round(ratio * maxSize));
 }
 
 function clampDevToolsPanelPosition(
@@ -1462,8 +1513,9 @@ function rowBorderMixPercent(
 type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images" | "memories";
-type MemoryPanelScope = "bot" | "session" | "all";
+type MemoryPanelScope = "bot" | "default" | "session" | "all";
 type ClientAccessState = "checking" | "allowed" | "blocked";
+const AUTO_TITLE_REFRESH_DELAYS_MS = [1500, 4000, 8000] as const;
 // Which post-auth surface is currently rendered. "hub" is the landing
 // screen shown after login; each mode tile navigates to a specific
 // experience. Future modes can be advertised as disabled Hub tiles
@@ -1486,6 +1538,20 @@ interface ConversationSummary {
   /** True when the conversation has at least one assistant reply; distinguishes "Default was last" from "no reply yet". */
   hasAssistantReply: boolean;
 }
+interface ConversationGroupSummary {
+  key: string;
+  botId: string | null;
+  name: string;
+  glyph: BotGlyphName;
+  color: string | null;
+  count: number;
+  conversations: ConversationSummary[];
+  latestUpdatedAt: string;
+  unread: boolean;
+}
+type SidebarConversationItem =
+  | { kind: "conversation"; conversation: ConversationSummary }
+  | { kind: "group"; group: ConversationGroupSummary };
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -1533,6 +1599,11 @@ interface ConversationDetail {
 interface ChatPostEnvelope {
   conversation: ConversationDetail;
   conversationStarters?: string[];
+  memoryLearned?: {
+    created?: MemoryEventPayload[];
+    retracted?: MemoryEventPayload[];
+    maxConfidence?: number;
+  };
 }
 interface UserSettings {
   theme: Theme;
@@ -1556,6 +1627,25 @@ interface UserMemory {
   text: string;
   source?: "direct" | "inferred" | "compiled";
   certainty?: number;
+  sourceMessageIds?: string[];
+}
+
+interface MemoryEventPayload {
+  id: string;
+  text: string;
+  botId: string | null;
+  conversationId?: string;
+  confidence: number;
+  source?: "direct" | "inferred" | "compiled";
+  certainty?: number;
+  sourceMessageIds?: string[];
+}
+
+interface MemoryToast {
+  id: string;
+  kind: "created" | "retracted";
+  memory: MemoryEventPayload;
+  expiresAt: number;
 }
 interface ModelCatalogEntry {
   id: string;
@@ -1705,7 +1795,16 @@ function botProfileCategoryCount(
           profile.core.interests,
           profile.core.boundaries,
           profile.core.quirks
-        ) + profileScaleFilled(profile.core.humor, profile.core.curiosity, profile.core.directness)
+        ) + profileScaleFilled(
+          profile.core.openness,
+          profile.core.conscientiousness,
+          profile.core.extraversion,
+          profile.core.agreeableness,
+          profile.core.emotionalStability,
+          profile.core.humor,
+          profile.core.curiosity,
+          profile.core.directness
+        )
       );
     case "character":
       return (
@@ -2402,11 +2501,11 @@ interface MemoryFamilyBotCluster {
 }
 
 const MEMORY_FAMILY_DIRECTORY_SLOTS: readonly (readonly [number, number])[] = [
-  [20, 24],
-  [50, 18],
-  [80, 25],
-  [30, 74],
-  [70, 74],
+  [50, 28],
+  [87, 43],
+  [73, 68],
+  [27, 68],
+  [13, 43],
 ] as const;
 
 const MEMORY_BUBBLE_CLOUD_SLOTS: readonly (readonly [number, number])[] = [
@@ -2422,10 +2521,12 @@ const MEMORY_BUBBLE_CLOUD_SLOTS: readonly (readonly [number, number])[] = [
 ] as const;
 
 const MEMORY_UNCERTAIN_CONFIDENCE_MAX = 0.48;
-const MEMORY_BUBBLE_MIN_SIZE = 150;
-const MEMORY_BUBBLE_MAX_SIZE = 210;
-const MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE = 58;
-const MEMORY_UNCERTAIN_BUBBLE_MAX_SIZE = 82;
+// Individual memory bubbles are intentionally compact. The prose can trail
+// off at rest; clicking a bubble opens a full-text detail card below.
+const MEMORY_BUBBLE_MIN_SIZE = 82;
+const MEMORY_BUBBLE_MAX_SIZE = 136;
+const MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE = 38;
+const MEMORY_UNCERTAIN_BUBBLE_MAX_SIZE = 68;
 
 function memoryConfidenceValue(memory: UserMemory): number {
   return Number.isFinite(memory.confidence) ? Math.max(0, Math.min(1, memory.confidence)) : 0.5;
@@ -2448,11 +2549,6 @@ function memoryBubbleSignalValue(memory: UserMemory): number {
     ? Math.max(0, Math.min(1, memory.certainty as number))
     : memoryConfidenceValue(memory);
 }
-
-// Diameter (px) for bot clusters with zero memories inside the family
-// drill-down. Small enough to read as "presence indicator", still big
-// enough to be tappable on touch.
-const MEMORY_EMPTY_CLUSTER_SIZE = 40;
 
 function stableUnitValue(seed: string): number {
   let hash = 2166136261;
@@ -2593,6 +2689,64 @@ function resolveRowColor(
     if (live) return live;
   }
   return null;
+}
+
+function conversationGroupKey(c: ConversationSummary): string {
+  return c.botId ? `bot:${c.botId}` : "default";
+}
+
+function conversationGroupBotId(key: string): string | null {
+  return key.startsWith("bot:") ? key.slice("bot:".length) : null;
+}
+
+function conversationGroupDeleteKey(key: string): string {
+  return `group:${key}`;
+}
+
+function buildConversationGroupSummary(
+  key: string,
+  conversations: ConversationSummary[],
+  bots: Bot[],
+  unreadConversationIds: Set<string>
+): ConversationGroupSummary {
+  const botId = conversationGroupBotId(key);
+  const bot = botId ? bots.find((candidate) => candidate.id === botId) : null;
+  const fallbackColor =
+    conversations.find((conversation) => conversation.lastBotColor)?.lastBotColor ?? null;
+  return {
+    key,
+    botId,
+    name: bot?.name?.trim() || (botId ? "Deleted bot" : DEFAULT_ASSISTANT_NAME),
+    glyph: bot
+      ? isBotGlyphName(bot.glyph)
+        ? bot.glyph
+        : DEFAULT_BOT_GLYPH
+      : "triangle",
+    color: bot?.color ?? fallbackColor,
+    count: conversations.length,
+    conversations,
+    latestUpdatedAt: conversations[0]?.updatedAt ?? "",
+    unread: conversations.some((conversation) => unreadConversationIds.has(conversation.id)),
+  };
+}
+
+function buildConversationGroups(
+  conversations: ConversationSummary[],
+  bots: Bot[],
+  unreadConversationIds: Set<string>
+): ConversationGroupSummary[] {
+  const grouped = new Map<string, ConversationSummary[]>();
+  for (const conversation of conversations) {
+    const key = conversationGroupKey(conversation);
+    const existing = grouped.get(key);
+    if (existing) existing.push(conversation);
+    else grouped.set(key, [conversation]);
+  }
+  return [...grouped.entries()]
+    .filter(([, rows]) => rows.length > 1)
+    .map(([key, rows]) =>
+      buildConversationGroupSummary(key, rows, bots, unreadConversationIds)
+    );
 }
 
 function ThemeGlyph({ mode }: { mode: Theme }): React.ReactElement {
@@ -7006,14 +7160,6 @@ function BotProfileBuilder({
         return (
           <>
             <label className={styles.botProfileField}>
-              <span>Traits</span>
-              <input
-                value={profile.core.traits}
-                onChange={(event) => updateCore("traits", event.currentTarget.value)}
-                placeholder="patient, strange, decisive, gentle..."
-              />
-            </label>
-            <label className={styles.botProfileField}>
               <span>Communication style</span>
               <select
                 value={profile.core.communicationStyle}
@@ -7026,14 +7172,58 @@ function BotProfileBuilder({
                 ))}
               </select>
             </label>
+            <div className={styles.botProfileSubsection}>
+              <span>OCEAN balance</span>
+              <small>Small shifts change the bot's center of gravity without locking it into a type.</small>
+            </div>
             <BotProfileScaleControl
-              label="Humor"
-              value={profile.core.humor}
-              labels={["Very dry", "Restrained", "Balanced", "Witty", "Very playful"]}
-              leftLabel="Dry"
-              rightLabel="Playful"
-              onChange={(value) => updateCore("humor", value)}
+              label="Openness"
+              value={profile.core.openness}
+              labels={["Grounded", "Practical", "Balanced", "Imaginative", "Highly exploratory"]}
+              leftLabel="Grounded"
+              rightLabel="Imaginative"
+              onChange={(value) => updateCore("openness", value)}
             />
+            <BotProfileScaleControl
+              label="Conscientiousness"
+              value={profile.core.conscientiousness}
+              labels={["Spontaneous", "Loose", "Balanced", "Methodical", "Highly organized"]}
+              leftLabel="Spontaneous"
+              rightLabel="Methodical"
+              onChange={(value) => updateCore("conscientiousness", value)}
+            />
+            <BotProfileScaleControl
+              label="Extraversion"
+              value={profile.core.extraversion}
+              labels={["Reserved", "Quiet", "Balanced", "Expressive", "Highly energetic"]}
+              leftLabel="Reserved"
+              rightLabel="Expressive"
+              onChange={(value) => updateCore("extraversion", value)}
+            />
+            <BotProfileScaleControl
+              label="Agreeableness"
+              value={profile.core.agreeableness}
+              labels={["Challenging", "Questioning", "Balanced", "Cooperative", "Highly accommodating"]}
+              leftLabel="Challenging"
+              rightLabel="Cooperative"
+              onChange={(value) => updateCore("agreeableness", value)}
+            />
+            <BotProfileScaleControl
+              label="Emotional baseline"
+              value={profile.core.emotionalStability}
+              labels={["Reactive", "Sensitive", "Balanced", "Steady", "Very composed"]}
+              leftLabel="Reactive"
+              rightLabel="Steady"
+              onChange={(value) => updateCore("emotionalStability", value)}
+            />
+            <label className={styles.botProfileField}>
+              <span>Trait notes / flavor text</span>
+              <input
+                value={profile.core.traits}
+                onChange={(event) => updateCore("traits", event.currentTarget.value)}
+                placeholder="patient, strange, decisive, gentle..."
+              />
+            </label>
             <label className={styles.botProfileField}>
               <span>What they lean into</span>
               <input
@@ -7220,6 +7410,8 @@ function HomeContent(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [draft, setDraft] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingOriginalText, setEditingOriginalText] = useState("");
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   /** Quick-replies after “Talk to me!”; scoped to `conversationId` so thread switches cannot show stale chips. */
@@ -7235,13 +7427,27 @@ function HomeContent(): React.JSX.Element {
   const [pairingCopyStatus, setPairingCopyStatus] = useState<string | null>(null);
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [botMemories, setBotMemories] = useState<UserMemory[]>([]);
+  const [memoryToasts, setMemoryToasts] = useState<MemoryToast[]>([]);
+  const [pausedMemoryToastIds, setPausedMemoryToastIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [directMemoryCountsByBotId, setDirectMemoryCountsByBotId] = useState<Record<string, number>>({});
   const [defaultDirectMemoryCount, setDefaultDirectMemoryCount] = useState(0);
   const [memoryPanelScope, setMemoryPanelScope] = useState<MemoryPanelScope>("bot");
   const [memoryPanelBotId, setMemoryPanelBotId] = useState<string | null>(null);
   const [memoryPanelSelectedFamily, setMemoryPanelSelectedFamily] = useState<PrismGroupId | null>(null);
   const [focusedMemoryId, setFocusedMemoryId] = useState<string | null>(null);
-  const [memoryTransitionLoading, setMemoryTransitionLoading] = useState(false);
+  // Phase + direction drive the cinematic zoom + fade between memory
+  // directory levels. We keep them as separate state so React can apply
+  // the data attributes in lockstep when a navigation begins.
+  const [memoryTransitionPhase, setMemoryTransitionPhase] =
+    useState<"idle" | "exiting" | "entering">("idle");
+  const [memoryTransitionDirection, setMemoryTransitionDirection] =
+    useState<"forward" | "backward">("forward");
+  const [memoryPhysicsSeed, setMemoryPhysicsSeed] = useState(0);
+  const memoryPanelRef = useRef<HTMLDivElement | null>(null);
+  const memoryPhysicsFrameRef = useRef<number | null>(null);
+  const [memoryPhysicsActive, setMemoryPhysicsActive] = useState(false);
   const [pendingReply, setPendingReply] = useState(false);
   const [pendingReplyConversationId, setPendingReplyConversationId] =
     useState<string | null>(null);
@@ -7251,6 +7457,7 @@ function HomeContent(): React.JSX.Element {
     () => new Set()
   );
   const [unreadConversationOrder, setUnreadConversationOrder] = useState<string[]>([]);
+  const [openConversationGroupKey, setOpenConversationGroupKey] = useState<string | null>(null);
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
   const selectedIdRef = useRef<string | null>(null);
   const detailIdRef = useRef<string | null>(null);
@@ -7491,12 +7698,6 @@ function HomeContent(): React.JSX.Element {
   // DELETE_CONFIRM_WINDOW_MS so the ✓ doesn't linger unexpectedly.
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const pendingDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Two-stage resend confirmation on user-message bubbles. Mirrors the
-  // pendingDeleteKey pattern but lives in its own slot so the two armed
-  // states stay independent (resend isn't destructive, so it shouldn't
-  // block delete and vice versa). Auto-disarms on the same window.
-  const [pendingResendId, setPendingResendId] = useState<string | null>(null);
-  const pendingResendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Hold-to-delete-all gesture: `holdingKey` tracks which button is currently
   // being pressed, which the CSS keys off (via `data-holding`) to light up
   // the held × / header button AND — through the list-level
@@ -7714,6 +7915,9 @@ function HomeContent(): React.JSX.Element {
     setSidebarOpen(false);
     if (nextPanel === "bots") {
       setBotPanelLibraryEnabled(true);
+    }
+    if (nextPanel === "memories") {
+      setMemoryPhysicsSeed((seed) => seed + 1);
     }
   }, []);
 
@@ -8146,6 +8350,43 @@ function HomeContent(): React.JSX.Element {
     },
     [conversations, privateChatActive, selectedId, unreadConversationOrder]
   );
+  const conversationGroups = useMemo(
+    () => buildConversationGroups(visibleConversations, bots, unreadConversationIds),
+    [visibleConversations, bots, unreadConversationIds]
+  );
+  const conversationGroupsByKey = useMemo(
+    () => new Map(conversationGroups.map((group) => [group.key, group])),
+    [conversationGroups]
+  );
+  const openConversationGroup = openConversationGroupKey
+    ? conversationGroupsByKey.get(openConversationGroupKey) ?? null
+    : null;
+  const sidebarConversationItems = useMemo<SidebarConversationItem[]>(() => {
+    if (openConversationGroup) {
+      return openConversationGroup.conversations.map((conversation) => ({
+        kind: "conversation",
+        conversation,
+      }));
+    }
+    const renderedGroupKeys = new Set<string>();
+    return visibleConversations.flatMap((conversation): SidebarConversationItem[] => {
+      const key = conversationGroupKey(conversation);
+      const group = conversationGroupsByKey.get(key);
+      if (group && group.count > 1) {
+        if (renderedGroupKeys.has(key)) return [];
+        renderedGroupKeys.add(key);
+        return [{ kind: "group", group }];
+      }
+      return [{ kind: "conversation", conversation }];
+    });
+  }, [conversationGroupsByKey, openConversationGroup, visibleConversations]);
+
+  useEffect(() => {
+    if (openConversationGroupKey && !conversationGroupsByKey.has(openConversationGroupKey)) {
+      setOpenConversationGroupKey(null);
+    }
+  }, [conversationGroupsByKey, openConversationGroupKey]);
+
   const showPrivateConversationEmptyState =
     privateChatActive && visibleConversations.length === 0;
   const pendingReplyVisible =
@@ -8596,6 +8837,19 @@ function HomeContent(): React.JSX.Element {
     setComposerPrimed(false);
   }, [selectedId, view]);
 
+  useEffect(() => {
+    if (memoryToasts.length === 0) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setMemoryToasts((current) =>
+        current.filter((toast) =>
+          pausedMemoryToastIds.has(toast.id) || toast.expiresAt > now
+        )
+      );
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [memoryToasts.length, pausedMemoryToastIds]);
+
   // Every entrance into Sandbox lands on a fresh, empty chat. Sandbox
   // is a playground — users expect each visit to start from zero, not
   // resume whatever thread was last open. Fires on:
@@ -8684,28 +8938,64 @@ function HomeContent(): React.JSX.Element {
     );
     setBotMemories(d.memories);
   }
+  async function refreshDefaultMemories() {
+    const d = await api<{ memories: UserMemory[] }>("/api/memories?scope=default");
+    setBotMemories(d.memories);
+  }
+  async function refreshOpenMemoryViews() {
+    await refreshMemories();
+    if (memoryPanelScope === "default") {
+      await refreshDefaultMemories();
+    } else if (memoryPanelBot?.id) {
+      await refreshBotMemories(memoryPanelBot.id);
+    }
+  }
   async function refreshBots() { const d = await api<{ bots: Bot[] }>("/api/bots"); setBots(d.bots); }
   async function refreshImages() { const d = await api<{ images: ImageRecord[] }>("/api/images"); setImages(d.images); }
 
-  async function runMemoryTransition(work: () => void | Promise<void>) {
+  async function runMemoryTransition(
+    work: () => void | Promise<void>,
+    direction: "forward" | "backward",
+  ) {
+    // A monotonic run id lets a fresher navigation pre-empt an older one
+    // (e.g. rapid back-back-back) without the older run flipping the
+    // phase back to "idle" out from under it.
     const runId = memoryTransitionRunRef.current + 1;
     memoryTransitionRunRef.current = runId;
-    const startedAt = Date.now();
-    setMemoryTransitionLoading(true);
-    await new Promise<void>((resolve) => {
-      window.requestAnimationFrame(() => resolve());
-    });
+    const isCurrent = () => memoryTransitionRunRef.current === runId;
+
+    setMemoryTransitionDirection(direction);
+    setMemoryTransitionPhase("exiting");
+
+    await new Promise<void>((resolve) =>
+      window.setTimeout(resolve, MEMORY_TRANSITION_EXIT_MS),
+    );
+    if (!isCurrent()) return;
+
     try {
       await work();
-    } finally {
-      const remaining = MEMORY_TRANSITION_MIN_MS - (Date.now() - startedAt);
-      if (remaining > 0) {
-        await new Promise((resolve) => window.setTimeout(resolve, remaining));
-      }
-      if (memoryTransitionRunRef.current === runId) {
-        setMemoryTransitionLoading(false);
-      }
+    } catch (err) {
+      if (isCurrent()) setMemoryTransitionPhase("idle");
+      throw err;
     }
+    if (!isCurrent()) return;
+
+    // Give React one frame to commit the new content at the enter
+    // animation's keyframe-0 (scaled + transparent) before we trigger the
+    // animation. Without this, the new content can flash at full size.
+    await new Promise<void>((resolve) =>
+      window.requestAnimationFrame(() => resolve()),
+    );
+    if (!isCurrent()) return;
+
+    setMemoryTransitionPhase("entering");
+
+    await new Promise<void>((resolve) =>
+      window.setTimeout(resolve, MEMORY_TRANSITION_ENTER_MS),
+    );
+    if (!isCurrent()) return;
+
+    setMemoryTransitionPhase("idle");
   }
 
   async function submitAuth(e: React.FormEvent) {
@@ -8764,8 +9054,8 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  // Single source of truth for /api/chat request bodies. Both the normal
-  // compose send and the user-bubble Resend flow funnel through this so
+  // Single source of truth for /api/chat request bodies. Normal sends and
+  // edit-rerun both funnel through this so
   // whatever bot / provider / incognito is live RIGHT NOW — not at the
   // moment the message was originally sent — is what the server sees.
   // That's the whole point of "play with bot settings and rerun".
@@ -8781,7 +9071,10 @@ function HomeContent(): React.JSX.Element {
   //     keeping the selected bot as prompt identity.
   function buildChatRequestBody(
     message: string,
-    options: { starterPrompt?: boolean; ephemeralMessages?: Message[] } = {}
+    options: {
+      starterPrompt?: boolean;
+      ephemeralMessages?: Message[];
+    } = {}
   ): Record<string, unknown> {
     const isChatMode = view === "chat";
     const privateForSend = detail?.incognito === true || pendingIncognito;
@@ -8834,6 +9127,111 @@ function HomeContent(): React.JSX.Element {
     };
   }
 
+  function beginEditMessage(msg: Message): void {
+    closeMessageContextOverlay();
+    setEditingMessageId(msg.id);
+    setEditingOriginalText(msg.content);
+    setDraft(msg.content);
+    queueMicrotask(() => draftComposerRef.current?.focus());
+  }
+
+  function cancelEditMessage(): void {
+    setEditingMessageId(null);
+    setEditingOriginalText("");
+    setDraft("");
+  }
+
+  async function performMessageEdit(messageId: string, text: string): Promise<void> {
+    if (!detail || !selectedId) return;
+    const cutoffIdx = detail.messages.findIndex((message) => message.id === messageId);
+    if (cutoffIdx < 0) return;
+
+    setPendingReply(true);
+    setPendingReplyIsNewConversation(false);
+    setError(null);
+    const previousDetail = detail;
+    const rewoundMessages = previousDetail.messages.slice(0, cutoffIdx);
+    const optimisticEditedMessage: Message = {
+      id: messageId,
+      role: "user",
+      content: text,
+      createdAt: new Date().toISOString(),
+    };
+    let editedConversation: ConversationDetail | null = null;
+    try {
+      if (previousDetail.incognito) {
+        setPendingReplyConversationId(previousDetail.id);
+        setDetail({
+          ...previousDetail,
+          messages: [...rewoundMessages, optimisticEditedMessage],
+        });
+        const d = await api<ChatPostEnvelope>("/api/chat", {
+          method: "POST",
+          body: JSON.stringify(
+            buildChatRequestBody(text, {
+              ephemeralMessages: rewoundMessages,
+            })
+          ),
+        });
+        pushMemoryToasts(d.memoryLearned);
+        setDetail(d.conversation);
+        editedConversation = d.conversation;
+      } else {
+        setPendingReplyConversationId(selectedId);
+        setDetail({
+          ...previousDetail,
+          messages: [...rewoundMessages, optimisticEditedMessage],
+        });
+        await api<{
+          ok: true;
+          message: string;
+          deletedMessages: number;
+          deletedMemories: number;
+        }>(
+          `/api/conversations/${selectedId}/rewind`,
+          {
+            method: "POST",
+            body: JSON.stringify({ messageId }),
+          }
+        );
+        const d = await api<ChatPostEnvelope>("/api/chat", {
+          method: "POST",
+          body: JSON.stringify(buildChatRequestBody(text)),
+        });
+        pushMemoryToasts(d.memoryLearned);
+        setDetail(d.conversation);
+        editedConversation = d.conversation;
+      }
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+      setDraft("");
+      await refreshConversations();
+      if (
+        editedConversation &&
+        !editedConversation.incognito &&
+        editedConversation.messages.filter((message) => message.role === "assistant").length === 1
+      ) {
+        for (const delayMs of AUTO_TITLE_REFRESH_DELAYS_MS) {
+          window.setTimeout(() => {
+            void refreshConversations();
+          }, delayMs);
+        }
+      }
+      await refreshOpenMemoryViews();
+    } catch (err) {
+      setDetail(previousDetail);
+      setError(err instanceof Error ? err.message : "Message edit failed.");
+    } finally {
+      setPendingReply(false);
+      setPendingReplyConversationId(null);
+      setPendingReplyIsNewConversation(false);
+    }
+  }
+
+  function requestMessageEdit(messageId: string, text: string): void {
+    void performMessageEdit(messageId, text);
+  }
+
   async function sendMessage(
     e: React.FormEvent | React.KeyboardEvent<HTMLTextAreaElement | HTMLFormElement>,
     options: { starterPrompt?: boolean; draftOverride?: string } = {}
@@ -8845,6 +9243,10 @@ function HomeContent(): React.JSX.Element {
       options.starterPrompt === true &&
       (!detail || detail.messages.length === 0);
     if ((!trimmed && !isStarterPrompt) || pendingReply) return;
+    if (editingMessageId && !isStarterPrompt) {
+      requestMessageEdit(editingMessageId, trimmed);
+      return;
+    }
     // Any typed/chosen follow-up supersedes the starter quick-replies row.
     if (!isStarterPrompt) {
       setConversationStarterPrompts(null);
@@ -8929,6 +9331,7 @@ function HomeContent(): React.JSX.Element {
           })
         ),
       });
+      pushMemoryToasts(d.memoryLearned);
       const stillViewingRequest = requestConversationId
         ? selectedIdRef.current === requestConversationId ||
           detailIdRef.current === requestConversationId
@@ -8982,10 +9385,22 @@ function HomeContent(): React.JSX.Element {
       // actually set (keeps the state update a no-op in the common case).
       if (chatBotOverride !== undefined && stillViewingRequest) setChatBotOverride(undefined);
       await refreshConversations();
-      await refreshMemories();
+      if (
+        !d.conversation.incognito &&
+        d.conversation.messages.filter((message) => message.role === "assistant").length === 1
+      ) {
+        for (const delayMs of AUTO_TITLE_REFRESH_DELAYS_MS) {
+          window.setTimeout(() => {
+            void refreshConversations();
+          }, delayMs);
+        }
+      }
+      await refreshOpenMemoryViews();
       if (stillViewingRequest) {
         const nextBotId = d.conversation.lastBotId ?? d.conversation.botId;
-        if (nextBotId) {
+        if (memoryPanelScope === "default") {
+          await refreshDefaultMemories();
+        } else if (nextBotId) {
           await refreshBotMemories(nextBotId);
         } else {
           setBotMemories([]);
@@ -9114,11 +9529,16 @@ function HomeContent(): React.JSX.Element {
   }
 
   function composerSubmitLabel(value: string): string {
+    if (editingMessageId) return "Save edit";
     return value.trim().length > 0 ? "Send" : "";
   }
 
   function composerSubmitDisabled(value: string): boolean {
-    return pendingReply || value.trim().length === 0;
+    return (
+      pendingReply ||
+      value.trim().length === 0 ||
+      (editingMessageId !== null && value.trim() === editingOriginalText.trim())
+    );
   }
 
   function handleComposerSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -9400,42 +9820,59 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  function memoryToastScopeLabel(memory: MemoryEventPayload): string {
+    if (!memory.botId) return "Global";
+    return bots.find((bot) => bot.id === memory.botId)?.name ?? "Bot";
+  }
+
+  function pushMemoryToasts(memoryLearned: ChatPostEnvelope["memoryLearned"]): void {
+    const created = memoryLearned?.created ?? [];
+    const retracted = memoryLearned?.retracted ?? [];
+    if (created.length === 0 && retracted.length === 0) return;
+
+    const now = Date.now();
+    const nextToasts: MemoryToast[] = [
+      ...created.map((memory) => ({
+        id: `created:${memory.id}:${now}`,
+        kind: "created" as const,
+        memory,
+        expiresAt: now + MEMORY_TOAST_DISMISS_MS,
+      })),
+      ...retracted.map((memory) => ({
+        id: `retracted:${memory.id}:${now}`,
+        kind: "retracted" as const,
+        memory,
+        expiresAt: now + MEMORY_TOAST_DISMISS_MS,
+      })),
+    ];
+    setMemoryToasts((current) => [...nextToasts, ...current].slice(0, 8));
+  }
+
+  async function undoMemoryToast(toast: MemoryToast) {
+    setMemoryToasts((current) => current.filter((item) => item.id !== toast.id));
+    if (toast.kind === "created") {
+      await api(`/api/memories/${toast.memory.id}`, { method: "DELETE" });
+    } else {
+      await api("/api/memories/restore", {
+        method: "POST",
+        body: JSON.stringify({
+          text: toast.memory.text,
+          botId: toast.memory.botId,
+          conversationId: toast.memory.conversationId,
+          confidence: toast.memory.confidence,
+          source: toast.memory.source,
+          certainty: toast.memory.certainty,
+          sourceMessageIds: toast.memory.sourceMessageIds ?? [],
+        }),
+      });
+    }
+    await refreshOpenMemoryViews();
+  }
+
   async function deleteMemory(id: string) {
     await api(`/api/memories/${id}`, { method: "DELETE" });
     setFocusedMemoryId((current) => (current === id ? null : current));
-    await refreshMemories();
-    if (memoryPanelBot?.id) {
-      await refreshBotMemories(memoryPanelBot.id);
-    }
-  }
-
-  async function editMemory(memory: UserMemory) {
-    if (isAssumptionMemory(memory)) {
-      setPanelError("Inferred memories can be deleted, but not edited.");
-      return;
-    }
-    const nextText = window.prompt("Edit memory", memory.text);
-    if (nextText === null) return;
-    const trimmedText = nextText.trim();
-    if (!trimmedText) {
-      setPanelError("Memory text cannot be empty.");
-      return;
-    }
-    if (trimmedText === memory.text) return;
-
-    setPanelError(null);
-    try {
-      await api(`/api/memories/${memory.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ text: trimmedText }),
-      });
-      await refreshMemories();
-      if (memoryPanelBot?.id) {
-        await refreshBotMemories(memoryPanelBot.id);
-      }
-    } catch (err) {
-      setPanelError(err instanceof Error ? err.message : "Memory edit failed.");
-    }
+    await refreshOpenMemoryViews();
   }
 
   // Fork is always anchored to an assistant bubble now (per-message
@@ -9602,85 +10039,6 @@ function HomeContent(): React.JSX.Element {
     },
     [viewportWidth]
   );
-
-  // Rewind this conversation to just before `msg`, then resubmit its
-  // original text through the normal /api/chat pipeline so whatever bot
-  // / provider / incognito setting is live right now is what runs — a
-  // Cursor-style "mid-conversation revert with different settings".
-  //
-  // Flow:
-  //   1. Optimistically truncate the visible messages at `msg` so the
-  //      UI snaps to the rewound state instantly (no awkward gap while
-  //      the network round-trip runs).
-  //   2. POST /api/conversations/:id/rewind — atomically deletes the
-  //      target user message + everything newer + any thread-scoped
-  //      memory_summaries on the same cutoff. Returns the original
-  //      text so we don't have to stash it locally.
-  //   3. POST /api/chat with that text via buildChatRequestBody — the
-  //      server inserts a fresh user row, generates a fresh assistant
-  //      reply, and we hydrate `detail` from the response.
-  //   4. On any failure, restore the prior `detail` so the user still
-  //      sees their history (the server's transaction rolls back too
-  //      if step 2 threw).
-  async function resendFromMessage(msg: Message): Promise<void> {
-    closeMessageContextOverlay();
-    disarmResend();
-    if (!selectedId) return;
-    if (pendingReply) return;
-
-    const previousDetail = detail;
-    if (!previousDetail) return;
-
-    const cutoffIdx = previousDetail.messages.findIndex(m => m.id === msg.id);
-    if (cutoffIdx < 0) return;
-
-    setPendingReply(true);
-    setError(null);
-    setDetail({
-      ...previousDetail,
-      messages: previousDetail.messages.slice(0, cutoffIdx),
-    });
-
-    try {
-      if (previousDetail.incognito) {
-        const rewoundMessages = previousDetail.messages.slice(0, cutoffIdx);
-        const d = await api<ChatPostEnvelope>("/api/chat", {
-          method: "POST",
-          body: JSON.stringify(
-            buildChatRequestBody(msg.content, {
-              ephemeralMessages: rewoundMessages,
-            })
-          ),
-        });
-        setDetail(d.conversation);
-        return;
-      }
-
-      const rewind = await api<{ ok: true; message: string }>(
-        `/api/conversations/${selectedId}/rewind`,
-        {
-          method: "POST",
-          body: JSON.stringify({ messageId: msg.id }),
-        }
-      );
-      const d = await api<ChatPostEnvelope>("/api/chat", {
-        method: "POST",
-        body: JSON.stringify(buildChatRequestBody(rewind.message)),
-      });
-      setDetail(d.conversation);
-      await refreshConversations();
-      await refreshMemories();
-    } catch (err) {
-      setDetail(previousDetail);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Resend failed. Verify the provider is reachable and try again."
-      );
-    } finally {
-      setPendingReply(false);
-    }
-  }
 
   async function exportChat() {
     if (!selectedId) return;
@@ -10066,45 +10424,12 @@ function HomeContent(): React.JSX.Element {
     }
   }, []);
 
-  // ── Two-stage resend (user-message bubbles) ───────────────────────────
-  // First click arms the target; a second click within
-  // DELETE_CONFIRM_WINDOW_MS fires the actual rewind+resend. Kept
-  // independent of armDelete so having a chat armed for deletion
-  // doesn't swallow a resend click on an unrelated bubble and vice
-  // versa — the "one armed affordance at a time" rule in the plan
-  // applies inside each family, not across them.
-  const disarmResend = useCallback(() => {
-    if (pendingResendTimerRef.current) {
-      clearTimeout(pendingResendTimerRef.current);
-      pendingResendTimerRef.current = null;
-    }
-    setPendingResendId(null);
-  }, []);
-
   // Right-click is suppressed app-wide: we intend to ship our own
   // context menu eventually. Until then, secondary clicks should do
   // nothing at all (no dismissal, no native menu) so the gesture
   // doesn't conflict with future custom affordances.
   const handleAppContextMenu = useCallback((event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
-  }, []);
-
-  const armResend = useCallback((messageId: string) => {
-    if (pendingResendTimerRef.current) {
-      clearTimeout(pendingResendTimerRef.current);
-      pendingResendTimerRef.current = null;
-    }
-    setPendingResendId(messageId);
-    pendingResendTimerRef.current = setTimeout(() => {
-      setPendingResendId(null);
-      pendingResendTimerRef.current = null;
-    }, DELETE_CONFIRM_WINDOW_MS);
-  }, []);
-
-  useEffect(() => () => {
-    if (pendingResendTimerRef.current) {
-      clearTimeout(pendingResendTimerRef.current);
-    }
   }, []);
 
   // ── Hold-to-delete-all gesture ────────────────────────────────────────
@@ -10239,39 +10564,6 @@ function HomeContent(): React.JSX.Element {
     };
   }, [pendingDeleteKey, disarmDelete]);
 
-  // Mirror the outside-click / Escape dismissal for the armed resend
-  // pill. Scoped by `[data-resend-affordance='true']` so clicks that
-  // hop between the armed bubble and the same bubble's action row stay
-  // "inside" and don't collapse the Confirm pill out from under the user.
-  useEffect(() => {
-    if (!pendingResendId) {
-      return;
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      if (!isPrimaryPointerDismissal(event)) return;
-      const target = event.target;
-      if (target instanceof Element && target.closest("[data-resend-affordance='true']")) {
-        return;
-      }
-      disarmResend();
-    }
-
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        disarmResend();
-      }
-    }
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [pendingResendId, disarmResend]);
-
   // Create mode: seed random color/glyph when the Bots panel opens only if
   // the compose form is still empty and the user hasn't picked a swatch/glyph
   // yet — so closing the panel mid-draft (or after a mis-tap) preserves work.
@@ -10352,6 +10644,61 @@ function HomeContent(): React.JSX.Element {
       setSelectedId(previousSelectedId);
       setDetail(previousDetail);
       setError(err instanceof Error ? err.message : "Delete failed.");
+    }
+  }
+
+  async function deleteConversationGroup(group: ConversationGroupSummary) {
+    setError(null);
+    disarmDelete();
+    const previousConversations = conversations;
+    const previousSelectedId = selectedId;
+    const previousDetail = detail;
+    const previousUnreadIds = unreadConversationIds;
+    const previousUnreadOrder = unreadConversationOrder;
+    const previousOpenGroupKey = openConversationGroupKey;
+    const groupConversationIds = new Set(
+      previousConversations
+        .filter((conversation) => conversationGroupKey(conversation) === group.key)
+        .map((conversation) => conversation.id)
+    );
+    const selectedGroupKey = previousDetail?.incognito
+      ? null
+      : previousDetail
+        ? previousDetail.botId
+          ? `bot:${previousDetail.botId}`
+          : "default"
+        : null;
+
+    setConversations((list) =>
+      list.filter((conversation) => conversationGroupKey(conversation) !== group.key)
+    );
+    setUnreadConversationIds((previous) => {
+      const next = new Set(previous);
+      for (const id of groupConversationIds) next.delete(id);
+      return next;
+    });
+    setUnreadConversationOrder((previous) =>
+      previous.filter((id) => !groupConversationIds.has(id))
+    );
+    setOpenConversationGroupKey(null);
+    if (selectedGroupKey === group.key) {
+      setSelectedId(null);
+      setDetail(null);
+    }
+
+    try {
+      const routeBotId = group.botId ? encodeURIComponent(group.botId) : "_default";
+      await api(`/api/conversations/by-bot/${routeBotId}`, { method: "DELETE" });
+      await refreshConversations();
+      await refreshOpenMemoryViews();
+    } catch (err) {
+      setConversations(previousConversations);
+      setSelectedId(previousSelectedId);
+      setDetail(previousDetail);
+      setUnreadConversationIds(previousUnreadIds);
+      setUnreadConversationOrder(previousUnreadOrder);
+      setOpenConversationGroupKey(previousOpenGroupKey);
+      setError(err instanceof Error ? err.message : "Delete conversation group failed.");
     }
   }
 
@@ -10962,6 +11309,15 @@ function HomeContent(): React.JSX.Element {
     openMemoriesPanelForBot(activeBot);
   }
 
+  function openDefaultMemoriesPanel() {
+    setMemoryPanelScope("default");
+    setMemoryPanelBotId(null);
+    setMemoryPanelSelectedFamily(null);
+    setFocusedMemoryId(null);
+    void refreshDefaultMemories();
+    openRightPanel("memories");
+  }
+
   function openAllMemoriesPanel() {
     setMemoryPanelScope("all");
     setMemoryPanelBotId(null);
@@ -11011,7 +11367,6 @@ function HomeContent(): React.JSX.Element {
       ["--memory-panel-color" as string]: memoryPanelAccent,
       ["--memory-panel-text" as string]: base["--accent-text" as keyof typeof base],
       ["--memory-panel-ink" as string]: base["--accent-ink" as keyof typeof base],
-      ["--memory-loader-triangle-color" as string]: memoryPanelAccent,
     };
     // Surface the active PRISM family's color so the left-edge bar in
     // the drill-down view can match the family being observed instead
@@ -11040,21 +11395,21 @@ function HomeContent(): React.JSX.Element {
       memoryCounts[family] += directMemoryCountsByBotId[bot.id] ?? 0;
     }
 
-    const defaultFamily = botPrismGroup(PRISM_DEFAULT_ACCENT);
-    memoryCounts[defaultFamily] += defaultDirectMemoryCount;
     const itemCounts = PRISM_GROUPS.reduce<Record<PrismGroupId, number>>((acc, group) => {
-      acc[group.id] = botCounts[group.id] + (group.id === defaultFamily && defaultDirectMemoryCount > 0 ? 1 : 0);
+      acc[group.id] = botCounts[group.id];
       return acc;
     }, { p: 0, r: 0, i: 0, s: 0, m: 0 });
-    const maxCount = Math.max(1, ...Object.values(itemCounts));
+    // Bubble size now reflects memory volume in the family (not bot count),
+    // so a family with many bots but no memories collapses to the empty
+    // size — visually matching the "No memories yet" drill-in state. The
+    // numeric badge below still shows bot count for roster context.
+    const maxCount = Math.max(defaultDirectMemoryCount, ...Object.values(memoryCounts));
 
     return PRISM_GROUPS.map((group, index) => {
       const itemCount = itemCounts[group.id];
       const memoryCount = memoryCounts[group.id];
-      const size = Math.round(96 + (itemCount / maxCount) * 84);
+      const size = ratioBubbleSize(memoryCount, maxCount);
       const slot = MEMORY_FAMILY_DIRECTORY_SLOTS[index % MEMORY_FAMILY_DIRECTORY_SLOTS.length];
-      const jitterX = (stableUnitValue(`${group.id}:${itemCount}:x`) - 0.5) * 4;
-      const jitterY = (stableUnitValue(`${group.id}:${itemCount}:y`) - 0.5) * 4;
       return {
         id: group.id,
         letter: group.letter,
@@ -11063,8 +11418,8 @@ function HomeContent(): React.JSX.Element {
         itemCount,
         memoryCount,
         style: {
-          ["--memory-family-x" as string]: `${Math.max(12, Math.min(88, slot[0] + jitterX))}%`,
-          ["--memory-family-y" as string]: `${Math.max(12, Math.min(88, slot[1] + jitterY))}%`,
+          ["--memory-family-x" as string]: `${slot[0]}%`,
+          ["--memory-family-y" as string]: `${slot[1]}%`,
           ["--memory-family-size" as string]: `${size}px`,
           ["--memory-family-color" as string]: group.swatch,
           ["--memory-family-delay" as string]: `${(index * 0.18).toFixed(2)}s`,
@@ -11072,6 +11427,24 @@ function HomeContent(): React.JSX.Element {
       };
     });
   }, [bots, defaultDirectMemoryCount, directMemoryCountsByBotId]);
+
+  const defaultMemoryDirectoryStyle = useMemo(() => {
+    // Share the family bubbles' memory-volume scale so the default Prism
+    // orb is visually comparable (apples-to-apples) instead of being
+    // measured against bot counts.
+    const maxCount = Math.max(
+      defaultDirectMemoryCount,
+      ...memoryFamilyDirectories.map((family) => family.memoryCount)
+    );
+    const size = ratioBubbleSize(defaultDirectMemoryCount, maxCount);
+    return {
+      ["--memory-family-x" as string]: "50%",
+      ["--memory-family-y" as string]: "50%",
+      ["--memory-family-size" as string]: `${size}px`,
+      ["--memory-family-color" as string]: PRISM_DEFAULT_ACCENT,
+      ["--memory-family-delay" as string]: "0.42s",
+    } as React.CSSProperties;
+  }, [memoryFamilyDirectories, defaultDirectMemoryCount]);
 
   const selectedMemoryFamilyDirectory = useMemo(
     () => memoryFamilyDirectories.find((family) => family.id === memoryPanelSelectedFamily) ?? null,
@@ -11081,39 +11454,39 @@ function HomeContent(): React.JSX.Element {
   const selectedFamilyBotClusters = useMemo<MemoryFamilyBotCluster[]>(() => {
     if (!memoryPanelSelectedFamily) return [];
     const familyBots = bots.filter((bot) => botPrismGroup(bot.color) === memoryPanelSelectedFamily);
-    const baseClusters: Omit<MemoryFamilyBotCluster, "style" | "innerBubbles">[] = familyBots.map((bot) => ({
-      id: bot.id,
-      botId: bot.id,
-      botName: bot.name,
-      botGlyph: bot.glyph,
-      color: normalizeAccentForTheme(bot.color ?? selectedMemoryFamilyDirectory?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme),
-      memoryCount: directMemoryCountsByBotId[bot.id] ?? 0,
-    }));
-
-    if (memoryPanelSelectedFamily === botPrismGroup(PRISM_DEFAULT_ACCENT) && defaultDirectMemoryCount > 0) {
-      baseClusters.push({
-        id: "prism-default",
-        botId: null,
-        botName: "Prism",
-        botGlyph: "triangle",
-        color: PRISM_DEFAULT_ACCENT,
-        memoryCount: defaultDirectMemoryCount,
-      });
-    }
+    // Bots with zero memories are intentionally omitted from the family
+    // drill-down so the orb cloud reads as "memories present" rather than
+    // "complete bot roster". A family with bots but no memories falls
+    // through to the empty-state messaging below.
+    const baseClusters: Omit<MemoryFamilyBotCluster, "style" | "innerBubbles">[] = familyBots
+      .map((bot) => ({
+        id: bot.id,
+        botId: bot.id,
+        botName: bot.name,
+        botGlyph: bot.glyph,
+        color: normalizeAccentForTheme(bot.color ?? selectedMemoryFamilyDirectory?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme),
+        memoryCount: directMemoryCountsByBotId[bot.id] ?? 0,
+      }))
+      .filter((cluster) => cluster.memoryCount > 0);
 
     const maxCount = Math.max(1, ...baseClusters.map((cluster) => cluster.memoryCount));
-    const buildInnerBubbles = (clusterId: string, count: number): MemoryClusterInnerBubble[] => {
+    const buildInnerBubbles = (
+      clusterId: string,
+      count: number,
+      clusterSize: number
+    ): MemoryClusterInnerBubble[] => {
       if (count <= 0) return [];
       // Inner motes are a direct preview of memories. Cap only at high counts
-      // so a 3-memory bot never looks like it contains 6 memories.
-      const density = Math.min(1, count / 24);
-      const bubbleCount = Math.min(14, count);
+      // and scale dot count with the parent size so tiny clusters stay sparse.
+      const sizeRatio = Math.max(0.12, clusterSize / MEMORY_RATIO_LARGE_MAX_SIZE);
+      const density = Math.min(1, count / Math.max(1, maxCount));
+      const bubbleCount = Math.max(1, Math.min(count, Math.round(20 * sizeRatio)));
       const placed: Array<{ x: number; y: number; radius: number }> = [];
       const bubbles: MemoryClusterInnerBubble[] = [];
       for (let i = 0; i < bubbleCount; i += 1) {
         // Larger memory families get slightly larger motes in addition to more
         // of them, so volume is readable at a glance.
-        const size = 5.2 + density * 2.4 + ((i + count) % 3) * 1.25;
+        const size = 4.4 + density * 3.2 + ((i + count) % 3) * 1.15;
         const radius = size / 2;
         const minCenterRadius = 10 + radius;
         const maxCenterRadius = Math.max(minCenterRadius + 1, 32 - radius);
@@ -11214,72 +11587,123 @@ function HomeContent(): React.JSX.Element {
       return bestCandidate;
     };
 
-    return orderedClusters.map((cluster, index) => {
-        const slot = MEMORY_BUBBLE_CLOUD_SLOTS[index % MEMORY_BUBBLE_CLOUD_SLOTS.length];
-        const slotLoop = Math.floor(index / MEMORY_BUBBLE_CLOUD_SLOTS.length);
-        // Empty bots collapse to a small unobtrusive circle. Filled
-        // bubbles still scale up with memory count, so the family
-        // drill-down reads as "presence + volume" at a glance.
-        const baseSize = cluster.memoryCount === 0
-          ? MEMORY_EMPTY_CLUSTER_SIZE
-          : 86 + (cluster.memoryCount / maxCount) * 78;
-        let size = cluster.memoryCount === 0
-          ? MEMORY_EMPTY_CLUSTER_SIZE
-          : Math.round(baseSize * crowdScale);
-        let radiusPct = (size / 2) * pxToPct;
-        let baseX = slot[0] + ((slotLoop % 3) - 1) * 4 + (stableUnitValue(`${cluster.id}:x`) - 0.5) * 6;
-        let baseY = slot[1] + ((slotLoop % 2) * 5 - 2.5) + (stableUnitValue(`${cluster.id}:y`) - 0.5) * 6;
-        let placed = placeWithoutOverlap(cluster.id, baseX, baseY, radiusPct);
+    // Pass 1: greedy placement. For each cluster, compute its size and a
+    // best-effort non-overlapping initial position. The shrink-on-collision
+    // heuristic is preserved as a cheap first pass, but with the new 72px
+    // floor it rarely changes anything — the real overlap cleanup happens
+    // in pass 2 below.
+    const layouts: Array<{
+      cluster: typeof orderedClusters[number];
+      size: number;
+      radiusPct: number;
+    }> = [];
+    for (let index = 0; index < orderedClusters.length; index += 1) {
+      const cluster = orderedClusters[index];
+      const slot = MEMORY_BUBBLE_CLOUD_SLOTS[index % MEMORY_BUBBLE_CLOUD_SLOTS.length];
+      const slotLoop = Math.floor(index / MEMORY_BUBBLE_CLOUD_SLOTS.length);
+      const baseSize = ratioBubbleSize(cluster.memoryCount, maxCount);
+      let size = Math.max(MEMORY_RATIO_MIN_SIZE, Math.round(baseSize * crowdScale));
+      let radiusPct = (size / 2) * pxToPct;
+      let baseX = slot[0] + ((slotLoop % 3) - 1) * 4 + (stableUnitValue(`${cluster.id}:x`) - 0.5) * 6;
+      let baseY = slot[1] + ((slotLoop % 2) * 5 - 2.5) + (stableUnitValue(`${cluster.id}:y`) - 0.5) * 6;
+      let placed = placeWithoutOverlap(cluster.id, baseX, baseY, radiusPct);
 
-        for (let shrink = 0; shrink < 3; shrink += 1) {
-          let collides = false;
-          for (const existing of placedClusters) {
-            const dx = placed.x - existing.x;
-            const dy = placed.y - existing.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance < radiusPct + existing.radiusPct + 0.9) {
-              collides = true;
-              break;
-            }
+      for (let shrink = 0; shrink < 3; shrink += 1) {
+        let collides = false;
+        for (const existing of placedClusters) {
+          const dx = placed.x - existing.x;
+          const dy = placed.y - existing.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < radiusPct + existing.radiusPct + 0.9) {
+            collides = true;
+            break;
           }
-          if (!collides) break;
-          size = Math.max(58, Math.round(size * 0.9));
-          radiusPct = (size / 2) * pxToPct;
-          baseX = Math.max(8 + radiusPct, Math.min(92 - radiusPct, baseX));
-          baseY = Math.max(10 + radiusPct, Math.min(90 - radiusPct, baseY));
-          placed = placeWithoutOverlap(`${cluster.id}:shrink:${shrink}`, baseX, baseY, radiusPct);
         }
+        if (!collides) break;
+        size = Math.max(MEMORY_RATIO_MIN_SIZE, Math.round(size * 0.9));
+        radiusPct = (size / 2) * pxToPct;
+        baseX = Math.max(8 + radiusPct, Math.min(92 - radiusPct, baseX));
+        baseY = Math.max(10 + radiusPct, Math.min(90 - radiusPct, baseY));
+        placed = placeWithoutOverlap(`${cluster.id}:shrink:${shrink}`, baseX, baseY, radiusPct);
+      }
 
-        placedClusters.push({ x: placed.x, y: placed.y, radiusPct });
-        const fill = mixHex(cluster.color, resolvedTheme === "dark" ? "#111114" : "#fbf3e6", 0.72);
-        const border = ensureContrast(
-          mixHex(cluster.color, resolvedTheme === "dark" ? "#ffffff" : "#20170f", resolvedTheme === "dark" ? 0.38 : 0.18),
-          fill,
-          2.1
-        );
-        const ink = pickReadableText(fill);
-        return {
-          ...cluster,
-          style: {
-            "--memory-bubble-size": `${size}px`,
-            "--memory-cloud-x": `${placed.x.toFixed(2)}%`,
-            "--memory-cloud-y": `${placed.y.toFixed(2)}%`,
-            "--memory-bubble-color": fill,
-            "--memory-bubble-border": border,
-            "--memory-bubble-ink": ink,
-            "--memory-bubble-source-color": cluster.color,
-            "--memory-bubble-glow": cluster.color,
-            "--memory-source-glyph-color": ensureContrast(cluster.color, fill, 2),
-            "--memory-bubble-tilt": `${Math.round((stableUnitValue(`${cluster.id}:tilt`) - 0.5) * 8)}deg`,
-            "--memory-bubble-z": `${20 + index}`,
-          } as React.CSSProperties,
-          innerBubbles: buildInnerBubbles(cluster.id, cluster.memoryCount),
-        };
-      });
+      placedClusters.push({ x: placed.x, y: placed.y, radiusPct });
+      layouts.push({ cluster, size, radiusPct });
+    }
+
+    // Pass 2: relaxation. Iteratively push apart any overlapping pairs
+    // along the connecting line until everyone settles. This catches the
+    // cases where greedy placement landed two orbs in each other's space
+    // because later orbs had to thread through gaps. The buffer (1.4%) is
+    // wider than the placement buffer (0.9%) so neighbors get a small
+    // breathing gap rather than touching edges.
+    const RELAX_BUFFER_PCT = 1.4;
+    const RELAX_ITERATIONS = 80;
+    const RELAX_PUSH = 0.52;
+    const RELAX_SETTLE_THRESHOLD = 0.04;
+    for (let iter = 0; iter < RELAX_ITERATIONS; iter += 1) {
+      let maxOverlap = 0;
+      for (let i = 0; i < placedClusters.length; i += 1) {
+        for (let j = i + 1; j < placedClusters.length; j += 1) {
+          const a = placedClusters[i];
+          const b = placedClusters[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const rawDistance = Math.sqrt(dx * dx + dy * dy);
+          const minDistance = a.radiusPct + b.radiusPct + RELAX_BUFFER_PCT;
+          if (rawDistance < minDistance) {
+            // Co-located orbs: pick a stable fallback direction so they
+            // don't divide-by-zero into NaN positions.
+            const distance = rawDistance > 0.0001 ? rawDistance : 0.0001;
+            const nx = rawDistance > 0.0001 ? dx / distance : 1;
+            const ny = rawDistance > 0.0001 ? dy / distance : 0;
+            const overlap = minDistance - distance;
+            maxOverlap = Math.max(maxOverlap, overlap);
+            const push = overlap * RELAX_PUSH;
+            a.x -= nx * push;
+            a.y -= ny * push;
+            b.x += nx * push;
+            b.y += ny * push;
+            a.x = Math.max(8 + a.radiusPct, Math.min(92 - a.radiusPct, a.x));
+            a.y = Math.max(10 + a.radiusPct, Math.min(90 - a.radiusPct, a.y));
+            b.x = Math.max(8 + b.radiusPct, Math.min(92 - b.radiusPct, b.x));
+            b.y = Math.max(10 + b.radiusPct, Math.min(90 - b.radiusPct, b.y));
+          }
+        }
+      }
+      if (maxOverlap < RELAX_SETTLE_THRESHOLD) break;
+    }
+
+    return layouts.map(({ cluster, size }, index) => {
+      const placed = placedClusters[index];
+      const fill = mixHex(cluster.color, resolvedTheme === "dark" ? "#111114" : "#fbf3e6", 0.72);
+      const border = ensureContrast(
+        mixHex(cluster.color, resolvedTheme === "dark" ? "#ffffff" : "#20170f", resolvedTheme === "dark" ? 0.38 : 0.18),
+        fill,
+        2.1
+      );
+      const ink = pickReadableText(fill);
+      return {
+        ...cluster,
+        style: {
+          "--memory-bubble-size": `${size}px`,
+          "--memory-cloud-x": `${placed.x.toFixed(2)}%`,
+          "--memory-cloud-y": `${placed.y.toFixed(2)}%`,
+          "--memory-bubble-color": fill,
+          "--memory-bubble-border": border,
+          "--memory-bubble-ink": ink,
+          "--memory-bubble-source-color": cluster.color,
+          "--memory-bubble-glow": cluster.color,
+          "--memory-source-glyph-color": ensureContrast(cluster.color, fill, 2),
+          "--memory-bubble-tilt": `${Math.round((stableUnitValue(`${cluster.id}:tilt`) - 0.5) * 8)}deg`,
+          "--memory-bubble-z": `${20 + index}`,
+        } as React.CSSProperties,
+        innerBubbles: buildInnerBubbles(cluster.id, cluster.memoryCount, size),
+      };
+    });
   }, [
     memoryPanelSelectedFamily,
     bots,
-    defaultDirectMemoryCount,
     directMemoryCountsByBotId,
     selectedMemoryFamilyDirectory?.color,
     resolvedTheme,
@@ -11296,7 +11720,7 @@ function HomeContent(): React.JSX.Element {
 
   const memoryBubbleLayoutById = useMemo(() => {
     const layoutById = new Map<string, { style: React.CSSProperties; uncertain: boolean }>();
-    if (memoryPanelScope !== "bot") return layoutById;
+    if (memoryPanelScope !== "bot" && memoryPanelScope !== "default") return layoutById;
     if (visibleMemoryBubbles.length === 0) return layoutById;
 
     const pxToPct = 100 / 520;
@@ -11308,9 +11732,16 @@ function HomeContent(): React.JSX.Element {
     const entries = visibleMemoryBubbles.map((memory) => {
       const confidence = memoryBubbleSignalValue(memory);
       const uncertain = confidence <= MEMORY_UNCERTAIN_CONFIDENCE_MAX;
+      const confidenceScale = uncertain
+        ? Math.max(0, Math.min(1, confidence / MEMORY_UNCERTAIN_CONFIDENCE_MAX))
+        : Math.max(0, Math.min(1, (confidence - MEMORY_UNCERTAIN_CONFIDENCE_MAX) / (1 - MEMORY_UNCERTAIN_CONFIDENCE_MAX)));
+      // Use the visible confidence band, not raw 0..1, so normal direct
+      // memories (roughly 0.62-0.92 in dev seeding) spread across the compact
+      // size range instead of bunching into near-identical circles.
+      const easedConfidence = Math.pow(confidenceScale, 0.82);
       const size = uncertain
-        ? Math.round(MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE + confidence * (MEMORY_UNCERTAIN_BUBBLE_MAX_SIZE - MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE))
-        : Math.round(MEMORY_BUBBLE_MIN_SIZE + confidence * (MEMORY_BUBBLE_MAX_SIZE - MEMORY_BUBBLE_MIN_SIZE));
+        ? Math.round(MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE + easedConfidence * (MEMORY_UNCERTAIN_BUBBLE_MAX_SIZE - MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE))
+        : Math.round(MEMORY_BUBBLE_MIN_SIZE + easedConfidence * (MEMORY_BUBBLE_MAX_SIZE - MEMORY_BUBBLE_MIN_SIZE));
       return { memory, confidence, uncertain, size };
     });
 
@@ -11360,6 +11791,12 @@ function HomeContent(): React.JSX.Element {
       return best;
     };
 
+    const layoutEntries: Array<{
+      entry: (typeof sorted)[number];
+      sortedIndex: number;
+      size: number;
+    }> = [];
+
     sorted.forEach((entry, sortedIndex) => {
       const slot = MEMORY_BUBBLE_CLOUD_SLOTS[sortedIndex % MEMORY_BUBBLE_CLOUD_SLOTS.length];
       const slotLoop = Math.floor(sortedIndex / MEMORY_BUBBLE_CLOUD_SLOTS.length);
@@ -11387,15 +11824,62 @@ function HomeContent(): React.JSX.Element {
       }
 
       placed.push({ x: placedPoint.x, y: placedPoint.y, radiusPct });
+      layoutEntries.push({ entry, sortedIndex, size });
+    });
+
+    // A second relaxation pass keeps compact prose bubbles from piling up
+    // after the greedy placement fallback chooses "least bad" positions.
+    // The bubbles are small enough now that this can usually separate all
+    // of them without additional shrinkage.
+    const RELAX_BUFFER_PCT = 1.05;
+    const RELAX_ITERATIONS = 100;
+    const RELAX_PUSH = 0.56;
+    const RELAX_SETTLE_THRESHOLD = 0.035;
+    for (let iter = 0; iter < RELAX_ITERATIONS; iter += 1) {
+      let maxOverlap = 0;
+      for (let i = 0; i < placed.length; i += 1) {
+        for (let j = i + 1; j < placed.length; j += 1) {
+          const a = placed[i];
+          const b = placed[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const rawDistance = Math.sqrt(dx * dx + dy * dy);
+          const minDistance = a.radiusPct + b.radiusPct + RELAX_BUFFER_PCT;
+          if (rawDistance >= minDistance) continue;
+
+          const distance = rawDistance > 0.0001 ? rawDistance : 0.0001;
+          const nx = rawDistance > 0.0001 ? dx / distance : 1;
+          const ny = rawDistance > 0.0001 ? dy / distance : 0;
+          const overlap = minDistance - distance;
+          maxOverlap = Math.max(maxOverlap, overlap);
+
+          const push = overlap * RELAX_PUSH;
+          a.x -= nx * push;
+          a.y -= ny * push;
+          b.x += nx * push;
+          b.y += ny * push;
+
+          a.x = Math.max(bounds.minX + a.radiusPct, Math.min(bounds.maxX - a.radiusPct, a.x));
+          a.y = Math.max(bounds.minY + a.radiusPct, Math.min(bounds.maxY - a.radiusPct, a.y));
+          b.x = Math.max(bounds.minX + b.radiusPct, Math.min(bounds.maxX - b.radiusPct, b.x));
+          b.y = Math.max(bounds.minY + b.radiusPct, Math.min(bounds.maxY - b.radiusPct, b.y));
+        }
+      }
+      if (maxOverlap < RELAX_SETTLE_THRESHOLD) break;
+    }
+
+    layoutEntries.forEach(({ entry, sortedIndex, size }, index) => {
+      const placedPoint = placed[index];
       const shade = mixHex(
         memoryPanelAccent,
         shadeTarget,
         shadePattern[sortedIndex % shadePattern.length]
       );
       const textLength = entry.memory.text.length;
-      const fontDivisor = textLength > 92 ? 10.8 : textLength > 68 ? 9.6 : textLength > 46 ? 8.4 : 7.5;
-      const fontSize = Math.max(13, Math.min(18, Math.round(size / fontDivisor)));
-      const lineCount = size >= 190 ? 7 : size >= 165 ? 6 : 5;
+      const fontDivisor = textLength > 92 ? 10.2 : textLength > 68 ? 9.2 : textLength > 46 ? 8.4 : 7.8;
+      const fontSize = Math.max(11, Math.min(14, Math.round(size / fontDivisor)));
+      const scoreSize = Math.max(13, Math.min(26, Math.round(size * 0.22)));
+      const lineCount = size >= 118 ? 4 : 3;
       layoutById.set(entry.memory.id, {
         uncertain: entry.uncertain,
         style: {
@@ -11403,6 +11887,7 @@ function HomeContent(): React.JSX.Element {
           "--memory-bubble-color": shade,
           "--memory-bubble-ink": pickReadableText(shade),
           "--memory-bubble-font-size": `${fontSize}px`,
+          "--memory-bubble-score-size": `${scoreSize}px`,
           "--memory-bubble-line-count": lineCount,
           "--memory-cloud-x": `${placedPoint.x.toFixed(2)}%`,
           "--memory-cloud-y": `${placedPoint.y.toFixed(2)}%`,
@@ -11414,8 +11899,13 @@ function HomeContent(): React.JSX.Element {
     return layoutById;
   }, [memoryPanelScope, visibleMemoryBubbles, memoryPanelAccent, resolvedTheme]);
 
+  const selectedVisibleMemory = useMemo(
+    () => visibleMemoryBubbles.find((memory) => memory.id === focusedMemoryId) ?? null,
+    [focusedMemoryId, visibleMemoryBubbles]
+  );
+
   useEffect(() => {
-    if (memoryPanelScope !== "bot") {
+    if (memoryPanelScope !== "bot" && memoryPanelScope !== "default") {
       setFocusedMemoryId(null);
       return;
     }
@@ -11423,6 +11913,165 @@ function HomeContent(): React.JSX.Element {
       setFocusedMemoryId(null);
     }
   }, [focusedMemoryId, memoryPanelScope, visibleMemoryBubbles]);
+
+  useEffect(() => {
+    if (panel !== "memories") return;
+    const root = memoryPanelRef.current;
+    if (!root) return;
+
+    const startPhysics = () => {
+      const cloud = root.querySelector<HTMLElement>(`.${styles.memoryBubbleCloud}`);
+      if (!cloud) return;
+      const nodes = Array.from(
+        cloud.querySelectorAll<HTMLElement>("[data-memory-physics-id]")
+      );
+      if (nodes.length === 0) return;
+
+      if (memoryPhysicsFrameRef.current !== null) {
+        window.cancelAnimationFrame(memoryPhysicsFrameRef.current);
+        memoryPhysicsFrameRef.current = null;
+      }
+
+      // Reset every body's offset BEFORE measuring so getBoundingClientRect
+      // reads the true layout target — not a residual physics offset from a
+      // previous open. Without this, reopening the drawer measures stale
+      // positions and the next sim looks "pre-scripted" / glitchy.
+      for (const node of nodes) {
+        node.style.setProperty("--memory-physics-x", "0px");
+        node.style.setProperty("--memory-physics-y", "0px");
+      }
+
+      const cloudRect = cloud.getBoundingClientRect();
+      // Unified drawer-inertia impulse. The right-hand panel slides in from
+      // off-screen-right and decelerates to a stop, so its children feel a
+      // simultaneous leftward "g-force" — like passengers in a car that
+      // just braked. Random per-item jitter (in BOTH starting offset and
+      // velocity) keeps it from feeling like a synchronized swim while
+      // preserving the shared direction cue.
+      const drawerDirX = MEMORY_PHYSICS_DRAWER_DIR_X;
+      const bodies = nodes.map((node) => {
+        const rect = node.getBoundingClientRect();
+        const radiusX = rect.width / 2;
+        const radiusY = rect.height / 2;
+        const targetX = rect.left - cloudRect.left + radiusX;
+        const targetY = rect.top - cloudRect.top + radiusY;
+        const minX = radiusX;
+        const maxX = Math.max(minX, cloudRect.width - radiusX);
+        const minY = radiusY;
+        const maxY = Math.max(minY, cloudRect.height - radiusY);
+        // Initial offset: tiny — items lag the drawer's leftward slide
+        // by a few px so they appear to "still be catching up" the moment
+        // the drawer parks.
+        const offsetX = -drawerDirX * 6 + (Math.random() - 0.5) * MEMORY_PHYSICS_OFFSET_JITTER_X;
+        const offsetY = (Math.random() - 0.5) * MEMORY_PHYSICS_OFFSET_JITTER_Y;
+        // Velocity: the bulk leftward kick + symmetric jitter. Y component
+        // has more spread because there's no shared vertical impulse, so
+        // the noise reads as natural unsettling.
+        const vx =
+          drawerDirX * MEMORY_PHYSICS_DRAWER_VELOCITY +
+          (Math.random() - 0.5) * MEMORY_PHYSICS_VELOCITY_JITTER_X;
+        const vy = (Math.random() - 0.5) * MEMORY_PHYSICS_VELOCITY_JITTER_Y;
+        node.style.setProperty("--memory-physics-x", `${offsetX.toFixed(2)}px`);
+        node.style.setProperty("--memory-physics-y", `${offsetY.toFixed(2)}px`);
+        return {
+          node,
+          targetX,
+          targetY,
+          minX,
+          maxX,
+          minY,
+          maxY,
+          x: offsetX,
+          y: offsetY,
+          vx,
+          vy,
+        };
+      });
+
+      setMemoryPhysicsActive(true);
+
+      let lastTime: number | null = null;
+      let elapsed = 0;
+      const step = (time: number) => {
+        if (lastTime === null) lastTime = time;
+        const dt = Math.min(0.033, (time - lastTime) / 1000);
+        lastTime = time;
+        elapsed += dt * 1000;
+
+        for (const body of bodies) {
+          const ax = -body.x * MEMORY_PHYSICS_SPRING - body.vx * MEMORY_PHYSICS_DAMPING;
+          const ay = -body.y * MEMORY_PHYSICS_SPRING - body.vy * MEMORY_PHYSICS_DAMPING;
+          body.vx += ax * dt;
+          body.vy += ay * dt;
+          body.x += body.vx * dt;
+          body.y += body.vy * dt;
+
+          const worldX = body.targetX + body.x;
+          const worldY = body.targetY + body.y;
+          if (worldX < body.minX) {
+            body.x = body.minX - body.targetX;
+            body.vx = Math.abs(body.vx) * MEMORY_PHYSICS_WALL_RESTITUTION;
+          }
+          if (worldX > body.maxX) {
+            body.x = body.maxX - body.targetX;
+            body.vx = -Math.abs(body.vx) * MEMORY_PHYSICS_WALL_RESTITUTION;
+          }
+          if (worldY < body.minY) {
+            body.y = body.minY - body.targetY;
+            body.vy = Math.abs(body.vy) * MEMORY_PHYSICS_WALL_RESTITUTION;
+          }
+          if (worldY > body.maxY) {
+            body.y = body.maxY - body.targetY;
+            body.vy = -Math.abs(body.vy) * MEMORY_PHYSICS_WALL_RESTITUTION;
+          }
+
+          body.node.style.setProperty("--memory-physics-x", `${body.x.toFixed(2)}px`);
+          body.node.style.setProperty("--memory-physics-y", `${body.y.toFixed(2)}px`);
+        }
+
+        const stillMoving = bodies.some((body) =>
+          Math.abs(body.x) > 0.35 ||
+          Math.abs(body.y) > 0.35 ||
+          Math.abs(body.vx) > 2 ||
+          Math.abs(body.vy) > 2
+        );
+        if (elapsed < MEMORY_PHYSICS_DURATION_MS && stillMoving) {
+          memoryPhysicsFrameRef.current = window.requestAnimationFrame(step);
+          return;
+        }
+        for (const body of bodies) {
+          body.node.style.setProperty("--memory-physics-x", "0px");
+          body.node.style.setProperty("--memory-physics-y", "0px");
+        }
+        memoryPhysicsFrameRef.current = null;
+        setMemoryPhysicsActive(false);
+      };
+
+      memoryPhysicsFrameRef.current = window.requestAnimationFrame(step);
+    };
+
+    // Time the physics kick to coincide with the panelIn animation's
+    // settle (the panel slides for ~200ms then snaps to rest). Firing
+    // ~140ms in lets the drawer reach its decelerating tail before the
+    // contents register the "stop", so the leftward overshoot reads as
+    // a consequence of the drawer braking — not as the bubbles moving on
+    // their own. Two rAFs after the timeout guarantee layout has stabilized
+    // before we measure each node's target position.
+    const startTimeout = window.setTimeout(() => {
+      const firstFrame = window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(startPhysics);
+      });
+      memoryPhysicsFrameRef.current = firstFrame;
+    }, 140);
+    return () => {
+      window.clearTimeout(startTimeout);
+      if (memoryPhysicsFrameRef.current !== null) {
+        window.cancelAnimationFrame(memoryPhysicsFrameRef.current);
+        memoryPhysicsFrameRef.current = null;
+      }
+      setMemoryPhysicsActive(false);
+    };
+  }, [panel, memoryPhysicsSeed]);
 
   function renderComposeUtilityActions(): React.JSX.Element {
     return (
@@ -11576,6 +12225,7 @@ function HomeContent(): React.JSX.Element {
   function renderMessageContextMenu(): React.JSX.Element | null {
     if (!messageContextMenu) return null;
     const msg = messageContextMenu.message;
+    const isUser = msg.role === "user";
     const showFork = !detail?.incognito;
     return (
       <>
@@ -11593,7 +12243,8 @@ function HomeContent(): React.JSX.Element {
           style={{
             left: `${messageContextMenu.x}px`,
             top: `${messageContextMenu.y}px`,
-          }}
+            "--message-context-accent": deriveMobileMessageFocusAccent(msg),
+          } as React.CSSProperties}
           role="menu"
           aria-label="Message actions"
         >
@@ -11607,7 +12258,19 @@ function HomeContent(): React.JSX.Element {
           >
             Copy
           </button>
-          {showFork && (
+          {isUser && (
+            <>
+              <button
+                key={`default:${memoryPhysicsSeed}`}
+                type="button"
+                role="menuitem"
+                onClick={() => beginEditMessage(msg)}
+              >
+                Edit
+              </button>
+            </>
+          )}
+          {showFork && !isUser && (
             <button
               type="button"
               role="menuitem"
@@ -11813,6 +12476,191 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const conversationRowStyle = (
+    c: ConversationSummary,
+    index: number
+  ): React.CSSProperties => {
+    const rawRowColor = privateChatActive ? null : resolveRowColor(c, bots);
+    const rowAccent = rawRowColor
+      ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
+      : !privateChatActive && !c.incognito
+        ? neutralRowColor(resolvedTheme)
+        : null;
+    return {
+      ...conversationRowGlowStyle(index),
+      ...(rowAccent
+        ? {
+            "--row-color": rowAccent,
+            "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
+          }
+        : {}),
+    } as React.CSSProperties;
+  };
+
+  const conversationGroupStyle = (
+    group: ConversationGroupSummary,
+    index: number
+  ): React.CSSProperties => {
+    const rawRowColor = group.color;
+    const rowAccent = rawRowColor
+      ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
+      : neutralRowColor(resolvedTheme);
+    return {
+      ...conversationRowGlowStyle(index),
+      "--row-color": rowAccent,
+      "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
+    } as React.CSSProperties;
+  };
+
+  const renderConversationRow = (
+    c: ConversationSummary,
+    index: number
+  ): React.JSX.Element => {
+    const isSelected = c.id === selectedId;
+    const isUnread = unreadConversationIds.has(c.id);
+    return (
+      <li
+        key={c.id}
+        className={styles.conversationRow}
+        data-private={c.incognito ? "true" : undefined}
+        data-unread={isUnread ? "true" : undefined}
+        style={conversationRowStyle(c, index)}
+      >
+        <button
+          type="button"
+          className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
+          onClick={() => {
+            disarmDelete();
+            clearConversationUnread(c.id);
+            void refreshConversation(c.id);
+            setSidebarOpen(false);
+          }}
+        >
+          {c.title}
+        </button>
+        {!isSelected && renderChatDeleteButton(c)}
+      </li>
+    );
+  };
+
+  function renderConversationGroupDeleteButton(group: ConversationGroupSummary): React.JSX.Element {
+    const deleteKey = conversationGroupDeleteKey(group.key);
+    const isArmedSingle = pendingDeleteKey === deleteKey;
+    const className = [
+      styles.conversationDelete,
+      isArmedSingle ? styles.conversationDeleteArmed : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return (
+      <button
+        type="button"
+        className={className}
+        data-delete-affordance="true"
+        aria-label={
+          isArmedSingle
+            ? `Confirm delete ${group.name} conversations`
+            : `Delete ${group.name} conversations`
+        }
+        title={isArmedSingle ? undefined : `Delete ${group.name} chats`}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (isArmedSingle) {
+            void deleteConversationGroup(group);
+          } else {
+            armDelete(deleteKey);
+          }
+        }}
+      >
+        {isArmedSingle && (
+          <span className={styles.conversationDeletePrompt}>Are you sure?</span>
+        )}
+        <span className={styles.conversationDeleteGlyph}>
+          {isArmedSingle ? "✓" : "×"}
+        </span>
+      </button>
+    );
+  }
+
+  const renderConversationGroupTile = (
+    group: ConversationGroupSummary,
+    index: number
+  ): React.JSX.Element => {
+    return (
+      <li
+        key={group.key}
+        className={styles.conversationRow}
+        data-unread={group.unread ? "true" : undefined}
+        style={conversationGroupStyle(group, index)}
+      >
+        <button
+          type="button"
+          className={styles.conversationGroupTile}
+          onClick={() => {
+            disarmDelete();
+            setOpenConversationGroupKey(group.key);
+            setConversationListScrollTop(0);
+          }}
+          aria-label={`Open ${group.name} conversations`}
+        >
+          <span className={styles.conversationGroupGlyph} aria-hidden="true">
+            <BotGlyph name={group.glyph} size={20} strokeWidth={1.5} />
+          </span>
+          <span className={styles.conversationGroupText}>
+            <span className={styles.conversationGroupName}>{group.name}</span>
+            <span className={styles.conversationGroupCount}>
+              {group.count} chats
+            </span>
+          </span>
+        </button>
+        {renderConversationGroupDeleteButton(group)}
+      </li>
+    );
+  };
+
+  const renderConversationListContents = (): React.JSX.Element[] => {
+    const rows: React.JSX.Element[] = [];
+    if (showPrivateConversationEmptyState) {
+      rows.push(
+        <li key="private-empty" className={styles.conversationListEmptyState}>
+          Private chats aren&apos;t saved.
+        </li>
+      );
+    }
+    if (openConversationGroup) {
+      rows.push(
+        <li key="group-back" className={styles.conversationGroupBackRow}>
+          <button
+            type="button"
+            className={styles.conversationGroupBackButton}
+            onClick={() => {
+              disarmDelete();
+              setOpenConversationGroupKey(null);
+            }}
+          >
+            ← Back to conversations
+          </button>
+          <div className={styles.conversationGroupOpenHeader}>
+            <span className={styles.conversationGroupGlyph} aria-hidden="true">
+              <BotGlyph name={openConversationGroup.glyph} size={18} strokeWidth={1.5} />
+            </span>
+            <span>{openConversationGroup.name}</span>
+            <small>{openConversationGroup.count} chats</small>
+          </div>
+        </li>
+      );
+    }
+    sidebarConversationItems.forEach((item, index) => {
+      rows.push(
+        item.kind === "group"
+          ? renderConversationGroupTile(item.group, rows.length)
+          : renderConversationRow(item.conversation, rows.length)
+      );
+    });
+    return rows;
+  };
+
   // ── Delete-all confirmation modal ─────────────────────────────────────
   // Rendered whenever `pendingDeleteKey` points at one of the bulk-delete
   // sentinels: the sidebar Conversations × for chats, or the existing
@@ -11912,6 +12760,54 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const renderMemoryToasts = () => {
+    if (memoryToasts.length === 0) return null;
+    const visible = memoryToasts.slice(0, MEMORY_TOAST_VISIBLE_LIMIT);
+    const overflow = Math.max(0, memoryToasts.length - visible.length);
+    return (
+      <div className={styles.memoryToastStack} aria-live="polite">
+        {visible.map((toast) => (
+          <button
+            key={toast.id}
+            type="button"
+            className={styles.memoryLearnedNotice}
+            data-memory-toast-kind={toast.kind}
+            onClick={() => void undoMemoryToast(toast)}
+            onMouseEnter={() =>
+              setPausedMemoryToastIds((current) => new Set(current).add(toast.id))
+            }
+            onMouseLeave={() => {
+              setPausedMemoryToastIds((current) => {
+                const next = new Set(current);
+                next.delete(toast.id);
+                return next;
+              });
+              setMemoryToasts((current) =>
+                current.map((item) =>
+                  item.id === toast.id
+                    ? { ...item, expiresAt: Date.now() + MEMORY_TOAST_REARM_MS }
+                    : item
+                )
+              );
+            }}
+            title="Tap to undo"
+          >
+            <span aria-hidden="true">{toast.kind === "created" ? "◆" : "↺"}</span>
+            <strong>
+              {toast.kind === "created" ? "Memory saved" : "Memory forgotten"}
+            </strong>
+            <small>
+              {memoryToastScopeLabel(toast.memory)} · tap to undo · {toast.memory.text}
+            </small>
+          </button>
+        ))}
+        {overflow > 0 && (
+          <div className={styles.memoryToastOverflow}>+{overflow} more</div>
+        )}
+      </div>
+    );
+  };
+
   /** Conversation tools — Memories / Edit bot / Export / Delete.
    *  Desktop renders inline in the chat header bar.
    *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
@@ -11920,6 +12816,7 @@ function HomeContent(): React.JSX.Element {
     const gearHidden = sidebarOpen || panel !== null;
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
     const canBotActions = Boolean(activeBot);
+    const canMemoryActions = Boolean(activeBot || defaultConversationUsesPrismIdentity);
     const canExport = Boolean(detail && selectedId);
     const canDelete = Boolean(detail && selectedId);
     const isMobileGear = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
@@ -11928,7 +12825,11 @@ function HomeContent(): React.JSX.Element {
 
     const handleMemories = () => {
       closeMenu();
-      openActiveBotMemoriesPanel();
+      if (activeBot) {
+        openMemoriesPanelForBot(activeBot);
+      } else if (defaultConversationUsesPrismIdentity) {
+        openDefaultMemoriesPanel();
+      }
     };
     const handleEditBot = () => {
       closeMenu();
@@ -11959,24 +12860,26 @@ function HomeContent(): React.JSX.Element {
           }`}
           aria-label="Conversation tools"
         >
+          {renderMemoryToasts()}
           <button
             type="button"
             className={styles.chatHeaderAction}
-            disabled={!canBotActions}
+            disabled={!canMemoryActions}
             onClick={handleMemories}
-            title="Bot memories"
+            title={activeBot ? "Bot memories" : "Default Prism memories"}
           >
             Memories
           </button>
-          <button
-            type="button"
-            className={styles.chatHeaderAction}
-            disabled={!canBotActions}
-            onClick={handleEditBot}
-            title="Edit bot"
-          >
-            Edit bot
-          </button>
+          {canBotActions && (
+            <button
+              type="button"
+              className={styles.chatHeaderAction}
+              onClick={handleEditBot}
+              title="Edit bot"
+            >
+              Edit bot
+            </button>
+          )}
           <button
             type="button"
             className={styles.chatHeaderAction}
@@ -12027,20 +12930,21 @@ function HomeContent(): React.JSX.Element {
               type="button"
               role="menuitem"
               className={styles.chatOverflowMenuItem}
-              disabled={!canBotActions}
+              disabled={!canMemoryActions}
               onClick={handleMemories}
             >
               Memories
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.chatOverflowMenuItem}
-              disabled={!canBotActions}
-              onClick={handleEditBot}
-            >
-              Edit bot
-            </button>
+            {canBotActions && (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.chatOverflowMenuItem}
+                onClick={handleEditBot}
+              >
+                Edit bot
+              </button>
+            )}
             <button
               type="button"
               role="menuitem"
@@ -12360,7 +13264,7 @@ function HomeContent(): React.JSX.Element {
               />
             </label>
             <div className={styles.devToolsActions}>
-              {memoryPanelScope === "bot" ? (
+              {memoryPanelScope === "bot" || memoryPanelScope === "default" ? (
                 <button
                   type="button"
                   className={styles.devToolsAction}
@@ -12437,8 +13341,10 @@ function HomeContent(): React.JSX.Element {
       {/* ── Memories panel ── */}
       {panel === "memories" && (
         <div
+          ref={memoryPanelRef}
           className={`${styles.panel} ${styles.panelMemories}`}
           data-memory-scope={memoryPanelScope}
+          data-memory-physics-active={memoryPhysicsActive ? "true" : undefined}
           data-memory-family={
             memoryPanelScope === "all" && memoryPanelSelectedFamily
               ? memoryPanelSelectedFamily
@@ -12448,7 +13354,7 @@ function HomeContent(): React.JSX.Element {
         >
           <div className={styles.panelHeader}>
             <div className={styles.panelHeaderTitle}>
-              {memoryPanelScope === "bot" ? (
+              {memoryPanelScope === "bot" || memoryPanelScope === "default" ? (
                 <button
                   type="button"
                   className={styles.panelBack}
@@ -12461,7 +13367,7 @@ function HomeContent(): React.JSX.Element {
                     setMemoryPanelScope("all");
                     setMemoryPanelBotId(null);
                     setFocusedMemoryId(null);
-                  })}
+                  }, "backward")}
                   aria-label={
                     memoryPanelSelectedFamily
                       ? "Back to PRISM family"
@@ -12482,17 +13388,33 @@ function HomeContent(): React.JSX.Element {
                   onClick={() => void runMemoryTransition(() => {
                     setMemoryPanelSelectedFamily(null);
                     setFocusedMemoryId(null);
-                  })}
+                  }, "backward")}
                   aria-label="Back to PRISM directories"
                   title="Back to PRISM directories"
                 >
                   ←
                 </button>
               ) : null}
-              <h3>{memoryPanelScope === "all" ? "All memories" : "Bot memories"}</h3>
+              <h3>
+                {memoryPanelScope === "all"
+                  ? "All memories"
+                  : memoryPanelScope === "default"
+                    ? "Default memories"
+                    : "Bot memories"}
+              </h3>
             </div>
             <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
           </div>
+          {/* Transition layer: receives the directional zoom + fade so
+              the navigation reads as "drilling into" or "pulling out of"
+              a directory instead of a hard cut. The phase + direction
+              data attributes drive the CSS keyframes; idle state leaves
+              the layer at scale 1 / opacity 1. */}
+          <div
+            className={styles.memoryTransitionLayer}
+            data-memory-transition-phase={memoryTransitionPhase}
+            data-memory-transition-direction={memoryTransitionDirection}
+          >
           {memoryPanelBot && (
             <div className={styles.memoryBotHeader}>
               <span className={styles.memoryBotGlyph} aria-hidden="true">
@@ -12504,27 +13426,56 @@ function HomeContent(): React.JSX.Element {
               </div>
             </div>
           )}
+          {memoryPanelScope === "default" && (
+            <div className={styles.memoryBotHeader}>
+              <span className={styles.memoryBotGlyph} aria-hidden="true">
+                <PrismTriangleMark />
+              </span>
+              <div>
+                <strong>Prism</strong>
+                <span>Shared memories every bot may draw from.</span>
+              </div>
+            </div>
+          )}
           <p className={styles.memoryPanelHint}>
             {memoryPanelScope === "all"
               ? memoryPanelSelectedFamily
                 ? `${selectedMemoryFamilyDirectory?.letter ?? "?"} family: each orb is a bot; orbit dots indicate saved memories.`
-                : "PRISM directories. Bubble size follows child bot count. Tap a directory to drill in."
-              : "Memories this bot has gathered across chats. Uncertain memories appear as smaller unlabeled bubbles."}
+                : "PRISM directories and your shared Prism memory. Tap to drill in."
+              : memoryPanelScope === "default"
+                ? "Prism also reflects on patterns it notices across your bots. Uncertain memories appear as smaller unlabeled bubbles."
+                : "Memories this bot has gathered across chats. Uncertain memories appear as smaller unlabeled bubbles."}
           </p>
           {memoryPanelScope === "all" && !memoryPanelSelectedFamily ? (
             <div className={styles.memoryBubbleCloud} role="list" aria-label="PRISM memory directories">
+              <button
+                type="button"
+                role="listitem"
+                className={styles.memoryFamilyCluster}
+                data-memory-default="true"
+                data-memory-physics-id="default:prism"
+                style={defaultMemoryDirectoryStyle}
+                onClick={() => void runMemoryTransition(openDefaultMemoriesPanel, "forward")}
+                aria-label={`Prism default: ${defaultDirectMemoryCount} memories. Open default memories.`}
+                title={`Prism default: ${defaultDirectMemoryCount} memories`}
+              >
+                <span className={styles.memoryDefaultGlyph} aria-hidden="true">
+                  <PrismTriangleMark />
+                </span>
+              </button>
               {memoryFamilyDirectories.map((family) => (
                 <button
-                  key={family.id}
+                  key={`family:${memoryPhysicsSeed}:${family.id}`}
                   type="button"
                   role="listitem"
                   className={styles.memoryFamilyCluster}
                   data-memory-family-empty={family.itemCount === 0 ? "true" : undefined}
+                  data-memory-physics-id={`family:${family.id}`}
                   style={family.style}
                   onClick={() => void runMemoryTransition(() => {
                     setMemoryPanelSelectedFamily(family.id);
                     setFocusedMemoryId(null);
-                  })}
+                  }, "forward")}
                   disabled={family.itemCount === 0}
                   aria-label={
                     family.itemCount > 0
@@ -12538,10 +13489,7 @@ function HomeContent(): React.JSX.Element {
                   }
                 >
                   {family.itemCount > 0 && (
-                    <>
-                      <span className={styles.memoryFamilyClusterLabel}>{family.letter}</span>
-                      <strong>{family.itemCount}</strong>
-                    </>
+                    <span className={styles.memoryFamilyClusterLabel}>{family.letter}</span>
                   )}
                 </button>
               ))}
@@ -12551,11 +13499,11 @@ function HomeContent(): React.JSX.Element {
               <ul className={styles.memoryBubbleCloud}>
                 {selectedFamilyBotClusters.map((cluster) => (
                   <li
-                    key={cluster.id}
+                    key={`cluster:${memoryPhysicsSeed}:${cluster.id}`}
                     className={styles.memoryBubble}
                     data-clickable="true"
                     data-source-cluster="true"
-                    data-source-cluster-empty={cluster.memoryCount === 0 ? "true" : undefined}
+                    data-memory-physics-id={`cluster:${cluster.id}`}
                     style={cluster.style}
                     onClick={() => void runMemoryTransition(async () => {
                       if (!cluster.botId) return;
@@ -12567,7 +13515,7 @@ function HomeContent(): React.JSX.Element {
                       // drill-down view instead of jumping all the way
                       // to the directory.
                       await refreshBotMemories(cluster.botId);
-                    })}
+                    }, "forward")}
                     role="button"
                     tabIndex={0}
                     onKeyDown={(event) => {
@@ -12580,7 +13528,7 @@ function HomeContent(): React.JSX.Element {
                         setMemoryPanelBotId(cluster.botId);
                         setFocusedMemoryId(null);
                         await refreshBotMemories(cluster.botId);
-                      });
+                      }, "forward");
                     }}
                     aria-label={
                       cluster.botId
@@ -12589,28 +13537,26 @@ function HomeContent(): React.JSX.Element {
                     }
                     title={`${cluster.botName}: ${cluster.memoryCount} memories`}
                   >
-                    {cluster.memoryCount > 0 && (
-                      <>
-                        <span className={styles.memorySourceClusterGlyph}>
-                          <BotGlyph
-                            name={cluster.botGlyph}
-                            size={36}
-                            strokeWidth={1.95}
-                          />
-                        </span>
-                        <div className={styles.memorySourceClusterInnerBubbles} aria-hidden="true">
-                          {cluster.innerBubbles.map((dot) => (
-                            <span key={dot.id} style={dot.style} />
-                          ))}
-                        </div>
-                        <strong className={styles.memorySourceClusterCount}>
-                          {cluster.memoryCount}
-                        </strong>
-                      </>
-                    )}
+                    <span className={styles.memorySourceClusterGlyph}>
+                      <BotGlyph
+                        name={cluster.botGlyph}
+                        size={40}
+                        strokeWidth={1.95}
+                      />
+                    </span>
+                    <div className={styles.memorySourceClusterInnerBubbles} aria-hidden="true">
+                      {cluster.innerBubbles.map((dot) => (
+                        <span key={dot.id} style={dot.style} />
+                      ))}
+                    </div>
                   </li>
                 ))}
               </ul>
+            ) : (selectedMemoryFamilyDirectory?.itemCount ?? 0) > 0 ? (
+              <div className={styles.memoryEmptyState}>
+                <strong>No memories in this family yet</strong>
+                <p>Bots in this PRISM category haven&rsquo;t gathered memories yet. Chat with one to start filling it in.</p>
+              </div>
             ) : (
               <div className={styles.memoryEmptyState}>
                 <strong>No bots in this family</strong>
@@ -12635,13 +13581,14 @@ function HomeContent(): React.JSX.Element {
                 const signalPercent = Math.round(memoryBubbleSignalValue(memory) * 100);
                 return (
                   <li
-                    key={memory.id}
+                    key={`memory:${memoryPhysicsSeed}:${memory.id}`}
                     className={styles.memoryBubble}
                     data-clickable="true"
                     data-memory-uncertain={uncertain ? "true" : undefined}
                     data-memory-selected={selected ? "true" : undefined}
                     data-memory-dimmed={dimmed ? "true" : undefined}
                     data-memory-inferred={inferred ? "true" : undefined}
+                    data-memory-physics-id={`memory:${memory.id}`}
                     style={{
                       ...layout?.style,
                       ...(inferred
@@ -12662,48 +13609,34 @@ function HomeContent(): React.JSX.Element {
                     }}
                   >
                     {selected ? (
-                      <div className={styles.memoryBubbleFocusDetails}>
-                        <strong>{signalPercent}%</strong>
-                        <span>{inferred ? "certainty" : "confidence"}</span>
-                      </div>
+                      <span className={styles.memoryBubbleScore}>
+                        {signalPercent}%
+                      </span>
                     ) : uncertain ? (
                       <span className={styles.memoryUncertainCore} aria-hidden="true" />
                     ) : (
                       <p>{memory.text}</p>
                     )}
-                    {selected && (
-                      <>
-                        <button
-                          type="button"
-                          className={`${styles.memoryBubbleAction} ${styles.memoryBubbleDeleteAction}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void deleteMemory(memory.id);
-                          }}
-                          aria-label={`Delete memory: ${memory.text}`}
-                          title="Delete memory"
-                        >
-                          ×
-                        </button>
-                        {!inferred && (
-                          <button
-                            type="button"
-                            className={`${styles.memoryBubbleAction} ${styles.memoryBubbleEditAction}`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void editMemory(memory);
-                            }}
-                            aria-label={`Edit memory: ${memory.text}`}
-                            title="Edit memory"
-                          >
-                            ✎
-                          </button>
-                        )}
-                      </>
-                    )}
                   </li>
                 );
               })}
+              {selectedVisibleMemory && (
+                <li className={styles.memoryFullProseCard} role="status" aria-live="polite">
+                  <strong>{isAssumptionMemory(selectedVisibleMemory) ? "Assumption" : "Memory"}</strong>
+                  <p>{selectedVisibleMemory.text}</p>
+                  <button
+                    type="button"
+                    className={styles.memoryFullProseDeleteButton}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void deleteMemory(selectedVisibleMemory.id);
+                    }}
+                    aria-label={`Delete memory: ${selectedVisibleMemory.text}`}
+                  >
+                    Delete memory
+                  </button>
+                </li>
+              )}
             </ul>
           ) : (
             <div className={styles.memoryEmptyState}>
@@ -12713,30 +13646,14 @@ function HomeContent(): React.JSX.Element {
                   ? memoryPanelSelectedFamily
                     ? "No memories are saved in this PRISM family yet."
                     : "When Prism saves memories, they will appear in these directories."
-                  : "When this bot saves a memory, it will float here."}
+                  : memoryPanelScope === "default"
+                    ? "When Prism saves shared memories, they will float here."
+                    : "When this bot saves a memory, it will float here."}
               </p>
             </div>
           )}
+          </div>
           {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-          {memoryTransitionLoading && (
-            <div
-              className={styles.memoryLoadingScreen}
-              role="status"
-              aria-live="polite"
-              aria-label="Opening memory view"
-            >
-              <div className={styles.memoryPrismLoader}>
-                <svg
-                  className={styles.memoryPrismLoaderTriangle}
-                  viewBox="0 0 100 100"
-                  aria-hidden="true"
-                >
-                  <path d="M50 9 90 84 10 84Z" fill="none" />
-                </svg>
-                <span>Opening memory</span>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -12849,14 +13766,11 @@ function HomeContent(): React.JSX.Element {
               Delete account
             </button>
           </div>
-          <h4 className={styles.sectionLabel}>Memories</h4>
-          <ul className={styles.memoryList}>
-            {memories.map(m => (
-              <li key={m.id}><p>{m.text}</p><small className={styles.muted}>confidence {m.confidence.toFixed(2)}</small><button type="button" onClick={() => void deleteMemory(m.id)}>Delete</button></li>
-            ))}
-          </ul>
           {/* Scoped to panelError so a chat-send 401 doesn't render a
-              duplicate error on top of the Settings drawer. */}
+              duplicate error on top of the Settings drawer. The legacy
+              in-settings memory list was removed once the dedicated
+              memories panel (with the cinematic directory transitions)
+              became the canonical management surface. */}
           {panelError && <p className={styles.error} role="alert">{panelError}</p>}
         </div>
       )}
@@ -13851,55 +14765,7 @@ function HomeContent(): React.JSX.Element {
           data-private-empty={showPrivateConversationEmptyState ? "true" : undefined}
           onScroll={event => setConversationListScrollTop(event.currentTarget.scrollTop)}
         >
-          {showPrivateConversationEmptyState && (
-            <li className={styles.conversationListEmptyState}>
-              Private chats aren&apos;t saved.
-            </li>
-          )}
-          {visibleConversations.map((c, index) => {
-            const isSelected = c.id === selectedId;
-            const isUnread = unreadConversationIds.has(c.id);
-            // Custom bots use their hue; Default/no-bot rows still enter the
-            // same gradient system, but with neutral black/white.
-            const rawRowColor = privateChatActive ? null : resolveRowColor(c, bots);
-            const rowAccent = rawRowColor
-              ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
-              : !privateChatActive && !c.incognito
-                ? neutralRowColor(resolvedTheme)
-                : null;
-            const rowStyle = {
-              ...conversationRowGlowStyle(index),
-              ...(rowAccent
-                ? {
-                    "--row-color": rowAccent,
-                    "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
-                  }
-                : {}),
-            } as React.CSSProperties;
-            return (
-              <li
-                key={c.id}
-                className={styles.conversationRow}
-                data-private={c.incognito ? "true" : undefined}
-                data-unread={isUnread ? "true" : undefined}
-                style={rowStyle}
-              >
-                <button
-                  type="button"
-                  className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
-                  onClick={() => {
-                    disarmDelete();
-                    clearConversationUnread(c.id);
-                    void refreshConversation(c.id);
-                    setSidebarOpen(false);
-                  }}
-                >
-                  {c.title}
-                </button>
-                {!isSelected && renderChatDeleteButton(c)}
-              </li>
-            );
-          })}
+          {renderConversationListContents()}
         </ul>
 
         <div className={styles.sidebarFooter}>
@@ -13915,37 +14781,40 @@ function HomeContent(): React.JSX.Element {
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
       >
         <header className={styles.chatHeader}>
-          <button
-            type="button"
-            className={styles.hubHomeButton}
-            onClick={resetChatHeaderToNewChat}
-            aria-label="Back to new chat"
-            title="Back to new chat"
-          >
-            {headerIdentity ? (
-              <span
-                className={styles.headerIdentity}
-                data-private-bot={privateCustomBotActive ? "true" : undefined}
-                style={
-                  headerIdentity.color
-                    ? ({
-                        "--header-identity-color": normalizeAccentForTheme(
-                          headerIdentity.color,
-                          resolvedTheme
-                        ),
-                      } as React.CSSProperties)
-                    : undefined
-                }
-              >
-                <span className={styles.headerIdentityGlyph} aria-hidden="true">
-                  <BotGlyph name={headerIdentity.glyph} size={32} strokeWidth={1.55} />
+          <div className={styles.chatHeaderIdentityGroup}>
+            <button
+              type="button"
+              className={styles.hubHomeButton}
+              onClick={resetChatHeaderToNewChat}
+              aria-label="Back to new chat"
+              title="Back to new chat"
+            >
+              {headerIdentity ? (
+                <span
+                  className={styles.headerIdentity}
+                  data-private-bot={privateCustomBotActive ? "true" : undefined}
+                  style={
+                    headerIdentity.color
+                      ? ({
+                          "--header-identity-color": normalizeAccentForTheme(
+                            headerIdentity.color,
+                            resolvedTheme
+                          ),
+                        } as React.CSSProperties)
+                      : undefined
+                  }
+                >
+                  <span className={styles.headerIdentityGlyph} aria-hidden="true">
+                    <BotGlyph name={headerIdentity.glyph} size={32} strokeWidth={1.55} />
+                  </span>
+                  <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
                 </span>
-                <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
-              </span>
-            ) : (
-              <PrismWordmark className={styles.hubHomeWordmark} />
-            )}
-          </button>
+              ) : (
+                <PrismWordmark className={styles.hubHomeWordmark} />
+              )}
+            </button>
+            {viewportWidth <= PICKER_MOBILE_BREAKPOINT ? renderMemoryToasts() : null}
+          </div>
           <h2>{detail?.title ?? "New conversation"}</h2>
           {renderChatOverflowGear()}
         </header>
@@ -14500,21 +15369,17 @@ function HomeContent(): React.JSX.Element {
                 {(() => {
                   // Chat-mode per-message actions. Identical behavior to
                   // Sandbox: assistant bubbles get a one-click "Fork here"
-                  // (non-destructive branch), user bubbles get two-stage
-                  // Resend → "Confirm resend?" → rewind+resubmit. Both
-                  // flows funnel through `buildChatRequestBody`, which
+                  // (non-destructive branch), user bubbles get Edit, which
+                  // rewinds from the message and sends the revised text via
+                  // `buildChatRequestBody`.
                   // keeps incognito turns ephemeral while honoring whatever
-                  // provider is currently live — so the toggle below the
-                  // textarea and the Resend button compose naturally.
+                  // provider is currently live.
                   const isUser = msg.role === "user";
-                  const armed = isUser && pendingResendId === msg.id;
                   return (
                     <div
                       className={styles.messageActionsSlot}
-                      data-armed={armed ? "true" : undefined}
                       data-copied={copied ? "true" : undefined}
                       data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
-                      data-resend-affordance={isUser ? "true" : undefined}
                     >
                       <div className={styles.messageActions}>
                         <button
@@ -14528,20 +15393,17 @@ function HomeContent(): React.JSX.Element {
                           {copied ? "copied" : "Copy"}
                         </button>
                         {isUser ? (
-                          <button
-                            type="button"
-                            className={armed ? styles.messageActionArmed : undefined}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (armed) {
-                                void resendFromMessage(msg);
-                              } else {
-                                armResend(msg.id);
-                              }
-                            }}
-                          >
-                            {armed ? "Confirm resend?" : "Resend"}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                beginEditMessage(msg);
+                              }}
+                            >
+                              Edit
+                            </button>
+                          </>
                         ) : detail?.incognito ? null : (
                           <>
                             <button
@@ -14574,6 +15436,7 @@ function HomeContent(): React.JSX.Element {
           )}
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
+          {renderConversationStarterRail()}
         </div>
 
         <form
@@ -14588,7 +15451,6 @@ function HomeContent(): React.JSX.Element {
           onKeyDown={handleComposerKeyDown}
         >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
-          {renderConversationStarterRail()}
           {emptyStateLensVisible && (
             <HueLensControl
               bots={pickerSourceBots}
@@ -14768,6 +15630,12 @@ function HomeContent(): React.JSX.Element {
               </div>
             );
           })()}
+          {editingMessageId && (
+            <div className={styles.composeEditNotice} role="status">
+              <span>Editing message. Save creates a new fork and sends the revised text.</span>
+              <button type="button" onClick={cancelEditMessage}>Cancel</button>
+            </div>
+          )}
           <ComposerInput
             ref={draftComposerRef}
             enabled={composerMarkdownEditorEnabled}
@@ -14892,58 +15760,7 @@ function HomeContent(): React.JSX.Element {
           data-private-empty={showPrivateConversationEmptyState ? "true" : undefined}
           onScroll={event => setConversationListScrollTop(event.currentTarget.scrollTop)}
         >
-          {showPrivateConversationEmptyState && (
-            <li className={styles.conversationListEmptyState}>
-              Private chats aren&apos;t saved.
-            </li>
-          )}
-          {visibleConversations.map((c, index) => {
-            const isSelected = c.id === selectedId;
-            const isUnread = unreadConversationIds.has(c.id);
-            // Same row-tint resolution as the Chat-mode sidebar — shared
-            // CSS tokens do the actual painting, we just push the vars.
-            // Sandbox rows "live-update" on each reply because the
-            // server's lastBotColor reflects whoever just spoke, and
-            // refreshConversations() fires after every send.
-            const rawRowColor = privateChatActive ? null : resolveRowColor(c, bots);
-            const rowAccent = rawRowColor
-              ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
-              : !privateChatActive && !c.incognito
-                ? neutralRowColor(resolvedTheme)
-                : null;
-            const rowStyle = {
-              ...conversationRowGlowStyle(index),
-              ...(rowAccent
-                ? {
-                    "--row-color": rowAccent,
-                    "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
-                  }
-                : {}),
-            } as React.CSSProperties;
-            return (
-              <li
-                key={c.id}
-                className={styles.conversationRow}
-                data-private={c.incognito ? "true" : undefined}
-                data-unread={isUnread ? "true" : undefined}
-                style={rowStyle}
-              >
-                <button
-                  type="button"
-                  className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
-                  onClick={() => {
-                    disarmDelete();
-                    clearConversationUnread(c.id);
-                    void refreshConversation(c.id);
-                    setSidebarOpen(false);
-                  }}
-                >
-                  {c.title}
-                </button>
-                {!isSelected && renderChatDeleteButton(c)}
-              </li>
-            );
-          })}
+          {renderConversationListContents()}
         </ul>
 
         <div className={styles.sidebarFooter}>
@@ -14960,37 +15777,40 @@ function HomeContent(): React.JSX.Element {
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
       >
         <header className={styles.chatHeader}>
-          <button
-            type="button"
-            className={styles.hubHomeButton}
-            onClick={resetChatHeaderToNewChat}
-            aria-label="Back to new chat"
-            title="Back to new chat"
-          >
-            {headerIdentity ? (
-              <span
-                className={styles.headerIdentity}
-                data-private-bot={privateCustomBotActive ? "true" : undefined}
-                style={
-                  headerIdentity.color
-                    ? ({
-                        "--header-identity-color": normalizeAccentForTheme(
-                          headerIdentity.color,
-                          resolvedTheme
-                        ),
-                      } as React.CSSProperties)
-                    : undefined
-                }
-              >
-                <span className={styles.headerIdentityGlyph} aria-hidden="true">
-                  <BotGlyph name={headerIdentity.glyph} size={32} strokeWidth={1.55} />
+          <div className={styles.chatHeaderIdentityGroup}>
+            <button
+              type="button"
+              className={styles.hubHomeButton}
+              onClick={resetChatHeaderToNewChat}
+              aria-label="Back to new chat"
+              title="Back to new chat"
+            >
+              {headerIdentity ? (
+                <span
+                  className={styles.headerIdentity}
+                  data-private-bot={privateCustomBotActive ? "true" : undefined}
+                  style={
+                    headerIdentity.color
+                      ? ({
+                          "--header-identity-color": normalizeAccentForTheme(
+                            headerIdentity.color,
+                            resolvedTheme
+                          ),
+                        } as React.CSSProperties)
+                      : undefined
+                  }
+                >
+                  <span className={styles.headerIdentityGlyph} aria-hidden="true">
+                    <BotGlyph name={headerIdentity.glyph} size={32} strokeWidth={1.55} />
+                  </span>
+                  <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
                 </span>
-                <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
-              </span>
-            ) : (
-              <PrismWordmark className={styles.hubHomeWordmark} />
-            )}
-          </button>
+              ) : (
+                <PrismWordmark className={styles.hubHomeWordmark} />
+              )}
+            </button>
+            {viewportWidth <= PICKER_MOBILE_BREAKPOINT ? renderMemoryToasts() : null}
+          </div>
           <h2>{detail?.title ?? "New conversation"}</h2>
           {renderChatOverflowGear()}
         </header>
@@ -15535,20 +16355,14 @@ function HomeContent(): React.JSX.Element {
                 )}
                 {(() => {
                   // Assistant bubbles: one-click "Fork here" (non-destructive
-                  // branch into a new conversation).
-                  // User bubbles: two-stage Resend → "Confirm resend?" →
-                  // rewind-and-resubmit. The armed attribute on the slot
-                  // keeps it expanded while the pointer leaves, matching
-                  // the delete-confirm pattern used elsewhere in the app.
+                  // branch into a new conversation). User bubbles get Edit,
+                  // which rewinds from that message and sends the revised text.
                   const isUser = msg.role === "user";
-                  const armed = isUser && pendingResendId === msg.id;
                   return (
                     <div
                       className={styles.messageActionsSlot}
-                      data-armed={armed ? "true" : undefined}
                       data-copied={copied ? "true" : undefined}
                       data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
-                      data-resend-affordance={isUser ? "true" : undefined}
                     >
                       <div className={styles.messageActions}>
                         <button
@@ -15562,20 +16376,17 @@ function HomeContent(): React.JSX.Element {
                           {copied ? "copied" : "Copy"}
                         </button>
                         {isUser ? (
-                          <button
-                            type="button"
-                            className={armed ? styles.messageActionArmed : undefined}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (armed) {
-                                void resendFromMessage(msg);
-                              } else {
-                                armResend(msg.id);
-                              }
-                            }}
-                          >
-                            {armed ? "Confirm resend?" : "Resend"}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                beginEditMessage(msg);
+                              }}
+                            >
+                              Edit
+                            </button>
+                          </>
                         ) : detail?.incognito ? null : (
                           <>
                             <button
@@ -15610,6 +16421,7 @@ function HomeContent(): React.JSX.Element {
               always bring the latest content into view. */}
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
+          {renderConversationStarterRail()}
         </div>
 
         <form
@@ -15624,7 +16436,6 @@ function HomeContent(): React.JSX.Element {
           onKeyDown={handleComposerKeyDown}
         >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
-          {renderConversationStarterRail()}
           {emptyStateLensVisible && (
             <HueLensControl
               bots={pickerSourceBots}
@@ -15758,6 +16569,12 @@ function HomeContent(): React.JSX.Element {
               );
             })()}
           </div>
+          {editingMessageId && (
+            <div className={styles.composeEditNotice} role="status">
+              <span>Editing message. Save creates a new fork and sends the revised text.</span>
+              <button type="button" onClick={cancelEditMessage}>Cancel</button>
+            </div>
+          )}
           <ComposerInput
             ref={draftComposerRef}
             enabled={composerMarkdownEditorEnabled}

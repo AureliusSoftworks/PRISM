@@ -881,6 +881,15 @@
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+.chatHeaderIdentityGroup {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
 .hubHomeWordmark {
   height: 20px;
   width: auto;
@@ -1504,6 +1513,150 @@
   color: var(--fg);
   border-color: var(--line-strong);
   font-weight: 500;
+}
+
+.conversationGroupTile {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  border: 1px solid color-mix(
+    in srgb,
+    var(--row-color, var(--accent)),
+    var(--fg) var(--row-border-mix, 0%)
+  );
+  background:
+    radial-gradient(
+      ellipse 720px 420px at 92% var(--row-glow-y, 12%),
+      color-mix(in srgb, var(--row-color, var(--accent)) var(--row-depth-glow), transparent),
+      color-mix(in srgb, var(--row-color, var(--accent)) var(--row-depth-fill), transparent) 38%,
+      transparent 72%
+    ),
+    linear-gradient(
+      color-mix(in srgb, var(--row-color, var(--accent)) var(--row-depth-base), transparent),
+      color-mix(in srgb, var(--row-color, var(--accent)) var(--row-depth-base), transparent)
+    ),
+    linear-gradient(
+      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent),
+      color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent)
+    );
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-conversation-title);
+  box-shadow:
+    inset 0 5px 9px -6px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(0, 0, 0, 0.18),
+    10px -8px 30px -18px color-mix(
+      in srgb,
+      var(--row-color, var(--accent)) var(--row-depth-glow-outer),
+      transparent
+    );
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.conversationGroupTile:hover {
+  border-color: var(--fg);
+}
+
+.conversationGroupGlyph {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--row-color, var(--fg));
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.conversationGroupText {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.conversationGroupName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.conversationGroupCount {
+  color: color-mix(in srgb, var(--row-text-color, var(--fg-muted)) 78%, transparent);
+  font-size: 10px;
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.conversationRow[data-unread="true"] .conversationGroupTile {
+  padding-right: 26px;
+}
+
+.conversationRow[data-unread="true"] .conversationGroupTile::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--row-color, var(--accent));
+  transform: translateY(-50%);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--row-color, var(--accent)) 68%, transparent);
+}
+
+.conversationGroupBackRow {
+  display: grid;
+  gap: 6px;
+  padding: 2px 0 6px;
+}
+
+.conversationGroupBackButton {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.conversationGroupBackButton:hover,
+.conversationGroupBackButton:focus-visible {
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.conversationGroupOpenHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.conversationGroupOpenHeader small {
+  color: var(--fg-subtle);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 /* Bot/PRISM-colored tint for conversation rows, keyed off the --row-color
@@ -4667,16 +4820,37 @@
 .messageContextMenu {
   position: fixed;
   z-index: 852;
-  min-width: 132px;
+  min-width: 154px;
   display: grid;
   gap: 4px;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
-  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 34%, var(--line));
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 24% 18%,
+      color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 14%, transparent),
+      transparent 52%
+    ),
+    color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent),
+    var(--shadow-lg),
+    0 0 34px color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 14%, transparent);
   backdrop-filter: blur(12px) saturate(1.08);
   -webkit-backdrop-filter: blur(12px) saturate(1.08);
+  overflow: hidden;
+}
+
+.messageContextMenu::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  z-index: -1;
+  border-radius: 14px;
+  border: 1px dashed color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 30%, transparent);
+  opacity: 0.58;
+  pointer-events: none;
 }
 
 .messageContextMenu[data-anchor="center"] {
@@ -4708,8 +4882,8 @@
 }
 
 .messageContextMenu button {
-  border: 0;
-  background: transparent;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--bg) 34%, transparent);
   color: var(--fg);
   border-radius: 10px;
   padding: 10px 14px;
@@ -4724,7 +4898,14 @@
 }
 
 .messageContextMenu button:active {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 14%, var(--bg-hover));
+}
+
+.messageContextMenu button:hover,
+.messageContextMenu button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 42%, transparent);
+  background: color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 12%, var(--bg-hover));
 }
 
 .messageContextMenu button:disabled {
@@ -4814,6 +4995,7 @@
 
 .messageActions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   min-height: 0;
   overflow: hidden;
@@ -4821,14 +5003,14 @@
 }
 
 .messageActions button {
-  border: 1px solid var(--line);
-  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 58%, transparent);
   color: var(--fg-muted);
-  border-radius: 6px;
-  padding: 3px 8px;
+  border-radius: 999px;
+  padding: 4px 9px;
   cursor: pointer;
   font-size: 11px;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 
 .messageActions button:hover {
@@ -4844,18 +5026,6 @@
 .messageUser .messageActions button:hover {
   background: color-mix(in srgb, var(--accent-text) 12%, transparent);
   color: var(--accent-text);
-}
-
-/* Armed "Confirm resend?" state. Uses the accent (bot color) rather than
-   --danger because resend isn't destructive — it's a deliberate rerun,
-   and the accent echo hints that the rerun will carry the currently
-   selected bot / provider settings. Applied on the button inside
-   .messageUser so both themes read correctly against the bubble fill. */
-.messageUser .messageActions button.messageActionArmed,
-.messageUser .messageActions button.messageActionArmed:hover {
-  background: var(--accent-text);
-  color: var(--accent);
-  border-color: var(--accent-text);
 }
 
 .typingIndicator {
@@ -4933,6 +5103,47 @@
   display: block;
 }
 
+.composeEditNotice {
+  max-width: min(1240px, 100%);
+  width: 100%;
+  margin: 0 auto 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--line));
+  border-radius: 14px;
+  background:
+    radial-gradient(
+      circle at 18% 18%,
+      color-mix(in srgb, var(--compose-bot-color, var(--accent)) 14%, transparent),
+      transparent 58%
+    ),
+    color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.composeEditNotice button {
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 9px;
+}
+
+.composeEditNotice button:hover,
+.composeEditNotice button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 44%, var(--line));
+  background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 12%, var(--bg));
+}
+
 /* Thin utility row above the textarea for the LOCAL/ONLINE mode toggle and
    any future compose-adjacent controls. Width matches `.composeEditorShell`
    so the row's left edge lines up with the textarea below it. */
@@ -4948,10 +5159,11 @@
 
 .conversationStarterRail {
   position: absolute;
-  left: clamp(16px, 4vw, 56px);
-  right: clamp(16px, 4vw, 56px);
-  bottom: clamp(18px, 4vh, 38px);
+  left: 50%;
+  bottom: clamp(18px, 4vh, 34px);
   z-index: 3;
+  width: min(860px, calc(100% - clamp(32px, 8vw, 112px)));
+  transform: translateX(-50%);
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 260px));
   justify-content: center;
@@ -4969,8 +5181,7 @@
 
 @media (max-width: 620px) {
   .conversationStarterRail {
-    left: 16px;
-    right: 16px;
+    width: calc(100% - 28px);
     bottom: 14px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow: visible;
@@ -5036,16 +5247,23 @@
   cursor: default;
 }
 
-.memoryLearnedNotice {
-  position: absolute;
-  right: clamp(18px, 5vw, 64px);
-  bottom: clamp(22px, 4vh, 42px);
+.memoryToastStack {
+  position: relative;
   z-index: 4;
+  display: grid;
+  gap: 8px;
+  width: min(260px, 28vw);
+  pointer-events: none;
+}
+
+.memoryLearnedNotice {
+  appearance: none;
+  width: 100%;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 2px 9px;
   align-items: center;
-  max-width: min(340px, calc(100% - 36px));
+  max-width: 100%;
   padding: 11px 14px;
   border: 1px solid color-mix(in srgb, var(--accent) 44%, var(--line));
   border-radius: 16px;
@@ -5060,8 +5278,20 @@
   box-shadow:
     var(--shadow-lg),
     0 0 26px color-mix(in srgb, var(--accent) 20%, transparent);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   animation: memoryLearnedIn 3.6s ease both;
+}
+
+.memoryLearnedNotice[data-memory-toast-kind="retracted"] {
+  border-color: color-mix(in srgb, var(--fg-muted) 34%, var(--line));
+  background:
+    radial-gradient(
+      circle at 10% 20%,
+      color-mix(in srgb, var(--fg-muted) 18%, transparent),
+      transparent 48%
+    ),
+    color-mix(in srgb, var(--bg-surface) 94%, transparent);
 }
 
 .memoryLearnedNotice > span {
@@ -5080,6 +5310,20 @@
   color: var(--fg-muted);
   font-size: 11px;
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memoryToastOverflow {
+  justify-self: end;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg-muted);
+  font-size: 11px;
+  box-shadow: var(--shadow-sm);
 }
 
 @keyframes memoryLearnedIn {
@@ -5095,6 +5339,44 @@
     opacity: 0;
     transform: translateY(4px) scale(0.98);
   }
+}
+
+.chatHeaderActions .memoryToastStack {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.chatHeaderActions .memoryLearnedNotice,
+.chatHeaderIdentityGroup .memoryLearnedNotice {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  max-width: min(260px, 28vw);
+  padding: 0 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.chatHeaderActions .memoryLearnedNotice > span,
+.chatHeaderIdentityGroup .memoryLearnedNotice > span {
+  grid-row: auto;
+  font-size: 14px;
+}
+
+.chatHeaderActions .memoryLearnedNotice strong,
+.chatHeaderIdentityGroup .memoryLearnedNotice strong {
+  font-size: 12px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.chatHeaderActions .memoryLearnedNotice small,
+.chatHeaderIdentityGroup .memoryLearnedNotice small {
+  display: none;
 }
 
 .composeUtilityActions {
@@ -6956,15 +7238,49 @@
   text-align: left;
 }
 
+.botProfileBuilderNav button:not([data-active="true"]):hover,
+.botProfileBuilderNav button:not([data-active="true"]):focus-visible {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--fg);
+}
+
+.botProfileBuilderNav button:not([data-active="true"]):hover small,
+.botProfileBuilderNav button:not([data-active="true"]):focus-visible small {
+  color: var(--fg-muted);
+}
+
 .botProfileBuilderNav button[data-active="true"] {
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 46%, var(--line));
-  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 10%, var(--bg));
-  color: var(--editor-bot-text, var(--fg));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 18%, var(--bg));
+  color: var(--fg);
+}
+
+.botProfileBuilderNav button[data-active="true"]:hover,
+.botProfileBuilderNav button[data-active="true"]:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 62%, var(--fg));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 22%, var(--bg));
+  color: var(--fg);
+}
+
+.botProfileBuilderNav button[data-active="true"] span {
+  color: var(--fg);
+}
+
+.botProfileBuilderNav button[data-active="true"]:hover span,
+.botProfileBuilderNav button[data-active="true"]:focus-visible span {
+  color: var(--fg);
 }
 
 .botProfileBuilderNav button[data-active="true"] small {
-  color: var(--editor-bot-text, var(--fg));
-  opacity: 0.84;
+  color: var(--fg-muted);
+  opacity: 1;
+}
+
+.botProfileBuilderNav button[data-active="true"]:hover small,
+.botProfileBuilderNav button[data-active="true"]:focus-visible small {
+  color: var(--fg-muted);
+  opacity: 1;
 }
 
 .botProfileBuilderNav span {
@@ -7848,44 +8164,6 @@
   cursor: not-allowed;
 }
 
-/* ── Memory list ── */
-.memoryList {
-  list-style: none;
-  display: grid;
-  gap: 8px;
-}
-
-.memoryList li {
-  border: 1px solid var(--line);
-  background: var(--bg);
-  border-radius: 10px;
-  padding: 10px;
-  display: grid;
-  gap: 6px;
-}
-
-.memoryList p {
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.memoryList button {
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--fg-muted);
-  border-radius: 6px;
-  padding: 4px 10px;
-  cursor: pointer;
-  font-size: 11px;
-  justify-self: start;
-  transition: background 0.15s, color 0.15s;
-}
-
-.memoryList button:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
-}
-
 .panelMemories {
   overflow-y: auto;
   scrollbar-width: none;
@@ -8129,6 +8407,8 @@
 }
 
 .memoryBubble {
+  --memory-orb-x: var(--memory-cloud-x, 50%);
+  --memory-orb-y: var(--memory-cloud-y, 50%);
   width: min(var(--memory-bubble-size), 82vw);
   min-height: min(var(--memory-bubble-size), 82vw);
   aspect-ratio: 1;
@@ -8161,20 +8441,24 @@
   place-items: center;
   align-content: center;
   gap: 6px;
-  padding: clamp(22px, 14%, 34px);
+  padding: clamp(12px, 11%, 20px);
   position: absolute;
-  left: var(--memory-cloud-x, 50%);
-  top: var(--memory-cloud-y, 50%);
+  left: var(--memory-orb-x);
+  top: var(--memory-orb-y);
   z-index: var(--memory-bubble-z, 10);
-  transform: translate(-50%, -50%) rotate(var(--memory-bubble-tilt, 0deg));
+  transform:
+    translate(
+      calc(-50% + var(--memory-physics-x, 0px)),
+      calc(-50% + var(--memory-physics-y, 0px))
+    )
+    rotate(var(--memory-bubble-tilt, 0deg));
   text-align: center;
-  will-change: left, top, transform;
+  will-change: transform;
   transition:
     border-color 0.16s ease,
     box-shadow 0.16s ease,
     filter 0.16s ease,
-    opacity 0.16s ease,
-    transform 0.22s ease;
+    opacity 0.16s ease;
 }
 
 .memoryBubble[data-clickable="true"] {
@@ -8189,7 +8473,13 @@
 .memoryBubble[data-memory-selected="true"] {
   z-index: 86;
   border-color: color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 82%, #ffffff);
-  transform: translate(-50%, -50%) rotate(var(--memory-bubble-tilt, 0deg)) scale(1.06);
+  transform:
+    translate(
+      calc(-50% + var(--memory-physics-x, 0px)),
+      calc(-50% + var(--memory-physics-y, 0px))
+    )
+    rotate(var(--memory-bubble-tilt, 0deg))
+    scale(1.06);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, #ffffff 24%, transparent),
     inset 0 -20px 34px color-mix(in srgb, #000000 16%, transparent),
@@ -8286,32 +8576,79 @@
     inset 0 0 8px color-mix(in srgb, #ffffff 22%, transparent);
 }
 
-.memoryBubbleFocusDetails {
-  position: relative;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  gap: 2px;
-  color: var(--memory-bubble-ink, var(--fg));
-  text-shadow:
-    0 1px 0 color-mix(in srgb, #ffffff 16%, transparent),
-    0 0 18px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 22%, transparent);
+.memoryFullProseCard {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 120;
+  width: min(360px, calc(100% - 36px));
+  transform: translateX(-50%);
+  padding: 14px 16px 16px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 44%, var(--fg) 18%);
+  background:
+    radial-gradient(
+      circle at 18% 14%,
+      color-mix(in srgb, var(--memory-panel-color) 20%, transparent),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--bg) 82%, #000000 18%);
+  color: var(--fg);
+  box-shadow:
+    0 18px 46px color-mix(in srgb, #000000 34%, transparent),
+    0 0 42px color-mix(in srgb, var(--memory-panel-color) 18%, transparent);
+  backdrop-filter: blur(18px) saturate(1.18);
 }
 
-.memoryBubbleFocusDetails strong {
+.memoryFullProseCard strong {
+  display: block;
+  margin: 0 0 6px;
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: clamp(28px, 30%, 54px);
+  font-size: 10px;
   font-weight: 720;
-  line-height: 0.95;
-  letter-spacing: -0.08em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--memory-panel-color) 82%, var(--fg));
 }
 
-.memoryBubbleFocusDetails span {
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.72;
+.memoryFullProseCard p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 620;
+  line-height: 1.32;
+  color: var(--fg);
+}
+
+.memoryFullProseDeleteButton {
+  width: 100%;
+  margin-top: 12px;
+  min-height: 36px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--danger) 46%, var(--memory-panel-color) 24%);
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg) 86%);
+  color: color-mix(in srgb, var(--danger) 82%, var(--fg));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 740;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow:
+    0 6px 16px color-mix(in srgb, #000000 18%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 6%, transparent);
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.memoryFullProseDeleteButton:hover,
+.memoryFullProseDeleteButton:focus-visible {
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--fg) 14%);
+  background: color-mix(in srgb, var(--danger) 22%, var(--bg) 78%);
+  color: color-mix(in srgb, var(--danger) 94%, #ffffff);
+  outline: none;
+  transform: translateY(-1px);
 }
 
 .memoryBubbleAction {
@@ -8386,7 +8723,11 @@
   display: grid;
   place-items: center;
   padding: 0;
-  transform: translate(-50%, -50%);
+  transform:
+    translate(
+      calc(-50% + var(--memory-physics-x, 0px)),
+      calc(-50% + var(--memory-physics-y, 0px))
+    );
   box-shadow:
     0 0 10px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 22%, transparent),
     0 0 30px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 10%, transparent);
@@ -8443,11 +8784,13 @@
 }
 
 .memoryFamilyCluster {
+  --memory-orb-x: var(--memory-family-x, 50%);
+  --memory-orb-y: var(--memory-family-y, 50%);
   appearance: none;
   font: inherit;
   position: absolute;
-  left: var(--memory-family-x, 50%);
-  top: var(--memory-family-y, 50%);
+  left: var(--memory-orb-x);
+  top: var(--memory-orb-y);
   z-index: 5;
   width: var(--memory-family-size, 92px);
   min-height: var(--memory-family-size, 92px);
@@ -8472,7 +8815,11 @@
   gap: 0;
   padding: 10px;
   text-align: center;
-  transform: translate(-50%, -50%);
+  transform:
+    translate(
+      calc(-50% + var(--memory-physics-x, 0px)),
+      calc(-50% + var(--memory-physics-y, 0px))
+    );
   box-shadow:
     0 12px 30px color-mix(in srgb, #000000 18%, transparent),
     0 0 34px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 22%, transparent),
@@ -8484,6 +8831,22 @@
     filter 0.16s ease;
   animation: memoryFamilyClusterWarble 5.8s ease-in-out infinite;
   animation-delay: var(--memory-family-delay, 0s);
+}
+
+/* Physics simulation drives transform and the per-frame --memory-physics-*
+   custom properties at full rAF cadence. Letting the existing transitions /
+   warble keep running causes a tug-of-war (the transition tries to ease
+   between every micro-update, the warble keyframes overwrite the transform
+   on each cycle), which reads as flickering / pre-scripted motion. While
+   physics is active, freeze both so the JS-driven transform is the only
+   thing moving the orbs. They resume the moment the simulation settles. */
+.panelMemories[data-memory-physics-active="true"] .memoryBubble {
+  transition: none;
+}
+
+.panelMemories[data-memory-physics-active="true"] .memoryFamilyCluster {
+  animation: none;
+  transition: none;
 }
 
 .memoryFamilyCluster::before {
@@ -8511,6 +8874,62 @@
   opacity: 0.28;
 }
 
+.memoryFamilyCluster[data-memory-default="true"] {
+  --memory-family-color: #ffffff;
+  border-color: color-mix(in srgb, #ffffff 72%, transparent);
+  background:
+    radial-gradient(
+      circle at 34% 24%,
+      color-mix(in srgb, #ffffff 82%, transparent),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle,
+      color-mix(in srgb, #ffffff 76%, var(--bg) 24%),
+      color-mix(in srgb, #ffffff 24%, var(--bg) 76%)
+    );
+  color: color-mix(in srgb, #ffffff 88%, var(--fg));
+  box-shadow:
+    0 12px 30px color-mix(in srgb, #000000 18%, transparent),
+    0 0 0 2px color-mix(in srgb, #ffffff 18%, transparent),
+    0 0 46px color-mix(in srgb, #ffffff 24%, transparent),
+    0 0 110px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.memoryFamilyCluster[data-memory-default="true"]::before {
+  inset: -10px;
+  border: 2px solid transparent;
+  border-radius: inherit;
+  background:
+    conic-gradient(
+      from 12deg,
+      #ff4d6d,
+      #ff9f1c,
+      #b7e63a,
+      #2fd3e3,
+      #7b5cff,
+      #ff4d6d
+    )
+    border-box;
+  mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.86;
+}
+
+.memoryDefaultGlyph {
+  width: clamp(28px, 38%, 44px);
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, #ffffff 42%, transparent));
+}
+
+.memoryDefaultGlyph svg {
+  width: 100%;
+  height: auto;
+}
+
 .memoryFamilyCluster:not(:disabled):hover,
 .memoryFamilyCluster:not(:disabled):focus-visible,
 .memoryFamilyCluster[data-memory-family-expanded="true"] {
@@ -8536,28 +8955,6 @@
   text-shadow:
     0 0 12px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 34%, transparent),
     0 1px 0 color-mix(in srgb, #000000 28%, transparent);
-}
-
-.memoryFamilyCluster strong {
-  min-width: 24px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  display: inline-grid;
-  place-items: center;
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  line-height: 1;
-  color: var(--fg);
-  background: color-mix(in srgb, var(--bg) 72%, var(--memory-family-color, var(--memory-panel-color)) 28%);
-  border: 1px solid color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 42%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 14%, transparent);
-}
-
-.memoryFamilyCluster small {
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  color: color-mix(in srgb, currentColor 74%, var(--fg-muted));
 }
 
 .memoryBubble[data-source-cluster="true"] {
@@ -8602,33 +8999,6 @@
     inset 0 0 14px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 10%, transparent);
 }
 
-.memoryBubble[data-source-cluster-empty="true"]::before,
-.memoryBubble[data-source-cluster-empty="true"]::after {
-  display: none;
-}
-
-/* Bots with zero memories in the family drill-down render as small,
-   quiet circles. Drop the inner padding (no children to host) and
-   strip the glow so they sit as subtle "presence" dots beside their
-   filled siblings without stealing focus. */
-.memoryBubble[data-source-cluster-empty="true"] {
-  padding: 0;
-  opacity: 0.72;
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--memory-bubble-border, var(--fg)) 28%, transparent),
-    0 4px 10px color-mix(in srgb, #000000 16%, transparent);
-}
-
-.memoryBubble[data-source-cluster-empty="true"][data-clickable="true"]:hover,
-.memoryBubble[data-source-cluster-empty="true"][data-clickable="true"]:focus-visible,
-.memoryBubble[data-source-cluster-empty="true"][data-clickable="true"]:focus-within {
-  opacity: 1;
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 60%, transparent),
-    0 6px 14px color-mix(in srgb, #000000 22%, transparent),
-    0 0 18px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 22%, transparent);
-}
-
 .memoryBubble[data-blank-bubble="true"] {
   padding: 0;
 }
@@ -8661,7 +9031,13 @@
 .memoryBubble[data-memory-delete-state="armed"] {
   z-index: 80;
   border-color: color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 86%, var(--memory-bubble-ink));
-  transform: translate(-50%, -50%) rotate(var(--memory-bubble-tilt, 0deg)) scale(1.055);
+  transform:
+    translate(
+      calc(-50% + var(--memory-physics-x, 0px)),
+      calc(-50% + var(--memory-physics-y, 0px))
+    )
+    rotate(var(--memory-bubble-tilt, 0deg))
+    scale(1.055);
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 30%, transparent),
     0 18px 34px color-mix(in srgb, #000000 24%, transparent),
@@ -8670,7 +9046,13 @@
 }
 
 .memoryBubble[data-memory-delete-state="armed"] {
-  transform: translate(-50%, -50%) rotate(var(--memory-bubble-tilt, 0deg)) scale(1.08);
+  transform:
+    translate(
+      calc(-50% + var(--memory-physics-x, 0px)),
+      calc(-50% + var(--memory-physics-y, 0px))
+    )
+    rotate(var(--memory-bubble-tilt, 0deg))
+    scale(1.08);
 }
 
 .memoryDeleteGlyph {
@@ -8694,7 +9076,13 @@
 .memoryBubble[data-popping="true"] {
   opacity: 0;
   filter: saturate(1.35) brightness(1.42);
-  transform: translate(-50%, -50%) rotate(var(--memory-bubble-tilt, 0deg)) scale(1.18);
+  transform:
+    translate(
+      calc(-50% + var(--memory-physics-x, 0px)),
+      calc(-50% + var(--memory-physics-y, 0px))
+    )
+    rotate(var(--memory-bubble-tilt, 0deg))
+    scale(1.18);
   box-shadow:
     0 0 0 10px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 20%, transparent),
     0 0 68px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 42%, transparent);
@@ -8714,12 +9102,12 @@
   position: relative;
   z-index: 2;
   margin: 0;
-  max-width: 86%;
-  max-height: 8.4em;
+  max-width: 82%;
+  max-height: calc(var(--memory-bubble-line-count, 3) * 1.16em);
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: var(--memory-bubble-line-count, 6);
+  -webkit-line-clamp: var(--memory-bubble-line-count, 3);
   overflow-wrap: anywhere;
   hyphens: auto;
   text-wrap: balance;
@@ -8734,6 +9122,22 @@
     --memory-bubble-text-shadow,
     0 1px 0 color-mix(in srgb, var(--memory-bubble-ink, #000000) 18%, transparent)
   );
+}
+
+.memoryBubbleScore {
+  position: relative;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--memory-bubble-score-size, 18px);
+  font-weight: 780;
+  letter-spacing: -0.08em;
+  line-height: 1;
+  color: var(--memory-bubble-ink, var(--fg));
+  text-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 12%, transparent),
+    0 0 18px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 24%, transparent);
 }
 
 .memoryBubble small {
@@ -8814,28 +9218,6 @@
   animation-delay: var(--memory-inner-delay, 0s);
 }
 
-.memorySourceClusterCount {
-  position: absolute;
-  right: 10%;
-  bottom: 9%;
-  z-index: 3;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 999px;
-  display: inline-grid;
-  place-items: center;
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10.5px;
-  line-height: 1;
-  color: var(--memory-bubble-ink, var(--fg));
-  background: color-mix(in srgb, var(--memory-bubble-color, var(--bg)) 76%, transparent);
-  border: 1px solid color-mix(in srgb, var(--memory-bubble-border, var(--fg)) 46%, transparent);
-  box-shadow:
-    0 4px 12px color-mix(in srgb, #000000 16%, transparent),
-    0 0 14px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 14%, transparent);
-}
-
 @keyframes memoryOrbitMotePulse {
   0%,
   100% {
@@ -8880,15 +9262,32 @@
   0%,
   100% {
     border-radius: 40% 60% 48% 52% / 52% 42% 58% 48%;
-    transform: translate(-50%, -50%) rotate(calc(-1deg + var(--memory-family-warble-a, 0deg)));
+    transform:
+      translate(
+        calc(-50% + var(--memory-physics-x, 0px)),
+        calc(-50% + var(--memory-physics-y, 0px))
+      )
+      rotate(calc(-1deg + var(--memory-family-warble-a, 0deg)));
   }
   28% {
     border-radius: 57% 43% 62% 38% / 41% 56% 44% 59%;
-    transform: translate(-50%, -50%) rotate(var(--memory-family-warble-b, -1.4deg)) scale(1.018);
+    transform:
+      translate(
+        calc(-50% + var(--memory-physics-x, 0px)),
+        calc(-50% + var(--memory-physics-y, 0px))
+      )
+      rotate(var(--memory-family-warble-b, -1.4deg))
+      scale(1.018);
   }
   62% {
     border-radius: 44% 56% 39% 61% / 61% 38% 62% 39%;
-    transform: translate(-50%, -50%) rotate(calc(1.3deg + var(--memory-family-warble-a, 0deg))) scale(0.992);
+    transform:
+      translate(
+        calc(-50% + var(--memory-physics-x, 0px)),
+        calc(-50% + var(--memory-physics-y, 0px))
+      )
+      rotate(calc(1.3deg + var(--memory-family-warble-a, 0deg)))
+      scale(0.992);
   }
 }
 
@@ -8923,101 +9322,82 @@
   line-height: 1.45;
 }
 
-.memoryLoadingScreen {
-  position: absolute;
-  inset: 0;
-  z-index: 140;
-  display: grid;
-  place-items: center;
-  color: var(--fg);
-  background:
-    radial-gradient(
-      circle at 50% 42%,
-      color-mix(in srgb, #ffffff 8%, transparent),
-      transparent 38%
-    ),
-    radial-gradient(
-      ellipse 76% 48% at 50% 54%,
-      color-mix(in srgb, #000000 18%, transparent),
-      transparent 72%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, #ffffff 3%, var(--bg-surface)),
-      var(--bg-surface) 54%,
-      color-mix(in srgb, #000000 14%, var(--bg-surface))
-    );
+/* ── Memory directory transition layer ──
+   Wraps the dynamic content of the memories panel (bot header, hint,
+   bubble cloud / bot list / empty state). A directional zoom + fade
+   replaces the older spinning-triangle loader so navigating between
+   directory levels reads as a continuous spatial gesture:
+
+     forward (drill in) → push through: outgoing scales up + fades out,
+                                        incoming scales up from below
+     backward (drill out) → pull back:  outgoing scales down + fades out,
+                                        incoming scales down from above
+
+   Idle state leaves the layer at scale 1 / opacity 1 so first-open of
+   the panel doesn't trigger a stray animation. The wrapper itself is
+   a normal block element — only `transform` and `opacity` animate so
+   we never trigger layout during the transition. */
+.memoryTransitionLayer {
+  transform-origin: 50% 42%;
+  will-change: transform, opacity;
 }
 
-.memoryLoadingScreen[data-exiting="true"] {
-  pointer-events: none;
-  animation: memoryLoadingScreenOut 420ms ease-in forwards;
+.memoryTransitionLayer[data-memory-transition-phase="exiting"][data-memory-transition-direction="forward"] {
+  animation: memoryTransitionExitForward 190ms cubic-bezier(0.55, 0, 0.85, 0.4) forwards;
 }
 
-.memoryPrismLoader {
-  position: relative;
-  display: grid;
-  place-items: center;
-  gap: 14px;
-  transform: translateY(-6%);
+.memoryTransitionLayer[data-memory-transition-phase="entering"][data-memory-transition-direction="forward"] {
+  animation: memoryTransitionEnterForward 190ms cubic-bezier(0.16, 0.84, 0.32, 1) forwards;
 }
 
-.memoryPrismLoader::before {
-  content: "";
-  position: absolute;
-  width: 128px;
-  height: 128px;
-  border-radius: 999px;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--memory-loader-triangle-color, var(--fg)) 42%, transparent),
-    transparent 70%
-  );
-  filter: blur(30px) saturate(1.2);
-  opacity: 0.34;
-  z-index: -1;
+.memoryTransitionLayer[data-memory-transition-phase="exiting"][data-memory-transition-direction="backward"] {
+  animation: memoryTransitionExitBackward 190ms cubic-bezier(0.55, 0, 0.85, 0.4) forwards;
 }
 
-.memoryPrismLoaderTriangle {
-  width: 76px;
-  height: 76px;
-  display: block;
-  overflow: visible;
-  filter:
-    drop-shadow(0 0 13px color-mix(in srgb, var(--memory-loader-triangle-color, var(--fg)) 28%, transparent))
-    drop-shadow(0 0 34px color-mix(in srgb, var(--memory-loader-triangle-color, var(--fg)) 22%, transparent));
-  animation: memoryPrismSpin 1.2s linear infinite;
+.memoryTransitionLayer[data-memory-transition-phase="entering"][data-memory-transition-direction="backward"] {
+  animation: memoryTransitionEnterBackward 190ms cubic-bezier(0.16, 0.84, 0.32, 1) forwards;
 }
 
-.memoryPrismLoaderTriangle path {
-  stroke: var(--memory-loader-triangle-color, var(--fg));
-  stroke-width: 7;
-  stroke-linecap: butt;
-  stroke-linejoin: miter;
-  stroke-miterlimit: 8;
+@keyframes memoryTransitionExitForward {
+  from { transform: scale(1); opacity: 1; }
+  to   { transform: scale(1.06); opacity: 0; }
 }
 
-.memoryPrismLoader span {
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--fg-muted);
+@keyframes memoryTransitionEnterForward {
+  from { transform: scale(0.94); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
 }
 
-@keyframes memoryPrismSpin {
-  to {
-    transform: rotate(360deg);
+@keyframes memoryTransitionExitBackward {
+  from { transform: scale(1); opacity: 1; }
+  to   { transform: scale(0.94); opacity: 0; }
+}
+
+@keyframes memoryTransitionEnterBackward {
+  from { transform: scale(1.06); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* Respect prefers-reduced-motion: collapse the directional zoom into a
+   short pure fade. Memory navigation should never punish motion-sensitive
+   users with parallax or scaling. */
+@media (prefers-reduced-motion: reduce) {
+  .memoryTransitionLayer[data-memory-transition-phase="exiting"] {
+    animation: memoryTransitionFadeOut 140ms linear forwards;
+  }
+  .memoryTransitionLayer[data-memory-transition-phase="entering"] {
+    animation: memoryTransitionFadeIn 140ms linear forwards;
   }
 }
 
-@keyframes memoryLoadingScreenOut {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
+@keyframes memoryTransitionFadeOut {
+  from { transform: none; opacity: 1; }
+  to   { transform: none; opacity: 0; }
+}
+
+@keyframes memoryTransitionFadeIn {
+  from { transform: none; opacity: 0; }
+  to   { transform: none; opacity: 1; }
 }
 
 /* ── Bot cards ── */
@@ -10844,6 +11224,29 @@
     transform: translateY(1px);
   }
 
+  .chatHeaderIdentityGroup {
+    position: relative;
+    flex-direction: row;
+    justify-content: center;
+    max-width: min(76vw, 340px);
+  }
+
+  .chatHeaderIdentityGroup .memoryToastStack {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 5;
+    width: auto;
+    transform: translate(-50%, -50%);
+  }
+
+  .chatHeaderIdentityGroup .memoryLearnedNotice {
+    max-width: min(270px, calc(100vw - 118px));
+    box-shadow:
+      var(--shadow-lg),
+      0 0 28px color-mix(in srgb, var(--accent) 26%, transparent);
+  }
+
   .chatHeader .headerIdentityName {
     max-width: min(36vw, 200px);
   }
@@ -11349,30 +11752,6 @@
     min-height: 44px;
   }
 
-  /* ── Memory list items ─────────────────────────────────────────────
-     More breathing room so each memory reads as its own card rather
-     than a cramped bullet, and the Delete control becomes a real tap
-     target instead of the desktop's 11px pill. */
-  .memoryList {
-    gap: 10px;
-  }
-
-  .memoryList li {
-    padding: 12px 14px;
-    gap: 8px;
-    border-radius: 12px;
-  }
-
-  .memoryList p {
-    font-size: 14px;
-  }
-
-  .memoryList button {
-    font-size: 12px;
-    padding: 6px 12px;
-    border-radius: 8px;
-  }
-
   /* ── Bot cards ─────────────────────────────────────────────────────
      Desktop keeps × dim (opacity 0.45) and brightens it on hover.
      Touch devices never fire hover, so without an override the ×
@@ -11650,8 +12029,7 @@
   .privateChatButton:hover:not(:active):not(:focus-visible),
   .messageActions button:hover:not(:active):not(:focus-visible),
   .messageUser .messageActions button:hover:not(:active):not(:focus-visible),
-  .panelClose:hover:not(:active):not(:focus-visible),
-  .memoryList button:hover:not(:active):not(:focus-visible) {
+  .panelClose:hover:not(:active):not(:focus-visible) {
     background: transparent !important;
     border-color: transparent !important;
     color: inherit !important;
