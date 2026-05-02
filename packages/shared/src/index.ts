@@ -144,6 +144,8 @@ export interface UserMemory {
   source?: "direct" | "inferred" | "compiled";
   /** Separate certainty channel for inferred/compiled assumptions. */
   certainty?: number;
+  /** Message ids this memory was derived from, used for edit/revert cleanup. */
+  sourceMessageIds?: string[];
   text: string;
 }
 
@@ -186,4 +188,27 @@ export interface StarterChatExtras {
 export interface ChatResponsePayload extends StarterChatExtras {
   conversation: Conversation;
   assistantMessage: ChatMessage;
+  memoryLearned?: {
+    created: Array<{
+      id: string;
+      text: string;
+      botId: string | null;
+      conversationId?: string;
+      confidence: number;
+      source?: "direct" | "inferred" | "compiled";
+      certainty?: number;
+      sourceMessageIds?: string[];
+    }>;
+    retracted: Array<{
+      id: string;
+      text: string;
+      botId: string | null;
+      conversationId?: string;
+      confidence: number;
+      source?: "direct" | "inferred" | "compiled";
+      certainty?: number;
+      sourceMessageIds?: string[];
+    }>;
+    maxConfidence: number;
+  };
 }

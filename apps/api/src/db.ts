@@ -34,6 +34,7 @@ export interface DbMemoryRecord {
   confidence: number;
   source: "direct" | "inferred" | "compiled";
   certainty: number | null;
+  sourceMessageIds: string;
   createdAt: string;
 }
 
@@ -134,6 +135,7 @@ export function createDatabase(): DatabaseSync {
       confidence REAL NOT NULL,
       source TEXT NOT NULL DEFAULT 'direct',
       certainty REAL,
+      source_message_ids TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -259,6 +261,12 @@ export function createDatabase(): DatabaseSync {
   if (!hasMemoryCertaintyColumn) {
     db.exec("ALTER TABLE memories ADD COLUMN certainty REAL;");
   }
+  const hasMemorySourceMessageIdsColumn = memoryColumns.some(
+    (column) => column.name === "source_message_ids"
+  );
+  if (!hasMemorySourceMessageIdsColumn) {
+    db.exec("ALTER TABLE memories ADD COLUMN source_message_ids TEXT NOT NULL DEFAULT '[]';");
+  }
   db.exec(`
     UPDATE memories
     SET source = COALESCE(source, 'direct')
@@ -268,6 +276,11 @@ export function createDatabase(): DatabaseSync {
     UPDATE memories
     SET certainty = COALESCE(certainty, confidence)
     WHERE certainty IS NULL;
+  `);
+  db.exec(`
+    UPDATE memories
+    SET source_message_ids = '[]'
+    WHERE source_message_ids IS NULL OR source_message_ids = '';
   `);
 
   // Migrate existing DBs to the bots.color and bots.glyph columns used
@@ -366,6 +379,18 @@ export function mapMemoryRow(row: DbMemoryRecord, text: string): UserMemory {
     confidence: row.confidence,
     source: row.source,
     certainty: row.certainty ?? row.confidence,
+    sourceMessageIds: parseMemorySourceMessageIds(row.sourceMessageIds),
     text
   };
+}
+
+function parseMemorySourceMessageIds(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }

@@ -126,6 +126,9 @@ function createTestDb(): DatabaseSync {
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
       confidence REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'direct',
+      certainty REAL,
+      source_message_ids TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
   `);

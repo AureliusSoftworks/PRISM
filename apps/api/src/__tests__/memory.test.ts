@@ -1,15 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import type { LlmProvider } from "../providers.ts";
+import { fallbackEmbedding, type LlmProvider } from "../providers.ts";
 import {
+  analyzeMemoryIntent,
   createDevSeedMemories,
+  deleteMemoriesLinkedToMessages,
   deleteOrphanedBotMemories,
+  findMemoryByCue,
   extractMemoryCandidates,
   filterConflictingMemories,
   persistMemoryCandidates,
   retrieveRelevantMemories,
-  updateDirectMemoryText,
 } from "../memory.ts";
 
 function createMemoryTestDb(): DatabaseSync {
@@ -26,6 +28,7 @@ function createMemoryTestDb(): DatabaseSync {
       confidence REAL NOT NULL,
       source TEXT NOT NULL DEFAULT 'direct',
       certainty REAL,
+      source_message_ids TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
     CREATE TABLE bots (
@@ -56,6 +59,18 @@ function throwingEmbedProvider(): LlmProvider {
     },
     async embedText(): Promise<number[]> {
       throw new Error("embedding model unavailable");
+    },
+  };
+}
+
+function fallbackTextProvider(): LlmProvider {
+  return {
+    name: "local",
+    async generateResponse(): Promise<string> {
+      return "";
+    },
+    async embedText(text: string): Promise<number[]> {
+      return fallbackEmbedding(text);
     },
   };
 }
@@ -110,12 +125,81 @@ describe("extractMemoryCandidates", () => {
     assert.equal(candidates[0]?.confidence, 0.98);
   });
 
+  it("strips conversational tag questions from stored memory text", () => {
+    const candidates = extractMemoryCandidates(
+      "I love potatoes, don't you?"
+    );
+
+    assert.deepEqual(candidates, [
+      { text: "You love potatoes.", confidence: 0.67 },
+    ]);
+  });
+
+  it("does not store one-off task requests as memories just because they contain my", () => {
+    const candidates = extractMemoryCandidates(
+      "Write a quick email to my landlord about the sink leak."
+    );
+
+    assert.deepEqual(candidates, []);
+  });
+
   it("rewrites my/me references to your/you in stored memory text", () => {
     const candidates = extractMemoryCandidates(
       "My favorite drink is coffee."
     );
 
     assert.match(candidates[0]?.text ?? "", /^Your favorite drink is coffee\.$/);
+  });
+});
+
+describe("analyzeMemoryIntent", () => {
+  it("promotes an explicit scope cue to global memory creation", () => {
+    const intent = analyzeMemoryIntent(
+      "I love pistachios. Make that a global memory."
+    );
+
+    assert.equal(intent.kind, "create");
+    assert.equal(intent.scope, "global");
+    assert.equal(intent.explicit, true);
+    assert.deepEqual(intent.candidates, [
+      { text: "You love pistachios.", confidence: 0.63 },
+    ]);
+  });
+
+  it("detects multiple retraction cues without creating new memories", () => {
+    const intent = analyzeMemoryIntent(
+      "Nevermind what I said about pistachios. Forget what I said about coffee."
+    );
+
+    assert.equal(intent.kind, "retract");
+    assert.deepEqual(intent.cuePhrases, [
+      "Nevermind what I said about pistachios",
+      "Forget what I said about coffee",
+    ]);
+  });
+
+  it("treats retraction plus a new claim as a correction", () => {
+    const intent = analyzeMemoryIntent(
+      "Forget what I said earlier. Actually I prefer matcha. Save that globally."
+    );
+
+    assert.equal(intent.kind, "correct");
+    assert.equal(intent.scope, "global");
+    assert.deepEqual(intent.cuePhrases, ["Forget what I said earlier"]);
+    assert.deepEqual(intent.newCandidates, [
+      { text: "You prefer matcha.", confidence: 0.66 },
+    ]);
+  });
+
+  it("keeps plain personal statements bot-scoped and non-explicit", () => {
+    const intent = analyzeMemoryIntent("I like quiet mornings.");
+
+    assert.equal(intent.kind, "create");
+    assert.equal(intent.scope, "bot");
+    assert.equal(intent.explicit, false);
+    assert.deepEqual(intent.candidates, [
+      { text: "You like quiet mornings.", confidence: 0.65 },
+    ]);
   });
 });
 
@@ -148,6 +232,27 @@ describe("persistMemoryCandidates", () => {
     assert.equal(row?.conversation_id, "conversation-1");
     assert.equal(row?.bot_id, "bot-1");
     assert.equal(row?.confidence, 0.8);
+  });
+
+  it("stores source message ids on direct memories", async () => {
+    const db = createMemoryTestDb();
+    const [memory] = await persistMemoryCandidates(
+      db,
+      stubProvider(),
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You like green tea.", confidence: 0.9 }],
+      Buffer.alloc(32, 7),
+      { sourceMessageIds: ["message-1"] }
+    );
+
+    const row = db
+      .prepare("SELECT source_message_ids FROM memories WHERE id = ?")
+      .get(memory.id) as { source_message_ids: string } | undefined;
+
+    assert.deepEqual(memory.sourceMessageIds, ["message-1"]);
+    assert.deepEqual(JSON.parse(row?.source_message_ids ?? "[]"), ["message-1"]);
   });
 
   it("still stores memories when embedding generation is unavailable", async () => {
@@ -224,6 +329,87 @@ describe("persistMemoryCandidates", () => {
     );
   });
 
+  it("lets default retrieval see global and compiled memories but not raw bot memories", async () => {
+    const db = createMemoryTestDb();
+    const provider = fallbackTextProvider();
+    const userKey = Buffer.alloc(32, 7);
+
+    await persistMemoryCandidates(
+      db,
+      provider,
+      "user-1",
+      "conversation-global",
+      null,
+      [{ text: "The user likes quiet mornings.", confidence: 0.8 }],
+      userKey
+    );
+    await persistMemoryCandidates(
+      db,
+      provider,
+      "user-1",
+      "conversation-bot-direct",
+      "bot-1",
+      [{ text: "Pirate Tim remembers a roleplay secret.", confidence: 0.8 }],
+      userKey
+    );
+    await persistMemoryCandidates(
+      db,
+      provider,
+      "user-1",
+      "conversation-bot-compiled",
+      "bot-1",
+      [{ text: "You consistently like gentle controls.", confidence: 0.92 }],
+      userKey,
+      { source: "compiled" }
+    );
+
+    const memories = await retrieveRelevantMemories(
+      db,
+      provider,
+      "user-1",
+      "gentle quiet controls",
+      userKey,
+      null,
+      10
+    );
+    const texts = new Set(memories.map((memory) => memory.text));
+
+    assert.equal(texts.has("The user likes quiet mornings."), true);
+    assert.equal(texts.has("You consistently like gentle controls."), true);
+    assert.equal(texts.has("Pirate Tim remembers a roleplay secret."), false);
+  });
+
+  it("finds the nearest in-scope memory for a retraction cue", async () => {
+    const db = createMemoryTestDb();
+    const provider = fallbackTextProvider();
+    const userKey = Buffer.alloc(32, 7);
+
+    await persistMemoryCandidates(
+      db,
+      provider,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [
+        { text: "You love pistachios.", confidence: 0.9 },
+        { text: "You prefer black coffee.", confidence: 0.9 },
+      ],
+      userKey
+    );
+
+    const memory = await findMemoryByCue(
+      db,
+      provider,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      "Nevermind what I said about pistachios",
+      userKey
+    );
+
+    assert.equal(memory?.text, "You love pistachios.");
+  });
+
   it("creates a compiled memory and deletes aligned specifics at strict threshold", async () => {
     const db = createMemoryTestDb();
     const provider = stubProvider();
@@ -240,7 +426,8 @@ describe("persistMemoryCandidates", () => {
         { text: "The user enjoys gentle interface details.", confidence: 0.91 },
         { text: "The user prefers soft animation pacing.", confidence: 0.92 },
       ],
-      userKey
+      userKey,
+      { sourceMessageIds: ["m1", "m2", "m3"] }
     );
 
     const rows = db
@@ -263,7 +450,37 @@ describe("persistMemoryCandidates", () => {
     assert.equal(counts.get("compiled"), 1);
     assert.equal(memories.length, 1);
     assert.equal(memories[0]?.source, "compiled");
+    assert.deepEqual(memories[0]?.sourceMessageIds, ["m1", "m2", "m3"]);
     assert.match(memories[0]?.text ?? "", /consistently like or value/i);
+  });
+
+  it("deletes direct and compiled memories linked to a source message", async () => {
+    const db = createMemoryTestDb();
+    const provider = stubProvider();
+    const userKey = Buffer.alloc(32, 7);
+
+    await persistMemoryCandidates(
+      db,
+      provider,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [
+        { text: "You like quiet mornings.", confidence: 0.98 },
+        { text: "You enjoy slow mornings.", confidence: 0.98 },
+        { text: "You prefer calm mornings.", confidence: 0.98 },
+      ],
+      userKey,
+      { sourceMessageIds: ["message-linked"] }
+    );
+
+    const deleted = deleteMemoriesLinkedToMessages(db, "user-1", ["message-linked"]);
+    const remaining = db
+      .prepare("SELECT COUNT(*) AS n FROM memories")
+      .get() as { n: number };
+
+    assert.equal(deleted, 1);
+    assert.equal(remaining.n, 0);
   });
 
   it("culminates first-person preference statements like real chat input", async () => {
@@ -360,63 +577,6 @@ describe("persistMemoryCandidates", () => {
       { bot_id: "bot-1", source: "direct", count: 2 },
       { bot_id: "bot-2", source: "direct", count: 1 },
     ]);
-  });
-});
-
-describe("updateDirectMemoryText", () => {
-  it("updates direct memory text", async () => {
-    const db = createMemoryTestDb();
-    const provider = stubProvider();
-    const userKey = Buffer.alloc(32, 7);
-    const [memory] = await persistMemoryCandidates(
-      db,
-      provider,
-      "user-1",
-      "conversation-1",
-      "bot-1",
-      [{ text: "The user likes abrupt controls.", confidence: 0.8 }],
-      userKey
-    );
-
-    const updated = updateDirectMemoryText(
-      db,
-      "user-1",
-      memory.id,
-      "The user likes gentle controls.",
-      userKey
-    );
-
-    assert.equal(updated.text, "The user likes gentle controls.");
-    const retrieved = await retrieveRelevantMemories(
-      db,
-      provider,
-      "user-1",
-      "controls",
-      userKey,
-      "bot-1",
-      1
-    );
-    assert.equal(retrieved[0]?.text, "The user likes gentle controls.");
-  });
-
-  it("rejects inferred memory edits", async () => {
-    const db = createMemoryTestDb();
-    const userKey = Buffer.alloc(32, 7);
-    const [memory] = await persistMemoryCandidates(
-      db,
-      stubProvider(),
-      "user-1",
-      "conversation-1",
-      "bot-1",
-      [{ text: "The user generally likes soft motion.", confidence: 0.8 }],
-      userKey,
-      { source: "inferred" }
-    );
-
-    assert.throws(
-      () => updateDirectMemoryText(db, "user-1", memory.id, "New text.", userKey),
-      /Inferred memories cannot be edited/
-    );
   });
 });
 
