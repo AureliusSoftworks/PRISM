@@ -224,9 +224,10 @@ npm run dev
   - Chat gets cross-thread personal-fact memory (extracted preferences in the `memories` table + Qdrant similarity recall across conversations), surfaced in the Settings sidebar.
   - Sandbox gets a silent, thread-scoped **rolling compaction summary** that kicks in when a thread outgrows the 30-message live window. Stored only in SQLite, never indexed into Qdrant, never surfaced in the sidebar — pure context plumbing so long Sandbox threads don't go amnesiac. Nothing ever crosses between threads.
   - Incognito opts out of both paths for the turn and forces the provider to LOCAL.
-- **Customizable chatbots** with a structured personality builder (composed into the model system prompt), temperature, and model overrides
+- **Customizable chatbots** with a structured profile builder, OCEAN-inspired personality sliders, temperature, and model overrides (composed into the model system prompt)
 - **Expanded bot glyph picker** with hundreds of Lucide-backed glyphs alongside the original inline set
 - **Forkable chats** — branch from any message in a conversation (Sandbox)
+- **Auto-generated chat titles** — first replies trigger a background local/online LLM pass that gives saved conversations short sidebar titles.
 - **Markdown in message bubbles** — assistant and user messages render GitHub-flavored Markdown safely in the thread (`react-markdown` + `remark-gfm`); the compose field is plain text.
 - **Per-chat deletion** — remove individual chats from the sidebar (subtle × that embosses red on hover, click-to-confirm) or from the chat header. **Press-and-hold any × (or the header Delete button) for ~1 s** to clear *every* chat at once: on pointerdown every × immediately glows red and tilts to its own small angle; at the 900 ms threshold the whole row shakes like iOS edit-mode while a centered confirmation modal ("Delete all chats?" · Cancel / Delete all) takes over the decision. Release before the threshold to snap the ×'s back. Messages and exports are purged; generated images and extracted memories are preserved.
 - **OpenAI image generation** (DALL-E 3) with gallery (Sandbox)

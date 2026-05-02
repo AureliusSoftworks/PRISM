@@ -4,6 +4,51 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-05-02 · [workflow]
+**Trigger**: A memory-pipeline fix was tested against a stale API dev process, causing the app to appear unchanged after code edits.
+**Lesson**: After changing API/backend behavior, especially memory extraction, inference, chat, or server routes, proactively restart the API dev server before asking for browser retests. If port 18787 is held by a stale Node process, clear that process and start `npm run dev -w apps/api` cleanly.
+**Applies to**: LocalAI API/backend changes and manual browser retest loops.
+
+### 2026-05-02 · [architecture]
+**Trigger**: A user prompt like "I love potatoes, don't you?" was stored as "You love potatoes, don't you." instead of the clean fact "You love potatoes."
+**Lesson**: Memory extraction should strip trailing conversational tag questions before first-person-to-second-person rewriting. Store only the durable user fact, not the social prompt fragment.
+**Applies to**: `apps/api/src/memory-extraction.ts` `rewriteMemoryText()` and memory extraction regression tests.
+
+### 2026-05-02 · [architecture]
+**Trigger**: Memory inference could merge "Potatoes are your favorite" and "Spuds are your favorite" into the lossy synonym-only memory "Potatoes are spuds."
+**Lesson**: Inferred synonym/equivalence memories must preserve the durable user-fact payload from their parent memories before deleting those parents. For favorite-style facts, the inferred memory should keep both the equivalence and the preference, e.g. "Potatoes are spuds, and they are your favorite." If the model output keeps only one side of the fact, reject the merge and preserve the direct memories instead.
+**Applies to**: `apps/api/src/memory-inference.ts` merge normalization and `apps/api/src/__tests__/memory-inference.test.ts`.
+
+### 2026-05-02 · [architecture]
+**Trigger**: A one-off task prompt, "Write a quick email to my landlord about the sink leak," became an inferred ASSUMPTION memory because the extractor treated any sentence containing "my" as personal.
+**Lesson**: Imperative task requests are working context, not durable memory, even when they contain first-person possessives. Block command-style requests at direct extraction, and reject inferred task-like merges that would delete real preference memories.
+**Applies to**: `apps/api/src/memory-extraction.ts` task request filtering and `apps/api/src/memory-inference.ts` task-like merge guard.
+
+### 2026-05-02 · [UX]
+**Trigger**: Conversation starter chips were rendered inside the compose form, so their absolute positioning was relative to the composer/full viewport area and they visually floated too low instead of belonging to the message canvas.
+**Lesson**: Conversation starter chips should render as an overlay inside `.messagesFrame` and be width-constrained to the centered `.messages` canvas, not the composer. In this app, "canvas area" means the visible message region above the editor and below existing message bubbles.
+**Applies to**: `apps/web/src/app/page.tsx` `renderConversationStarterRail()` placement and `apps/web/src/app/page.module.css` `.conversationStarterRail`.
+
+### 2026-05-02 · [UX]
+**Trigger**: Individual bot-memory prose bubbles in the bot memory panel were too large and overlapped after several memories were seeded for one bot. Shrinking them meant text would naturally trail off, so the full prose needed a click/focus expansion target.
+**Lesson**: Individual memory bubbles should stay compact and use collision-aware relaxation to avoid overlap. Their size must visibly reflect confidence/certainty across the visible confidence band, not raw 0..1 in a way that makes normal memories look identical. At rest, prose may truncate inside the orb; clicking/focusing a memory changes that selected orb to its confidence/certainty score and opens a separate full-prose card inside the memory cloud with an explicit `Delete memory` button. Do not show the score in the prose card, do not use a tiny `×` for deletion in the prose card, and do not enlarge every memory bubble just to fit full text.
+**Applies to**: `apps/web/src/app/page.tsx` `memoryBubbleLayoutById` sizing/relaxation and selected-memory detail rendering; `apps/web/src/app/page.module.css` compact memory bubble text and `.memoryFullProseCard`.
+
+### 2026-05-01 · [UX]
+**Trigger**: Numeric badges throughout iMemories (PRISM family bot count, default Prism memory count, per-bot orb memory count in the family drill-down) read as clutter once size, color, and inner motes already communicated memory volume. The whole panel was meant to feel atmospheric/visual, but the explicit numbers fought that.
+**Lesson**: iMemories is **purely visual end-to-end**: no on-screen numeric badges at any level. Directory-level PRISM family bubbles render with **letter mark only**; the default Prism orb shows the **triangle mark only**; bot orbs in the family drill-down show **glyph + inner memory motes only** (no count badge). All counts move into the `aria-label` and `title` attributes for accessibility / hover info, never on-screen text. The visual hierarchy is: size = memory volume, color = identity, glyph = identity mark, inner motes = memory granularity. This **supersedes** prior "letter plus bot count" and per-orb count-badge rules.
+**Applies to**: `apps/web/src/app/page.tsx` PRISM family directory, default Prism orb, and bot-cluster JSX; `apps/web/src/app/page.module.css` removal of `.memoryFamilyCluster strong`, `.memoryFamilyCluster small`, and `.memorySourceClusterCount`.
+
+### 2026-05-01 · [UX]
+**Trigger**: PRISM family bubble size was scaled by bot count, which meant a family with many bots and no memories (e.g., 110 R-family bots, none with memories) appeared as a large bubble despite having nothing inside, masking the actual memory landscape.
+**Lesson**: Size the PRISM family bubbles (and the default Prism orb) by **memory volume**, not bot count, on a shared scale. Visual size communicates "how much memory lives here". Keep the disable-on-zero-bots rule for the family button so families with bots-but-no-memories remain tappable and route to the "No memories yet" empty state.
+**Applies to**: `apps/web/src/app/page.tsx` `memoryFamilyDirectories` size math and `defaultMemoryDirectoryStyle` shared scale.
+
+### 2026-05-01 · [UX]
+**Trigger**: In the PRISM family drill-down, bots with zero memories were rendered as small "presence" circles for roster completeness, but at higher counts (e.g., 110 R-family bots, none with memories) the empty circles dominated the canvas and read as noise rather than information.
+**Lesson**: In the PRISM family drill-down, only render orbs for bots that actually have memories. If a family contains bots but none have memories yet, fall through to a dedicated empty state ("No memories in this family yet") instead of rendering blank presence circles. This **reverses** the 2026-04-30 "blank/glyphless bubble for zero-memory bots" rule for the family drill-down specifically. The 2026-04-30 rule still applies elsewhere (e.g., default Prism scope), but inside a PRISM family drill-down, presence-without-memories is now communicated via empty-state copy, not a circle.
+**Applies to**: `apps/web/src/app/page.tsx` `selectedFamilyBotClusters` filtering and family-drill-down empty-state branching; `apps/web/src/app/page.module.css` removal of `data-source-cluster-empty` rules.
+
 ### 2026-05-01 · [UX]
 **Trigger**: Main iMemories PRISM letters showed raw memory counts, but tapping a letter revealed bot orbs, creating a count mismatch. Bot orb inner dots also used a decorative sqrt scale that overpromised actual memory count.
 **Lesson**: In iMemories, every visible count should predict the next interaction: root PRISM letter counts represent child bot/default orbs, and bot-orb badges/inner dots should use explicit direct-memory counts from the API, not the filtered all-memories list. Empty PRISM letters stay as blank circles with no text/glyph.
@@ -103,6 +148,16 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Trigger**: Desktop start-screen bot cards were still bleeding into the hero after mobile sizing looked correct.
 **Lesson**: Treat desktop low-count bot-picker sizing separately from mobile. Mobile can keep the approved compact stacked treatment, but desktop 5-10 bot grids need a much narrower low-count frame and smaller tile cap so the grid starts below the hero title/hint instead of occupying the same visual band. Dense desktop grids should be fixed by reducing the picker parent frame max height in geometry, then deriving density thresholds from the effective constrained frame width/height; CSS top-clearance offsets hide the real geometry problem and let stage selection drift. A desktop max height around 260px uses the available air above the grid without returning to the old hero overlap. When Spotlight bot search is open, the picker must switch from bottom-anchored absolute positioning to an in-flow clipped results panel below the search box so dense rainbow/grid states can never sit behind the search surface.
 **Applies to**: `apps/web/src/app/page.tsx` picker frame geometry/density thresholds and `apps/web/src/app/page.module.css` search-active picker positioning.
+
+### 2026-05-01 · [UX]
+**Trigger**: Message actions were initially split into Resend, Revert, and Edit, but the desired interaction is a single Edit flow that rewinds from the edited message and sends the revised text.
+**Lesson**: For chat message correction, prefer one Edit action over separate Resend/Revert controls. Saving an edited user message should truncate the thread from that message, delete linked direct/compiled memories, and send the revised message for a fresh assistant reply.
+**Applies to**: `apps/web/src/app/page.tsx` message actions/composer edit mode and `apps/api/src/conversations.ts` memory cascade behavior.
+
+### 2026-05-01 · [UX]
+**Trigger**: Bundling fork creation into Edit made the correction flow fragile and confusing, including duplicate target messages and fork-message id mismatches.
+**Lesson**: Do not bundle Fork into Edit. Edit should be same-chat correction with rewind/regenerate semantics. If branching is needed, expose it as a separate explicit Fork-from-here action rather than overloading message correction.
+**Applies to**: `apps/web/src/app/page.tsx` message actions and `apps/api/src/server.ts` fork route behavior.
 
 ### 2026-04-27 · [UX]
 **Trigger**: A stage-1 bot picker overlap fix moved cards into normal flow below the hero, which prevented overlap but made mobile require scrolling to see all bot cards.
