@@ -1,7 +1,14 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { processChatMessage } from "../chat.ts";
+import {
+  parseTitleResponse,
+  processChatMessage,
+  sanitizeConversationTitle,
+} from "../chat.ts";
+import { rewindConversation } from "../conversations.ts";
+import { persistMemoryCandidates } from "../memory.ts";
+import { fallbackEmbedding, type LlmProvider } from "../providers.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -38,9 +45,97 @@ function createChatTestDb(): DatabaseSync {
       color TEXT,
       glyph TEXT
     );
+    CREATE TABLE memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      bot_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'direct',
+      certainty REAL,
+      source_message_ids TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE memory_summaries (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      summary TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
   return db;
 }
+
+async function flushBackgroundTitleJobs(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function installChatFetchStub(reply = "Memory-aware reply"): void {
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    const body = JSON.parse(String(init?.body ?? "{}")) as { prompt?: string };
+    if (url.includes("/api/embeddings")) {
+      return new Response(
+        JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+    return new Response(
+      JSON.stringify({ message: { content: reply } }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }) as typeof fetch;
+}
+
+function fallbackProvider(): LlmProvider {
+  return {
+    name: "local",
+    async generateResponse(): Promise<string> {
+      return "";
+    },
+    async embedText(text: string): Promise<number[]> {
+      return fallbackEmbedding(text);
+    },
+  };
+}
+
+describe("conversation title inference helpers", () => {
+  it("parses strict JSON title payloads", () => {
+    assert.equal(
+      parseTitleResponse('{"title":"Sourdough Care Plan"}'),
+      "Sourdough Care Plan"
+    );
+  });
+
+  it("parses fenced JSON title payloads", () => {
+    assert.equal(
+      parseTitleResponse('```json\n{"title":"Memory Map Cleanup"}\n```'),
+      "Memory Map Cleanup"
+    );
+  });
+
+  it("rejects malformed or empty title payloads", () => {
+    assert.equal(parseTitleResponse(""), null);
+    assert.equal(parseTitleResponse('{"title":""}'), null);
+  });
+
+  it("falls back to plain-text title responses from local models", () => {
+    assert.equal(parseTitleResponse("Title: Garden Notes."), "Garden Notes");
+    assert.equal(parseTitleResponse("Memory Map Cleanup\n\nExtra text"), "Memory Map Cleanup");
+  });
+
+  it("sanitizes title chrome and caps long strings", () => {
+    assert.equal(sanitizeConversationTitle('" Lantern Ritual. "'), "Lantern Ritual");
+    assert.equal(
+      sanitizeConversationTitle("A".repeat(80)),
+      `${"A".repeat(57)}...`
+    );
+  });
+});
 
 describe("processChatMessage starter prompts", () => {
   it("creates an assistant-only opener grounded in the active bot prompt", async () => {
@@ -131,7 +226,8 @@ describe("processChatMessage starter prompts", () => {
     const inferBody = bodies[1];
     assert.equal(inferBody?.messages?.[0]?.role, "system");
     assert.match(inferBody?.messages?.[1]?.content ?? "", /Respond with compact JSON/);
-    assert.equal(fetchCount, 2);
+    await flushBackgroundTitleJobs();
+    assert.equal(fetchCount, 3);
   });
 
   it("falls back to local starter chips when inference returns non-json", async () => {
@@ -259,5 +355,313 @@ describe("processChatMessage starter prompts", () => {
       .get() as { n: number };
     assert.equal(conversationCount.n, 0);
     assert.equal(messageCount.n, 0);
+  });
+});
+
+describe("processChatMessage auto-generated titles", () => {
+  it("updates a new conversation title in the background after the first reply", async () => {
+    const db = createChatTestDb();
+    let titleCalls = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+      };
+      const prompt = body.messages?.at(-1)?.content ?? "";
+      if (prompt.includes('"title"')) {
+        titleCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: '{"title":"Sourdough Care Plan"}' } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Keep the starter warm and fed." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "How do I keep my sourdough starter alive?",
+      Buffer.alloc(32, 7),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.conversation.title, "How do I keep my sourdough starter alive?");
+    await flushBackgroundTitleJobs();
+
+    const row = db
+      .prepare("SELECT title FROM conversations WHERE id = ?")
+      .get(result.conversation.id) as { title: string };
+    assert.equal(row.title, "Sourdough Care Plan");
+    assert.equal(titleCalls, 1);
+  });
+
+  it("does not re-title an existing conversation on later replies", async () => {
+    const db = createChatTestDb();
+    let titleCalls = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+      };
+      const prompt = body.messages?.at(-1)?.content ?? "";
+      if (prompt.includes('"title"')) {
+        titleCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: '{"title":"First Topic"}' } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Assistant reply" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "Tell me about kelp forests.",
+      Buffer.alloc(32, 7),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+    await flushBackgroundTitleJobs();
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "What animals live there?",
+      Buffer.alloc(32, 7),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      first.conversation.id
+    );
+    await flushBackgroundTitleJobs();
+
+    const row = db
+      .prepare("SELECT title FROM conversations WHERE id = ?")
+      .get(first.conversation.id) as { title: string };
+    assert.equal(row.title, "First Topic");
+    assert.equal(titleCalls, 1);
+  });
+
+  it("re-titles after rewinding the first user message", async () => {
+    const db = createChatTestDb();
+    const inferredTitles = ["Original Topic", "Rewritten Topic"];
+    let titleCalls = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+      };
+      const prompt = body.messages?.at(-1)?.content ?? "";
+      if (prompt.includes('"title"')) {
+        const title = inferredTitles[titleCalls] ?? "Extra Topic";
+        titleCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: JSON.stringify({ title }) } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Assistant reply" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "Plan a garden.",
+      Buffer.alloc(32, 7),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+    await flushBackgroundTitleJobs();
+
+    const originalUserMessage = db
+      .prepare("SELECT id FROM messages WHERE conversation_id = ? AND role = 'user'")
+      .get(first.conversation.id) as { id: string };
+    rewindConversation(db, "user-1", first.conversation.id, originalUserMessage.id);
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Plan a moon garden.",
+      Buffer.alloc(32, 7),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      first.conversation.id
+    );
+    await flushBackgroundTitleJobs();
+
+    const row = db
+      .prepare("SELECT title FROM conversations WHERE id = ?")
+      .get(first.conversation.id) as { title: string };
+    assert.equal(row.title, "Rewritten Topic");
+    assert.equal(titleCalls, 2);
+  });
+
+  it("skips title generation for incognito chats", async () => {
+    const db = createChatTestDb();
+    let chatCalls = 0;
+    globalThis.fetch = (async () => {
+      chatCalls += 1;
+      return new Response(
+        JSON.stringify({ message: { content: "Private reply" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Keep this private.",
+      Buffer.alloc(32, 7),
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        incognito: true,
+        mode: "chat",
+      }
+    );
+    await flushBackgroundTitleJobs();
+
+    const conversationCount = db
+      .prepare("SELECT COUNT(*) AS n FROM conversations")
+      .get() as { n: number };
+    assert.equal(conversationCount.n, 0);
+    assert.equal(chatCalls, 1);
+  });
+});
+
+describe("processChatMessage conversational memory cues", () => {
+  it("saves explicit global memories even when auto-memory is off", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    installChatFetchStub();
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "I love pistachios. Make that a global memory.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const row = db
+      .prepare("SELECT bot_id FROM memories")
+      .get() as { bot_id: string | null } | undefined;
+    assert.equal(row?.bot_id, null);
+    assert.equal(result.memoryLearned?.created.length, 1);
+    assert.equal(result.memoryLearned?.created[0]?.botId, null);
+  });
+
+  it("retracts a semantically matched memory by cue", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    installChatFetchStub();
+    await persistMemoryCandidates(
+      db,
+      fallbackProvider(),
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You love pistachios.", confidence: 0.92 }],
+      userKey
+    );
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Nevermind what I said about pistachios.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      },
+      "conversation-1"
+    );
+
+    const remaining = db
+      .prepare("SELECT COUNT(*) AS n FROM memories")
+      .get() as { n: number };
+    assert.equal(remaining.n, 0);
+    assert.equal(result.memoryLearned?.retracted[0]?.text, "You love pistachios.");
+  });
+
+  it("retracts before creating replacement memories for correction cues", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    installChatFetchStub();
+    await persistMemoryCandidates(
+      db,
+      fallbackProvider(),
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You prefer coffee.", confidence: 0.92 }],
+      userKey
+    );
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Forget what I said about coffee. Actually I prefer matcha.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      },
+      "conversation-1"
+    );
+
+    const rows = db
+      .prepare("SELECT bot_id FROM memories")
+      .all() as Array<{ bot_id: string | null }>;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.bot_id, "bot-1");
+    assert.equal(result.memoryLearned?.retracted[0]?.text, "You prefer coffee.");
+    assert.equal(result.memoryLearned?.created[0]?.text, "You prefer matcha.");
   });
 });

@@ -2,7 +2,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
 import {
-  extractMemoryCandidates,
+  analyzeMemoryIntent,
+  deleteMemoryById,
+  findMemoryByCue,
   persistMemoryCandidates,
   retrieveRelevantMemories,
 } from "./memory.ts";
@@ -29,14 +31,35 @@ export interface ProcessChatMessageResult {
   conversation: Conversation;
   conversationStarters?: string[];
   memoryLearned?: {
-    botId?: string;
-    count: number;
+    created: Array<{
+      id: string;
+      text: string;
+      botId: string | null;
+      conversationId?: string;
+      confidence: number;
+      source?: "direct" | "inferred" | "compiled";
+      certainty?: number;
+      sourceMessageIds?: string[];
+    }>;
+    retracted: Array<{
+      id: string;
+      text: string;
+      botId: string | null;
+      conversationId?: string;
+      confidence: number;
+      source?: "direct" | "inferred" | "compiled";
+      certainty?: number;
+      sourceMessageIds?: string[];
+    }>;
     maxConfidence: number;
   };
 }
 
 const INFER_STARTER_TEMPERATURE = 0.38;
 const INFER_STARTER_MAX_TOKENS = 420;
+const INFER_TITLE_TEMPERATURE = 0.2;
+const INFER_TITLE_MAX_TOKENS = 32;
+const INFER_TITLE_MAX_CHARS = 60;
 const STARTER_FALLBACK_STOP_WORDS = new Set([
   "about",
   "there",
@@ -51,19 +74,22 @@ const STARTER_FALLBACK_STOP_WORDS = new Set([
   "should",
 ]);
 
-function parseSuggestedRepliesPayload(raw: string): string[] {
+function extractJsonObjectPayload(raw: string): string {
   const trimmed = raw.trim();
-  let payload = trimmed;
   const fence = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)```$/);
   if (fence?.[1]) {
-    payload = fence[1].trim();
-  } else {
-    const firstBrace = trimmed.indexOf("{");
-    const lastBrace = trimmed.lastIndexOf("}");
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-      payload = trimmed.slice(firstBrace, lastBrace + 1);
-    }
+    return fence[1].trim();
   }
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1);
+  }
+  return trimmed;
+}
+
+function parseSuggestedRepliesPayload(raw: string): string[] {
+  const payload = extractJsonObjectPayload(raw);
   try {
     const parsedUnknown = JSON.parse(payload) as { suggestions?: unknown };
     const list = parsedUnknown?.suggestions;
@@ -75,6 +101,36 @@ function parseSuggestedRepliesPayload(raw: string): string[] {
     return [...new Set(strings)].slice(0, 4);
   } catch {
     return [];
+  }
+}
+
+export function sanitizeConversationTitle(rawTitle: string): string | null {
+  const title = rawTitle
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(?:chat|conversation)?\s*title\s*[:\-]\s*/i, "")
+    .replace(/^here(?:'s| is)\s+(?:a\s+)?(?:short\s+)?(?:chat\s+|conversation\s+)?title\s*[:\-]\s*/i, "")
+    .replace(/^[\s"'“”‘’`*_#:-]+/, "")
+    .replace(/[\s"'“”‘’`*_#.!?:;-]+$/, "")
+    .trim();
+  if (!title) return null;
+  return title.length > INFER_TITLE_MAX_CHARS
+    ? `${title.slice(0, INFER_TITLE_MAX_CHARS - 3).trimEnd()}...`
+    : title;
+}
+
+export function parseTitleResponse(raw: string): string | null {
+  const payload = extractJsonObjectPayload(raw);
+  try {
+    const parsedUnknown = JSON.parse(payload) as {
+      title?: unknown;
+    };
+    return typeof parsedUnknown.title === "string"
+      ? sanitizeConversationTitle(parsedUnknown.title)
+      : null;
+  } catch {
+    return sanitizeConversationTitle(payload.split(/\r?\n/).find(Boolean) ?? payload);
   }
 }
 
@@ -151,6 +207,60 @@ async function inferConversationStarters(
     // Non-fatal: chips are optional chrome.
   }
   return fallbackConversationStarters(opener, personaLabel);
+}
+
+/** Background chrome call: names a conversation for the sidebar/history list. */
+async function inferConversationTitle(
+  provider: LlmProvider,
+  userMessage: string,
+  assistantReply: string,
+  personaLabel: string | undefined,
+  baseOverrides: GenerateOptions | undefined
+): Promise<string | null> {
+  const firstUserMessage = userMessage.trim();
+  const opener =
+    assistantReply.trim().length > 2200
+      ? `${assistantReply.trim().slice(0, 2200)}...`
+      : assistantReply.trim();
+  if (!firstUserMessage && !opener) return null;
+
+  const inferOverrides: GenerateOptions = {
+    ...baseOverrides,
+    temperature: INFER_TITLE_TEMPERATURE,
+    maxTokens: INFER_TITLE_MAX_TOKENS,
+  };
+  const label = personaLabel?.trim() || "Prism";
+  const messages: ProviderMessage[] = [
+    {
+      role: "system",
+      content:
+        "You title chats for a conversation sidebar. Reply with JSON only — no prose, no markdown outside JSON.",
+    },
+    {
+      role: "user",
+      content: [
+        `Assistant persona label: "${label}".`,
+        firstUserMessage
+          ? `The user's first message was:\n---\n${firstUserMessage.slice(0, 2200)}\n---`
+          : "The user started from an empty composer, so the assistant opened the thread.",
+        "The assistant's first reply was:",
+        "---",
+        opener,
+        "---",
+        'Respond with compact JSON exactly in this shape: {"title":"..."}',
+        "The title is what the user sees in the conversation list.",
+        "Bias strongly toward five content words or fewer.",
+        "Do not count filler words toward that limit: of, and, the, this, that, a, an, in, on, to, for.",
+        "Use plain text only: no quotes, numbering, emoji, trailing period, markdown, or subtitle punctuation.",
+      ].join("\n"),
+    },
+  ];
+
+  try {
+    return parseTitleResponse(await provider.generateResponse(messages, inferOverrides));
+  } catch {
+    return null;
+  }
 }
 
 export interface UserChatSettings {
@@ -571,8 +681,9 @@ export async function processChatMessage(
     userMessage: promptUserMessage,
   });
 
+  let userMessageId: string | null = null;
   if (!isStarterPrompt) {
-    const userMessageId = randomId(12);
+    userMessageId = randomId(12);
     db.prepare(
       "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?)"
     ).run(userMessageId, activeConversationId, userId, message, now);
@@ -586,10 +697,11 @@ export async function processChatMessage(
     settings.botOverrides?.model?.trim() ||
     (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
   const assistantCreatedAt = new Date().toISOString();
+  const assistantMessageId = randomId(12);
   db.prepare(
     "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)"
   ).run(
-    randomId(12),
+    assistantMessageId,
     activeConversationId,
     userId,
     assistantReply,
@@ -637,36 +749,143 @@ export async function processChatMessage(
       )
       .get(activeConversationId, userId) as { n: number }
   ).n;
+  const assistantMessageCount = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'"
+      )
+      .get(activeConversationId, userId) as { n: number }
+  ).n;
+  if (assistantMessageCount === 1) {
+    const titleConversationId = activeConversationId;
+    const titleUserId = userId;
+    const titleUserMessage = message;
+    const titleAssistantReply = assistantReply;
+    const titleAssistantMessageId = assistantMessageId;
+    const titlePersonaLabel = settings.starterPromptLabel;
+    const titleOverrides = settings.botOverrides;
+    queueMicrotask(() => {
+      void inferConversationTitle(
+        provider,
+        titleUserMessage,
+        titleAssistantReply,
+        titlePersonaLabel,
+        titleOverrides
+      )
+        .then((title) => {
+          if (!title) return;
+          const currentAssistantCount = (
+            db
+              .prepare(
+                "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'"
+              )
+              .get(titleConversationId, titleUserId) as { n: number }
+          ).n;
+          const sourceAssistant = db
+            .prepare(
+              "SELECT id FROM messages WHERE id = ? AND conversation_id = ? AND user_id = ? AND role = 'assistant'"
+            )
+            .get(titleAssistantMessageId, titleConversationId, titleUserId) as
+            | { id: string }
+            | undefined;
+          if (currentAssistantCount !== 1 || !sourceAssistant?.id) return;
+          db.prepare(
+            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+          ).run(title, new Date().toISOString(), titleConversationId, titleUserId);
+        })
+        .catch(() => {});
+    });
+  }
 
-  // Cross-thread facts: non-incognito turns with autoMemory on. When a
-  // concrete bot is active, the memory is scoped to that bot so its
-  // personality can grow across Chat and Sandbox.
+  // Cross-thread facts: auto-memory still captures normal personal facts,
+  // while explicit conversational cues ("save that globally", "forget X")
+  // are honored even when the global auto-memory toggle is off.
   let memoryLearned: ProcessChatMessageResult["memoryLearned"];
+  const memoryIntent = !isStarterPrompt ? analyzeMemoryIntent(message) : null;
+  const shouldProcessExplicitMemory =
+    memoryIntent !== null &&
+    (memoryIntent.kind !== "create" || memoryIntent.scope === "global" || memoryIntent.explicit);
   if (
     !skipPersonalFacts &&
-    settings.autoMemory &&
-    !isStarterPrompt
+    !isStarterPrompt &&
+    memoryIntent &&
+    (settings.autoMemory || shouldProcessExplicitMemory)
   ) {
-    const candidates = extractMemoryCandidates(message);
-    if (candidates.length > 0) {
-      const storedMemories = await persistMemoryCandidates(
+    const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
+    const retractedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["retracted"] = [];
+    const cuePhrases =
+      memoryIntent.kind === "retract" || memoryIntent.kind === "correct"
+        ? memoryIntent.cuePhrases
+        : [];
+    for (const cuePhrase of cuePhrases) {
+      const target = await findMemoryByCue(
         db,
         provider,
         userId,
         activeConversationId,
         activeMemoryBotId,
-        candidates,
+        cuePhrase,
         userKey
       );
-      if (storedMemories.length > 0) {
-        memoryLearned = {
-          ...(activeMemoryBotId ? { botId: activeMemoryBotId } : {}),
-          count: storedMemories.length,
-          maxConfidence: Math.max(
-            ...storedMemories.map((memory) => memory.confidence)
-          ),
-        };
+      if (target && deleteMemoryById(db, userId, target.id)) {
+        retractedMemories.push({
+          id: target.id,
+          text: target.text,
+          botId: target.botId ?? null,
+          conversationId: target.conversationId,
+          confidence: target.confidence,
+          source: target.source,
+          certainty: target.certainty,
+          sourceMessageIds: target.sourceMessageIds,
+        });
       }
+    }
+
+    const candidates =
+      memoryIntent.kind === "correct"
+        ? memoryIntent.newCandidates
+        : memoryIntent.kind === "create"
+          ? memoryIntent.candidates
+          : [];
+    if (candidates.length > 0) {
+      const memoryBotId =
+        memoryIntent.kind !== "retract" && memoryIntent.scope === "global"
+          ? null
+          : activeMemoryBotId;
+      const storedMemories = await persistMemoryCandidates(
+        db,
+        provider,
+        userId,
+        activeConversationId,
+        memoryBotId,
+        candidates,
+        userKey,
+        { sourceMessageIds: userMessageId ? [userMessageId] : [] }
+      );
+      createdMemories.push(
+        ...storedMemories.map((memory) => ({
+          id: memory.id,
+          text: memory.text,
+          botId: memory.botId ?? null,
+          conversationId: memory.conversationId,
+          confidence: memory.confidence,
+          source: memory.source,
+          certainty: memory.certainty,
+          sourceMessageIds: memory.sourceMessageIds,
+        }))
+      );
+    }
+
+    if (createdMemories.length > 0 || retractedMemories.length > 0) {
+      memoryLearned = {
+        created: createdMemories,
+        retracted: retractedMemories,
+        maxConfidence: Math.max(
+          0,
+          ...createdMemories.map((memory) => memory.confidence),
+          ...retractedMemories.map((memory) => memory.confidence)
+        ),
+      };
     }
   }
 
