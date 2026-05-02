@@ -17,11 +17,13 @@ import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage } from "./chat.ts";
 import {
   createDevSeedMemories,
+  deleteMemoryById,
   deleteOrphanedBotMemories,
   filterConflictingMemories,
-  updateDirectMemoryText
+  restoreMemory
 } from "./memory.ts";
-import { createDevSeedConversations, deleteAllConversations, deleteConversation, listConversationSummaries, rewindConversation } from "./conversations.ts";
+import { inferAndStoreBotMemories } from "./memory-inference.ts";
+import { createDevSeedConversations, deleteAllConversations, deleteConversation, deleteConversationsByBot, listConversationSummaries, rewindConversation } from "./conversations.ts";
 import {
   composeBotSystemPrompt,
   deleteAllBots,
@@ -29,7 +31,7 @@ import {
   deleteBots,
 } from "./bots.ts";
 import { parseHiddenBotModelIds, resolveNextSettings } from "./settings.ts";
-import { buildModelCatalog } from "./providers.ts";
+import { buildModelCatalog, selectProvider } from "./providers.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import { generateImage } from "./image-provider.ts";
@@ -50,6 +52,7 @@ const masterKey = deriveMasterKey(config.encryptionMasterKey);
 const backupAdapter = new LocalOnlyBackupAdapter();
 const LOCAL_OWNER_EMAIL = "prism-owner@local.prism";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
+const memoryInferenceCheckedAtByScope = new Map<string, string>();
 
 interface UserDbRow {
   id: string;
@@ -228,6 +231,18 @@ function readOptionalString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseSourceMessageIds(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function createSession(userId: string): { token: string; expiresAt: string } {
@@ -571,6 +586,12 @@ function buildRoutes(): RouteDefinition[] {
       const deleted = deleteAllConversations(db, userId);
       json(ctx.res, 200, { ok: true, deleted });
     }),
+    route("DELETE", "/api/conversations/by-bot/:botId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.botId === "_default" ? null : ctx.params.botId;
+      const deleted = deleteConversationsByBot(db, userId, botId);
+      json(ctx.res, 200, { ok: true, deleted });
+    }),
     route("POST", "/api/conversations/dev-seed", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -726,7 +747,42 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const conversationId = readOptionalString(ctx.query.get("conversationId"));
       const botId = readOptionalString(ctx.query.get("botId"));
+      const scope = readOptionalString(ctx.query.get("scope"));
       deleteOrphanedBotMemories(db, userId);
+      if (botId) {
+        const inferenceState = db.prepare(`
+          SELECT
+            MAX(CASE WHEN source = 'direct' THEN created_at END) AS latest_direct_at,
+            MAX(CASE WHEN source = 'inferred' THEN created_at END) AS latest_inferred_at
+          FROM memories
+          WHERE user_id = ?
+            AND bot_id = ?
+            AND source IN ('direct', 'inferred')
+        `).get(userId, botId) as {
+          latest_direct_at?: string | null;
+          latest_inferred_at?: string | null;
+        } | undefined;
+        const latestDirectAt = inferenceState?.latest_direct_at ?? null;
+        const latestInferredAt = inferenceState?.latest_inferred_at ?? null;
+        const inferenceScopeKey = `${userId}:${botId}`;
+        const shouldInfer =
+          latestDirectAt !== null &&
+          latestDirectAt > (latestInferredAt ?? "1970-01-01") &&
+          memoryInferenceCheckedAtByScope.get(inferenceScopeKey) !== latestDirectAt;
+        if (shouldInfer) {
+          try {
+            const user = getUserRow(userId);
+            const openAiApiKey =
+              getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+            const provider = selectProvider(user.preferred_provider, openAiApiKey);
+            await inferAndStoreBotMemories(db, provider, userId, botId, userKey);
+          } catch (error) {
+            console.warn("Memory inference skipped:", error);
+          } finally {
+            memoryInferenceCheckedAtByScope.set(inferenceScopeKey, latestDirectAt);
+          }
+        }
+      }
       type MemoryRow = {
         id: string;
         conversation_id: string | null;
@@ -734,6 +790,7 @@ function buildRoutes(): RouteDefinition[] {
         confidence: number;
         source: "direct" | "inferred" | "compiled";
         certainty: number | null;
+        source_message_ids: string;
         ciphertext: string;
         iv: string;
         tag: string;
@@ -742,18 +799,24 @@ function buildRoutes(): RouteDefinition[] {
       const rows = botId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId, botId) as MemoryRow[]
+        : scope === "default"
+        ? db
+            .prepare(
+              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT 100"
+            )
+            .all(userId) as MemoryRow[]
         : conversationId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId, conversationId) as MemoryRow[]
         : db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId) as MemoryRow[];
       const memoryCountRows = db
@@ -786,6 +849,7 @@ function buildRoutes(): RouteDefinition[] {
           confidence: row.confidence,
           source: row.source,
           certainty: row.certainty ?? row.confidence,
+          sourceMessageIds: parseSourceMessageIds(row.source_message_ids),
           text: payload.text ?? "",
           createdAt: row.created_at
         };
@@ -841,21 +905,101 @@ function buildRoutes(): RouteDefinition[] {
       const result = db.prepare("DELETE FROM memories WHERE user_id = ?").run(userId);
       json(ctx.res, 200, { ok: true, deleted: Number(result.changes ?? 0) });
     }),
-    route("PATCH", "/api/memories/:id", async (ctx) => {
+    route("POST", "/api/memories/restore", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const text = readString(body.text, "Memory text");
-      const memory = updateDirectMemoryText(db, userId, ctx.params.id, text, userKey);
+      const botId = readOptionalString(body.botId);
+      if (botId) {
+        const bot = db
+          .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
+          .get(botId, userId) as { id?: string } | undefined;
+        if (!bot?.id) {
+          throw new Error("Bot not found.");
+        }
+      }
+      const conversationId = readOptionalString(body.conversationId);
+      const requestedSource = readOptionalString(body.source);
+      const source =
+        requestedSource === "inferred" || requestedSource === "compiled"
+          ? requestedSource
+          : "direct";
+      const confidence =
+        typeof body.confidence === "number" && Number.isFinite(body.confidence)
+          ? Math.max(0, Math.min(1, body.confidence))
+          : undefined;
+      const certainty =
+        typeof body.certainty === "number" && Number.isFinite(body.certainty)
+          ? Math.max(0, Math.min(1, body.certainty))
+          : confidence;
+      const sourceMessageIds = Array.isArray(body.sourceMessageIds)
+        ? body.sourceMessageIds.filter((value): value is string => typeof value === "string")
+        : [];
+      const provider = selectProvider(
+        user.preferred_provider,
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey
+      );
+      const memory = await restoreMemory(db, provider, userId, userKey, {
+        text,
+        botId,
+        conversationId,
+        confidence,
+        source,
+        certainty,
+        sourceMessageIds,
+      });
       json(ctx.res, 200, { ok: true, memory });
     }),
     route("DELETE", "/api/memories/:id", async (ctx) => {
       const userId = requireAuth(ctx);
-      db.prepare("DELETE FROM memories WHERE id = ? AND user_id = ?").run(
-        ctx.params.id,
-        userId
-      );
-      json(ctx.res, 200, { ok: true });
+      const deleted = deleteMemoryById(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, deleted });
+    }),
+    route("PATCH", "/api/messages/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const text = readString((ctx.body as Record<string, unknown>).text, "Message text");
+      const messageId = ctx.params.id;
+      const message = db.prepare(`
+        SELECT m.id, m.conversation_id, m.role, m.content, m.created_at,
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id AND c.user_id = m.user_id
+        WHERE m.id = ? AND m.user_id = ?
+      `).get(messageId, userId) as
+        | {
+          id: string;
+          conversation_id: string;
+          role: string;
+          content: string;
+          created_at: string;
+        }
+        | undefined;
+
+      if (!message) {
+        throw new Error("Message not found.");
+      }
+      if (message.role !== "user") {
+        throw new Error("Only user messages can be edited.");
+      }
+
+      db.exec("BEGIN IMMEDIATE TRANSACTION");
+      try {
+        db.prepare(
+          "UPDATE messages SET content = ? WHERE id = ? AND user_id = ?"
+        ).run(text, messageId, userId);
+        db.prepare(
+          "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+        ).run(new Date().toISOString(), message.conversation_id, userId);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+
+      json(ctx.res, 200, {
+        ok: true,
+      });
     }),
     route("GET", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -1196,8 +1340,29 @@ function buildRoutes(): RouteDefinition[] {
       if (!messageId) {
         throw new Error("messageId is required.");
       }
-      const { content } = rewindConversation(db, userId, conversationId, messageId);
-      json(ctx.res, 200, { ok: true, message: content });
+      const { content, deletedMessages, deletedMemories } = rewindConversation(
+        db,
+        userId,
+        conversationId,
+        messageId
+      );
+      json(ctx.res, 200, { ok: true, message: content, deletedMessages, deletedMemories });
+    }),
+    route("POST", "/api/conversations/:id/revert", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const body = ctx.body as Record<string, unknown>;
+      const messageId = typeof body.messageId === "string" ? body.messageId : null;
+      if (!messageId) {
+        throw new Error("messageId is required.");
+      }
+      const { deletedMessages, deletedMemories } = rewindConversation(
+        db,
+        userId,
+        conversationId,
+        messageId
+      );
+      json(ctx.res, 200, { ok: true, deletedMessages, deletedMemories });
     }),
     route("POST", "/api/conversations/:id/fork", async (ctx) => {
       const userId = requireAuth(ctx);

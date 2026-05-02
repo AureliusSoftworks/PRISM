@@ -5,6 +5,7 @@ import {
   createDevSeedConversations,
   deleteAllConversations,
   deleteConversation,
+  deleteConversationsByBot,
   listConversationSummaries,
   rewindConversation,
 } from "../conversations.ts";
@@ -63,6 +64,20 @@ function createTestDb(): DatabaseSync {
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      bot_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'direct',
+      certainty REAL,
+      source_message_ids TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -87,6 +102,18 @@ function seedChat(db: DatabaseSync, userId: string, conversationId: string): voi
   db.prepare(
     "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
   ).run(`sum-${suffix}`, userId, conversationId, "user likes cats", now);
+}
+
+function seedBotChat(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  botId: string | null
+): void {
+  seedChat(db, userId, conversationId);
+  db.prepare(
+    "UPDATE conversations SET bot_id = ? WHERE id = ? AND user_id = ?"
+  ).run(botId, conversationId, userId);
 }
 
 function seedListConversation(
@@ -212,9 +239,10 @@ describe("deleteConversation", () => {
     );
   });
 
-  it("preserves images and memory summaries, untying them from the deleted chat", () => {
+  it("preserves images, summaries, and memories, untying them from the deleted chat", () => {
     const db = createTestDb();
     seedChat(db, "user-1", "chat-1");
+    insertLinkedMemory(db, "user-1", "chat-1", "memory-chat-1", ["msg-chat-1"]);
 
     deleteConversation(db, "user-1", "chat-1");
 
@@ -229,6 +257,12 @@ describe("deleteConversation", () => {
       .get("sum-chat-1") as { id: string; conversation_id: string | null } | undefined;
     assert.ok(summary, "memory summary should still exist");
     assert.equal(summary?.conversation_id, null);
+
+    const memory = db
+      .prepare("SELECT id, conversation_id FROM memories WHERE id = ?")
+      .get("memory-chat-1") as { id: string; conversation_id: string | null } | undefined;
+    assert.ok(memory, "memory should still exist");
+    assert.equal(memory?.conversation_id, null);
   });
 
   it("rejects deletion attempts by a different user", () => {
@@ -374,6 +408,85 @@ describe("deleteAllConversations", () => {
   });
 });
 
+describe("deleteConversationsByBot", () => {
+  it("removes only saved conversations for the requested bot", () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "bot-chat-1", "bot-1");
+    seedBotChat(db, "user-1", "bot-chat-2", "bot-1");
+    seedBotChat(db, "user-1", "other-bot-chat", "bot-2");
+    seedBotChat(db, "user-1", "default-chat", null);
+    seedBotChat(db, "user-2", "other-user-bot-chat", "bot-1");
+
+    const deleted = deleteConversationsByBot(db, "user-1", "bot-1");
+
+    assert.equal(deleted, 2);
+    const remaining = db
+      .prepare("SELECT id FROM conversations ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      remaining.map((row) => row.id),
+      ["default-chat", "other-bot-chat", "other-user-bot-chat"]
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE user_id = ?")
+        .get("user-1") as { n: number }).n,
+      2
+    );
+  });
+
+  it("removes Default Prism conversations while preserving linked artifacts", () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "default-1", null);
+    seedBotChat(db, "user-1", "default-2", null);
+    seedBotChat(db, "user-1", "bot-chat", "bot-1");
+    seedBotChat(db, "user-2", "other-user-default", null);
+    insertLinkedMemory(db, "user-1", "default-1", "memory-default-1", ["msg-default-1"]);
+    db.prepare("UPDATE conversations SET incognito = 1 WHERE id = ?").run("default-2");
+
+    const deleted = deleteConversationsByBot(db, "user-1", null);
+
+    assert.equal(deleted, 1);
+    const remaining = db
+      .prepare("SELECT id FROM conversations ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      remaining.map((row) => row.id),
+      ["bot-chat", "default-2", "other-user-default"]
+    );
+    const image = db
+      .prepare("SELECT conversation_id FROM images WHERE id = ?")
+      .get("img-default-1") as { conversation_id: string | null };
+    const summary = db
+      .prepare("SELECT conversation_id FROM memory_summaries WHERE id = ?")
+      .get("sum-default-1") as { conversation_id: string | null };
+    const memory = db
+      .prepare("SELECT conversation_id FROM memories WHERE id = ?")
+      .get("memory-default-1") as { conversation_id: string | null };
+    assert.equal(image.conversation_id, null);
+    assert.equal(summary.conversation_id, null);
+    assert.equal(memory.conversation_id, null);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM conversation_exports WHERE conversation_id = ?")
+        .get("default-1") as { n: number }).n,
+      0
+    );
+  });
+
+  it("returns 0 when no saved conversations match the bot group", () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "bot-chat", "bot-1");
+
+    const deleted = deleteConversationsByBot(db, "user-1", "bot-2");
+
+    assert.equal(deleted, 0);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM conversations WHERE user_id = ?")
+        .get("user-1") as { n: number }).n,
+      1
+    );
+  });
+});
+
 describe("createDevSeedConversations", () => {
   it("creates saved sidebar chats with lorem assistant replies", () => {
     const db = createTestDb();
@@ -485,6 +598,28 @@ function insertSummary(
   ).run(id, userId, conversationId, summary, `1970-01-01T00:00:${s}.000Z`);
 }
 
+function insertLinkedMemory(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  id: string,
+  sourceMessageIds: string[]
+): void {
+  db.prepare(`
+    INSERT INTO memories (
+      id, user_id, conversation_id, bot_id, ciphertext, iv, tag,
+      confidence, source, certainty, source_message_ids, created_at
+    )
+    VALUES (?, ?, ?, NULL, 'ciphertext', 'iv', 'tag', 0.9, 'compiled', 0.9, ?, ?)
+  `).run(
+    id,
+    userId,
+    conversationId,
+    JSON.stringify(sourceMessageIds),
+    "1970-01-01T00:00:08.000Z"
+  );
+}
+
 describe("rewindConversation", () => {
   it("truncates the target user message and everything newer, returning the original text", () => {
     const db = createTestDb();
@@ -577,6 +712,31 @@ describe("rewindConversation", () => {
     assert.deepEqual(
       remaining.map(r => r.id),
       ["sum-old"]
+    );
+  });
+
+  it("preserves memories linked to truncated messages", () => {
+    const db = createTestDb();
+    seedConversationAt(db, "user-1", "chat-1", [
+      { id: "m1", role: "user", content: "first", seconds: 1 },
+      { id: "m2", role: "assistant", content: "reply", seconds: 2 },
+      { id: "m3", role: "user", content: "second", seconds: 5 },
+      { id: "m4", role: "assistant", content: "second reply", seconds: 6 },
+    ]);
+    insertLinkedMemory(db, "user-1", "chat-1", "memory-old", ["m1"]);
+    insertLinkedMemory(db, "user-1", "chat-1", "memory-truncated", ["m3"]);
+    insertLinkedMemory(db, "user-1", "chat-1", "memory-compiled", ["m1", "m3"]);
+
+    const result = rewindConversation(db, "user-1", "chat-1", "m3");
+    const remaining = db
+      .prepare("SELECT id FROM memories ORDER BY id")
+      .all() as Array<{ id: string }>;
+
+    assert.equal(result.deletedMessages, 2);
+    assert.equal(result.deletedMemories, 0);
+    assert.deepEqual(
+      remaining.map((row) => row.id),
+      ["memory-compiled", "memory-old", "memory-truncated"]
     );
   });
 

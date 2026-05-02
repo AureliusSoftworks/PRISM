@@ -184,6 +184,9 @@ export function deleteConversation(
       "UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
     ).run(userId, conversationId);
     db.prepare(
+      "UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
+    ).run(userId, conversationId);
+    db.prepare(
       "DELETE FROM conversation_exports WHERE conversation_id = ? AND user_id = ?"
     ).run(conversationId, userId);
     db.prepare(
@@ -193,6 +196,59 @@ export function deleteConversation(
       "DELETE FROM conversations WHERE id = ? AND user_id = ?"
     ).run(conversationId, userId);
     db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
+ * Permanently remove all saved chats in one bot/default conversation group.
+ *
+ * `botId === null` targets Default Prism chats (`conversations.bot_id IS NULL`).
+ * Private/incognito rows are excluded to match the sidebar's visible saved-chat
+ * surface. Linked user artifacts follow the same preservation contract as
+ * {@link deleteConversation}: images and memories survive with their
+ * conversation pointer nulled, while messages and exports are deleted.
+ */
+export function deleteConversationsByBot(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null
+): number {
+  const botPredicate = botId === null ? "bot_id IS NULL" : "bot_id = ?";
+  const groupSubquery = `SELECT id FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND ${botPredicate}`;
+  const groupParams: Array<string | null> = botId === null ? [userId] : [userId, botId];
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const countRow = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND ${botPredicate}`
+      )
+      .get(...groupParams) as { n: number };
+    const conversationCount = Number(countRow.n ?? 0);
+
+    db.prepare(
+      `UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
+    ).run(userId, ...groupParams);
+    db.prepare(
+      `UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
+    ).run(userId, ...groupParams);
+    db.prepare(
+      `UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
+    ).run(userId, ...groupParams);
+    db.prepare(
+      `DELETE FROM conversation_exports WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
+    ).run(userId, ...groupParams);
+    db.prepare(
+      `DELETE FROM messages WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
+    ).run(userId, ...groupParams);
+    db.prepare(
+      `DELETE FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND ${botPredicate}`
+    ).run(...groupParams);
+    db.exec("COMMIT");
+    return conversationCount;
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
@@ -220,18 +276,17 @@ export function deleteConversation(
  *     turn, matching "the checkpoint IS the new turn").
  *   - Purges `memory_summaries` whose `conversation_id` matches and
  *     whose `created_at >= cutoff` so the thread-scoped compaction is
- *     rewound alongside the visible history. The cross-thread
- *     `memories` table has no `conversation_id` column and is left
- *     strictly untouched — facts learned in this thread may also apply
- *     to unrelated conversations, so nuking them by timestamp would be
- *     an overreach.
+ *     rewound alongside the visible history.
+ *   - Leaves the cross-thread `memories` table strictly untouched. Facts
+ *     learned in this thread may also apply to unrelated conversations,
+ *     so message rewind is not a memory-management gesture.
  */
 export function rewindConversation(
   db: DatabaseSync,
   userId: string,
   conversationId: string,
   messageId: string
-): { content: string } {
+): { content: string; deletedMessages: number; deletedMemories: number } {
   const conversation = db
     .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
     .get(conversationId, userId) as { id?: string } | undefined;
@@ -255,7 +310,7 @@ export function rewindConversation(
 
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
-    db.prepare(
+    const deletedMessages = db.prepare(
       "DELETE FROM messages WHERE conversation_id = ? AND user_id = ? AND created_at >= ?"
     ).run(conversationId, userId, target.created_at);
     db.prepare(
@@ -265,12 +320,15 @@ export function rewindConversation(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(new Date().toISOString(), conversationId, userId);
     db.exec("COMMIT");
+    return {
+      content: target.content,
+      deletedMessages: Number(deletedMessages.changes ?? 0),
+      deletedMemories: 0,
+    };
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
-
-  return { content: target.content };
 }
 
 /**
@@ -301,6 +359,9 @@ export function deleteAllConversations(
     ).run(userId);
     db.prepare(
       "UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id IS NOT NULL"
+    ).run(userId);
+    db.prepare(
+      "UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IS NOT NULL"
     ).run(userId);
     db.prepare("DELETE FROM conversation_exports WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM messages WHERE user_id = ?").run(userId);
