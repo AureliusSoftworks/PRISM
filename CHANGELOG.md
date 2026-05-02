@@ -10,6 +10,110 @@ Active development happens on the `dev` branch; every release is a merge into
 
 ## [Unreleased]
 
+### Added
+
+- **Structured Bot Profile Builder.** The freeform bot prompt is replaced
+  with a category-based profile editor (purpose, core personality, identity,
+  worldview, appearance, fine print). Personality sliders use the Big Five
+  (OCEAN: openness, conscientiousness, extraversion, agreeableness,
+  emotional stability), with the legacy humor / curiosity / directness
+  sliders preserved so older saved bots keep their behavior. Voice presets
+  and worldview leanings compose into the model system prompt.
+- **Lucide-backed bot glyph picker.** Hundreds of categorized icons
+  searchable by keyword, alongside the original inline glyph set. Mobile
+  gets a dedicated fullscreen picker with a draft state and explicit Apply.
+- **Inferred and compiled memory channels.** Direct user facts can roll up
+  into inferred memories (LLM-driven merges of related clues, with
+  favorite-payload preservation and a guard that prevents imperative task
+  requests from deleting real preferences) or compiled memories (a single
+  fact synthesized from several similar direct memories). Each memory now
+  carries a separate `certainty` field alongside `confidence`, and tracks
+  `sourceMessageIds` so edits and reverts can purge derived memories cleanly.
+- **Intent-aware memory extraction.** A new `analyzeMemoryIntent` pass
+  classifies each turn as create / retract / correct, detects global-scope
+  cues like "save that globally" or "remember this to Prism", strips
+  trailing tag questions ("don't you?") before storage, and blocks
+  imperative task requests from becoming personal facts. Explicit
+  conversational cues are honored even when the global auto-memory toggle
+  is off.
+- **Rebuilt iMemories panel.** PRISM family directory routes through
+  letter-based bubbles sized by memory volume; drilling in plays a
+  directional drawer-physics zoom (matched exit/enter halves with
+  underdamped spring overshoot). Memory bubbles size by ratio against the
+  largest sibling so dense bot drill-downs stay legible; selecting one
+  opens a full-prose detail card with explicit Delete. The default Prism
+  orb has its own `scope=default` API path. Counts moved off-screen into
+  aria-labels — the panel is now purely visual.
+- **Edit messages in place.** A single Edit action on a user message
+  rewinds the thread from that point, cascades any direct/compiled memories
+  the message produced, and resends for a fresh assistant reply. Replaces
+  the earlier Resend / Revert / Edit trio.
+- **Auto-titled saved chats.** After the first assistant reply, a
+  background pass through the active provider names the conversation for
+  the sidebar (clamped, sanitized, JSON-shaped). The title only writes back
+  if the conversation still has exactly one assistant message, so retries
+  and forks do not clobber a manual rename.
+- **Sidebar conversation grouping.** Saved chats now cluster by bot in the
+  sidebar, sharing the bot's color, glyph, and unread state. Default Prism
+  chats keep their own slot. Long-press / context-menu actions on a bot
+  cluster expose grouped operations, including a single-tap Delete-Group
+  that cascades to messages, exports, and conversation-scoped memories.
+- **Memory toasts.** Created and retracted memories surface as a stack of
+  up to three toasts above the composer, auto-dismissing after a window
+  with hover-to-pin and rearm timing.
+- **Prism Server for Windows.** New native WPF tray app + Inno Setup
+  installer lane. `release-server-windows.yml` builds and uploads
+  `Prism-Server-Setup-v<version>-win-x64.exe` to the server release.
+  Includes a startup-task PowerShell helper, dev-launch env wiring, an
+  installer smoke-test batch wrapper, and a global exception / crash-log
+  capture path for triage. Documented in `docs/prism-server-app-windows.md`.
+- **`prism` console dispatcher.** New repo-owned `scripts/prism` (and
+  PowerShell `scripts/prism.ps1`) consolidates native rebuild commands:
+  `prism ios`, `prism phone`, `prism mac-client`, `prism mac-server`,
+  `prism web`, plus a Windows server lane. `prism web` runs `next dev` in
+  the foreground so Ctrl+C stops cleanly.
+- **Memory dev tools and lifecycle endpoints.** New API endpoints to seed,
+  clear, count, edit, restore (`POST /api/memories/restore`), edit a user
+  message (`PATCH /api/messages/:id`), and revert a conversation
+  (`POST /api/conversations/:id/revert`) so the rebuilt panel and devtools
+  can rehearse realistic states. Bot deletion now cascades to its memories.
+
+### Changed
+
+- Auto-memory toggle now governs only opportunistic capture; explicit user
+  cues ("save globally", "forget X", "actually...") are always honored.
+- Default-scope memory queries now also include compiled memories so
+  global recall surfaces the most useful summary facts.
+- Recent-memory retrieval uses an embed-with-fallback path so a missing or
+  failing embedder no longer kills retrieval — the hash fallback kicks in.
+
+### Fixed
+
+- Bot editor model dropdowns hide disabled model choices instead of showing
+  greyed-out rows the user cannot pick.
+- Local model picker dedupes models by display label so two providers
+  exposing the same model name no longer double-list.
+- Chat composer controls preserve the active bot context when the panel
+  reopens; neutral rows and the memory panel got contrast and visual polish.
+- Clipboard copy works outside secure contexts (LAN IPs, http://) by
+  falling back to the legacy path when `navigator.clipboard` is unavailable.
+- Desktop message context selection no longer drops the active bot when
+  switching messages.
+- `wipe-accounts` now wipes both prod and dev DBs and aligns its preflight
+  checks with the launcher scripts.
+- Conversation rewind now nulls memory `conversation_id` instead of leaving
+  orphan pointers, and reports `deletedMessages` + `deletedMemories` so the
+  client can confirm what was removed.
+
+### Docs
+
+- README documents the OCEAN sliders and auto-generated chat titles.
+- `docs/native-quick-launch.md` adds the `prism` dispatcher and the Merge
+  Main + Build runbook.
+- `docs/prism-server-app-windows.md` introduces the Windows server lane.
+- `tasks/lessons.md` logs the iMemories visual rebuild, memory-pipeline
+  guards, single-Edit message flow, and conversation starter rail anchor.
+
 ## [0.2.0] - 2026-04-26
 
 ### Added

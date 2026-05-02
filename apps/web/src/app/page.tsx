@@ -7174,7 +7174,7 @@ function BotProfileBuilder({
             </label>
             <div className={styles.botProfileSubsection}>
               <span>OCEAN balance</span>
-              <small>Small shifts change the bot's center of gravity without locking it into a type.</small>
+              <small>Small shifts change the bot&apos;s center of gravity without locking it into a type.</small>
             </div>
             <BotProfileScaleControl
               label="Openness"
