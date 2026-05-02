@@ -117,6 +117,17 @@ function createTestDb(): DatabaseSync {
       bot_id TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      bot_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -145,6 +156,27 @@ function seedHistoryReferencingBot(
   db.prepare(
     "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ).run(`msg-${suffix}`, `conv-${suffix}`, userId, "assistant", "hi", botId, now);
+}
+
+function seedMemory(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null,
+  memoryId: string
+): void {
+  db.prepare(
+    "INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    memoryId,
+    userId,
+    null,
+    botId,
+    "ciphertext",
+    "iv",
+    "tag",
+    0.8,
+    new Date().toISOString()
+  );
 }
 
 describe("deleteBot", () => {
@@ -178,6 +210,26 @@ describe("deleteBot", () => {
       .get("conv-1") as { id: string; bot_id: string | null } | undefined;
     assert.ok(conv, "conversation should still exist");
     assert.equal(conv?.bot_id, null);
+  });
+
+  it("deletes memories scoped to the deleted bot", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "bot-1");
+    seedBot(db, "user-1", "bot-2");
+    seedMemory(db, "user-1", "bot-1", "memory-deleted");
+    seedMemory(db, "user-1", "bot-2", "memory-other-bot");
+    seedMemory(db, "user-1", null, "memory-global");
+    seedMemory(db, "user-2", "bot-1", "memory-other-user");
+
+    deleteBot(db, "user-1", "bot-1");
+
+    const rows = db
+      .prepare("SELECT id FROM memories ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      rows.map((row) => row.id),
+      ["memory-global", "memory-other-bot", "memory-other-user"]
+    );
   });
 
   it("rejects deletion attempts by a different user", () => {
@@ -236,6 +288,10 @@ describe("deleteBots", () => {
     seedBot(db, "user-1", "new", "2026-01-03T00:00:00.000Z");
     seedHistoryReferencingBot(db, "user-1", "new", "new");
     seedHistoryReferencingBot(db, "user-1", "middle", "middle");
+    seedMemory(db, "user-1", "old", "memory-old");
+    seedMemory(db, "user-1", "middle", "memory-middle");
+    seedMemory(db, "user-1", "new", "memory-new");
+    seedMemory(db, "user-1", null, "memory-global");
 
     const deleted = deleteBots(db, "user-1", 2);
 
@@ -254,6 +310,13 @@ describe("deleteBots", () => {
         .get(`msg-${suffix}`) as { bot_id: string | null } | undefined;
       assert.equal(msg?.bot_id, null);
     }
+    const memories = db
+      .prepare("SELECT id FROM memories ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      memories.map((memory) => memory.id),
+      ["memory-global", "memory-old"]
+    );
   });
 
   it("stays scoped to the acting user", () => {
@@ -262,6 +325,7 @@ describe("deleteBots", () => {
     seedBot(db, "user-1", "mine-2", "2026-01-02T00:00:00.000Z");
     seedBot(db, "user-2", "theirs", "2026-01-03T00:00:00.000Z");
     seedHistoryReferencingBot(db, "user-2", "theirs", "theirs");
+    seedMemory(db, "user-2", "theirs", "memory-theirs");
 
     const deleted = deleteBots(db, "user-1", 10);
 
@@ -274,6 +338,10 @@ describe("deleteBots", () => {
       .prepare("SELECT bot_id FROM messages WHERE id = ?")
       .get("msg-theirs") as { bot_id: string | null } | undefined;
     assert.equal(msg?.bot_id, "theirs");
+    const memory = db
+      .prepare("SELECT bot_id FROM memories WHERE id = ?")
+      .get("memory-theirs") as { bot_id: string | null } | undefined;
+    assert.equal(memory?.bot_id, "theirs");
   });
 });
 
@@ -303,6 +371,26 @@ describe("deleteAllBots", () => {
       (db.prepare("SELECT COUNT(*) AS n FROM bots WHERE user_id = ?")
         .get("user-1") as { n: number }).n,
       0
+    );
+  });
+
+  it("deletes bot-scoped memories while preserving global memories", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "bot-1");
+    seedBot(db, "user-1", "bot-2");
+    seedMemory(db, "user-1", "bot-1", "memory-bot-1");
+    seedMemory(db, "user-1", "bot-2", "memory-bot-2");
+    seedMemory(db, "user-1", null, "memory-global");
+    seedMemory(db, "user-2", "bot-2", "memory-other-user");
+
+    deleteAllBots(db, "user-1");
+
+    const rows = db
+      .prepare("SELECT id FROM memories ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      rows.map((row) => row.id),
+      ["memory-global", "memory-other-user"]
     );
   });
 
@@ -336,6 +424,7 @@ describe("deleteAllBots", () => {
     seedBot(db, "user-2", "bot-2");
     seedBot(db, "user-2", "bot-3");
     seedHistoryReferencingBot(db, "user-2", "bot-2", "2");
+    seedMemory(db, "user-2", "bot-2", "memory-user-2");
 
     const deleted = deleteAllBots(db, "user-1");
 
@@ -358,5 +447,9 @@ describe("deleteAllBots", () => {
       .prepare("SELECT bot_id FROM conversations WHERE id = ?")
       .get("conv-2") as { bot_id: string | null } | undefined;
     assert.equal(conv?.bot_id, "bot-2");
+    const memory = db
+      .prepare("SELECT bot_id FROM memories WHERE id = ?")
+      .get("memory-user-2") as { bot_id: string | null } | undefined;
+    assert.equal(memory?.bot_id, "bot-2");
   });
 });

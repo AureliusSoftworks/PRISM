@@ -52,6 +52,9 @@ export function composeBotSystemPrompt(
  *   - Nulls out `bot_id` on past messages and conversations that pointed at
  *     this bot. Historical replies stay in the thread and fall back to the
  *     generic "Assistant" label via the LEFT JOIN in the chat read path.
+ *   - Deletes memories scoped to this bot. Bot memories are only meaningful
+ *     while their owner bot exists; otherwise the Memories panel would show
+ *     orphaned/default Prism memory clusters.
  *   - Public bots can still only be deleted by their owner; other users that
  *     have interacted with the public bot keep their message history intact
  *     (their `bot_id` is left pointing at the now-deleted row, which the
@@ -77,6 +80,9 @@ export function deleteBot(
     db.prepare(
       "UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id = ?"
     ).run(userId, botId);
+    db.prepare(
+      "DELETE FROM memories WHERE user_id = ? AND bot_id = ?"
+    ).run(userId, botId);
     db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(
       botId,
       userId
@@ -92,7 +98,8 @@ export function deleteBot(
  * Permanently remove up to `limit` of the caller's most recently updated bots.
  *
  * This powers the Developer Tools density controls. It preserves historical
- * chats by nulling bot references before deleting the bot rows.
+ * chats by nulling bot references before deleting the bot rows, and removes
+ * bot-scoped memories for those deleted bots.
  */
 export function deleteBots(
   db: DatabaseSync,
@@ -125,6 +132,9 @@ export function deleteBots(
       `UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
     ).run(userId, ...ids);
     db.prepare(
+      `DELETE FROM memories WHERE user_id = ? AND bot_id IN (${placeholders})`
+    ).run(userId, ...ids);
+    db.prepare(
       `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
     ).run(userId, ...ids);
     db.exec("COMMIT");
@@ -144,6 +154,8 @@ export function deleteBots(
  *   - Nulls out `bot_id` on the user's past messages and conversations
  *     first, so historical threads keep their content and fall back to
  *     the generic "Assistant" label via the chat read path's LEFT JOIN.
+ *   - Deletes all bot-scoped memories for the caller. Global/default
+ *     memories with `bot_id IS NULL` are intentionally preserved.
  *   - Strictly scoped to `userId` via `WHERE user_id = ?` on every
  *     statement so other users' bots (including public bots they don't
  *     own) are never touched.
@@ -163,6 +175,9 @@ export function deleteAllBots(db: DatabaseSync, userId: string): number {
     ).run(userId);
     db.prepare(
       "UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id IS NOT NULL"
+    ).run(userId);
+    db.prepare(
+      "DELETE FROM memories WHERE user_id = ? AND bot_id IS NOT NULL"
     ).run(userId);
     db.prepare("DELETE FROM bots WHERE user_id = ?").run(userId);
     db.exec("COMMIT");
