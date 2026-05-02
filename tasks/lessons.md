@@ -4,6 +4,76 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-05-01 · [UX]
+**Trigger**: Main iMemories PRISM letters showed raw memory counts, but tapping a letter revealed bot orbs, creating a count mismatch. Bot orb inner dots also used a decorative sqrt scale that overpromised actual memory count.
+**Lesson**: In iMemories, every visible count should predict the next interaction: root PRISM letter counts represent child bot/default orbs, and bot-orb badges/inner dots should use explicit direct-memory counts from the API, not the filtered all-memories list. Empty PRISM letters stay as blank circles with no text/glyph.
+**Applies to**: `apps/web/src/app/page.tsx` iMemories PRISM directory counts, family drill-in clusters, and inner memory mote rendering.
+
+### 2026-05-01 · [UX]
+**Trigger**: The main iMemories tab showed extra featured bubbles in addition to the PRISM category nodes, which read as visual noise.
+**Lesson**: Main iMemories should render exactly five PRISM directory bubbles at root level. Bubble size/count should scale by child bot/default-orb count per category, and drilling into a category should reveal that category's floating bot/default orbs.
+**Applies to**: `apps/web/src/app/page.tsx` all-memories panel rendering and PRISM family directory drill-in behavior.
+
+### 2026-05-01 · [UX]
+**Trigger**: PRISM-family drill-in initially opened raw memory bubbles, but the expected mental model was bot-grid style filtering.
+**Lesson**: Drilling into a PRISM memory family should show bot orbs/glyph clusters for that family with orbit indicators for memory volume, plus an explicit back button in the panel header to return to the 5-directory root.
+**Applies to**: `apps/web/src/app/page.tsx` memory family drill-in rendering and memories panel header navigation.
+
+### 2026-05-01 · [UX]
+**Trigger**: Inner memory indicators in family drill-in visually collided with the centered bot glyph.
+**Lesson**: When rendering memory indicators inside bot orbs, reserve a center-safe zone around the glyph, place indicators with non-overlap constraints, and use subtle in-orb drift/bounce motion rather than static or center-crossing placement.
+**Applies to**: `apps/web/src/app/page.tsx` inner memory bubble placement and `apps/web/src/app/page.module.css` inner bubble animation.
+
+### 2026-05-01 · [UX]
+**Trigger**: In-orb memory bubbles still felt centered and disconnected from memory volume.
+**Lesson**: Inner memory bubble count and bubble size should scale with child memory volume. Placement should still use the full orb, but be biased toward the outer ring for stronger visual energy and cleaner glyph readability.
+**Applies to**: `apps/web/src/app/page.tsx` in-orb memory bubble density/size math and radial placement weighting.
+
+### 2026-05-01 · [UX]
+**Trigger**: Family drill-in bot orbs overlapped heavily when counts and orb sizes increased.
+**Lesson**: Family drill-in orb layout needs collision-aware placement and adaptive downscaling under crowding so bot orbs remain visually distinct and non-overlapping.
+**Applies to**: `apps/web/src/app/page.tsx` selected family bot-cluster layout and sizing logic.
+
+### 2026-05-01 · [architecture]
+**Trigger**: Opening bot memories from PRISM family drill-in rendered the wrong color/glyph because panel styling depended on `activeBot` instead of the explicitly opened bot.
+**Lesson**: Memories panel bot mode must track its own bot context (`memoryPanelBotId`) so accent, header glyph/name, and refresh/delete behavior stay bound to the opened bot even when navigation did not change global active-bot selection.
+**Applies to**: `apps/web/src/app/page.tsx` memories panel state, accent resolution, and bot-memory refresh paths.
+
+### 2026-05-01 · [UX]
+**Trigger**: Bot-memory bubbles could overlap/clip, and there was no visual lane for inferred/compiled assumptions.
+**Lesson**: Bot-memory bubble placement should be collision-aware and boundary-clamped to avoid overlap/clipping. Low-confidence memories should render as smaller unlabeled bubbles. Inferred/compiled assumptions should render in a rounded bottom dock with opacity mapped to certainty.
+**Applies to**: `apps/web/src/app/page.tsx` bot-memory layout/segmentation and `apps/web/src/app/page.module.css` uncertain bubble + assumptions dock styling.
+
+### 2026-05-01 · [workflow]
+**Trigger**: Needed to verify inferred/compiled memory behavior before dynamic generation was fully online.
+**Lesson**: Developer tools should include memory-source and certainty controls (direct/inferred/compiled) plus seeding actions scoped to all bots or the active bot. Inferred/compiled assumptions should be delete-only in UI.
+**Applies to**: `apps/web/src/app/page.tsx` dev-tools memories controls and assumptions-card actions.
+
+### 2026-05-01 · [UX]
+**Trigger**: High-count All Memories family clusters needed to stay legible as bot counts scale.
+**Lesson**: PRISM family clusters should use living organic motion (warbling blob edges), avoid overlap through fixed high-count slots/size caps, and display only the PRISM family letter plus bot count. Keep memory-count detail in accessibility labels/tooltips, not the visible blob.
+**Applies to**: `apps/web/src/app/page.tsx` memory family cluster rendering and `apps/web/src/app/page.module.css` family cluster styling.
+
+### 2026-05-01 · [UX]
+**Trigger**: Higher bot counts made the All Memories bubble map claustrophobic again even after decorative aura/orbit treatments.
+**Lesson**: All Memories needs count-based density stages like the bot picker. Low counts can show bot bubbles; medium counts should cap large spotlight bubbles and render the rest as compact stars; high counts should collapse into color-family/constellation clusters or a tiny dot-field so adding bots cannot increase full-size bubble occupancy without bound.
+**Applies to**: `apps/web/src/app/page.tsx` All Memories clustering and `apps/web/src/app/page.module.css` memory map density styling.
+
+### 2026-04-30 · [architecture]
+**Trigger**: Deleting all bots left bot-scoped memories orphaned, causing the main Memories panel to show them under the default Prism source.
+**Lesson**: Bot-scoped memories belong to the bot lifecycle. Deleting one or more bots should preserve chat history by nulling historical `bot_id` references, but should delete `memories` rows with those bot IDs. Preserve only global/default memories where `bot_id IS NULL`.
+**Applies to**: `apps/api/src/bots.ts` bot deletion helpers and Memories panel source clustering.
+
+### 2026-04-30 · [UX]
+**Trigger**: The bot memory bubble delete state used CSS-drawn X bars and trapped interaction until the panel was closed.
+**Lesson**: Destructive marks inside memory bubbles should be rendered as real integrated glyphs, not pseudo-element bars. Any selected/armed bubble state must preserve an obvious escape path: tapping blank bubbles, dimmed space, or panel background should cancel instead of making the drawer feel input-locked.
+**Applies to**: `apps/web/src/app/page.tsx` memory bubble interactions and `apps/web/src/app/page.module.css` memory delete glyph styling.
+
+### 2026-04-30 · [UX]
+**Trigger**: The main Memories panel was updated to cluster memories by bot, but initially only showed bots that already had memories.
+**Lesson**: The primary Memories panel should represent the full bot roster. Bots with memories render as larger glyph bubbles sized by memory count; bots with zero memories still render as small blank/glyphless bubbles so the panel reads as a complete bot memory map.
+**Applies to**: `apps/web/src/app/page.tsx` memory source clustering and `apps/web/src/app/page.module.css` memory bubble styling.
+
 ### 2026-04-27 · [UX]
 **Trigger**: The user wanted a true live markdown editor in the compose surface, not a split view or rendered preview pane.
 **Lesson**: Desktop markdown authoring should use a WYSIWYG surface (TipTap + `@tiptap/markdown`) so formatting is visible while editing, with Markdown as the wire format to match bubble rendering. Use a vertical tool rail beside the field; mobile stays plain textarea; chat bubbles keep safe `react-markdown` rendering.
