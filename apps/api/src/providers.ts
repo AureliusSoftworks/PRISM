@@ -65,7 +65,7 @@ const OPENAI_CHAT_MODEL_PREFIXES = [
  */
 const OPENAI_ERROR_MESSAGE_MAX_CHARS = 500;
 
-function fallbackEmbedding(text: string): number[] {
+export function fallbackEmbedding(text: string): number[] {
   const vector = new Array<number>(12).fill(0);
   for (let index = 0; index < text.length; index += 1) {
     const bucket = index % vector.length;

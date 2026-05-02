@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { randomId } from "./security.ts";
 import type { LlmProvider } from "./providers.ts";
 import { upsertVector, ensureCollection, searchVectors } from "./qdrant.ts";
+import { persistMemoryCandidates } from "./memory.ts";
 
 /**
  * Chat-mode summarizer prompt: extracts cross-thread personal facts the
@@ -38,7 +39,8 @@ export async function summarizeAndStoreMemories(
   db: DatabaseSync,
   provider: LlmProvider,
   userId: string,
-  conversationId: string
+  conversationId: string,
+  userKey?: Buffer
 ): Promise<void> {
   const messages = db.prepare(
     "SELECT role, content FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC LIMIT 40"
@@ -67,6 +69,35 @@ export async function summarizeAndStoreMemories(
   db.prepare(
     "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
   ).run(summaryId, userId, conversationId, summary, now);
+
+  // Optionally persist extracted bullet facts as low-certainty compiled
+  // assumptions so the UI can render them alongside direct memories.
+  if (userKey) {
+    const compiledFacts = summary
+      .split("\n")
+      .map((line) => line.replace(/^[\s>*-]+/, "").trim())
+      .filter((line) => line.length > 0)
+      .filter((line) => line.toUpperCase() !== "NONE")
+      .slice(0, 3);
+    if (compiledFacts.length > 0) {
+      await persistMemoryCandidates(
+        db,
+        provider,
+        userId,
+        conversationId,
+        null,
+        compiledFacts.map((text, index) => ({
+          text,
+          confidence: Math.max(0.34, 0.52 - index * 0.06),
+        })),
+        userKey,
+        {
+          source: "compiled",
+          certainty: 0.45,
+        }
+      );
+    }
+  }
 
   try {
     await ensureCollection();

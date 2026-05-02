@@ -32,6 +32,8 @@ export interface DbMemoryRecord {
   iv: string;
   tag: string;
   confidence: number;
+  source: "direct" | "inferred" | "compiled";
+  certainty: number | null;
   createdAt: string;
 }
 
@@ -130,6 +132,8 @@ export function createDatabase(): DatabaseSync {
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
       confidence REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'direct',
+      certainty REAL,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -243,6 +247,28 @@ export function createDatabase(): DatabaseSync {
   if (!hasMemoryBotIdColumn) {
     db.exec("ALTER TABLE memories ADD COLUMN bot_id TEXT;");
   }
+  const hasMemorySourceColumn = memoryColumns.some(
+    (column) => column.name === "source"
+  );
+  if (!hasMemorySourceColumn) {
+    db.exec("ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'direct';");
+  }
+  const hasMemoryCertaintyColumn = memoryColumns.some(
+    (column) => column.name === "certainty"
+  );
+  if (!hasMemoryCertaintyColumn) {
+    db.exec("ALTER TABLE memories ADD COLUMN certainty REAL;");
+  }
+  db.exec(`
+    UPDATE memories
+    SET source = COALESCE(source, 'direct')
+    WHERE source IS NULL OR source = '';
+  `);
+  db.exec(`
+    UPDATE memories
+    SET certainty = COALESCE(certainty, confidence)
+    WHERE certainty IS NULL;
+  `);
 
   // Migrate existing DBs to the bots.color and bots.glyph columns used
   // for the visual identifier that appears on the bot card and messages.
@@ -338,6 +364,8 @@ export function mapMemoryRow(row: DbMemoryRecord, text: string): UserMemory {
     userId: row.userId,
     createdAt: row.createdAt,
     confidence: row.confidence,
+    source: row.source,
+    certainty: row.certainty ?? row.confidence,
     text
   };
 }

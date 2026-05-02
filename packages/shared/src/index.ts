@@ -140,6 +140,10 @@ export interface UserMemory {
   botId?: string;
   createdAt: string;
   confidence: number;
+  /** Origin of this memory item. */
+  source?: "direct" | "inferred" | "compiled";
+  /** Separate certainty channel for inferred/compiled assumptions. */
+  certainty?: number;
   text: string;
 }
 
