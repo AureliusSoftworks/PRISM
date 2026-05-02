@@ -15,6 +15,12 @@ import { buildHealthResponse } from "./health.ts";
 import { consumePairingCode, createPairingCode } from "./pairing.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage } from "./chat.ts";
+import {
+  createDevSeedMemories,
+  deleteOrphanedBotMemories,
+  filterConflictingMemories,
+  updateDirectMemoryText
+} from "./memory.ts";
 import { createDevSeedConversations, deleteAllConversations, deleteConversation, listConversationSummaries, rewindConversation } from "./conversations.ts";
 import {
   composeBotSystemPrompt,
@@ -395,7 +401,24 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, { ok: true });
     }),
     route("GET", "/api/auth/me", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const sessionToken = getSessionToken(ctx);
+      if (!sessionToken) {
+        json(ctx.res, 200, { ok: true, user: null });
+        return;
+      }
+
+      let userId: string;
+      try {
+        const session = requireValidSession(db, sessionToken);
+        ctx.sessionToken = session.token;
+        ctx.userId = session.userId;
+        userId = session.userId;
+        touchUserActivity(session.userId);
+      } catch {
+        clearCookie(ctx.res, config.sessionCookieName);
+        json(ctx.res, 200, { ok: true, user: null });
+        return;
+      }
       const row = getUserRow(userId);
       json(ctx.res, 200, {
         ok: true,
@@ -671,7 +694,7 @@ function buildRoutes(): RouteDefinition[] {
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
 
-      const { conversation, conversationStarters } = await processChatMessage(
+      const { conversation, conversationStarters, memoryLearned } = await processChatMessage(
         db,
         userId,
         message,
@@ -694,6 +717,7 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         conversation,
+        ...(memoryLearned ? { memoryLearned } : {}),
         ...(conversationStarters ? { conversationStarters } : {}),
       });
     }),
@@ -702,11 +726,14 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const conversationId = readOptionalString(ctx.query.get("conversationId"));
       const botId = readOptionalString(ctx.query.get("botId"));
+      deleteOrphanedBotMemories(db, userId);
       type MemoryRow = {
         id: string;
         conversation_id: string | null;
         bot_id: string | null;
         confidence: number;
+        source: "direct" | "inferred" | "compiled";
+        certainty: number | null;
         ciphertext: string;
         iv: string;
         tag: string;
@@ -715,41 +742,112 @@ function buildRoutes(): RouteDefinition[] {
       const rows = botId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, source, certainty, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId, botId) as MemoryRow[]
         : conversationId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, source, certainty, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId, conversationId) as MemoryRow[]
         : db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, source, certainty, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId) as MemoryRow[];
+      const memoryCountRows = db
+        .prepare(
+          "SELECT bot_id, COUNT(*) AS count FROM memories WHERE user_id = ? GROUP BY bot_id"
+        )
+        .all(userId) as Array<{ bot_id: string | null; count: number }>;
+      const memoryCountsByBotId: Record<string, number> = {};
+      let defaultMemoryCount = 0;
+      for (const row of memoryCountRows) {
+        if (row.bot_id) {
+          memoryCountsByBotId[row.bot_id] = Number(row.count ?? 0);
+        } else {
+          defaultMemoryCount = Number(row.count ?? 0);
+        }
+      }
+      const decryptedMemories = rows.map((row) => {
+        const payload = decryptJson(
+          {
+            ciphertext: row.ciphertext,
+            iv: row.iv,
+            tag: row.tag
+          },
+          userKey
+        ) as { text?: string };
+        return {
+          id: row.id,
+          conversationId: row.conversation_id ?? undefined,
+          botId: row.bot_id ?? undefined,
+          confidence: row.confidence,
+          source: row.source,
+          certainty: row.certainty ?? row.confidence,
+          text: payload.text ?? "",
+          createdAt: row.created_at
+        };
+      });
       json(ctx.res, 200, {
         ok: true,
-        memories: rows.map((row) => {
-          const payload = decryptJson(
-            {
-              ciphertext: row.ciphertext,
-              iv: row.iv,
-              tag: row.tag
-            },
-            userKey
-          ) as { text?: string };
-          return {
-            id: row.id,
-            conversationId: row.conversation_id ?? undefined,
-            botId: row.bot_id ?? undefined,
-            confidence: row.confidence,
-            text: payload.text ?? "",
-            createdAt: row.created_at
-          };
-        })
+        memories: filterConflictingMemories(decryptedMemories),
+        memoryCountsByBotId,
+        defaultMemoryCount,
+        directCountsByBotId: memoryCountsByBotId,
+        defaultDirectCount: defaultMemoryCount
       });
+    }),
+    route("POST", "/api/memories/dev-seed", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const count = Number(body.count);
+      if (!Number.isInteger(count) || count < 1 || count > 2000) {
+        throw new Error("Memory seed count must be between 1 and 2000.");
+      }
+      const requestedBotId = readOptionalString(body.botId);
+      const requestedSource = readOptionalString(body.source);
+      const source = requestedSource === "inferred" || requestedSource === "compiled"
+        ? requestedSource
+        : "direct";
+      const requestedCertainty = typeof body.certainty === "number" && Number.isFinite(body.certainty)
+        ? Math.max(0, Math.min(1, body.certainty))
+        : undefined;
+      const botIds = requestedBotId
+        ? (
+            db
+              .prepare("SELECT id FROM bots WHERE user_id = ? AND id = ?")
+              .all(userId, requestedBotId) as Array<{ id: string }>
+          ).map((row) => row.id)
+        : (
+            db
+              .prepare("SELECT id FROM bots WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC, name ASC")
+              .all(userId) as Array<{ id: string }>
+          ).map((row) => row.id);
+      if (requestedBotId && botIds.length === 0) {
+        throw new Error("Bot not found.");
+      }
+      const created = createDevSeedMemories(db, userId, userKey, count, botIds, {
+        randomizeAcrossBots: !requestedBotId,
+        source,
+        certainty: requestedCertainty,
+      });
+      json(ctx.res, 200, { ok: true, created });
+    }),
+    route("DELETE", "/api/memories", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const result = db.prepare("DELETE FROM memories WHERE user_id = ?").run(userId);
+      json(ctx.res, 200, { ok: true, deleted: Number(result.changes ?? 0) });
+    }),
+    route("PATCH", "/api/memories/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const text = readString(body.text, "Memory text");
+      const memory = updateDirectMemoryText(db, userId, ctx.params.id, text, userKey);
+      json(ctx.res, 200, { ok: true, memory });
     }),
     route("DELETE", "/api/memories/:id", async (ctx) => {
       const userId = requireAuth(ctx);
