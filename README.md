@@ -213,6 +213,7 @@ npm run dev
 ## Features
 
 - **Per-user auth** with encrypted session cookies
+- **Optional second Ollama host** — add another LAN Ollama machine from Settings, merge its offline models into Prism's local model lists, and route selected models back to the correct host.
 - **Native-client web gate** — the hosted web shell requires a paired Prism client access token, so direct browser visits show an app-required screen instead of bypassing the client.
 - **Post-auth Hub** with 5-colour prism-glyph mode tiles:
   - **Chat** — a calm, stripped-down "personal Prism" surface (sidebar + history + typing + send). The only compose-adjacent control is an **Incognito** pill that doubles as an online/offline toggle: on = this send is local-only and bypasses memory; off = saved provider + normal memory pipeline.
@@ -222,9 +223,10 @@ npm run dev
 - **Strict data isolation** — every query is tenant-scoped by `user_id`
 - **Mode-specific memory model**:
   - Chat gets cross-thread personal-fact memory (extracted preferences in the `memories` table + Qdrant similarity recall across conversations), surfaced in the Settings sidebar.
+  - Candidate memories pass through an LLM validation critic plus deterministic policy gates before they are saved, so role-confused prompts and malformed model output are cleaned up or skipped instead of becoming durable bubbles.
   - Sandbox gets a silent, thread-scoped **rolling compaction summary** that kicks in when a thread outgrows the 30-message live window. Stored only in SQLite, never indexed into Qdrant, never surfaced in the sidebar — pure context plumbing so long Sandbox threads don't go amnesiac. Nothing ever crosses between threads.
   - Incognito opts out of both paths for the turn and forces the provider to LOCAL.
-- **Customizable chatbots** with a structured profile builder, OCEAN-inspired personality sliders, temperature, and model overrides (composed into the model system prompt)
+- **Customizable chatbots** with a structured profile builder, OCEAN-inspired personality sliders, temperature, model overrides, and optional delete protection for favorite bots (composed into the model system prompt)
 - **Expanded bot glyph picker** with hundreds of Lucide-backed glyphs alongside the original inline set
 - **Forkable chats** — branch from any message in a conversation (Sandbox)
 - **Auto-generated chat titles** — first replies trigger a background local/online LLM pass that gives saved conversations short sidebar titles.
