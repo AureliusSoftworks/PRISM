@@ -1104,7 +1104,9 @@
   .glyphOption,
   .glyphOption *,
   .botLibraryHandle,
-  .botLibraryHandle *
+  .botLibraryHandle *,
+  .sidebarHandle,
+  .sidebarHandle *
 ) {
   -webkit-touch-callout: none;
   -webkit-user-drag: none;
@@ -11326,6 +11328,10 @@
   display: none;
 }
 
+.sidebarHandle {
+  display: none;
+}
+
 /* Faded out while EITHER drawer is open:
      · sidebar expanded — the fixed top-left hamburger would otherwise
        sit directly on top of the sidebar's profile avatar.
@@ -11336,6 +11342,11 @@
    the fade can cross-ride the sidebar's 0.25s slide and the panel's
    0.2s slide-in/out. */
 .menuToggleHidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebarHandleHidden {
   opacity: 0;
   pointer-events: none;
 }
@@ -11523,6 +11534,114 @@
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
+/* ── Mid-width drawer ─────────────────────────────────────────────────
+   At tablet / narrow-desktop widths the permanent 280px sidebar leaves
+   the chat feeling cramped. Collapse it into the same drawer model as
+   mobile, but use a side handle instead of the phone header hamburger. */
+@media (min-width: 721px) and (max-width: 1080px) {
+  .appLayout {
+    --sidebar-drawer-width: 290px;
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: var(--sidebar-drawer-width);
+    z-index: 200;
+    visibility: hidden;
+    transform: translateX(-100%);
+    transition:
+      transform 0.25s ease,
+      visibility 0s linear 0.25s;
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .sidebarOpen {
+    visibility: visible;
+    transform: translateX(0);
+    transition-delay: 0s;
+  }
+
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(1.5px);
+    z-index: 199;
+    animation: overlayIn 0.2s ease-out;
+  }
+
+  @keyframes overlayIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .sidebarHandle {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-flex;
+    position: fixed;
+    top: 50%;
+    left: 0;
+    z-index: 202;
+    width: 30px;
+    height: 86px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-left: 0;
+    border-radius: 0 16px 16px 0;
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--bg-surface) 92%, var(--accent) 8%),
+        color-mix(in srgb, var(--bg-deep) 78%, var(--accent-ink) 22%)
+      );
+    color: var(--fg);
+    box-shadow: var(--shadow-sm), 0 0 24px color-mix(in srgb, var(--accent-glow) 55%, transparent);
+    cursor: pointer;
+    font: inherit;
+    font-size: 22px;
+    line-height: 1;
+    transform: translateY(-50%);
+    transition:
+      left 0.25s ease,
+      opacity 0.18s ease,
+      background 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .sidebarHandleOpen {
+    left: var(--sidebar-drawer-width);
+  }
+
+  .sidebarHandle:hover,
+  .sidebarHandle:focus-visible {
+    color: var(--accent-text);
+    border-color: color-mix(in srgb, var(--accent-ink) 46%, var(--line));
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--bg-surface) 84%, var(--accent) 16%),
+        color-mix(in srgb, var(--bg-deep) 66%, var(--accent-ink) 34%)
+      );
+    outline: none;
+  }
+
+  .sidebarHandle:active {
+    transform: translateY(-50%) translateX(1px);
+  }
+}
+
 /* ── Mobile ── */
 @media (max-width: 720px) {
   /* ── Hub: full-bleed, inverted elevation ────────────────────────
@@ -11668,14 +11787,19 @@
       12px
       calc(env(safe-area-inset-bottom) + 16px)
       max(12px, calc(env(safe-area-inset-left) + 12px));
+    visibility: hidden;
     transform: translateX(-100%);
-    transition: transform 0.25s ease;
+    transition:
+      transform 0.25s ease,
+      visibility 0s linear 0.25s;
     background: var(--bg-surface);
     box-shadow: var(--shadow-lg);
   }
 
   .sidebarOpen {
+    visibility: visible;
     transform: translateX(0);
+    transition-delay: 0s;
   }
 
   .overlay {

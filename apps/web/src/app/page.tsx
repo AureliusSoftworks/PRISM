@@ -510,6 +510,7 @@ const PICKER_BREAKPOINT_SCALE_EXPONENT = 1.2;
 const PICKER_BREAKPOINT_SCALE_MIN = 0.45;
 const PICKER_BREAKPOINT_SCALE_MAX = 2.5;
 const PICKER_MOBILE_BREAKPOINT = 720;
+const SIDEBAR_DRAWER_BREAKPOINT = 1080;
 const DESKTOP_SIDEBAR_WIDTH = 280;
 const DESKTOP_MESSAGES_PADDING_X = 40;
 const MOBILE_MESSAGES_PADDING_X = 28;
@@ -8007,6 +8008,7 @@ function HomeContent(): React.JSX.Element {
   const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
   const viewportWidth = useViewportWidth();
   const viewportHeight = useViewportHeight();
+  const sidebarDrawerMode = viewportWidth <= SIDEBAR_DRAWER_BREAKPOINT;
   const secondaryOllamaDraftHost = settings?.secondaryOllamaHost?.trim() ?? "";
   const mobileBotsPanel = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
   const mobileKeyboardInset = useMobileKeyboardInset(
@@ -15482,9 +15484,27 @@ function HomeContent(): React.JSX.Element {
         aria-hidden={sidebarOpen || panel !== null}
         tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
       >☰</button>
+      <button
+        type="button"
+        className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
+          panel !== null ? styles.sidebarHandleHidden : ""
+        }`}
+        onClick={() => {
+          setSidebarOpen(o => !o);
+        }}
+        aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
+        aria-pressed={sidebarOpen}
+        title={sidebarOpen ? "Close conversations" : "Open conversations"}
+      >
+        <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
+      </button>
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
-      <aside className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}>
+      <aside
+        className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
+        aria-hidden={sidebarDrawerMode && !sidebarOpen ? true : undefined}
+        inert={sidebarDrawerMode && !sidebarOpen ? true : undefined}
+      >
         {renderProfileCard()}
 
         <div className={styles.newChatGroup}>
@@ -16486,10 +16506,28 @@ function HomeContent(): React.JSX.Element {
         aria-hidden={sidebarOpen || panel !== null}
         tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
       >☰</button>
+      <button
+        type="button"
+        className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
+          panel !== null ? styles.sidebarHandleHidden : ""
+        }`}
+        onClick={() => {
+          setSidebarOpen(o => !o);
+        }}
+        aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
+        aria-pressed={sidebarOpen}
+        title={sidebarOpen ? "Close conversations" : "Open conversations"}
+      >
+        <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
+      </button>
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
-      <aside className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}>
+      <aside
+        className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
+        aria-hidden={sidebarDrawerMode && !sidebarOpen ? true : undefined}
+        inert={sidebarDrawerMode && !sidebarOpen ? true : undefined}
+      >
         {renderProfileCard()}
 
         <div className={styles.newChatGroup}>
