@@ -219,6 +219,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Lesson**: Treat selected DOM nodes as breakpoint/context clues, not proof of causality. When a bug appears when a media query activates, inspect all layout changes introduced by that media query before attributing the issue to the specific visible element the user selected.
 **Applies to**: LocalAI responsive UI debugging in `apps/web/src/app/page.tsx` and `apps/web/src/app/page.module.css`.
 
+### 2026-05-03 · [workflow]
+**Trigger**: Memory directory flicker debugging regressed intentional visual styling through broad CSS suppressions instead of isolating the underlying breakpoint/layout cause.
+**Lesson**: When visual polish is already intentional, do not flatten/remove styling as a diagnostic fix unless explicitly approved. First preserve the visual baseline, reproduce the issue, and isolate layout/re-render/compositing causes with the smallest reversible probe.
+**Applies to**: LocalAI responsive UI/debugging work in `apps/web/src/app/page.tsx` and `apps/web/src/app/page.module.css`.
+
 ### 2026-04-24 · [UX]
 **Trigger**: Mobile bot customizer color/glyph popover used vertical space well but felt ambiguous to dismiss because it behaved like a near-full-height sheet.
 **Lesson**: Third-layer mobile popovers inside the right drawer should read as centered modal cards, not full-height sheets. Keep a visible dimmed outside area around the card so tap-outside dismissal is obvious; use a moderate viewport-height cap and let the internal glyph grid scroll instead of stretching the whole popover to the top and bottom safe areas.
