@@ -15,7 +15,7 @@ import {
 import { useSearchParams, useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import Link from "@tiptap/extension-link";
@@ -202,11 +202,13 @@ const PRISM_WORDMARK_PALETTE = [
   PRISM_COLORS.m,
 ] as const;
 
-const PRISM_BOT_SEED_HUE_SPREAD_DEG = 28;
-const PRISM_BOT_SEED_SATURATION_MIN = 82;
+const PRISM_BOT_SEED_HUE_SPREAD_DEG = 54;
+const PRISM_BOT_SEED_SATURATION_MIN = 70;
 const PRISM_BOT_SEED_SATURATION_MAX = 100;
-const PRISM_BOT_SEED_LIGHTNESS_MIN = 38;
-const PRISM_BOT_SEED_LIGHTNESS_MAX = 60;
+const PRISM_BOT_SEED_LIGHTNESS_MIN = 32;
+const PRISM_BOT_SEED_LIGHTNESS_MAX = 68;
+const BOT_COLOR_DIVERSITY_SAMPLE_ATTEMPTS = 40;
+const BOT_COLOR_DIVERSITY_MIN_DISTANCE = 0.3;
 
 // Fisher-Yates shuffle. Non-mutating: returns a new array so React state
 // updates remain referentially clean. Generic so future callers that
@@ -1184,14 +1186,15 @@ function findBotIdAtPoint(x: number, y: number): string | null {
 // The wheel paints a HSL hue ring via conic-gradient with a white-centered
 // radial for saturation; these helpers map clicks on the wheel to/from hex.
 
-function randomHex(): string {
+function randomHexSeed(seedIndex?: number): string {
   // Seed from five PRISM wordmark hue families, not five exact hexes.
   // This keeps the library constrained to P/R/I/S/M while preserving the
   // subtle spectrum that makes large swatch grids readable.
-  const seed =
-    PRISM_WORDMARK_PALETTE[
-      Math.floor(Math.random() * PRISM_WORDMARK_PALETTE.length)
-    ];
+  const safeSeedIndex =
+    typeof seedIndex === "number"
+      ? Math.max(0, Math.min(PRISM_WORDMARK_PALETTE.length - 1, seedIndex))
+      : Math.floor(Math.random() * PRISM_WORDMARK_PALETTE.length);
+  const seed = PRISM_WORDMARK_PALETTE[safeSeedIndex];
   const { h } = hexToHsl(seed);
   const hue =
     (h -
@@ -1206,6 +1209,57 @@ function randomHex(): string {
     PRISM_BOT_SEED_LIGHTNESS_MIN +
     Math.random() * (PRISM_BOT_SEED_LIGHTNESS_MAX - PRISM_BOT_SEED_LIGHTNESS_MIN);
   return hslToHex(hue, saturation, lightness);
+}
+
+function botColorDistanceScore(aHex: string, bHex: string): number {
+  const a = hexToHsl(aHex);
+  const b = hexToHsl(bHex);
+  const hueDistance = circularHueDistance(a.h, b.h) / 180;
+  const saturationDistance = Math.abs(a.s - b.s) / 100;
+  const lightnessDistance = Math.abs(a.l - b.l) / 100;
+  return hueDistance * 0.68 + saturationDistance * 0.2 + lightnessDistance * 0.12;
+}
+
+function randomHex(existingHexes: readonly string[] = []): string {
+  const existing = existingHexes
+    .map((hex) => hex.trim())
+    .filter((hex) => hexChannels(hex) !== null);
+  if (existing.length === 0) return randomHexSeed();
+  const normalizedExisting = existing.map((hex) => normalizeAccentForTheme(hex, "dark"));
+  const segmentCounts = new Array<number>(PRISM_WORDMARK_PALETTE.length).fill(0);
+  for (const hex of normalizedExisting) {
+    const { h } = hexToHsl(hex);
+    segmentCounts[hueLensSegmentIndexForHue(h)] += 1;
+  }
+  const prioritizedSegments = segmentCounts
+    .map((count, segment) => ({ count, segment }))
+    .sort((a, b) => a.count - b.count)
+    .map((entry) => entry.segment);
+
+  let bestCandidate = randomHexSeed(prioritizedSegments[0]);
+  let bestMinDistance = -1;
+
+  for (let attempt = 0; attempt < BOT_COLOR_DIVERSITY_SAMPLE_ATTEMPTS; attempt += 1) {
+    const segment = prioritizedSegments[attempt % prioritizedSegments.length];
+    const candidate = randomHexSeed(segment);
+    const normalizedCandidate = normalizeAccentForTheme(candidate, "dark");
+    let minDistance = Number.POSITIVE_INFINITY;
+    for (const existingHex of normalizedExisting) {
+      minDistance = Math.min(
+        minDistance,
+        botColorDistanceScore(normalizedCandidate, existingHex)
+      );
+    }
+    if (minDistance > bestMinDistance) {
+      bestMinDistance = minDistance;
+      bestCandidate = candidate;
+    }
+    if (minDistance >= BOT_COLOR_DIVERSITY_MIN_DISTANCE) {
+      return candidate;
+    }
+  }
+
+  return bestCandidate;
 }
 
 function hslToHex(h: number, s: number, l: number): string {
@@ -1602,6 +1656,7 @@ interface ChatPostEnvelope {
   memoryLearned?: {
     created?: MemoryEventPayload[];
     retracted?: MemoryEventPayload[];
+    rejected?: MemoryRejectedEventPayload[];
     maxConfidence?: number;
   };
 }
@@ -1613,6 +1668,7 @@ interface UserSettings {
   hiddenBotModelIds: string[];
   hasOpenAiApiKey: boolean;
   ollamaModel: string;
+  secondaryOllamaHost: string;
 }
 interface PairingCode {
   code: string;
@@ -1630,6 +1686,19 @@ interface UserMemory {
   sourceMessageIds?: string[];
 }
 
+type MemoryValidationStatus = "approved" | "auto_fixed";
+type MemoryValidationReasonCode =
+  | "subject_role_confusion"
+  | "assistant_identity_instruction"
+  | "task_request_not_memory"
+  | "question_fragment"
+  | "trailing_conversation_tag"
+  | "lost_preference_payload"
+  | "contradiction"
+  | "low_confidence"
+  | "malformed_text"
+  | "validator_error";
+
 interface MemoryEventPayload {
   id: string;
   text: string;
@@ -1639,19 +1708,37 @@ interface MemoryEventPayload {
   source?: "direct" | "inferred" | "compiled";
   certainty?: number;
   sourceMessageIds?: string[];
+  validationStatus?: MemoryValidationStatus;
+  originalText?: string;
+  reasonCodes?: MemoryValidationReasonCode[];
 }
 
-interface MemoryToast {
-  id: string;
-  kind: "created" | "retracted";
-  memory: MemoryEventPayload;
-  expiresAt: number;
+interface MemoryRejectedEventPayload {
+  originalText: string;
+  reasonCodes: MemoryValidationReasonCode[];
+  notes?: string;
 }
+
+type MemoryToast =
+  | {
+      id: string;
+      kind: "created" | "retracted";
+      memory: MemoryEventPayload;
+      expiresAt: number;
+    }
+  | {
+      id: string;
+      kind: "rejected";
+      rejected: MemoryRejectedEventPayload;
+      expiresAt: number;
+    };
 interface ModelCatalogEntry {
   id: string;
   label: string;
   provider: Provider;
   isDefault?: boolean;
+  localHost?: "primary" | "secondary";
+  hostLabel?: string;
 }
 interface ModelCatalog {
   local: ModelCatalogEntry[];
@@ -1661,6 +1748,17 @@ interface ModelCatalog {
     online: string;
   };
 }
+interface SecondaryOllamaStatus {
+  configured: boolean;
+  reachable: boolean;
+  modelCount: number;
+}
+type SecondaryOllamaUiStatus =
+  | "unconfigured"
+  | "checking"
+  | "connected"
+  | "empty"
+  | "error";
 interface Bot {
   id: string;
   name: string;
@@ -1669,6 +1767,7 @@ interface Bot {
   local_model: string | null;
   online_model: string | null;
   online_enabled?: number | null;
+  delete_protected?: number | null;
   temperature: number;
   max_tokens: number;
   color: string | null;
@@ -1688,6 +1787,14 @@ const HUE_RIBBON_DESKTOP_COLUMNS = 12;
 const HUE_RIBBON_DESKTOP_ROWS = 3;
 const HUE_RIBBON_MOBILE_COLUMNS = 5;
 const HUE_RIBBON_MOBILE_ROWS = 6;
+const HUE_LENS_RAIL_BG_LIGHT = "color-mix(in srgb, #000000 16%, transparent)";
+const HUE_LENS_RAIL_BG_DARK = "color-mix(in srgb, #ffffff 28%, transparent)";
+const HUE_LENS_THUMB_FILL_LIGHT = "#12100e";
+const HUE_LENS_THUMB_FILL_DARK = "#f4f1ea";
+const HUE_LENS_THUMB_SHADOW_LIGHT = "0 2px 6px rgba(0, 0, 0, 0.28)";
+const HUE_LENS_THUMB_SHADOW_DARK = "0 2px 7px rgba(0, 0, 0, 0.52)";
+const HUE_LENS_FOCUS_RING_LIGHT = "0 0 0 2px color-mix(in srgb, #000000 35%, transparent)";
+const HUE_LENS_FOCUS_RING_DARK = "0 0 0 2px color-mix(in srgb, #ffffff 54%, transparent)";
 const BOT_PICKER_RETURN_ANIMATION_MS = 360;
 const BOT_PANEL_DASHBOARD_MIN_BOTS = 1;
 const BOT_PANEL_COLOR_HARMONY_MIN_BOTS = 40;
@@ -1869,6 +1976,7 @@ function createBotFormHasEnteredData(options: {
   localModel: string;
   onlineModel: string;
   onlineEnabled: boolean;
+  deleteProtected: boolean;
   temperature: number;
   maxTokens: number;
 }): boolean {
@@ -1877,6 +1985,7 @@ function createBotFormHasEnteredData(options: {
   if (options.localModel !== AUTO_MODEL_CHOICE) return true;
   if (options.onlineModel !== AUTO_MODEL_CHOICE) return true;
   if (!options.onlineEnabled) return true;
+  if (options.deleteProtected) return true;
   if (options.temperature !== BOT_TEMPERATURE_DEFAULT) return true;
   if (options.maxTokens !== BOT_REPLY_LENGTH_DEFAULT_TOKENS) return true;
   return false;
@@ -1925,6 +2034,53 @@ function normalizeModelChoice(value: string | null | undefined): string {
   return trimmed.length > 0 ? trimmed : AUTO_MODEL_CHOICE;
 }
 
+const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
+const REQUIRED_PRIMARY_LOCAL_MODEL_ID = "llama3.2";
+
+function modelLabelFromId(id: string): string {
+  const parts = id
+    .split(/[-_:]/)
+    .filter(Boolean)
+    .filter((part, index, allParts) =>
+      !(index === allParts.length - 1 && part.toLowerCase() === "latest")
+    );
+  const displayParts = parts.length > 0 ? parts : [id];
+  return displayParts
+    .map((part) =>
+      part.toUpperCase() === part
+        ? part
+        : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`
+    )
+    .join(" ");
+}
+
+function localModelDuplicateKey(model: ModelCatalogEntry): string {
+  const rawId = model.id.startsWith(SECONDARY_OLLAMA_MODEL_PREFIX)
+    ? model.id.slice(SECONDARY_OLLAMA_MODEL_PREFIX.length)
+    : model.id;
+  return modelLabelFromId(rawId).toLocaleLowerCase();
+}
+
+function preferPrimaryLocalModelEntries(models: ModelCatalogEntry[]): ModelCatalogEntry[] {
+  const primaryKeys = new Set(
+    models
+      .filter((model) => model.localHost !== "secondary")
+      .map(localModelDuplicateKey)
+  );
+  return models.filter(
+    (model) =>
+      model.localHost !== "secondary" || !primaryKeys.has(localModelDuplicateKey(model))
+  );
+}
+
+function isRequiredPrimaryLocalModel(model: ModelCatalogEntry): boolean {
+  return (
+    model.provider === "local" &&
+    model.localHost !== "secondary" &&
+    model.id === REQUIRED_PRIMARY_LOCAL_MODEL_ID
+  );
+}
+
 function modelOptionsForProvider(
   catalog: ModelCatalog | null,
   settings: UserSettings | null,
@@ -1933,7 +2089,7 @@ function modelOptionsForProvider(
   if (provider === "local") {
     const fallbackId = settings?.ollamaModel?.trim() || "Local default";
     return catalog?.local.length
-      ? catalog.local
+      ? preferPrimaryLocalModelEntries(catalog.local)
       : [{ id: fallbackId, label: fallbackId, provider: "local", isDefault: true }];
   }
   return catalog?.online.length
@@ -1951,9 +2107,17 @@ function botCustomizerModelOptionsForProvider(
   settings: UserSettings | null,
   provider: Provider
 ): ModelCatalogEntry[] {
+  return availableModelOptionsForProvider(catalog, settings, provider);
+}
+
+function availableModelOptionsForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider
+): ModelCatalogEntry[] {
   const hidden = new Set(settings?.hiddenBotModelIds ?? []);
   return modelOptionsForProvider(catalog, settings, provider).filter(
-    (model) => !hidden.has(model.id)
+    (model) => isRequiredPrimaryLocalModel(model) || !hidden.has(model.id)
   );
 }
 
@@ -1962,6 +2126,7 @@ function botCustomizerModelChoiceVisible(
   choice: string
 ): boolean {
   return (
+    choice === REQUIRED_PRIMARY_LOCAL_MODEL_ID ||
     choice === AUTO_MODEL_CHOICE ||
     !new Set(settings?.hiddenBotModelIds ?? []).has(choice)
   );
@@ -2141,13 +2306,16 @@ function computeHueLensTrackSegments(bots: readonly Bot[]): HueLensTrackSegment[
 // Build the lens track from the bot colors that actually exist. Populated
 // families expand to fill the whole rail, so a one-green-bot library paints
 // one full-width green bar instead of a green island with empty gaps.
-function hueLensGradient(segments: readonly HueLensTrackSegment[]): string {
+function hueLensGradient(
+  segments: readonly HueLensTrackSegment[],
+  theme: "light" | "dark"
+): string {
   if (segments.length === 0) {
     return "linear-gradient(to right, transparent 0%, transparent 100%)";
   }
   const stops: string[] = [];
   for (let i = 0; i < segments.length; i += 1) {
-    const color = segments[i].color;
+    const color = normalizeAccentForTheme(segments[i].color, theme);
     const start = (i / segments.length) * 100;
     const end = ((i + 1) / segments.length) * 100;
     stops.push(`${color} ${start.toFixed(2)}%`);
@@ -2440,6 +2608,7 @@ type PrismGroupId = "p" | "r" | "i" | "s" | "m";
 type BotLibraryFilterId = "all" | PrismGroupId;
 const BOT_LIBRARY_FILTER_ALL = "all" as const;
 const BOT_LIBRARY_DRAWER_ANIMATION_MS = 220;
+const PANEL_CLOSE_ANIMATION_MS = 180;
 
 interface PrismGroupDef {
   id: PrismGroupId;
@@ -2693,6 +2862,12 @@ function resolveRowColor(
 
 function conversationGroupKey(c: ConversationSummary): string {
   return c.botId ? `bot:${c.botId}` : "default";
+}
+
+/** Mirror of `conversationGroupKey` for cases where only the bot id is in
+ *  hand — e.g. picking a panel to auto-open after a new chat is committed. */
+function conversationGroupKeyForBotId(botId: string): string {
+  return `bot:${botId}`;
 }
 
 function conversationGroupBotId(key: string): string | null {
@@ -5259,6 +5434,7 @@ function ComposerBotPicker({
                   hueLensAvailable={hueLensAvailable}
                   trackGradient={hueLensTrackGradient}
                   trackSegments={hueLensTrackSegments}
+                  resolvedTheme={resolvedTheme}
                   compact
                   showCount={false}
                   allowClear={false}
@@ -5504,6 +5680,11 @@ function ComposerModelPicker({
                     <span className={styles.composeModelOptionName}>
                       {model.label}
                     </span>
+                    {model.hostLabel && (
+                      <span className={styles.composeModelOptionMeta}>
+                        {model.hostLabel}
+                      </span>
+                    )}
                   </span>
                   {model.isDefault && (
                     <span className={styles.composeModelDefaultBadge}>
@@ -5547,6 +5728,8 @@ interface HueLensControlProps {
   trackSegments: readonly HueLensTrackSegment[];
   /** Compact layout for embedding inside the bot popout. */
   compact?: boolean;
+  /** Active app theme for rail/thumb contrast tuning. */
+  resolvedTheme: "light" | "dark";
   /** Whether to render the active visible/total count next to the slider. */
   showCount?: boolean;
   /** Whether the active state can be cleared back to "All". */
@@ -5571,6 +5754,7 @@ function HueLensControl({
   trackGradient,
   trackSegments,
   compact = false,
+  resolvedTheme,
   showCount = true,
   allowClear = true,
   onInteractionChange,
@@ -5644,8 +5828,15 @@ function HueLensControl({
   const sliderValue = active
     ? hueLensSliderValueForFilterCenter(hueFilterCenter, trackSegments)
     : 180;
+  const isDarkTheme = resolvedTheme === "dark";
   const lensStyle = {
     "--lens-track-gradient": trackGradient,
+    "--hue-lens-rail-bg": isDarkTheme ? HUE_LENS_RAIL_BG_DARK : HUE_LENS_RAIL_BG_LIGHT,
+    "--hue-lens-thumb-fill": isDarkTheme ? HUE_LENS_THUMB_FILL_DARK : HUE_LENS_THUMB_FILL_LIGHT,
+    "--hue-lens-thumb-shadow": isDarkTheme
+      ? HUE_LENS_THUMB_SHADOW_DARK
+      : HUE_LENS_THUMB_SHADOW_LIGHT,
+    "--hue-lens-focus-ring": isDarkTheme ? HUE_LENS_FOCUS_RING_DARK : HUE_LENS_FOCUS_RING_LIGHT,
   } as React.CSSProperties;
   return (
     <div
@@ -6647,17 +6838,6 @@ interface MessageBodyProps {
   content: string;
 }
 
-const MARKDOWN_TOOLBAR_ACTIONS = [
-  { id: "bold", label: "Bold", shortLabel: "B", title: "Bold" },
-  { id: "italic", label: "Italic", shortLabel: "I", title: "Italic" },
-  { id: "code", label: "Code", shortLabel: "</>", title: "Inline code" },
-  { id: "link", label: "Link", shortLabel: "Link", title: "Link" },
-  { id: "list", label: "List", shortLabel: "List", title: "Bulleted list" },
-  { id: "quote", label: "Quote", shortLabel: "Quote", title: "Quote" },
-] as const;
-
-type MarkdownToolbarActionId = (typeof MARKDOWN_TOOLBAR_ACTIONS)[number]["id"];
-
 /** Imperative focus for plain textarea vs TipTap WYSIWYG compose field. */
 interface ComposerInputHandle {
   focus: (options?: FocusOptions) => void;
@@ -6673,6 +6853,53 @@ interface ComposerInputProps {
   onValueChange: (value: string) => void;
   onFocus: () => void;
   hideSubmitButton?: boolean;
+}
+
+interface ProseMirrorSelectionState {
+  selection: {
+    $from: {
+      depth: number;
+      node: (depth: number) => { type: { name: string } };
+    };
+  };
+}
+
+function selectionIsInsideMarkdownList(state: ProseMirrorSelectionState): boolean {
+  const { $from } = state.selection;
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const nodeName = $from.node(depth).type.name;
+    if (
+      nodeName === "listItem" ||
+      nodeName === "bulletList" ||
+      nodeName === "orderedList"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function domSelectionIsInsideMarkdownList(root: HTMLElement): boolean {
+  const selection = root.ownerDocument.getSelection();
+  const anchor = selection?.anchorNode;
+  if (!anchor) return false;
+
+  const anchorElement =
+    anchor instanceof Element ? anchor : anchor.parentElement;
+
+  return Boolean(
+    anchorElement &&
+    root.contains(anchorElement) &&
+    anchorElement.closest("li, ol, ul")
+  );
+}
+
+function editorSelectionIsInsideMarkdownList(editor: Editor): boolean {
+  return (
+    editor.isActive("listItem") ||
+    editor.isActive("bulletList") ||
+    editor.isActive("orderedList")
+  );
 }
 
 function useMobileKeyboardInset(active: boolean): number {
@@ -6751,6 +6978,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const lastEmittedRef = useRef(value);
     const onValueChangeRef = useRef(onValueChange);
     const onFocusRef = useRef(onFocus);
+    const editorRef = useRef<Editor | null>(null);
 
     useLayoutEffect(() => {
       onValueChangeRef.current = onValueChange;
@@ -6783,6 +7011,11 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           attributes: {
             class: styles.markdownTiptapContent,
             spellcheck: "true",
+            autocorrect: "on",
+            autocapitalize: "sentences",
+            enterkeyhint: "send",
+            lang: "en",
+            "aria-multiline": "true",
           },
           handleDOMEvents: {
             focus: () => {
@@ -6790,8 +7023,34 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               return false;
             },
           },
-          handleKeyDown: (_view, event) => {
+          handleKeyDown: (view, event) => {
             if (event.key === "Enter" && !event.shiftKey) {
+              const activeEditor = editorRef.current;
+              const insideMarkdownList = Boolean(
+                (activeEditor && editorSelectionIsInsideMarkdownList(activeEditor)) ||
+                selectionIsInsideMarkdownList(view.state) ||
+                domSelectionIsInsideMarkdownList(view.dom)
+              );
+              if (activeEditor && insideMarkdownList) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (
+                  activeEditor.commands.splitListItem("listItem") ||
+                  activeEditor.commands.liftListItem("listItem")
+                ) {
+                  return true;
+                }
+                const form = (event.target as HTMLElement).closest("form");
+                form?.requestSubmit();
+                return true;
+              }
+              if (
+                selectionIsInsideMarkdownList(view.state) ||
+                domSelectionIsInsideMarkdownList(view.dom)
+              ) {
+                event.stopPropagation();
+                return false;
+              }
               event.preventDefault();
               const form = (event.target as HTMLElement).closest("form");
               form?.requestSubmit();
@@ -6809,6 +7068,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       },
       [placeholder]
     );
+
+    useEffect(() => {
+      editorRef.current = editor;
+      return () => {
+        if (editorRef.current === editor) editorRef.current = null;
+      };
+    }, [editor]);
 
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
@@ -6833,61 +7099,48 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       [editor]
     );
 
-    const applyToolbarAction = useCallback(
-      (actionId: MarkdownToolbarActionId) => {
-        if (!editor || editor.isDestroyed) return;
-        const chain = editor.chain().focus();
-        switch (actionId) {
-          case "bold":
-            chain.toggleBold().run();
-            break;
-          case "italic":
-            chain.toggleItalic().run();
-            break;
-          case "code":
-            chain.toggleCode().run();
-            break;
-          case "link":
-            if (editor.state.selection.empty) {
-              chain
-                .insertContent("[link text](https://)", { contentType: "markdown" })
-                .run();
-            } else {
-              chain.setLink({ href: "https://" }).run();
-            }
-            break;
-          case "list":
-            chain.toggleBulletList().run();
-            break;
-          case "quote":
-            chain.toggleBlockquote().run();
-            break;
+    const handleRichEditorKeyDownCapture = useCallback(
+      (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== "Enter") return;
+
+        const activeEditor = editor;
+        const root = event.currentTarget;
+        const insideMarkdownList = Boolean(
+          (activeEditor && editorSelectionIsInsideMarkdownList(activeEditor)) ||
+          domSelectionIsInsideMarkdownList(root)
+        );
+
+        if (event.shiftKey) {
+          if (!insideMarkdownList) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const form = root.closest("form");
+          form?.requestSubmit();
+          return;
         }
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (
+          insideMarkdownList &&
+          activeEditor &&
+          (
+            activeEditor.commands.splitListItem("listItem") ||
+            activeEditor.commands.liftListItem("listItem")
+          )
+        ) {
+          return;
+        }
+
+        const form = root.closest("form");
+        form?.requestSubmit();
       },
       [editor]
     );
 
     return (
       <div className={styles.markdownComposerSurface}>
-        <div className={styles.markdownSideToolbar} aria-label="Markdown formatting tools">
-          <span className={styles.markdownToolbarLabelVertical} aria-hidden="true">
-            MD
-          </span>
-          {MARKDOWN_TOOLBAR_ACTIONS.map(action => (
-            <button
-              key={action.id}
-              type="button"
-              className={styles.markdownToolbarButton}
-              title={action.title}
-              aria-label={action.title}
-              onPointerDown={event => event.preventDefault()}
-              onClick={() => applyToolbarAction(action.id)}
-            >
-              <span className={styles.markdownToolbarButtonText}>{action.label}</span>
-              <span className={styles.markdownToolbarButtonShort}>{action.shortLabel}</span>
-            </button>
-          ))}
-        </div>
         <div className={styles.markdownComposerMain}>
           <div
             className={`${styles.markdownComposerInputRow} ${hideSubmitButton ? styles.markdownComposerInputRowSingle : ""}`}
@@ -6895,6 +7148,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             <div
               className={styles.markdownRichEditorHost}
               data-markdown-cm-host="true"
+              onKeyDownCapture={handleRichEditorKeyDownCapture}
             >
               <EditorContent editor={editor} />
             </div>
@@ -7421,6 +7675,9 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
+  const [secondaryOllamaStatus, setSecondaryOllamaStatus] =
+    useState<SecondaryOllamaStatus | null>(null);
+  const [secondaryOllamaStatusChecking, setSecondaryOllamaStatusChecking] = useState(false);
   const [openAiKey, setOpenAiKey] = useState("");
   const [pairingCode, setPairingCode] = useState<PairingCode | null>(null);
   const [pairingBusy, setPairingBusy] = useState(false);
@@ -7463,7 +7720,6 @@ function HomeContent(): React.JSX.Element {
   const detailIdRef = useRef<string | null>(null);
   const memoryTransitionRunRef = useRef(0);
   const [modelRevealMessageId, setModelRevealMessageId] = useState<string | null>(null);
-  const modelRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [messageContextMenu, setMessageContextMenu] = useState<{
@@ -7490,17 +7746,9 @@ function HomeContent(): React.JSX.Element {
     startY: number;
   } | null>(null);
   const botContextSuppressClickRef = useRef(false);
-  const revealMessageModel = useCallback((id: string) => {
-    if (modelRevealTimerRef.current) {
-      clearTimeout(modelRevealTimerRef.current);
-    }
-    setModelRevealMessageId(id);
-    modelRevealTimerRef.current = setTimeout(() => {
-      setModelRevealMessageId(current => current === id ? null : current);
-      modelRevealTimerRef.current = null;
-    }, 3200);
-  }, []);
   const [panel, setPanel] = useState<PanelView>(null);
+  const [panelClosing, setPanelClosing] = useState(false);
+  const panelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   selectedIdRef.current = selectedId;
   detailIdRef.current = detail?.id ?? null;
   // Drill-in target for the high-count Prism color dashboard. Null at
@@ -7615,6 +7863,7 @@ function HomeContent(): React.JSX.Element {
   const [newBotLocalModel, setNewBotLocalModel] = useState(AUTO_MODEL_CHOICE);
   const [newBotOnlineModel, setNewBotOnlineModel] = useState(AUTO_MODEL_CHOICE);
   const [newBotOnlineEnabled, setNewBotOnlineEnabled] = useState(true);
+  const [newBotDeleteProtected, setNewBotDeleteProtected] = useState(false);
   const [newBotTemperature, setNewBotTemperature] = useState(BOT_TEMPERATURE_DEFAULT);
   const [newBotMaxTokens, setNewBotMaxTokens] = useState(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
   // Lazy initializers so the very first render already picks a random seed
@@ -7623,6 +7872,8 @@ function HomeContent(): React.JSX.Element {
   const [newBotGlyph, setNewBotGlyph] = useState<BotGlyphName>(() => randomBotGlyph());
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
   const [botProfileBuilderOpen, setBotProfileBuilderOpen] = useState(false);
+  const [botPreferredModelsModalOpen, setBotPreferredModelsModalOpen] = useState(false);
+  const [settingsAboutModalOpen, setSettingsAboutModalOpen] = useState(false);
   const [botProfileActivePage, setBotProfileActivePage] =
     useState<BotProfileBuilderPageId>("purpose");
   // Side-tooltip state for the bot editor's parameter help text. The
@@ -7669,6 +7920,7 @@ function HomeContent(): React.JSX.Element {
     localModel: AUTO_MODEL_CHOICE,
     onlineModel: AUTO_MODEL_CHOICE,
     onlineEnabled: true,
+    deleteProtected: false,
     temperature: BOT_TEMPERATURE_DEFAULT,
     maxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
   });
@@ -7678,6 +7930,7 @@ function HomeContent(): React.JSX.Element {
     localModel: newBotLocalModel,
     onlineModel: newBotOnlineModel,
     onlineEnabled: newBotOnlineEnabled,
+    deleteProtected: newBotDeleteProtected,
     temperature: newBotTemperature,
     maxTokens: newBotMaxTokens,
   };
@@ -7727,6 +7980,7 @@ function HomeContent(): React.JSX.Element {
     localModel: string;
     onlineModel: string;
     onlineEnabled: boolean;
+    deleteProtected: boolean;
     temperature: number;
     maxTokens: number;
     color: string;
@@ -7753,6 +8007,8 @@ function HomeContent(): React.JSX.Element {
   const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
   const viewportWidth = useViewportWidth();
   const viewportHeight = useViewportHeight();
+  const secondaryOllamaDraftHost = settings?.secondaryOllamaHost?.trim() ?? "";
+  const mobileBotsPanel = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
   const mobileKeyboardInset = useMobileKeyboardInset(
     composerFocused && viewportWidth <= PICKER_MOBILE_BREAKPOINT
   );
@@ -7761,20 +8017,51 @@ function HomeContent(): React.JSX.Element {
   }, [sidebarOpen, panel]);
 
   useEffect(() => {
+    if (!botPreferredModelsModalOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setBotPreferredModelsModalOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [botPreferredModelsModalOpen]);
+
+  useEffect(() => {
+    if (!mobileBotsPanel && botPreferredModelsModalOpen) {
+      setBotPreferredModelsModalOpen(false);
+    }
+  }, [botPreferredModelsModalOpen, mobileBotsPanel]);
+
+  useEffect(() => {
+    if (!settingsAboutModalOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSettingsAboutModalOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [settingsAboutModalOpen]);
+
+  useEffect(() => {
     setChatOverflowMenuOpen(false);
   }, [detail?.id]);
 
   useEffect(() => {
     if (!chatOverflowMenuOpen) return;
-    function onDocMouseDown(event: MouseEvent) {
+    function onDocPointerDownCapture(event: PointerEvent) {
       if (!isPrimaryPointerDismissal(event)) return;
       const root = chatOverflowMenuRef.current;
       if (!root?.contains(event.target as Node)) {
         setChatOverflowMenuOpen(false);
       }
     }
-    document.addEventListener("mousedown", onDocMouseDown);
-    return () => document.removeEventListener("mousedown", onDocMouseDown);
+    // Capture + pointer events keeps mobile taps from leaking into message
+    // bubbles while the wrench menu is open.
+    document.addEventListener("pointerdown", onDocPointerDownCapture, true);
+    return () =>
+      document.removeEventListener("pointerdown", onDocPointerDownCapture, true);
   }, [chatOverflowMenuOpen]);
 
   useEffect(() => {
@@ -7890,9 +8177,10 @@ function HomeContent(): React.JSX.Element {
   }, []);
   // Shared close helper for the right-hand panels. Also resets panel-specific
   // transient UI so reopening a panel doesn't resurrect stale state.
-  const closePanel = useCallback(() => {
-    setPanel(null);
+  const resetPanelTransientState = useCallback(() => {
     setColorWheelOpen(false);
+    setBotPreferredModelsModalOpen(false);
+    setSettingsAboutModalOpen(false);
     setEditingBotId(null);
     if (botLibraryCloseTimerRef.current) {
       clearTimeout(botLibraryCloseTimerRef.current);
@@ -7910,7 +8198,27 @@ function HomeContent(): React.JSX.Element {
     setBotPanelLibraryEnabled(true);
   }, []);
 
+  const closePanel = useCallback(() => {
+    if (!panel || panelClosing) return;
+    if (panelCloseTimerRef.current) {
+      clearTimeout(panelCloseTimerRef.current);
+      panelCloseTimerRef.current = null;
+    }
+    setPanelClosing(true);
+    panelCloseTimerRef.current = setTimeout(() => {
+      setPanel(null);
+      setPanelClosing(false);
+      resetPanelTransientState();
+      panelCloseTimerRef.current = null;
+    }, PANEL_CLOSE_ANIMATION_MS);
+  }, [panel, panelClosing, resetPanelTransientState]);
+
   const openRightPanel = useCallback((nextPanel: Exclude<PanelView, null>) => {
+    if (panelCloseTimerRef.current) {
+      clearTimeout(panelCloseTimerRef.current);
+      panelCloseTimerRef.current = null;
+    }
+    setPanelClosing(false);
     setPanel(nextPanel);
     setSidebarOpen(false);
     if (nextPanel === "bots") {
@@ -7919,6 +8227,15 @@ function HomeContent(): React.JSX.Element {
     if (nextPanel === "memories") {
       setMemoryPhysicsSeed((seed) => seed + 1);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (panelCloseTimerRef.current) {
+        clearTimeout(panelCloseTimerRef.current);
+        panelCloseTimerRef.current = null;
+      }
+    };
   }, []);
 
   const openBotLibraryDrawer = useCallback(() => {
@@ -7960,7 +8277,7 @@ function HomeContent(): React.JSX.Element {
     const input = botNameInputRef.current;
     if (!input) return;
     input.focus({ preventScroll: true });
-  }, [panel, editingBotId]);
+  }, [panel, editingBotId, bots]);
 
   useEffect(() => {
     if (!devToolsOpen) return;
@@ -7998,7 +8315,7 @@ function HomeContent(): React.JSX.Element {
       media.removeEventListener?.("change", update);
       media.removeListener?.(update);
     };
-  }, []);
+  }, [bots]);
 
   // Starter "hello" intent (composerPrimed) disarms on outside taps — keep
   // hero / compose / picker surfaces from clearing each other accidentally.
@@ -8033,10 +8350,6 @@ function HomeContent(): React.JSX.Element {
       if (emptyStateSearchOpenTimerRef.current) {
         clearTimeout(emptyStateSearchOpenTimerRef.current);
         emptyStateSearchOpenTimerRef.current = null;
-      }
-      if (modelRevealTimerRef.current) {
-        clearTimeout(modelRevealTimerRef.current);
-        modelRevealTimerRef.current = null;
       }
       if (copiedMessageTimerRef.current) {
         clearTimeout(copiedMessageTimerRef.current);
@@ -8127,6 +8440,19 @@ function HomeContent(): React.JSX.Element {
     () => (resolvedTheme === "light" ? styles.themeLight : styles.themeDark),
     [resolvedTheme]
   );
+
+  useEffect(() => {
+    if (panel !== "settings") return;
+    if (!secondaryOllamaDraftHost) {
+      setSecondaryOllamaStatus(null);
+      setSecondaryOllamaStatusChecking(false);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void refreshSecondaryOllamaStatus(secondaryOllamaDraftHost);
+    }, 260);
+    return () => window.clearTimeout(timer);
+  }, [panel, secondaryOllamaDraftHost]);
 
   // Derive the --accent / --accent-text / --accent-ink triad written
   // onto the app shell. A selected/active bot owns this single-color
@@ -8544,13 +8870,18 @@ function HomeContent(): React.JSX.Element {
   // Hide the lens until it can actually reveal hidden color territory.
   // If every filterable bot already fits in the active ribbon window,
   // the slider is decorative friction rather than useful navigation.
-  const hueLensAvailable =
+  const hueLensHasHiddenRange =
     hueLensTrackSegments.length > 1 &&
     hueLensFilterableBotCount > hueLensWindowCapacity;
+  // Mobile can enter hue drill mode from a tile tap before the slider is
+  // visible; keep the lens available while drilled in so users can steer
+  // or clear that focused color space.
+  const hueLensAvailable =
+    hueLensHasHiddenRange || hueFilterCenter !== null;
   const hueFilterActive = hueFilterCenter !== null;
   const hueLensTrackGradient = useMemo(
-    () => hueLensGradient(hueLensTrackSegments),
-    [hueLensTrackSegments]
+    () => hueLensGradient(hueLensTrackSegments, resolvedTheme),
+    [hueLensTrackSegments, resolvedTheme]
   );
   // Empty-state lens slider lives in the compose form just below the
   // messages frame while the user is browsing/filtering bots. Once a bot
@@ -8578,8 +8909,8 @@ function HomeContent(): React.JSX.Element {
   //     thread chat. Lens-driven hue (the existing `var(--accent)` orb
   //     behavior).
   const activeConversationIsEmpty = !detail || detail.messages.length === 0;
-  /** Plain textarea only — rich markdown compose (TipTap) is off everywhere. */
-  const composerMarkdownEditorEnabled = false;
+  /** Hybrid Markdown compose: typed Markdown markers render live while the draft remains Markdown text. */
+  const composerMarkdownEditorEnabled = true;
   const messagesFrameMode = useMemo<"private" | "home" | "engaged">(() => {
     if (privateChatActive) return "private";
     if (defaultConversationUsesPrismIdentity) return "home";
@@ -8871,9 +9202,11 @@ function HomeContent(): React.JSX.Element {
   }, [view]);
 
   async function refreshAll() { await Promise.all([refreshConversations(), refreshSettings(), refreshMemories(), refreshBots(), refreshImages(), refreshModels()]); }
-  async function refreshConversations() {
+  async function refreshConversations(): Promise<ConversationSummary[]> {
     const d = await api<{ conversations: ConversationSummary[] }>("/api/conversations");
-    setConversations(d.conversations.filter(c => !c.incognito));
+    const next = d.conversations.filter(c => !c.incognito);
+    setConversations(next);
+    return next;
   }
   async function refreshConversation(id: string): Promise<void> {
     clearConversationUnread(id);
@@ -8906,14 +9239,39 @@ function HomeContent(): React.JSX.Element {
   }
   async function refreshSettings() {
     const d = await api<{ settings: UserSettings }>("/api/settings");
+    const secondaryHost =
+      typeof d.settings.secondaryOllamaHost === "string"
+        ? d.settings.secondaryOllamaHost
+        : "";
     setSettings({
       ...d.settings,
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
         : [],
+      secondaryOllamaHost: secondaryHost,
     });
   }
   async function refreshModels() { const d = await api<{ catalog: ModelCatalog }>("/api/models"); setModelCatalog(d.catalog); }
+  async function refreshSecondaryOllamaStatus(hostOverride?: string) {
+    setSecondaryOllamaStatusChecking(true);
+    try {
+      const statusUrl = hostOverride !== undefined
+        ? `/api/settings/secondary-ollama-status?host=${encodeURIComponent(hostOverride)}`
+        : "/api/settings/secondary-ollama-status";
+      const d = await api<{ status: SecondaryOllamaStatus }>(
+        statusUrl
+      );
+      setSecondaryOllamaStatus(d.status);
+    } catch {
+      setSecondaryOllamaStatus({
+        configured: Boolean(hostOverride?.trim()),
+        reachable: false,
+        modelCount: 0,
+      });
+    } finally {
+      setSecondaryOllamaStatusChecking(false);
+    }
+  }
   async function refreshMemories() {
     const d = await api<{
       memories: UserMemory[];
@@ -9100,7 +9458,10 @@ function HomeContent(): React.JSX.Element {
     // persistence/memory path.
     const providerForSend = settings?.preferredProvider;
     const modelChoice = providerForSend
-      ? chatModelChoiceByProvider[providerForSend]
+      ? visibleBotCustomizerModelChoice(
+          settings,
+          chatModelChoiceByProvider[providerForSend]
+        )
       : AUTO_MODEL_CHOICE;
     const modelOverride =
       modelChoice !== AUTO_MODEL_CHOICE
@@ -9384,7 +9745,37 @@ function HomeContent(): React.JSX.Element {
       // mirroring detail.botId cleanly. Only fires when an override was
       // actually set (keeps the state update a no-op in the common case).
       if (chatBotOverride !== undefined && stillViewingRequest) setChatBotOverride(undefined);
-      await refreshConversations();
+      const refreshedConversations = await refreshConversations();
+      // Auto-drill into the new chat's bot panel after a brand-new chat
+      // commits. Two halves of the same rule:
+      //   • new chat with bot X and X has 2+ saved chats now (group exists)
+      //     → open `bot:X` panel so the user lands inside it.
+      //   • new chat with no bot, or a bot that doesn't form a group yet
+      //     → close any open group panel so the new chat stays visible at
+      //     the top level instead of being hidden behind a stale drill-in.
+      // Gated on `stillViewingRequest` so a backgrounded send that lands
+      // after the user navigated elsewhere never yanks the sidebar. The
+      // functional setter makes the "already viewing this bot's panel"
+      // case a free no-op.
+      if (
+        stillViewingRequest &&
+        requestStartedNewConversation &&
+        !d.conversation.incognito
+      ) {
+        const newBotId = d.conversation.botId;
+        let nextOpenKey: string | null = null;
+        if (newBotId) {
+          const sameBotCount = refreshedConversations.filter(
+            (c) => c.botId === newBotId && !c.incognito,
+          ).length;
+          if (sameBotCount >= 2) {
+            nextOpenKey = conversationGroupKeyForBotId(newBotId);
+          }
+        }
+        setOpenConversationGroupKey((prev) =>
+          prev === nextOpenKey ? prev : nextOpenKey,
+        );
+      }
       if (
         !d.conversation.incognito &&
         d.conversation.messages.filter((message) => message.role === "assistant").length === 1
@@ -9578,6 +9969,7 @@ function HomeContent(): React.JSX.Element {
     if (!(target instanceof HTMLElement)) return;
     const fromMarkdownEditor = target.closest("[data-markdown-cm-host='true']") !== null;
     const fromPlainTextarea = target instanceof HTMLTextAreaElement;
+    if (fromMarkdownEditor) return;
     if (!fromMarkdownEditor && !fromPlainTextarea) return;
     e.preventDefault();
     void sendMessage(e, {
@@ -9680,7 +10072,8 @@ function HomeContent(): React.JSX.Element {
       }
       await api("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
       setOpenAiKey("");
-      await refreshSettings();
+      await Promise.all([refreshSettings(), refreshModels()]);
+      await refreshSecondaryOllamaStatus();
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Save failed.");
     } finally {
@@ -9689,6 +10082,9 @@ function HomeContent(): React.JSX.Element {
   }
 
   function setBotCustomizerModelVisible(modelId: string, visible: boolean) {
+    if (modelId === REQUIRED_PRIMARY_LOCAL_MODEL_ID) {
+      return;
+    }
     if (!visible) {
       setNewBotLocalModel((current) =>
         current === modelId ? AUTO_MODEL_CHOICE : current
@@ -9828,7 +10224,8 @@ function HomeContent(): React.JSX.Element {
   function pushMemoryToasts(memoryLearned: ChatPostEnvelope["memoryLearned"]): void {
     const created = memoryLearned?.created ?? [];
     const retracted = memoryLearned?.retracted ?? [];
-    if (created.length === 0 && retracted.length === 0) return;
+    const rejected = memoryLearned?.rejected ?? [];
+    if (created.length === 0 && retracted.length === 0 && rejected.length === 0) return;
 
     const now = Date.now();
     const nextToasts: MemoryToast[] = [
@@ -9844,12 +10241,19 @@ function HomeContent(): React.JSX.Element {
         memory,
         expiresAt: now + MEMORY_TOAST_DISMISS_MS,
       })),
+      ...rejected.map((memory, index) => ({
+        id: `rejected:${index}:${now}`,
+        kind: "rejected" as const,
+        rejected: memory,
+        expiresAt: now + MEMORY_TOAST_DISMISS_MS,
+      })),
     ];
     setMemoryToasts((current) => [...nextToasts, ...current].slice(0, 8));
   }
 
   async function undoMemoryToast(toast: MemoryToast) {
     setMemoryToasts((current) => current.filter((item) => item.id !== toast.id));
+    if (toast.kind === "rejected") return;
     if (toast.kind === "created") {
       await api(`/api/memories/${toast.memory.id}`, { method: "DELETE" });
     } else {
@@ -9867,6 +10271,27 @@ function HomeContent(): React.JSX.Element {
       });
     }
     await refreshOpenMemoryViews();
+  }
+
+  function memoryToastTitle(toast: MemoryToast): string {
+    if (toast.kind === "rejected") return "Memory skipped";
+    const memory = toast.memory;
+    if (toast.kind === "created" && memory.validationStatus === "auto_fixed") {
+      return "Memory cleaned up";
+    }
+    return toast.kind === "created" ? "Memory saved" : "Memory forgotten";
+  }
+
+  function memoryToastDetail(toast: MemoryToast): string {
+    if (toast.kind === "rejected") {
+      return `Not saved · ${toast.rejected.originalText}`;
+    }
+    const memory = toast.memory;
+    const prefix =
+      toast.kind === "created" && memory.validationStatus === "auto_fixed"
+        ? "edited for clarity"
+        : "tap to undo";
+    return `${memoryToastScopeLabel(memory)} · ${prefix} · ${memory.text}`;
   }
 
   async function deleteMemory(id: string) {
@@ -10028,13 +10453,11 @@ function HomeContent(): React.JSX.Element {
         anchor,
       });
       setContextFocusedMessageId(msg.id);
+      setModelRevealMessageId(msg.role === "assistant" ? msg.id : null);
 
       const vpMobile = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
       if (opts?.mobileActivate && vpMobile) {
         setMobileFocusedMessageId(msg.id);
-        if (msg.role === "assistant") {
-          setModelRevealMessageId(msg.id);
-        }
       }
     },
     [viewportWidth]
@@ -10578,7 +11001,9 @@ function HomeContent(): React.JSX.Element {
       return;
     }
 
-    setNewBotColor(randomHex());
+    setNewBotColor(randomHex(
+      bots.map((bot) => bot.color?.trim() ?? "").filter((hex) => hex.length > 0)
+    ));
     setNewBotGlyph(randomBotGlyph());
   }, [panel, editingBotId]);
 
@@ -10734,7 +11159,9 @@ function HomeContent(): React.JSX.Element {
       profile: randomBotProfile(name),
       temperature: randomBotTemperatureSetting(),
       maxTokens: randomBotReplyLengthTokens(),
-      color: randomHex(),
+      color: randomHex(
+        bots.map((bot) => bot.color?.trim() ?? "").filter((hex) => hex.length > 0)
+      ),
       glyph: randomBotGlyph(),
     };
   }
@@ -10764,10 +11191,13 @@ function HomeContent(): React.JSX.Element {
     setNewBotLocalModel(AUTO_MODEL_CHOICE);
     setNewBotOnlineModel(AUTO_MODEL_CHOICE);
     setNewBotOnlineEnabled(true);
+    setNewBotDeleteProtected(false);
     setNewBotTemperature(BOT_TEMPERATURE_DEFAULT);
     setNewBotMaxTokens(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
     createBotAppearanceTouchedRef.current = false;
-    setNewBotColor(randomHex());
+    setNewBotColor(randomHex(
+      bots.map((bot) => bot.color?.trim() ?? "").filter((hex) => hex.length > 0)
+    ));
     setNewBotGlyph(randomBotGlyph());
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
@@ -10794,6 +11224,7 @@ function HomeContent(): React.JSX.Element {
           localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
           onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
           onlineEnabled: newBotOnlineEnabled,
+          deleteProtected: newBotDeleteProtected,
           temperature: newBotTemperature,
           maxTokens: newBotMaxTokens,
           color: newBotColor,
@@ -10851,6 +11282,7 @@ function HomeContent(): React.JSX.Element {
           localModel: bot.local_model ?? "",
           onlineModel: bot.online_model ?? "",
           onlineEnabled: bot.online_enabled !== 0,
+          deleteProtected: bot.delete_protected === 1,
           temperature: normalizeBotTemperature(bot.temperature),
           maxTokens: normalizeBotMaxTokens(bot.max_tokens),
           color: bot.color,
@@ -10883,18 +11315,25 @@ function HomeContent(): React.JSX.Element {
     disarmDelete();
     const previousBots = bots;
     const previousSelectedBotId = selectedBotId;
+    const protectedBots = previousBots.filter((bot) => bot.delete_protected === 1);
+    const protectedBotIds = new Set(protectedBots.map((bot) => bot.id));
+    const unprotectedCount = previousBots.length - protectedBots.length;
     // Nothing to clear — short-circuit rather than fire a no-op request.
     // Tapping into the empty state via hold-from-nothing is unreachable in
     // practice, but the guard keeps the function safe to call from any
     // future entry point.
-    if (previousBots.length === 0) return;
+    if (unprotectedCount === 0) return;
     // Bail out of any in-progress edit so the form doesn't keep pointing at
     // a row that's about to vanish. resetBotForm reseeds the color/glyph
     // so the reopened form still feels generative.
-    setEditingBotId(null);
-    resetBotForm();
-    setBots([]);
-    setSelectedBotId(null);
+    if (!editingBotId || !protectedBotIds.has(editingBotId)) {
+      setEditingBotId(null);
+      resetBotForm();
+    }
+    setBots(protectedBots);
+    if (previousSelectedBotId && !protectedBotIds.has(previousSelectedBotId)) {
+      setSelectedBotId(null);
+    }
     try {
       await api("/api/bots", { method: "DELETE" });
       await refreshBots();
@@ -11246,9 +11685,15 @@ function HomeContent(): React.JSX.Element {
     const seededLocalModel = normalizeModelChoice(bot.local_model ?? bot.model);
     const seededOnlineModel = normalizeModelChoice(bot.online_model);
     const seededOnlineEnabled = bot.online_enabled !== 0;
+    const seededDeleteProtected = bot.delete_protected === 1;
     const seededTemperature = normalizeBotTemperature(bot.temperature);
     const seededMaxTokens = normalizeBotMaxTokens(bot.max_tokens);
-    const seededColor = bot.color?.trim() || randomHex();
+    const seededColor = bot.color?.trim() || randomHex(
+      bots
+        .filter((candidate) => candidate.id !== bot.id)
+        .map((candidate) => candidate.color?.trim() ?? "")
+        .filter((hex) => hex.length > 0)
+    );
     const seededGlyph: BotGlyphName = isBotGlyphName(bot.glyph)
       ? bot.glyph
       : DEFAULT_BOT_GLYPH;
@@ -11257,6 +11702,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotLocalModel(seededLocalModel);
     setNewBotOnlineModel(seededOnlineModel);
     setNewBotOnlineEnabled(seededOnlineEnabled);
+    setNewBotDeleteProtected(seededDeleteProtected);
     setNewBotTemperature(seededTemperature);
     setNewBotMaxTokens(seededMaxTokens);
     setNewBotColor(seededColor);
@@ -11270,6 +11716,7 @@ function HomeContent(): React.JSX.Element {
       localModel: seededLocalModel,
       onlineModel: seededOnlineModel,
       onlineEnabled: seededOnlineEnabled,
+      deleteProtected: seededDeleteProtected,
       temperature: seededTemperature,
       maxTokens: seededMaxTokens,
       color: seededColor,
@@ -11870,8 +12317,14 @@ function HomeContent(): React.JSX.Element {
 
     layoutEntries.forEach(({ entry, sortedIndex, size }, index) => {
       const placedPoint = placed[index];
+      const bubbleAccent =
+        memoryPanelScope === "default"
+          ? resolvedTheme === "dark"
+            ? "#cccccc"
+            : "#444444"
+          : memoryPanelAccent;
       const shade = mixHex(
-        memoryPanelAccent,
+        bubbleAccent,
         shadeTarget,
         shadePattern[sortedIndex % shadePattern.length]
       );
@@ -11885,6 +12338,7 @@ function HomeContent(): React.JSX.Element {
         style: {
           "--memory-bubble-size": `${size}px`,
           "--memory-bubble-color": shade,
+          "--memory-bubble-source-color": bubbleAccent,
           "--memory-bubble-ink": pickReadableText(shade),
           "--memory-bubble-font-size": `${fontSize}px`,
           "--memory-bubble-score-size": `${scoreSize}px`,
@@ -12144,6 +12598,7 @@ function HomeContent(): React.JSX.Element {
           localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
           onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
           onlineEnabled: newBotOnlineEnabled,
+          deleteProtected: newBotDeleteProtected,
           temperature: newBotTemperature,
           maxTokens: newBotMaxTokens,
           color: newBotColor,
@@ -12158,6 +12613,7 @@ function HomeContent(): React.JSX.Element {
         localModel,
         onlineModel,
         onlineEnabled: newBotOnlineEnabled,
+        deleteProtected: newBotDeleteProtected,
         temperature: newBotTemperature,
         maxTokens: newBotMaxTokens,
         color: newBotColor,
@@ -12193,6 +12649,29 @@ function HomeContent(): React.JSX.Element {
     catch (err) { setPanelError(err instanceof Error ? err.message : "Image gen failed."); }
     finally { setBusy(false); }
   }
+
+  const secondaryOllamaUiStatus: SecondaryOllamaUiStatus =
+    !secondaryOllamaDraftHost
+      ? "unconfigured"
+      : secondaryOllamaStatusChecking
+          ? "checking"
+          : secondaryOllamaStatus?.reachable
+            ? secondaryOllamaStatus.modelCount > 0
+              ? "connected"
+              : "empty"
+            : "error";
+  const secondaryOllamaStatusText =
+    secondaryOllamaUiStatus === "connected"
+      ? `Connected · ${secondaryOllamaStatus?.modelCount ?? 0} model${
+          secondaryOllamaStatus?.modelCount === 1 ? "" : "s"
+        }`
+      : secondaryOllamaUiStatus === "empty"
+        ? "Connected · no models"
+        : secondaryOllamaUiStatus === "checking"
+          ? "Checking..."
+          : secondaryOllamaUiStatus === "error"
+              ? "Not reachable"
+              : "Optional";
 
   if (clientAccessState !== "allowed") {
     const isChecking = clientAccessState === "checking";
@@ -12645,13 +13124,17 @@ function HomeContent(): React.JSX.Element {
             <span className={styles.conversationGroupGlyph} aria-hidden="true">
               <BotGlyph name={openConversationGroup.glyph} size={18} strokeWidth={1.5} />
             </span>
-            <span>{openConversationGroup.name}</span>
-            <small>{openConversationGroup.count} chats</small>
+            <span className={styles.conversationGroupText}>
+              <span className={styles.conversationGroupName}>{openConversationGroup.name}</span>
+              <span className={styles.conversationGroupCount}>
+                {openConversationGroup.count} chats
+              </span>
+            </span>
           </div>
         </li>
       );
     }
-    sidebarConversationItems.forEach((item, index) => {
+    sidebarConversationItems.forEach((item) => {
       rows.push(
         item.kind === "group"
           ? renderConversationGroupTile(item.group, rows.length)
@@ -12684,23 +13167,26 @@ function HomeContent(): React.JSX.Element {
     // user-visible string + the confirm action from the armed key so both
     // contexts share every a11y / focus / dismissal affordance without
     // forking the JSX.
-    const count = isChats ? conversations.length : bots.length;
+    const protectedBotCount = isBots
+      ? bots.filter((bot) => bot.delete_protected === 1).length
+      : 0;
+    const count = isChats ? conversations.length : Math.max(0, bots.length - protectedBotCount);
     const noun = isChats
       ? count === 1 ? "conversation" : "conversations"
       : count === 1 ? "bot" : "bots";
-    const title = isChats ? "Delete all chats?" : "Delete all bots?";
+    const title = isChats ? "Delete all chats?" : "Delete all unprotected bots?";
     const body = isChats
       ? count === 1
         ? "This will permanently remove your only conversation."
         : `This will permanently remove all ${count} conversations.`
       : count === 1
-        ? "This will permanently remove your only bot."
-        : `This will permanently remove all ${count} bots.`;
+        ? "This will permanently remove your only unprotected bot."
+        : `This will permanently remove all ${count} unprotected ${noun}.`;
     // What stays behind after the wipe — different trailing copy because
     // the two scopes have different "untouched" surfaces.
     const coda = isChats
       ? " Images and memories stay."
-      : " Chats using these bots stay (they fall back to Default).";
+      : `${protectedBotCount > 0 ? " Protected bots will be kept." : ""} Chats using deleted bots stay (they fall back to Default).`;
     const onConfirm = () => {
       if (isChats) void deleteAllConversations();
       else void deleteAllBots();
@@ -12790,15 +13276,13 @@ function HomeContent(): React.JSX.Element {
                 )
               );
             }}
-            title="Tap to undo"
+            title={toast.kind === "rejected" ? "Tap to dismiss" : "Tap to undo"}
           >
-            <span aria-hidden="true">{toast.kind === "created" ? "◆" : "↺"}</span>
-            <strong>
-              {toast.kind === "created" ? "Memory saved" : "Memory forgotten"}
-            </strong>
-            <small>
-              {memoryToastScopeLabel(toast.memory)} · tap to undo · {toast.memory.text}
-            </small>
+            <span aria-hidden="true">
+              {toast.kind === "created" ? "◆" : toast.kind === "retracted" ? "↺" : "◇"}
+            </span>
+            <strong>{memoryToastTitle(toast)}</strong>
+            <small>{memoryToastDetail(toast)}</small>
           </button>
         ))}
         {overflow > 0 && (
@@ -12848,6 +13332,19 @@ function HomeContent(): React.JSX.Element {
         armDelete(HEADER_DELETE_KEY);
         closeMenu();
       }
+    };
+    const swallowMenuPointerDown = (
+      event: React.PointerEvent<HTMLElement>
+    ) => {
+      event.stopPropagation();
+    };
+    const swallowMenuEvent = (
+      event:
+        | React.MouseEvent<HTMLElement>
+        | React.SyntheticEvent<HTMLElement>
+    ) => {
+      event.preventDefault();
+      event.stopPropagation();
     };
 
     if (!isMobileGear) {
@@ -12920,18 +13417,31 @@ function HomeContent(): React.JSX.Element {
           aria-haspopup="menu"
           aria-label="Conversation tools menu"
           title="Conversation tools"
-          onClick={() => setChatOverflowMenuOpen(open => !open)}
+          onPointerDownCapture={swallowMenuPointerDown}
+          onClick={(event) => {
+            swallowMenuEvent(event);
+            setChatOverflowMenuOpen(open => !open);
+          }}
         >
           <WrenchGlyph />
         </button>
         {chatOverflowMenuOpen && (
-          <div className={styles.chatOverflowMenu} role="menu" aria-label="Conversation tools">
+          <div
+            className={styles.chatOverflowMenu}
+            role="menu"
+            aria-label="Conversation tools"
+            onPointerDownCapture={swallowMenuPointerDown}
+            onContextMenu={swallowMenuEvent}
+          >
             <button
               type="button"
               role="menuitem"
               className={styles.chatOverflowMenuItem}
               disabled={!canMemoryActions}
-              onClick={handleMemories}
+              onClick={(event) => {
+                swallowMenuEvent(event);
+                handleMemories();
+              }}
             >
               Memories
             </button>
@@ -12940,7 +13450,10 @@ function HomeContent(): React.JSX.Element {
                 type="button"
                 role="menuitem"
                 className={styles.chatOverflowMenuItem}
-                onClick={handleEditBot}
+                onClick={(event) => {
+                  swallowMenuEvent(event);
+                  handleEditBot();
+                }}
               >
                 Edit bot
               </button>
@@ -12950,7 +13463,10 @@ function HomeContent(): React.JSX.Element {
               role="menuitem"
               className={styles.chatOverflowMenuItem}
               disabled={!canExport}
-              onClick={handleExport}
+              onClick={(event) => {
+                swallowMenuEvent(event);
+                handleExport();
+              }}
             >
               Export .md
             </button>
@@ -12963,7 +13479,10 @@ function HomeContent(): React.JSX.Element {
               aria-label={
                 deleteArmed ? "Confirm delete this chat" : "Delete this chat"
               }
-              onClick={handleDelete}
+              onClick={(event) => {
+                swallowMenuEvent(event);
+                handleDelete();
+              }}
             >
               {deleteArmed ? "✓ Confirm delete" : "Delete chat"}
             </button>
@@ -12990,10 +13509,12 @@ function HomeContent(): React.JSX.Element {
     const isArmedSingle = pendingDeleteKey === botKey;
     const isHolding = holdingKey === botKey;
     const armedAll = pendingDeleteKey === DELETE_ALL_BOTS_KEY;
+    const isProtected = bot.delete_protected === 1;
 
     const className = [
       styles.botCardDelete,
       isArmedSingle ? styles.botCardDeleteArmed : "",
+      isProtected ? styles.botCardDeleteProtected : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -13005,15 +13526,24 @@ function HomeContent(): React.JSX.Element {
         data-delete-affordance="true"
         data-holding={isHolding ? "true" : undefined}
         aria-label={
-          isArmedSingle
+          isProtected
+            ? `${bot.name} is protected from deletion`
+            : isArmedSingle
             ? `Confirm delete ${bot.name}`
             : `Delete ${bot.name} — click to remove this bot, or press and hold to clear all bots`
         }
-        title={isArmedSingle ? undefined : "Delete bot · hold for all"}
+        title={
+          isProtected
+            ? "Protected bot · toggle delete protection off to delete"
+            : isArmedSingle
+              ? undefined
+              : "Delete bot · hold for all"
+        }
         onPointerDown={(e) => {
           // Only primary-button presses kick off the hold; right-click
           // (contextmenu) stays out of the gesture entirely.
           if (e.button !== 0) return;
+          if (isProtected) return;
           // Pointer capture guarantees pointerup/pointercancel even if the
           // finger drags off the target mid-hold — without it, a touch
           // sliding off would orphan the 900 ms timer.
@@ -13042,6 +13572,10 @@ function HomeContent(): React.JSX.Element {
           // behind the backdrop. Treat clicks as no-ops (the modal's own
           // Cancel / backdrop / Esc handle dismissal).
           if (armedAll) return;
+          if (isProtected) {
+            setPanelError("This bot is protected. Toggle delete protection off first.");
+            return;
+          }
           if (isArmedSingle) {
             void deleteBot(bot.id);
           } else {
@@ -13053,7 +13587,9 @@ function HomeContent(): React.JSX.Element {
           <span className={styles.conversationDeletePrompt}>Are you sure?</span>
         )}
         <span className={styles.conversationDeleteGlyph}>
-          {isArmedSingle ? "✓" : "×"}
+          {isArmedSingle ? "✓" : isProtected ? (
+            <BotGlyph name="lock" size={14} strokeWidth={2.05} />
+          ) : "×"}
         </span>
       </button>
     );
@@ -13330,6 +13866,7 @@ function HomeContent(): React.JSX.Element {
       {panel && (
         <div
           className={styles.panelOverlay}
+          data-closing={panelClosing ? "true" : undefined}
           onClick={(event) => {
             if (event.button !== 0 || event.ctrlKey) return;
             closePanel();
@@ -13343,6 +13880,7 @@ function HomeContent(): React.JSX.Element {
         <div
           ref={memoryPanelRef}
           className={`${styles.panel} ${styles.panelMemories}`}
+          data-closing={panelClosing ? "true" : undefined}
           data-memory-scope={memoryPanelScope}
           data-memory-physics-active={memoryPhysicsActive ? "true" : undefined}
           data-memory-family={
@@ -13659,12 +14197,29 @@ function HomeContent(): React.JSX.Element {
 
       {/* ── Settings panel ── */}
       {panel === "settings" && (
-        <div className={styles.panel}>
+        <div className={styles.panel} data-closing={panelClosing ? "true" : undefined}>
           <div className={styles.panelHeader}><h3>Settings</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
           {settings && (
             <form className={styles.form} onSubmit={saveSettings}>
               <label>Theme<select value={settings.theme} onChange={e => setSettings(p => p ? { ...p, theme: e.target.value as Theme } : p)}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Auto (system)</option></select></label>
               <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
+              <label className={styles.settingsHostField}>
+                <span className={styles.settingsHostLabel}>Second Ollama host</span>
+                <span
+                  className={styles.settingsHostInputWrap}
+                  data-status={secondaryOllamaUiStatus}
+                >
+                  <input
+                    type="text"
+                    placeholder="192.168.1.50:11434"
+                    value={settings.secondaryOllamaHost ?? ""}
+                    onChange={e => setSettings(p => p ? { ...p, secondaryOllamaHost: e.target.value } : p)}
+                  />
+                  <span className={styles.settingsHostStatus} aria-live="polite">
+                    {secondaryOllamaStatusText}
+                  </span>
+                </span>
+              </label>
               {settings.hasOpenAiApiKey && (
                 <button
                   type="button"
@@ -13676,6 +14231,16 @@ function HomeContent(): React.JSX.Element {
                 </button>
               )}
               <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
+              <button
+                type="button"
+                className={styles.settingsInfoButton}
+                aria-haspopup="dialog"
+                aria-expanded={settingsAboutModalOpen ? "true" : undefined}
+                onClick={() => setSettingsAboutModalOpen(true)}
+              >
+                <strong>App info</strong>
+            <span>What Prism is, how it works, and what you control.</span>
+              </button>
               <details className={styles.settingsModelDropdown}>
                 <summary>
                   <span>Bot customizer models</span>
@@ -13687,18 +14252,26 @@ function HomeContent(): React.JSX.Element {
                 </summary>
                 <div className={styles.settingsModelList}>
                   {allBotCustomizerModelOptions(modelCatalog, settings).map((model) => {
-                    const visible = !settings.hiddenBotModelIds.includes(model.id);
+                    const required = isRequiredPrimaryLocalModel(model);
+                    const visible = required || !settings.hiddenBotModelIds.includes(model.id);
                     return (
                       <label key={model.id} className={styles.settingsModelToggle}>
                         <input
                           type="checkbox"
                           checked={visible}
+                          disabled={required}
                           onChange={(event) =>
                             setBotCustomizerModelVisible(model.id, event.currentTarget.checked)
                           }
                         />
                         <span>{model.label}</span>
-                        <small>{model.provider === "local" ? "Offline" : "Online"}</small>
+                        <small>
+                          {required
+                            ? "Required"
+                            : model.provider === "local"
+                            ? `Offline${model.hostLabel ? ` · ${model.hostLabel}` : ""}`
+                            : "Online"}
+                        </small>
                       </label>
                     );
                   })}
@@ -13706,6 +14279,57 @@ function HomeContent(): React.JSX.Element {
               </details>
               <button type="submit" disabled={busy}>Save</button>
             </form>
+          )}
+          {settingsAboutModalOpen && (
+            <div
+              className={styles.settingsAboutModalBackdrop}
+              role="presentation"
+              onClick={() => setSettingsAboutModalOpen(false)}
+            >
+              <div
+                className={styles.settingsAboutModal}
+                role="dialog"
+                aria-modal="true"
+                aria-label="About this app"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <header className={styles.settingsAboutModalHeader}>
+                  <div>
+                    <span>App details</span>
+                    <h4>About this app</h4>
+                    <p>A quick guide to PRISM&apos;s vision and how it behaves today.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsAboutModalOpen(false)}
+                    aria-label="Close app info"
+                  >
+                    ×
+                  </button>
+                </header>
+                <div className={styles.settingsAboutModalBody}>
+                  <p>
+                    PRISM is a playful, personal AI workspace: surreal in style, practical in interaction.
+                  </p>
+                  <p>
+                    The Hub currently centers two modes: Chat for grounded conversation and Sandbox for
+                    open-ended exploration.
+                  </p>
+                  <p>
+                    Bots let you shape personality, creativity, and response depth without permanently changing
+                    the underlying model.
+                  </p>
+                  <p>
+                    You stay in control: choose offline/online behavior, manage memories, and tune responses
+                    per bot.
+                  </p>
+                  <p>
+                    This PRISM workspace can also pair with companion clients, so your same environment can
+                    travel across devices.
+                  </p>
+                </div>
+              </div>
+            </div>
           )}
           <div className={styles.pairingActions}>
             <h4>Pair a device</h4>
@@ -13827,6 +14451,7 @@ function HomeContent(): React.JSX.Element {
             || visibleLocalModelChoice !== editPristine.localModel
             || visibleOnlineModelChoice !== editPristine.onlineModel
             || newBotOnlineEnabled !== editPristine.onlineEnabled
+            || newBotDeleteProtected !== editPristine.deleteProtected
             || newBotTemperature !== editPristine.temperature
             || newBotMaxTokens !== editPristine.maxTokens
             || normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
@@ -13902,6 +14527,7 @@ function HomeContent(): React.JSX.Element {
         return (
           <div
             className={`${styles.panel} ${styles.panelBots}`}
+            data-closing={panelClosing ? "true" : undefined}
             data-color-picker-open={colorWheelOpen ? "true" : undefined}
             data-profile-builder-open={botProfileBuilderOpen ? "true" : undefined}
             data-library-expanded={
@@ -14012,165 +14638,321 @@ function HomeContent(): React.JSX.Element {
                 <div className={styles.botParameterHeader}>
                   <small>Plain-language choices for model routing, creativity, and answer size.</small>
                 </div>
-                <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
-                  <span>Online capability</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={newBotOnlineEnabled}
-                    data-enabled={newBotOnlineEnabled ? "true" : undefined}
-                    onClick={() => setNewBotOnlineEnabled((enabled) => !enabled)}
-                  >
-                    <strong>{newBotOnlineEnabled ? "Allowed" : "Offline only"}</strong>
-                    <small>
-                      {newBotOnlineEnabled
-                        ? "This bot may use its preferred online model."
-                        : "Online model preference is ignored for this bot."}
-                    </small>
-                  </button>
-                </label>
-                <div
-                  className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                  onMouseEnter={(event) => showFieldHelp(
-                    "Used when this bot replies while the editor is set to LOCAL.",
-                    event.currentTarget
-                  )}
-                  onMouseLeave={hideFieldHelp}
-                  onFocus={(event) => showFieldHelp(
-                    "Used when this bot replies while the editor is set to LOCAL.",
-                    event.currentTarget
-                  )}
-                  onBlur={hideFieldHelp}
-                >
-                  <span>Preferred offline model</span>
-                  <select
-                    value={visibleLocalModelChoice}
-                    onChange={(event) => setNewBotLocalModel(event.currentTarget.value)}
-                    aria-label="Preferred offline model for this bot"
-                  >
-                    <option value={AUTO_MODEL_CHOICE}>Auto</option>
-                    {localModelOptions.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}{model.isDefault ? " (default)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <small>Used when this bot replies while the editor is set to LOCAL.</small>
+                <div className={styles.botParameterToggleRow}>
+                  <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
+                    <span>Delete protection</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={newBotDeleteProtected}
+                      data-enabled={newBotDeleteProtected ? "true" : undefined}
+                      onClick={() => setNewBotDeleteProtected((protectedNow) => !protectedNow)}
+                    >
+                      <strong>{newBotDeleteProtected ? "Protected" : "Deletes normally"}</strong>
+                      <small>
+                        {newBotDeleteProtected
+                          ? "This bot cannot be deleted by single or bulk delete."
+                          : "This bot can be deleted normally."}
+                      </small>
+                    </button>
+                  </label>
+                  <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
+                    <span>Online capability</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={newBotOnlineEnabled}
+                      data-enabled={newBotOnlineEnabled ? "true" : undefined}
+                      onClick={() => setNewBotOnlineEnabled((enabled) => !enabled)}
+                    >
+                      <strong>{newBotOnlineEnabled ? "Allowed" : "Offline only"}</strong>
+                      <small>
+                        {newBotOnlineEnabled
+                          ? "This bot may use its preferred online model."
+                          : "Online model preference is ignored for this bot."}
+                      </small>
+                    </button>
+                  </label>
                 </div>
-                <div
-                  className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                  onMouseEnter={(event) => showFieldHelp(
-                    "Used when this bot replies while the editor is set to ONLINE.",
-                    event.currentTarget
-                  )}
-                  onMouseLeave={hideFieldHelp}
-                  onFocus={(event) => showFieldHelp(
-                    "Used when this bot replies while the editor is set to ONLINE.",
-                    event.currentTarget
-                  )}
-                  onBlur={hideFieldHelp}
-                >
-                  <span>Preferred online model</span>
-                  <select
-                    value={visibleOnlineModelChoice}
-                    onChange={(event) => setNewBotOnlineModel(event.currentTarget.value)}
-                    aria-label="Preferred online model for this bot"
-                    disabled={!newBotOnlineEnabled}
-                  >
-                    <option value={AUTO_MODEL_CHOICE}>Auto</option>
-                    {onlineModelOptions.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}{model.isDefault ? " (default)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <small>
-                    {newBotOnlineEnabled
-                      ? "Used when this bot replies while the editor is set to ONLINE."
-                      : "Disabled while online capability is off."}
-                  </small>
-                </div>
-                <div
-                  className={styles.botParameterField}
-                  onMouseEnter={(event) => showFieldHelp(
-                    botTemperatureDescription(newBotTemperature),
-                    event.currentTarget
-                  )}
-                  onMouseLeave={hideFieldHelp}
-                  onFocus={(event) => showFieldHelp(
-                    botTemperatureDescription(newBotTemperature),
-                    event.currentTarget
-                  )}
-                  onBlur={hideFieldHelp}
-                >
-                  <div className={styles.botParameterQuestionRow}>
-                    <span>Reply creativity</span>
-                    <strong>{botTemperatureLabel(newBotTemperature)}</strong>
+                {mobileBotsPanel ? (
+                  <div className={styles.botParameterField}>
+                    <span>Response tuning</span>
+                    <button
+                      type="button"
+                      className={styles.botPreferredModelsButton}
+                      aria-haspopup="dialog"
+                      aria-expanded={botPreferredModelsModalOpen ? "true" : undefined}
+                      onClick={() => {
+                        setActiveFieldHelp(null);
+                        setBotPreferredModelsModalOpen(true);
+                      }}
+                    >
+                      <strong>Open response tuning</strong>
+                      <span>
+                        {botTemperatureLabel(newBotTemperature)} · {selectedLengthPreset?.label ?? "Custom"} replies
+                      </span>
+                    </button>
                   </div>
-                  <small className={styles.botParameterInlineHelp}>
-                    Lower values keep answers predictable; higher values allow more surprise.
-                  </small>
-                  <input
-                    type="range"
-                    min={BOT_TEMPERATURE_MIN}
-                    max={BOT_TEMPERATURE_MAX}
-                    step={BOT_TEMPERATURE_STEP}
-                    value={newBotTemperature}
-                    onChange={event => setNewBotTemperature(
-                      normalizeBotTemperature(Number(event.currentTarget.value))
-                    )}
-                    className={styles.botParameterRange}
-                    aria-label="Reply creativity for this bot"
-                    // Drives the thumb's fill/edge color inversion in CSS:
-                    // 0 = far left (color fill, black edge) → 1 = far right
-                    // (black fill, color edge). Keeps the thumb visible against
-                    // both ends of the dark→accent track gradient.
-                    style={{
-                      ["--slider-pos" as string]: String(
-                        (newBotTemperature - BOT_TEMPERATURE_MIN)
-                          / (BOT_TEMPERATURE_MAX - BOT_TEMPERATURE_MIN)
-                      ),
-                    } as React.CSSProperties}
-                  />
-                  <div className={styles.botParameterScale} aria-hidden="true">
-                    <span>Predictable</span>
-                    <span>Balanced</span>
-                    <span>Inventive</span>
-                  </div>
-                </div>
-                <fieldset
-                  className={styles.botParameterField}
-                  onMouseEnter={(event) => showFieldHelp(
-                    selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it.",
-                    event.currentTarget
-                  )}
-                  onMouseLeave={hideFieldHelp}
-                  onFocus={(event) => showFieldHelp(
-                    selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it.",
-                    event.currentTarget
-                  )}
-                  onBlur={hideFieldHelp}
-                >
-                  <legend>Reply depth</legend>
-                  <small className={styles.botParameterInlineHelp}>
-                    Pick the size of answer this bot should naturally aim for.
-                  </small>
-                  <div className={styles.botLengthOptions}>
-                    {BOT_REPLY_LENGTH_PRESETS.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        className={styles.botLengthOption}
-                        data-selected={newBotMaxTokens === preset.tokens ? "true" : undefined}
-                        onClick={() => setNewBotMaxTokens(preset.tokens)}
+                ) : (
+                  <>
+                    <div className={styles.botParameterModelRow}>
+                      <div
+                        className={`${styles.botParameterField} ${styles.botParameterModelField}`}
+                        onMouseEnter={(event) => showFieldHelp(
+                          "Used when this bot replies while the editor is set to LOCAL.",
+                          event.currentTarget
+                        )}
+                        onMouseLeave={hideFieldHelp}
+                        onFocus={(event) => showFieldHelp(
+                          "Used when this bot replies while the editor is set to LOCAL.",
+                          event.currentTarget
+                        )}
+                        onBlur={hideFieldHelp}
                       >
-                        <span>{preset.label}</span>
-                        <small>{preset.description}</small>
-                      </button>
-                    ))}
-                  </div>
-                </fieldset>
+                        <span>Preferred offline model</span>
+                        <select
+                          value={visibleLocalModelChoice}
+                          onChange={(event) => setNewBotLocalModel(event.currentTarget.value)}
+                          aria-label="Preferred offline model for this bot"
+                        >
+                          <option value={AUTO_MODEL_CHOICE}>Auto</option>
+                          {localModelOptions.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.label}{model.isDefault ? " (default)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <small>Used when this bot replies while the editor is set to LOCAL.</small>
+                      </div>
+                      <div
+                        className={`${styles.botParameterField} ${styles.botParameterModelField}`}
+                        onMouseEnter={(event) => showFieldHelp(
+                          "Used when this bot replies while the editor is set to ONLINE.",
+                          event.currentTarget
+                        )}
+                        onMouseLeave={hideFieldHelp}
+                        onFocus={(event) => showFieldHelp(
+                          "Used when this bot replies while the editor is set to ONLINE.",
+                          event.currentTarget
+                        )}
+                        onBlur={hideFieldHelp}
+                      >
+                        <span>Preferred online model</span>
+                        <select
+                          value={visibleOnlineModelChoice}
+                          onChange={(event) => setNewBotOnlineModel(event.currentTarget.value)}
+                          aria-label="Preferred online model for this bot"
+                          disabled={!newBotOnlineEnabled}
+                        >
+                          <option value={AUTO_MODEL_CHOICE}>Auto</option>
+                          {onlineModelOptions.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.label}{model.isDefault ? " (default)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <small>
+                          {newBotOnlineEnabled
+                            ? "Used when this bot replies while the editor is set to ONLINE."
+                            : "Disabled while online capability is off."}
+                        </small>
+                      </div>
+                    </div>
+                    <div
+                      className={styles.botParameterField}
+                      onMouseEnter={(event) => showFieldHelp(
+                        botTemperatureDescription(newBotTemperature),
+                        event.currentTarget
+                      )}
+                      onMouseLeave={hideFieldHelp}
+                      onFocus={(event) => showFieldHelp(
+                        botTemperatureDescription(newBotTemperature),
+                        event.currentTarget
+                      )}
+                      onBlur={hideFieldHelp}
+                    >
+                      <div className={styles.botParameterQuestionRow}>
+                        <span>Reply creativity</span>
+                        <strong>{botTemperatureLabel(newBotTemperature)}</strong>
+                      </div>
+                      <small className={styles.botParameterInlineHelp}>
+                        Lower values keep answers predictable; higher values allow more surprise.
+                      </small>
+                      <input
+                        type="range"
+                        min={BOT_TEMPERATURE_MIN}
+                        max={BOT_TEMPERATURE_MAX}
+                        step={BOT_TEMPERATURE_STEP}
+                        value={newBotTemperature}
+                        onChange={event => setNewBotTemperature(
+                          normalizeBotTemperature(Number(event.currentTarget.value))
+                        )}
+                        className={styles.botParameterRange}
+                        aria-label="Reply creativity for this bot"
+                        style={{
+                          ["--slider-pos" as string]: String(
+                            (newBotTemperature - BOT_TEMPERATURE_MIN)
+                              / (BOT_TEMPERATURE_MAX - BOT_TEMPERATURE_MIN)
+                          ),
+                        } as React.CSSProperties}
+                      />
+                      <div className={styles.botParameterScale} aria-hidden="true">
+                        <span>Predictable</span>
+                        <span>Balanced</span>
+                        <span>Inventive</span>
+                      </div>
+                    </div>
+                    <fieldset
+                      className={styles.botParameterField}
+                      onMouseEnter={(event) => showFieldHelp(
+                        selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it.",
+                        event.currentTarget
+                      )}
+                      onMouseLeave={hideFieldHelp}
+                      onFocus={(event) => showFieldHelp(
+                        selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it.",
+                        event.currentTarget
+                      )}
+                      onBlur={hideFieldHelp}
+                    >
+                      <legend>Reply depth</legend>
+                      <small className={styles.botParameterInlineHelp}>
+                        Pick the size of answer this bot should naturally aim for.
+                      </small>
+                      <div className={styles.botLengthOptions}>
+                        {BOT_REPLY_LENGTH_PRESETS.map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            className={styles.botLengthOption}
+                            data-selected={newBotMaxTokens === preset.tokens ? "true" : undefined}
+                            onClick={() => setNewBotMaxTokens(preset.tokens)}
+                          >
+                            <span>{preset.label}</span>
+                            <small>{preset.description}</small>
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+                  </>
+                )}
               </section>
+              {mobileBotsPanel && botPreferredModelsModalOpen && (
+                <div
+                  className={styles.botPreferredModelsModalBackdrop}
+                  role="presentation"
+                  onClick={() => setBotPreferredModelsModalOpen(false)}
+                >
+                  <div
+                    className={styles.botPreferredModelsModal}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Response tuning"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <header className={styles.botPreferredModelsModalHeader}>
+                      <div>
+                        <span>Model routing</span>
+                        <h4>Response tuning</h4>
+                        <p>Adjust model routing, creativity, and natural answer size.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBotPreferredModelsModalOpen(false)}
+                        aria-label="Close response tuning"
+                      >
+                        ×
+                      </button>
+                    </header>
+                    <div className={styles.botPreferredModelsModalBody}>
+                      <div className={`${styles.botParameterField} ${styles.botParameterModelField}`}>
+                        <span>Preferred offline model</span>
+                        <select
+                          value={visibleLocalModelChoice}
+                          onChange={(event) => setNewBotLocalModel(event.currentTarget.value)}
+                          aria-label="Preferred offline model for this bot"
+                        >
+                          <option value={AUTO_MODEL_CHOICE}>Auto</option>
+                          {localModelOptions.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.label}{model.isDefault ? " (default)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <small>Used when this bot replies while the editor is set to LOCAL.</small>
+                      </div>
+                      <div className={`${styles.botParameterField} ${styles.botParameterModelField}`}>
+                        <span>Preferred online model</span>
+                        <select
+                          value={visibleOnlineModelChoice}
+                          onChange={(event) => setNewBotOnlineModel(event.currentTarget.value)}
+                          aria-label="Preferred online model for this bot"
+                          disabled={!newBotOnlineEnabled}
+                        >
+                          <option value={AUTO_MODEL_CHOICE}>Auto</option>
+                          {onlineModelOptions.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.label}{model.isDefault ? " (default)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <small>
+                          {newBotOnlineEnabled
+                            ? "Used when this bot replies while the editor is set to ONLINE."
+                            : "Disabled while online capability is off."}
+                        </small>
+                      </div>
+                      <div className={styles.botParameterField}>
+                        <div className={styles.botParameterQuestionRow}>
+                          <span>Reply creativity</span>
+                          <strong>{botTemperatureLabel(newBotTemperature)}</strong>
+                        </div>
+                        <small className={styles.botParameterInlineHelp}>
+                          Lower values keep answers predictable; higher values allow more surprise.
+                        </small>
+                        <input
+                          type="range"
+                          min={BOT_TEMPERATURE_MIN}
+                          max={BOT_TEMPERATURE_MAX}
+                          step={BOT_TEMPERATURE_STEP}
+                          value={newBotTemperature}
+                          onChange={event => setNewBotTemperature(
+                            normalizeBotTemperature(Number(event.currentTarget.value))
+                          )}
+                          className={styles.botParameterRange}
+                          aria-label="Reply creativity for this bot"
+                          style={{
+                            ["--slider-pos" as string]: String(
+                              (newBotTemperature - BOT_TEMPERATURE_MIN)
+                                / (BOT_TEMPERATURE_MAX - BOT_TEMPERATURE_MIN)
+                            ),
+                          } as React.CSSProperties}
+                        />
+                      </div>
+                      <fieldset className={styles.botParameterField}>
+                        <legend>Reply depth</legend>
+                        <small className={styles.botParameterInlineHelp}>
+                          Pick the size of answer this bot should naturally aim for.
+                        </small>
+                        <div className={styles.botLengthOptions}>
+                          {BOT_REPLY_LENGTH_PRESETS.map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              className={styles.botLengthOption}
+                              data-selected={newBotMaxTokens === preset.tokens ? "true" : undefined}
+                              onClick={() => setNewBotMaxTokens(preset.tokens)}
+                            >
+                              <span>{preset.label}</span>
+                              <small>{preset.description}</small>
+                            </button>
+                          ))}
+                        </div>
+                      </fieldset>
+                    </div>
+                  </div>
+                </div>
+              )}
               <button
                 type="submit"
                 disabled={!primaryActive}
@@ -14425,7 +15207,7 @@ function HomeContent(): React.JSX.Element {
         // stay visible so the gallery remains useful.
         const canGenerate = settings?.preferredProvider === "openai";
         return (
-          <div className={styles.panel}>
+          <div className={styles.panel} data-closing={panelClosing ? "true" : undefined}>
             <div className={styles.panelHeader}><h3>Images</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
             {canGenerate ? (
               <form className={styles.form} onSubmit={generateImg}>
@@ -15305,7 +16087,6 @@ function HomeContent(): React.JSX.Element {
                 }}
                 onClick={(event) => {
                   if (!mobileContextMenu) {
-                    if (modelRevealLabel) revealMessageModel(msg.id);
                     return;
                   }
                   event.preventDefault();
@@ -15460,6 +16241,7 @@ function HomeContent(): React.JSX.Element {
               hueLensAvailable={hueLensAvailable}
               trackGradient={hueLensTrackGradient}
               trackSegments={hueLensTrackSegments}
+              resolvedTheme={resolvedTheme}
               onInteractionChange={setLensInteracting}
             />
           )}
@@ -15544,9 +16326,13 @@ function HomeContent(): React.JSX.Element {
             };
             const modelProvider: Provider = displayLocal ? "local" : "openai";
             const rawModelChoice = chatModelChoiceByProvider[modelProvider];
+            const visibleModelChoice = visibleBotCustomizerModelChoice(
+              settings,
+              rawModelChoice
+            );
             const modelOptions = includeSelectedModelOption(
-              modelOptionsForProvider(modelCatalog, settings, modelProvider),
-              rawModelChoice,
+              availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+              visibleModelChoice,
               modelProvider
             );
             const modelSelectDisabled =
@@ -15613,7 +16399,7 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 </div>
                 <ComposerModelPicker
-                  value={rawModelChoice}
+                  value={visibleModelChoice}
                   onChange={(nextChoice) => {
                     setChatModelChoiceByProvider((previous) => ({
                       ...previous,
@@ -16295,7 +17081,6 @@ function HomeContent(): React.JSX.Element {
                 }}
                 onClick={(event) => {
                   if (!mobileContextMenu) {
-                    if (modelRevealLabel) revealMessageModel(msg.id);
                     return;
                   }
                   event.preventDefault();
@@ -16445,6 +17230,7 @@ function HomeContent(): React.JSX.Element {
               hueLensAvailable={hueLensAvailable}
               trackGradient={hueLensTrackGradient}
               trackSegments={hueLensTrackSegments}
+              resolvedTheme={resolvedTheme}
               onInteractionChange={setLensInteracting}
             />
           )}
@@ -16543,15 +17329,19 @@ function HomeContent(): React.JSX.Element {
               const isLocal = settings?.preferredProvider !== "openai";
               const modelProvider: Provider = isLocal ? "local" : "openai";
               const rawModelChoice = chatModelChoiceByProvider[modelProvider];
+              const visibleModelChoice = visibleBotCustomizerModelChoice(
+                settings,
+                rawModelChoice
+              );
               const modelOptions = includeSelectedModelOption(
-                modelOptionsForProvider(modelCatalog, settings, modelProvider),
-                rawModelChoice,
+                availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+                visibleModelChoice,
                 modelProvider
               );
               return (
                 <>
                   <ComposerModelPicker
-                    value={rawModelChoice}
+                    value={visibleModelChoice}
                     onChange={(nextChoice) => {
                       setChatModelChoiceByProvider((previous) => ({
                         ...previous,

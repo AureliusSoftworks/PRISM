@@ -653,6 +653,64 @@
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+.settingsHostField {
+  display: grid;
+  gap: 6px;
+}
+
+.settingsHostLabel {
+  color: var(--fg);
+}
+
+.settingsHostInputWrap {
+  position: relative;
+  display: block;
+}
+
+.settingsHostInputWrap input {
+  padding-right: 132px;
+}
+
+.settingsHostStatus {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 118px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg-muted);
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.settingsHostInputWrap[data-status="connected"] .settingsHostStatus {
+  color: #36d399;
+  border-color: color-mix(in srgb, #36d399 44%, var(--line));
+  background: color-mix(in srgb, #36d399 10%, var(--bg));
+}
+
+.settingsHostInputWrap[data-status="empty"] .settingsHostStatus,
+.settingsHostInputWrap[data-status="unsaved"] .settingsHostStatus,
+.settingsHostInputWrap[data-status="checking"] .settingsHostStatus {
+  color: #f2c94c;
+  border-color: color-mix(in srgb, #f2c94c 42%, var(--line));
+  background: color-mix(in srgb, #f2c94c 10%, var(--bg));
+}
+
+.settingsHostInputWrap[data-status="error"] .settingsHostStatus {
+  color: #ff7a7a;
+  border-color: color-mix(in srgb, #ff7a7a 44%, var(--line));
+  background: color-mix(in srgb, #ff7a7a 10%, var(--bg));
+}
+
 .form button,
 .btnPrimary {
   background: var(--accent);
@@ -1570,20 +1628,20 @@
   height: 26px;
   display: grid;
   place-items: center;
-  border-radius: 999px;
-  color: var(--row-color, var(--fg));
-  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+  color: var(--fg);
 }
 
 .conversationGroupText {
   min-width: 0;
-  display: grid;
-  gap: 1px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 8px;
 }
 
 .conversationGroupName {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1591,11 +1649,25 @@
 }
 
 .conversationGroupCount {
-  color: color-mix(in srgb, var(--row-text-color, var(--fg-muted)) 78%, transparent);
+  flex: 0 0 auto;
+  white-space: nowrap;
+  /* Match the row title's text color (which already ramps with row position
+     to stay readable against the bot tint). The 10px uppercase letter-
+     spacing keeps the count visually distinct from the bolder name even
+     at full opacity, so dropping the prior 78% mix recovers legibility on
+     pale/gray bot tints without making the count compete with the name. */
+  color: var(--row-text-color, var(--fg-muted));
   font-size: 10px;
   line-height: 1.1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.conversationGroupCount::before {
+  /* Em dash separator so the tile reads "PRISM — 4 CHATS" on a single line.
+     Letter-spacing/uppercase don't apply to the dash, but the muted color
+     blends it into the count's visual rhythm. */
+  content: "— ";
 }
 
 .conversationRow[data-unread="true"] .conversationGroupTile {
@@ -1642,21 +1714,14 @@
 }
 
 .conversationGroupOpenHeader {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 7px;
   padding: 3px 8px;
   color: var(--fg-muted);
   font-size: 11px;
   letter-spacing: 0.02em;
-}
-
-.conversationGroupOpenHeader small {
-  color: var(--fg-subtle);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  min-width: 0;
 }
 
 /* Bot/PRISM-colored tint for conversation rows, keyed off the --row-color
@@ -4651,8 +4716,8 @@
 }
 
 /* Subtle "who generated this" tag shown next to the role label.
-   The dot is always on (at-a-glance status); the text label stays hidden
-   until the message is hovered so the thread doesn't feel noisy. */
+   The dot is always on; the model name is revealed only while the message
+   context menu is open so ordinary hover/click does not latch extra chrome. */
 .providerTag {
   display: inline-flex;
   align-items: center;
@@ -4668,8 +4733,6 @@
   transition: opacity 0.15s;
 }
 
-.message:hover .providerLabel,
-.message:focus-within .providerLabel,
 .message[data-model-revealed="true"] .providerLabel {
   opacity: 0.7;
 }
@@ -5294,6 +5357,20 @@
     color-mix(in srgb, var(--bg-surface) 94%, transparent);
 }
 
+.memoryLearnedNotice[data-memory-toast-kind="rejected"] {
+  border-color: color-mix(in srgb, var(--fg-muted) 24%, var(--line));
+  background:
+    radial-gradient(
+      circle at 10% 20%,
+      color-mix(in srgb, var(--fg-muted) 10%, transparent),
+      transparent 48%
+    ),
+    color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 18px color-mix(in srgb, var(--fg-muted) 10%, transparent);
+}
+
 .memoryLearnedNotice > span {
   grid-row: 1 / span 2;
   color: var(--accent-ink);
@@ -5445,8 +5522,9 @@
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: color-mix(in srgb, var(--bg) 86%, var(--bg-surface) 14%);
+  background: var(--bg);
   padding: 8px 10px 8px 8px;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .markdownSideToolbar {
@@ -5512,10 +5590,16 @@
 
 .markdownRichEditorHost {
   min-width: 0;
-  min-height: 78px;
-  max-height: 180px;
+  min-height: 44px;
+  max-height: 204px;
   overflow: auto;
   border-radius: 12px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.markdownRichEditorHost::-webkit-scrollbar {
+  display: none;
 }
 
 .markdownTiptapContent {
@@ -5523,11 +5607,12 @@
 }
 
 .markdownRichEditorHost :global(.tiptap) {
-  min-height: 70px;
+  min-height: 44px;
   outline: none;
   color: var(--fg);
   font-size: var(--font-size-compose);
-  line-height: 1.55;
+  line-height: 1.5;
+  padding: 7px 10px;
 }
 
 .markdownRichEditorHost :global(.tiptap p) {
@@ -5541,6 +5626,103 @@
   height: 0;
   pointer-events: none;
   font-style: italic;
+}
+
+.compose[data-compose-ready="true"] .markdownComposerSurface {
+  border-color: color-mix(in srgb, var(--accent-ink) 74%, var(--line));
+  box-shadow: inset -18px 0 24px -24px var(--accent-glow);
+}
+
+.compose[data-compose-ready="true"][data-compose-bot-selected="true"] .markdownComposerSurface {
+  border-color: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 72%,
+    var(--line)
+  );
+  box-shadow: inset -18px 0 24px -24px color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 72%,
+    transparent
+  );
+}
+
+.appLayout[data-private-active="true"]
+  .compose[data-compose-ready="true"][data-compose-bot-selected="true"]
+  .markdownComposerSurface {
+  border-color: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 24%,
+    var(--line)
+  );
+  box-shadow: inset -18px 0 24px -24px color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 24%,
+    transparent
+  );
+}
+
+.markdownComposerSurface:focus-within {
+  border-color: var(--accent-ink);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.compose[data-compose-ready="true"] .markdownComposerSurface:focus-within {
+  box-shadow:
+    0 0 0 3px var(--accent-glow),
+    inset -18px 0 24px -24px var(--accent-glow);
+}
+
+.compose[data-compose-ready="true"][data-compose-bot-selected="true"] .markdownComposerSurface:focus-within {
+  border-color: var(--compose-bot-color, var(--accent));
+  box-shadow:
+    0 0 0 3px color-mix(
+      in srgb,
+      var(--compose-bot-color, var(--accent)) 35%,
+      transparent
+    ),
+    inset -18px 0 24px -24px color-mix(
+      in srgb,
+      var(--compose-bot-color, var(--accent)) 72%,
+      transparent
+    );
+}
+
+.appLayout[data-private-active="true"]
+  .compose[data-compose-ready="true"][data-compose-bot-selected="true"]
+  .markdownComposerSurface:focus-within {
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--fg));
+  box-shadow:
+    0 0 0 3px color-mix(
+      in srgb,
+      var(--compose-bot-color, var(--accent)) 14%,
+      transparent
+    ),
+    inset -18px 0 24px -24px color-mix(
+      in srgb,
+      var(--compose-bot-color, var(--accent)) 24%,
+      transparent
+    );
+}
+
+.compose[data-compose-bot-selected="true"]
+  .markdownRichEditorHost
+  :global(.tiptap p.is-editor-empty.is-empty::before) {
+  color: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 82%,
+    var(--fg) 18%
+  );
+}
+
+.appLayout[data-private-active="true"]
+  .compose[data-compose-bot-selected="true"]
+  .markdownRichEditorHost
+  :global(.tiptap p.is-editor-empty.is-empty::before) {
+  color: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 24%,
+    var(--fg-muted) 76%
+  );
 }
 
 .markdownRichEditorHost :global(.tiptap h1),
@@ -5894,7 +6076,7 @@
   appearance: none;
   /* `--lens-track-gradient` paints only populated PRISM families, compacted
      across the full rail; background-color is the neutral fallback. */
-  background-color: color-mix(in srgb, var(--fg) 16%, transparent);
+  background-color: var(--hue-lens-rail-bg, color-mix(in srgb, var(--fg) 16%, transparent));
   background-image: var(
     --lens-track-gradient,
     linear-gradient(
@@ -5965,9 +6147,9 @@
   height: 18px;
   margin-top: -3px;
   border-radius: 50%;
-  background: #000000;
+  background: var(--hue-lens-thumb-fill, #000000);
   border: 2px solid var(--bg-surface);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--hue-lens-thumb-shadow, 0 2px 6px rgba(0, 0, 0, 0.28));
   cursor: grab;
   transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -5976,9 +6158,9 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #000000;
+  background: var(--hue-lens-thumb-fill, #000000);
   border: 2px solid var(--bg-surface);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--hue-lens-thumb-shadow, 0 2px 6px rgba(0, 0, 0, 0.28));
   cursor: grab;
   transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -5996,7 +6178,7 @@
 }
 
 .hueLensSlider:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, #000000 35%, transparent);
+  box-shadow: var(--hue-lens-focus-ring, 0 0 0 2px color-mix(in srgb, #000000 35%, transparent));
 }
 
 .hueLensCount {
@@ -7026,6 +7208,138 @@
   letter-spacing: 0.04em;
 }
 
+.form button.settingsInfoButton,
+.settingsInfoButton {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.form button.settingsInfoButton strong,
+.settingsInfoButton strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.form button.settingsInfoButton span,
+.settingsInfoButton span {
+  color: currentColor;
+  opacity: 1;
+  font-size: 11.5px;
+  font-weight: 560;
+  line-height: 1.35;
+}
+
+.form button.settingsInfoButton:hover:not(:disabled),
+.form button.settingsInfoButton:focus-visible,
+.settingsInfoButton:hover:not(:disabled),
+.settingsInfoButton:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--fg);
+  outline: none;
+}
+
+.form button.settingsInfoButton:hover:not(:disabled) span,
+.form button.settingsInfoButton:focus-visible span,
+.settingsInfoButton:hover:not(:disabled) span,
+.settingsInfoButton:focus-visible span {
+  color: currentColor;
+  opacity: 1;
+}
+
+.settingsAboutModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  padding:
+    calc(env(safe-area-inset-top) + 16px)
+    max(14px, calc(env(safe-area-inset-right) + 14px))
+    calc(env(safe-area-inset-bottom) + 16px)
+    max(14px, calc(env(safe-area-inset-left) + 14px));
+  background: color-mix(in srgb, #000 42%, transparent);
+}
+
+.settingsAboutModal {
+  width: min(560px, 100%);
+  max-height: 100%;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-surface) 95%, transparent);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.settingsAboutModalHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settingsAboutModalHeader span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settingsAboutModalHeader h4 {
+  margin: 3px 0 4px;
+  font-size: 19px;
+  line-height: 1.1;
+}
+
+.settingsAboutModalHeader p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.form .settingsAboutModalHeader button,
+.settingsAboutModalHeader button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  flex-shrink: 0;
+}
+
+.settingsAboutModalBody {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.settingsAboutModalBody p {
+  margin: 0;
+  color: var(--fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
 .botProfileSummaryCard {
   gap: 9px;
 }
@@ -7061,11 +7375,12 @@
 }
 
 .botProfileSummaryButton[data-complete="true"] {
+  color: var(--fg);
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 56%, var(--line));
   background:
     linear-gradient(
       135deg,
-      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 15%, transparent),
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 22%, transparent),
       transparent 68%
     ),
     var(--bg);
@@ -7077,20 +7392,26 @@
   filter: saturate(0.35);
 }
 
+.form button.botProfileSummaryButton:hover:not(:disabled),
+.form button.botProfileSummaryButton:focus-visible,
 .botProfileSummaryButton:hover,
 .botProfileSummaryButton:focus-visible {
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 42%, var(--line));
   background: var(--bg-hover);
+  color: var(--fg);
   outline: none;
 }
 
+.form button.botProfileSummaryButton[data-complete="true"]:hover:not(:disabled),
+.form button.botProfileSummaryButton[data-complete="true"]:focus-visible,
 .botProfileSummaryButton[data-complete="true"]:hover,
 .botProfileSummaryButton[data-complete="true"]:focus-visible {
+  color: var(--fg);
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 52%, var(--line));
   background:
     linear-gradient(
       135deg,
-      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 15%, transparent),
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 26%, transparent),
       transparent 68%
     ),
     var(--bg);
@@ -7103,11 +7424,24 @@
 
 .botProfileSummaryButton small {
   min-width: 0;
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--fg) 82%, var(--fg-muted) 18%);
+  opacity: 1;
   font-size: 11px;
+  font-weight: 560;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.botProfileSummaryButton:hover small,
+.botProfileSummaryButton:focus-visible small,
+.botProfileSummaryButton[data-complete="true"] small {
+  color: var(--fg);
+  opacity: 1;
+}
+
+.botProfileSummaryButton[data-locked="true"] small {
+  opacity: 0.78;
 }
 
 .botProfileSummaryButton strong {
@@ -7774,6 +8108,151 @@
   gap: 7px;
 }
 
+.botParameterToggleRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.botParameterModelRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.panelBots .form button.botPreferredModelsButton,
+.botPreferredModelsButton {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-deep);
+  color: var(--fg);
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  padding: 10px 11px;
+  text-align: left;
+}
+
+.panelBots .form button.botPreferredModelsButton strong,
+.botPreferredModelsButton strong {
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.panelBots .form button.botPreferredModelsButton span,
+.botPreferredModelsButton span {
+  color: currentColor;
+  opacity: 1;
+  font-size: 11.5px;
+  font-weight: 560;
+  line-height: 1.3;
+}
+
+.panelBots .form button.botPreferredModelsButton:hover:not(:disabled),
+.panelBots .form button.botPreferredModelsButton:focus-visible,
+.botPreferredModelsButton:hover:not(:disabled),
+.botPreferredModelsButton:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--fg);
+  outline: none;
+}
+
+.panelBots .form button.botPreferredModelsButton:hover:not(:disabled) span,
+.panelBots .form button.botPreferredModelsButton:focus-visible span,
+.botPreferredModelsButton:hover:not(:disabled) span,
+.botPreferredModelsButton:focus-visible span {
+  color: currentColor;
+  opacity: 1;
+}
+
+.botPreferredModelsModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  padding:
+    calc(env(safe-area-inset-top) + 14px)
+    max(12px, calc(env(safe-area-inset-right) + 12px))
+    calc(env(safe-area-inset-bottom) + 14px)
+    max(12px, calc(env(safe-area-inset-left) + 12px));
+  background: color-mix(in srgb, #000 44%, transparent);
+}
+
+.botPreferredModelsModal {
+  width: min(540px, 100%);
+  max-height: 100%;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-surface) 95%, transparent);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.botPreferredModelsModalHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.botPreferredModelsModalHeader span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.botPreferredModelsModalHeader h4 {
+  margin: 3px 0 4px;
+  font-size: 19px;
+  line-height: 1.1;
+}
+
+.botPreferredModelsModalHeader p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.form .botPreferredModelsModalHeader button,
+.botPreferredModelsModalHeader button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  flex-shrink: 0;
+}
+
+.botPreferredModelsModalBody {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+@media (max-width: 1320px) {
+  .botParameterToggleRow,
+  .botParameterModelRow {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
 .botOnlineCapabilityToggle button {
   -webkit-appearance: none;
   appearance: none;
@@ -8185,7 +8664,8 @@
     var(--bg-surface);
 }
 
-.panelMemories[data-memory-scope="all"] {
+.panelMemories[data-memory-scope="all"],
+.panelMemories[data-memory-scope="default"] {
   border-left: 0;
   background:
     radial-gradient(
@@ -8206,7 +8686,8 @@
     );
 }
 
-.panelMemories[data-memory-scope="all"]::before {
+.panelMemories[data-memory-scope="all"]::before,
+.panelMemories[data-memory-scope="default"]::before {
   content: "";
   position: absolute;
   top: 0;
@@ -8272,6 +8753,39 @@
   line-height: 0;
 }
 
+.panelMemories[data-memory-scope="default"] .memoryBotGlyph {
+  position: relative;
+  background: transparent;
+  border-color: transparent;
+  box-shadow:
+    0 0 46px color-mix(in srgb, #ffffff 24%, transparent);
+}
+
+.panelMemories[data-memory-scope="default"] .memoryBotGlyph::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border: 2px solid transparent;
+  border-radius: inherit;
+  background:
+    conic-gradient(
+      from 12deg,
+      #ff4d6d,
+      #ff9f1c,
+      #b7e63a,
+      #2fd3e3,
+      #7b5cff,
+      #ff4d6d
+    )
+    border-box;
+  mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.86;
+  pointer-events: none;
+}
+
 .themeLight .memoryBotGlyph {
   color: #ffffff;
 }
@@ -8290,6 +8804,28 @@
 .themeLight .memoryBotGlyph :where(svg) {
   color: #ffffff;
   stroke: #ffffff;
+}
+
+.themeDark .panelMemories[data-memory-scope="default"] .memoryBotGlyph,
+.themeDark .memoryDefaultGlyph {
+  color: #ffffff;
+}
+
+.themeDark .panelMemories[data-memory-scope="default"] .memoryBotGlyph :where(svg),
+.themeDark .memoryDefaultGlyph :where(svg) {
+  color: #ffffff;
+  stroke: #ffffff;
+}
+
+.themeLight .panelMemories[data-memory-scope="default"] .memoryBotGlyph,
+.themeLight .memoryDefaultGlyph {
+  color: #111111;
+}
+
+.themeLight .panelMemories[data-memory-scope="default"] .memoryBotGlyph :where(svg),
+.themeLight .memoryDefaultGlyph :where(svg) {
+  color: #111111;
+  stroke: #111111;
 }
 
 .memoryBotHeader strong,
@@ -8315,7 +8851,8 @@
   line-height: 1.45;
 }
 
-.panelMemories[data-memory-scope="all"] .memoryPanelHint {
+.panelMemories[data-memory-scope="all"] .memoryPanelHint,
+.panelMemories[data-memory-scope="default"] .memoryPanelHint {
   color: var(--fg-muted);
 }
 
@@ -8337,7 +8874,8 @@
     );
 }
 
-.panelMemories[data-memory-scope="all"] .memoryBubbleCloud {
+.panelMemories[data-memory-scope="all"] .memoryBubbleCloud,
+.panelMemories[data-memory-scope="default"] .memoryBubbleCloud {
   background:
     radial-gradient(
       ellipse 44% 34% at 76% 28%,
@@ -8373,7 +8911,8 @@
 /* Light theme uses watercolor bubbles on cream paper, so the dark vignette
    tuned for the dark theme would compete with them. Swap to a warm paper
    wash that adds gentle depth without darkening the surround. */
-.themeLight .panelMemories[data-memory-scope="all"] .memoryBubbleCloud {
+.themeLight .panelMemories[data-memory-scope="all"] .memoryBubbleCloud,
+.themeLight .panelMemories[data-memory-scope="default"] .memoryBubbleCloud {
   background:
     radial-gradient(
       ellipse 44% 34% at 76% 28%,
@@ -8554,6 +9093,33 @@
       transparent 10deg 24deg
     );
   opacity: 0.54;
+  pointer-events: none;
+}
+
+.panelMemories[data-memory-scope="default"]
+  .memoryBubble[data-memory-inferred="true"]:not([data-source-cluster="true"]):not([data-memory-selected="true"])::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  z-index: 0;
+  border: 2px solid transparent;
+  border-radius: inherit;
+  background:
+    conic-gradient(
+      from 12deg,
+      #ff4d6d,
+      #ff9f1c,
+      #b7e63a,
+      #2fd3e3,
+      #7b5cff,
+      #ff4d6d
+    )
+    border-box;
+  mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.78;
   pointer-events: none;
 }
 
@@ -9692,7 +10258,7 @@
       transparent 68%
     ),
     var(--bg-deep);
-  color: var(--editor-bot-text, var(--fg));
+  color: var(--editor-bot-ink, var(--fg));
   padding: 9px 11px;
   font-size: 14px;
   font-weight: 650;
@@ -10328,6 +10894,20 @@
   outline: none;
 }
 
+.botCardDeleteProtected,
+.botCard:hover .botCardDeleteProtected,
+.botCardDeleteProtected:hover,
+.botCardDeleteProtected:focus-visible {
+  opacity: 0.9;
+  color: color-mix(in srgb, var(--fg) 72%, var(--fg-muted));
+  text-shadow: 0 0 8px color-mix(in srgb, var(--fg) 18%, transparent);
+  outline: none;
+}
+
+.botCardDeleteProtected .conversationDeleteGlyph :where(svg) {
+  display: block;
+}
+
 /* Armed single-bot confirm pill. Anchored to the × slot so the ✓
    lands under the cursor that just clicked the × glyph. Opts out
    of the hold-glow / tilt visuals so this calmer "are you sure?"
@@ -10382,7 +10962,7 @@
 }
 
 .botList[data-delete-holding="true"]
-  .botCardDelete:not([data-holding="true"]):not(.botCardDeleteArmed) {
+  .botCardDelete:not([data-holding="true"]):not(.botCardDeleteArmed):not(.botCardDeleteProtected) {
   opacity: 1;
   color: var(--danger);
   text-shadow: 0 0 6px color-mix(in srgb, var(--danger) 40%, transparent);
@@ -10410,9 +10990,9 @@
   50%      { transform: scale(1.08) rotate(-2.4deg); }
 }
 
-.botList[data-delete-armed-all="true"] .botCardDelete,
+.botList[data-delete-armed-all="true"] .botCardDelete:not(.botCardDeleteProtected),
 .botList[data-delete-armed-all="true"]
-  .botCardDelete:not([data-holding="true"]):not(.botCardDeleteArmed) {
+  .botCardDelete:not([data-holding="true"]):not(.botCardDeleteArmed):not(.botCardDeleteProtected) {
   opacity: 1;
   color: var(--danger);
   text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 45%, transparent);
@@ -10421,7 +11001,7 @@
 }
 
 .botList[data-delete-armed-all="true"]
-  .botCard:nth-child(even) .botCardDelete {
+  .botCard:nth-child(even) .botCardDelete:not(.botCardDeleteProtected) {
   animation-name: botCardDeleteJiggleB;
   animation-delay: -45ms;
 }
@@ -10449,12 +11029,12 @@
   }
 
   .botList[data-delete-holding="true"]
-    .botCardDelete:not([data-holding="true"]):not(.botCardDeleteArmed) {
+    .botCardDelete:not([data-holding="true"]):not(.botCardDeleteArmed):not(.botCardDeleteProtected) {
     transform: none;
   }
-  .botList[data-delete-armed-all="true"] .botCardDelete,
+  .botList[data-delete-armed-all="true"] .botCardDelete:not(.botCardDeleteProtected),
   .botList[data-delete-armed-all="true"]
-    .botCard:nth-child(even) .botCardDelete {
+    .botCard:nth-child(even) .botCardDelete:not(.botCardDeleteProtected) {
     animation: none;
     transform: scale(1.08);
   }
@@ -10772,6 +11352,7 @@
   position: relative;
   flex-shrink: 0;
   margin-left: auto;
+  z-index: 860;
 }
 
 .chatGearAnchorHidden {
@@ -10901,7 +11482,9 @@
   border: 1px solid var(--line);
   background: var(--bg-surface);
   box-shadow: var(--shadow-sm), 0 12px 40px color-mix(in srgb, var(--bg-deep) 35%, transparent);
-  z-index: 260;
+  z-index: 861;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
 .chatOverflowMenuItem {
@@ -11154,7 +11737,7 @@
     right: max(12px, calc(env(safe-area-inset-right) + 12px));
     left: auto;
     margin-left: 0;
-    z-index: 201;
+    z-index: 860;
   }
 
   .chatGearButton {
@@ -11627,6 +12210,27 @@
     overflow: hidden;
   }
 
+  .botParameterToggleRow {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .botParameterModelRow {
+    display: none;
+  }
+
+  .botPreferredModelsButton {
+    padding: 9px 10px;
+  }
+
+  .botPreferredModelsButton span {
+    display: block;
+  }
+
+  .botPreferredModelsModalBody .botParameterField small {
+    display: block;
+  }
+
   .botParameterField select {
     width: 100%;
     min-width: 0;
@@ -11750,6 +12354,11 @@
   .deleteAllModalConfirm {
     flex: 1 1 0;
     min-height: 44px;
+  }
+
+  .botPreferredModelsModal {
+    width: 100%;
+    border-radius: 14px;
   }
 
   /* ── Bot cards ─────────────────────────────────────────────────────
