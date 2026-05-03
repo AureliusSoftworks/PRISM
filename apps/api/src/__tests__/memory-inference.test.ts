@@ -30,7 +30,21 @@ function createMemoryInferenceTestDb(): DatabaseSync {
 function inferenceProvider(response: string): LlmProvider {
   return {
     name: "local",
-    async generateResponse(): Promise<string> {
+    async generateResponse(messages): Promise<string> {
+      if (messages[0]?.content.includes("memory validation critic")) {
+        const payload = JSON.parse(messages[1]?.content ?? "{}") as {
+          candidates?: Array<{ index: number; text: string; confidence: number }>;
+        };
+        return JSON.stringify({
+          results: (payload.candidates ?? []).map((candidate) => ({
+            index: candidate.index,
+            decision: "approve",
+            text: candidate.text,
+            confidence: candidate.confidence,
+            reasonCodes: [],
+          })),
+        });
+      }
       return response;
     },
     async embedText(text: string): Promise<number[]> {

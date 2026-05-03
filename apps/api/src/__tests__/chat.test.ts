@@ -43,7 +43,8 @@ function createChatTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       color TEXT,
-      glyph TEXT
+      glyph TEXT,
+      delete_protected INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE memories (
       id TEXT PRIMARY KEY,
@@ -77,10 +78,34 @@ async function flushBackgroundTitleJobs(): Promise<void> {
 function installChatFetchStub(reply = "Memory-aware reply"): void {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
-    const body = JSON.parse(String(init?.body ?? "{}")) as { prompt?: string };
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      prompt?: string;
+      messages?: Array<{ content: string }>;
+    };
     if (url.includes("/api/embeddings")) {
       return new Response(
         JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+    if (body.messages?.[0]?.content.includes("memory validation critic")) {
+      const validationPayload = JSON.parse(body.messages[1]?.content ?? "{}") as {
+        candidates?: Array<{ index: number; text: string; confidence: number }>;
+      };
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: JSON.stringify({
+              results: (validationPayload.candidates ?? []).map((candidate) => ({
+                index: candidate.index,
+                decision: "approve",
+                text: candidate.text,
+                confidence: candidate.confidence,
+                reasonCodes: [],
+              })),
+            }),
+          },
+        }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }
@@ -583,6 +608,70 @@ describe("processChatMessage conversational memory cues", () => {
     assert.equal(row?.bot_id, null);
     assert.equal(result.memoryLearned?.created.length, 1);
     assert.equal(result.memoryLearned?.created[0]?.botId, null);
+  });
+
+  it("cleans assistant self-reference memory instructions before saving", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        prompt?: string;
+        messages?: Array<{ content: string }>;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.messages?.[0]?.content.includes("memory validation critic")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                results: [
+                  {
+                    index: 0,
+                    decision: "auto_fix",
+                    text: "You prefer Prism not to refer to itself as AI.",
+                    confidence: 0.92,
+                    reasonCodes: ["assistant_identity_instruction"],
+                  },
+                ],
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Got it." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Remember this: do not refer to yourself as AI.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.memoryLearned?.created.length, 1);
+    assert.equal(
+      result.memoryLearned?.created[0]?.text,
+      "You prefer Prism not to refer to itself as AI."
+    );
+    assert.equal(result.memoryLearned?.created[0]?.validationStatus, "auto_fixed");
+    assert.equal(result.memoryLearned?.rejected.length, 0);
   });
 
   it("retracts a semantically matched memory by cue", async () => {

@@ -23,6 +23,8 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     providerLocked: 0,
     autoMemory: 1,
     hiddenBotModelIds: "[]",
+    secondaryOllamaHost: null,
+    primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
 }
@@ -129,7 +131,15 @@ describe("resolveNextSettings — hiddenBotModelIds", () => {
       { hiddenBotModelIds: [" llama3.2 ", "llava", "llava", 42] },
       baseline()
     );
-    assert.deepEqual(next.hiddenBotModelIds, ["llama3.2", "llava"]);
+    assert.deepEqual(next.hiddenBotModelIds, ["llava"]);
+  });
+
+  it("never persists the required primary local model as hidden", () => {
+    const next = resolveNextSettings(
+      { hiddenBotModelIds: ["llama3.2", "gpt-4o-mini"] },
+      baseline()
+    );
+    assert.deepEqual(next.hiddenBotModelIds, ["gpt-4o-mini"]);
   });
 
   it("keeps the stored list when the field is missing or invalid", () => {
@@ -150,6 +160,63 @@ describe("resolveNextSettings — hiddenBotModelIds", () => {
 describe("parseHiddenBotModelIds", () => {
   it("falls back to an empty list for malformed stored JSON", () => {
     assert.deepEqual(parseHiddenBotModelIds("not-json"), []);
+  });
+});
+
+describe("resolveNextSettings — secondaryOllamaHost", () => {
+  it("normalizes a bare host into an Ollama base URL", () => {
+    const next = resolveNextSettings(
+      { secondaryOllamaHost: "192.168.1.50:11434/" },
+      baseline()
+    );
+    assert.equal(next.secondaryOllamaHost, "http://192.168.1.50:11434");
+  });
+
+  it("clears the secondary host when the field is empty or null", () => {
+    const current = baseline({ secondaryOllamaHost: "http://192.168.1.50:11434" });
+    assert.equal(
+      resolveNextSettings({ secondaryOllamaHost: "" }, current).secondaryOllamaHost,
+      null
+    );
+    assert.equal(
+      resolveNextSettings({ secondaryOllamaHost: null }, current).secondaryOllamaHost,
+      null
+    );
+  });
+
+  it("keeps the stored secondary host when the field is missing or invalidly typed", () => {
+    const current = baseline({ secondaryOllamaHost: "http://192.168.1.50:11434" });
+    assert.equal(resolveNextSettings({}, current).secondaryOllamaHost, current.secondaryOllamaHost);
+    assert.equal(
+      resolveNextSettings({ secondaryOllamaHost: 11434 }, current).secondaryOllamaHost,
+      current.secondaryOllamaHost
+    );
+  });
+
+  it("rejects loopback aliases for the primary host", () => {
+    assert.throws(
+      () => resolveNextSettings({ secondaryOllamaHost: "127.0.0.1:11434" }, baseline()),
+      /different IP address/
+    );
+    assert.throws(
+      () =>
+        resolveNextSettings(
+          { secondaryOllamaHost: "localhost:11434" },
+          baseline({ primaryOllamaHost: "http://host.docker.internal:11434" })
+        ),
+      /different IP address/
+    );
+  });
+
+  it("rejects the same IP even when the port is different", () => {
+    assert.throws(
+      () =>
+        resolveNextSettings(
+          { secondaryOllamaHost: "http://192.168.1.20:11435" },
+          baseline({ primaryOllamaHost: "http://192.168.1.20:11434" })
+        ),
+      /different IP address/
+    );
   });
 });
 

@@ -18,6 +18,7 @@ export interface DbUserRecord {
   providerLocked: number;
   autoMemory: number;
   autoSwitchModel: number;
+  secondaryOllamaHost: string | null;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
   openAiKeyTag: string | null;
@@ -71,6 +72,7 @@ export function createDatabase(): DatabaseSync {
       auto_memory INTEGER NOT NULL DEFAULT 1,
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
+      secondary_ollama_host TEXT,
       openai_key_ciphertext TEXT,
       openai_key_iv TEXT,
       openai_key_tag TEXT,
@@ -166,6 +168,7 @@ export function createDatabase(): DatabaseSync {
       glyph TEXT,
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
+      delete_protected INTEGER NOT NULL DEFAULT 0,
       visibility TEXT NOT NULL DEFAULT 'private',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -204,6 +207,10 @@ export function createDatabase(): DatabaseSync {
   const hasHiddenBotModelIds = userColumns.some((column) => column.name === "hidden_bot_model_ids");
   if (!hasHiddenBotModelIds) {
     db.exec("ALTER TABLE users ADD COLUMN hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]';");
+  }
+  const hasSecondaryOllamaHost = userColumns.some((column) => column.name === "secondary_ollama_host");
+  if (!hasSecondaryOllamaHost) {
+    db.exec("ALTER TABLE users ADD COLUMN secondary_ollama_host TEXT;");
   }
   db.exec(`
     UPDATE users
@@ -312,6 +319,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotOnlineEnabledColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN online_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  const hasBotDeleteProtectedColumn = botColumns.some(
+    (column) => column.name === "delete_protected"
+  );
+  if (!hasBotDeleteProtectedColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN delete_protected INTEGER NOT NULL DEFAULT 0;");
   }
   const hasBotLocalModelColumn = botColumns.some(
     (column) => column.name === "local_model"

@@ -96,6 +96,7 @@ function createTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
+      delete_protected INTEGER NOT NULL DEFAULT 0,
       visibility TEXT NOT NULL DEFAULT 'private',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -139,11 +140,20 @@ function seedBot(
   db: DatabaseSync,
   userId: string,
   botId: string,
-  updatedAt = new Date().toISOString()
+  updatedAt = new Date().toISOString(),
+  deleteProtected = false
 ): void {
   db.prepare(
-    "INSERT INTO bots (id, user_id, name, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(botId, userId, `Bot ${botId}`, "You are a test bot.", updatedAt, updatedAt);
+    "INSERT INTO bots (id, user_id, name, system_prompt, delete_protected, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    botId,
+    userId,
+    `Bot ${botId}`,
+    "You are a test bot.",
+    deleteProtected ? 1 : 0,
+    updatedAt,
+    updatedAt
+  );
 }
 
 function seedHistoryReferencingBot(
@@ -250,6 +260,34 @@ describe("deleteBot", () => {
     );
   });
 
+  it("blocks deletion when the bot is protected", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "bot-1", new Date().toISOString(), true);
+    seedHistoryReferencingBot(db, "user-1", "bot-1", "1");
+    seedMemory(db, "user-1", "bot-1", "memory-protected");
+
+    assert.throws(
+      () => deleteBot(db, "user-1", "bot-1"),
+      /This bot is protected/
+    );
+
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM bots WHERE id = ?")
+        .get("bot-1") as { n: number }).n,
+      1
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
+        .get("msg-1") as { bot_id: string | null }).bot_id,
+      "bot-1"
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM memories WHERE id = ?")
+        .get("memory-protected") as { bot_id: string | null }).bot_id,
+      "bot-1"
+    );
+  });
+
   it("throws when the bot does not exist", () => {
     const db = createTestDb();
     assert.throws(
@@ -345,6 +383,38 @@ describe("deleteBots", () => {
       .prepare("SELECT bot_id FROM memories WHERE id = ?")
       .get("memory-theirs") as { bot_id: string | null } | undefined;
     assert.equal(memory?.bot_id, "theirs");
+  });
+
+  it("skips protected bots when deleting a limited newest set", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "old", "2026-01-01T00:00:00.000Z");
+    seedBot(db, "user-1", "protected-new", "2026-01-03T00:00:00.000Z", true);
+    seedBot(db, "user-1", "unprotected-new", "2026-01-02T00:00:00.000Z");
+    seedHistoryReferencingBot(db, "user-1", "protected-new", "protected");
+    seedHistoryReferencingBot(db, "user-1", "unprotected-new", "unprotected");
+    seedMemory(db, "user-1", "protected-new", "memory-protected");
+    seedMemory(db, "user-1", "unprotected-new", "memory-unprotected");
+
+    const deleted = deleteBots(db, "user-1", 10);
+
+    assert.equal(deleted, 2);
+    const survivors = db
+      .prepare("SELECT id FROM bots ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      survivors.map((bot) => bot.id),
+      ["protected-new"]
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
+        .get("msg-protected") as { bot_id: string | null }).bot_id,
+      "protected-new"
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM memories WHERE id = ?")
+        .get("memory-protected") as { bot_id: string | null }).bot_id,
+      "protected-new"
+    );
   });
 });
 
@@ -454,5 +524,42 @@ describe("deleteAllBots", () => {
       .prepare("SELECT bot_id FROM memories WHERE id = ?")
       .get("memory-user-2") as { bot_id: string | null } | undefined;
     assert.equal(memory?.bot_id, "bot-2");
+  });
+
+  it("keeps protected bots during delete-all and reports only deleted bots", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "protected", "2026-01-03T00:00:00.000Z", true);
+    seedBot(db, "user-1", "unprotected-1");
+    seedBot(db, "user-1", "unprotected-2");
+    seedHistoryReferencingBot(db, "user-1", "protected", "protected");
+    seedHistoryReferencingBot(db, "user-1", "unprotected-1", "unprotected-1");
+    seedMemory(db, "user-1", "protected", "memory-protected");
+    seedMemory(db, "user-1", "unprotected-1", "memory-unprotected");
+
+    const deleted = deleteAllBots(db, "user-1");
+
+    assert.equal(deleted, 2);
+    const survivors = db
+      .prepare("SELECT id FROM bots ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      survivors.map((bot) => bot.id),
+      ["protected"]
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
+        .get("msg-protected") as { bot_id: string | null }).bot_id,
+      "protected"
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
+        .get("msg-unprotected-1") as { bot_id: string | null }).bot_id,
+      null
+    );
+    assert.deepEqual(
+      (db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{ id: string }>)
+        .map((memory) => memory.id),
+      ["memory-protected"]
+    );
   });
 });

@@ -17,6 +17,8 @@ export interface ModelCatalogEntry {
   label: string;
   provider: "local" | "openai";
   isDefault?: boolean;
+  localHost?: "primary" | "secondary";
+  hostLabel?: string;
 }
 
 export interface ModelCatalog {
@@ -26,6 +28,12 @@ export interface ModelCatalog {
     local: string;
     online: string;
   };
+}
+
+export interface LocalModelHostStatus {
+  configured: boolean;
+  reachable: boolean;
+  modelCount: number;
 }
 
 export interface LlmProvider {
@@ -42,6 +50,7 @@ interface OpenAiConfig {
 }
 
 const config = getAppConfig();
+export const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
 
 export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
 const OPENAI_FALLBACK_MODELS = [
@@ -149,13 +158,17 @@ function uniqueModelIds(ids: string[]): string[] {
   return result;
 }
 
+function modelLabelKey(id: string): string {
+  return modelLabelFromId(id).toLocaleLowerCase();
+}
+
 function uniqueModelIdsByLabel(ids: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const id of ids) {
     const trimmed = id.trim();
     if (!trimmed) continue;
-    const key = modelLabelFromId(trimmed).toLocaleLowerCase();
+    const key = modelLabelKey(trimmed);
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(trimmed);
@@ -163,16 +176,41 @@ function uniqueModelIdsByLabel(ids: string[]): string[] {
   return result;
 }
 
+function removeModelIdsWithLabels(ids: string[], excludedIds: string[]): string[] {
+  const excludedLabels = new Set(excludedIds.map(modelLabelKey));
+  return ids.filter((id) => !excludedLabels.has(modelLabelKey(id)));
+}
+
+function encodeSecondaryOllamaModelId(id: string): string {
+  return `${SECONDARY_OLLAMA_MODEL_PREFIX}${id.trim()}`;
+}
+
+function parseSecondaryOllamaModelId(id: string): string | null {
+  const trimmed = id.trim();
+  if (!trimmed.startsWith(SECONDARY_OLLAMA_MODEL_PREFIX)) {
+    return null;
+  }
+  const modelId = trimmed.slice(SECONDARY_OLLAMA_MODEL_PREFIX.length).trim();
+  return modelId.length > 0 ? modelId : null;
+}
+
 function toCatalogEntry(
   id: string,
   provider: "local" | "openai",
-  defaultId: string
+  defaultId: string,
+  options: {
+    label?: string;
+    localHost?: "primary" | "secondary";
+    hostLabel?: string;
+  } = {}
 ): ModelCatalogEntry {
   return {
     id,
-    label: modelLabelFromId(id),
+    label: options.label ?? modelLabelFromId(id),
     provider,
     isDefault: id === defaultId || undefined,
+    ...(options.localHost ? { localHost: options.localHost } : {}),
+    ...(options.hostLabel ? { hostLabel: options.hostLabel } : {}),
   };
 }
 
@@ -194,9 +232,9 @@ function isAllowedOpenAiChatModel(id: string): boolean {
   return OPENAI_CHAT_MODEL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
-async function discoverLocalModelIds(): Promise<string[]> {
+async function discoverLocalModelIds(ollamaHost: string): Promise<string[]> {
   try {
-    const response = await fetch(`${config.ollamaHost}/api/tags`);
+    const response = await fetch(`${ollamaHost}/api/tags`);
     if (!response.ok) return [];
     const payload = (await response.json()) as {
       models?: Array<{ name?: unknown; model?: unknown }>;
@@ -214,6 +252,76 @@ async function discoverLocalModelIds(): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+export async function checkLocalModelHostStatus(
+  ollamaHost: string | null | undefined
+): Promise<LocalModelHostStatus> {
+  const normalizedHost = ollamaHost?.trim();
+  if (!normalizedHost) {
+    return { configured: false, reachable: false, modelCount: 0 };
+  }
+  const hostCandidates = [normalizedHost];
+  const seenCandidates = new Set<string>([normalizedHost]);
+  try {
+    // Some local setups resolve `localhost` to IPv6 first (::1) even when
+    // Ollama only listens on IPv4. Probe 127.0.0.1 as a fallback.
+    const parsedHost = new URL(normalizedHost);
+    const hostname = parsedHost.hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0" ||
+      hostname === "::1" ||
+      hostname === "::ffff:127.0.0.1" ||
+      hostname === "host.docker.internal"
+    ) {
+      const loopbackIpv4 = new URL(normalizedHost);
+      loopbackIpv4.hostname = "127.0.0.1";
+      const loopbackIpv4Candidate = loopbackIpv4.toString().replace(/\/$/, "");
+      if (!seenCandidates.has(loopbackIpv4Candidate)) {
+        hostCandidates.push(loopbackIpv4Candidate);
+        seenCandidates.add(loopbackIpv4Candidate);
+      }
+
+      // If this API's primary host is pinned to a LAN IP in env, also probe
+      // that address for loopback inputs.
+      const primaryHostCandidate = config.ollamaHost.trim();
+      if (primaryHostCandidate && !seenCandidates.has(primaryHostCandidate)) {
+        hostCandidates.push(primaryHostCandidate);
+        seenCandidates.add(primaryHostCandidate);
+      }
+    }
+  } catch {
+    // Keep the original candidate; malformed hosts are treated as unreachable.
+  }
+
+  for (const host of hostCandidates) {
+    try {
+      const response = await fetch(`${host}/api/tags`);
+      if (!response.ok) {
+        continue;
+      }
+      const payload = (await response.json()) as {
+        models?: Array<{ name?: unknown; model?: unknown }>;
+      };
+      const modelIds = uniqueModelIds(
+        (payload.models ?? [])
+          .map((model) =>
+            typeof model.name === "string"
+              ? model.name
+              : typeof model.model === "string"
+                ? model.model
+                : ""
+          )
+      );
+      return { configured: true, reachable: true, modelCount: modelIds.length };
+    } catch {
+      // Try next host candidate.
+    }
+  }
+
+  return { configured: true, reachable: false, modelCount: 0 };
 }
 
 async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> {
@@ -237,19 +345,41 @@ async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> 
   }
 }
 
-export async function buildModelCatalog(openAiApiKey?: string): Promise<ModelCatalog> {
-  const [discoveredLocal, discoveredOnline] = await Promise.all([
-    discoverLocalModelIds(),
+export async function buildModelCatalog(
+  openAiApiKey?: string,
+  secondaryOllamaHost?: string | null
+): Promise<ModelCatalog> {
+  const [discoveredLocal, discoveredSecondaryLocal, discoveredOnline] = await Promise.all([
+    discoverLocalModelIds(config.ollamaHost),
+    secondaryOllamaHost ? discoverLocalModelIds(secondaryOllamaHost) : Promise.resolve([]),
     discoverOpenAiModelIds(openAiApiKey),
   ]);
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
+  const secondaryLocalIds = removeModelIdsWithLabels(
+    uniqueModelIdsByLabel(discoveredSecondaryLocal),
+    localIds
+  );
   const onlineIds = uniqueModelIds([
     OPENAI_DEFAULT_MODEL,
     ...discoveredOnline,
     ...OPENAI_FALLBACK_MODELS,
   ]);
   return {
-    local: localIds.map((id) => toCatalogEntry(id, "local", config.ollamaModel)),
+    local: [
+      ...localIds.map((id) =>
+        toCatalogEntry(id, "local", config.ollamaModel, {
+          localHost: "primary",
+          hostLabel: "Primary host",
+        })
+      ),
+      ...secondaryLocalIds.map((id) =>
+        toCatalogEntry(encodeSecondaryOllamaModelId(id), "local", config.ollamaModel, {
+          label: `${modelLabelFromId(id)} (Second host)`,
+          localHost: "secondary",
+          hostLabel: "Second host",
+        })
+      ),
+    ],
     online: onlineIds.map((id) => toCatalogEntry(id, "openai", OPENAI_DEFAULT_MODEL)),
     defaults: {
       local: config.ollamaModel,
@@ -260,11 +390,23 @@ export async function buildModelCatalog(openAiApiKey?: string): Promise<ModelCat
 
 export class LocalOllamaProvider implements LlmProvider {
   public readonly name = "local" as const;
+  private readonly secondaryOllamaHost: string | null;
+
+  public constructor(options: { secondaryOllamaHost?: string | null } = {}) {
+    this.secondaryOllamaHost = options.secondaryOllamaHost?.trim() || null;
+  }
 
   public async generateResponse(
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    const requestedModel = options?.model?.trim() || config.ollamaModel;
+    const secondaryModel = parseSecondaryOllamaModelId(requestedModel);
+    if (secondaryModel && !this.secondaryOllamaHost) {
+      throw new Error("Second Ollama host is not configured.");
+    }
+    const ollamaHost = secondaryModel ? this.secondaryOllamaHost! : config.ollamaHost;
+    const model = secondaryModel ?? requestedModel;
     const ollamaOptions: Record<string, unknown> = {};
     if (typeof options?.temperature === "number") {
       ollamaOptions.temperature = options.temperature;
@@ -274,7 +416,7 @@ export class LocalOllamaProvider implements LlmProvider {
       ollamaOptions.num_predict = options.maxTokens;
     }
     const requestBody: Record<string, unknown> = {
-      model: options?.model?.trim() || config.ollamaModel,
+      model,
       stream: false,
       messages
     };
@@ -282,7 +424,7 @@ export class LocalOllamaProvider implements LlmProvider {
       requestBody.options = ollamaOptions;
     }
 
-    const response = await fetch(`${config.ollamaHost}/api/chat`, {
+    const response = await fetch(`${ollamaHost}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(requestBody)
@@ -436,7 +578,8 @@ function formatOpenAiError(
  */
 export function selectProvider(
   preferredProvider: "local" | "openai",
-  openAiApiKey?: string
+  openAiApiKey?: string,
+  secondaryOllamaHost?: string | null
 ): LlmProvider {
   if (preferredProvider === "openai") {
     if (!openAiApiKey) {
@@ -446,5 +589,5 @@ export function selectProvider(
     }
     return new OpenAiProvider({ apiKey: openAiApiKey });
   }
-  return new LocalOllamaProvider();
+  return new LocalOllamaProvider({ secondaryOllamaHost });
 }

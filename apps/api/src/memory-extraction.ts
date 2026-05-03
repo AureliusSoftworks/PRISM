@@ -32,6 +32,7 @@ const HIGH_CONFIDENCE_MEMORY_CUES = [
   "don't forget",
   "do not forget",
   "please remember",
+  "remember this",
   "remember that",
   "keep in mind",
   "make a note",
@@ -71,7 +72,7 @@ function hasSubstantiveHighConfidenceMemory(lower: string): boolean {
 }
 
 const MEMORY_CUE_PREFIX_PATTERN_RAW =
-  /^(?:please[\s,]+)?(?:(?:do\s+not|don't)[\s,]+forget(?:[\s,]+that)?|remember(?:[\s,]+that)?|please[\s,]+remember|keep[\s,]+in[\s,]+mind(?:[\s,]+that)?|make[\s,]+a[\s,]+note(?:[\s,]+that)?|actually(?:[\s,]+|$)|correction:?\s*|scratch[\s,]+that(?:[\s,]+|$))[\s,]*/i;
+  /^(?:please[\s,]+)?(?:(?:do\s+not|don't)[\s,]+forget(?:[\s,]+that)?|remember(?:[\s,]+(?:that|this))?|please[\s,]+remember|keep[\s,]+in[\s,]+mind(?:[\s,]+that)?|make[\s,]+a[\s,]+note(?:[\s,]+that)?|actually(?:[\s,]+|$)|correction:?\s*|scratch[\s,]+that(?:[\s,]+|$))[\s,:]*/i;
 
 const GLOBAL_SCOPE_PATTERNS = [
   /\b(?:save|remember)\s+(?:this|that|it)\s+globally\b/i,

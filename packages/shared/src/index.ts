@@ -149,6 +149,26 @@ export interface UserMemory {
   text: string;
 }
 
+export type MemoryValidationStatus = "approved" | "auto_fixed";
+
+export type MemoryValidationReasonCode =
+  | "subject_role_confusion"
+  | "assistant_identity_instruction"
+  | "task_request_not_memory"
+  | "question_fragment"
+  | "trailing_conversation_tag"
+  | "lost_preference_payload"
+  | "contradiction"
+  | "low_confidence"
+  | "malformed_text"
+  | "validator_error";
+
+export interface MemoryValidationEvent {
+  validationStatus?: MemoryValidationStatus;
+  originalText?: string;
+  reasonCodes?: MemoryValidationReasonCode[];
+}
+
 /**
  * Post-auth surface the user is chatting from.
  *
@@ -198,6 +218,9 @@ export interface ChatResponsePayload extends StarterChatExtras {
       source?: "direct" | "inferred" | "compiled";
       certainty?: number;
       sourceMessageIds?: string[];
+      validationStatus?: MemoryValidationStatus;
+      originalText?: string;
+      reasonCodes?: MemoryValidationReasonCode[];
     }>;
     retracted: Array<{
       id: string;
@@ -208,6 +231,11 @@ export interface ChatResponsePayload extends StarterChatExtras {
       source?: "direct" | "inferred" | "compiled";
       certainty?: number;
       sourceMessageIds?: string[];
+    }>;
+    rejected?: Array<{
+      originalText: string;
+      reasonCodes: MemoryValidationReasonCode[];
+      notes?: string;
     }>;
     maxConfidence: number;
   };

@@ -33,7 +33,8 @@ function createMemoryTestDb(): DatabaseSync {
     );
     CREATE TABLE bots (
       id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL
+      user_id TEXT NOT NULL,
+      delete_protected INTEGER NOT NULL DEFAULT 0
     );
   `);
   return db;
@@ -123,6 +124,16 @@ describe("extractMemoryCandidates", () => {
 
     assert.equal(candidates[0]?.text, "You like cheese.");
     assert.equal(candidates[0]?.confidence, 0.98);
+  });
+
+  it("treats remember-this directives as explicit memory candidates", () => {
+    const candidates = extractMemoryCandidates(
+      "Remember this: do not refer to yourself as AI."
+    );
+
+    assert.deepEqual(candidates, [
+      { text: "Do not refer to yourself as AI.", confidence: 0.98 },
+    ]);
   });
 
   it("strips conversational tag questions from stored memory text", () => {

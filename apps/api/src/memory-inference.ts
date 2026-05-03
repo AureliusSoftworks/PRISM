@@ -3,6 +3,7 @@ import type { UserMemory } from "@localai/shared";
 import type { LlmProvider } from "./providers.ts";
 import { decryptJson } from "./security.ts";
 import { deleteMemoryById, restoreMemory } from "./memory.ts";
+import { validateMemoryCandidates } from "./memory-validation.ts";
 
 type DirectMemoryRow = {
   id: string;
@@ -32,6 +33,12 @@ type DirectMemoryCandidate = {
   row: DirectMemoryRow;
   text: string;
   sourceMessageIds: string[];
+};
+
+type ValidatedInferenceMerge = {
+  text: string;
+  parents: DirectMemoryCandidate[];
+  certainty: number;
 };
 
 type EquivalenceMemory = {
@@ -326,23 +333,50 @@ export async function inferAndStoreBotMemories(
 
   const created: UserMemory[] = [];
   const consumedParentIds = new Set<string>();
+  const validatedMerges: ValidatedInferenceMerge[] = [];
+
+  for (const merge of merges) {
+    const parents = merge.parentIndices
+      .map((index) => candidates[index - 1])
+      .filter((candidate): candidate is DirectMemoryCandidate => candidate !== undefined);
+    if (parents.length !== merge.parentIndices.length) continue;
+    if (parents.some((parent) => consumedParentIds.has(parent.row.id))) continue;
+    const inferredText = preserveFavoritePayload(merge.text, parents);
+    if (!mergePreservesFavoritePayload(inferredText, parents)) continue;
+    if (taskMergeWouldDropPreferencePayload(inferredText, parents)) continue;
+
+    const validation = await validateMemoryCandidates(provider, {
+      source: "inferred",
+      scope: "bot",
+      rawContext: `[Parent memories]\n${parents.map((parent) => `- ${parent.text}`).join("\n")}`,
+      candidates: [{ text: inferredText, confidence: merge.certainty }],
+      existingMemories: candidates.map((candidate) => candidate.text),
+    });
+    const [validated] = validation.candidates;
+    if (!validated) continue;
+    validatedMerges.push({
+      text: validated.text,
+      parents,
+      certainty: validated.confidence,
+    });
+    for (const parent of parents) {
+      consumedParentIds.add(parent.row.id);
+    }
+  }
+
+  if (validatedMerges.length === 0) return [];
+  consumedParentIds.clear();
 
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
-    for (const merge of merges) {
-      const parents = merge.parentIndices
-        .map((index) => candidates[index - 1])
-        .filter((candidate): candidate is DirectMemoryCandidate => candidate !== undefined);
-      if (parents.length !== merge.parentIndices.length) continue;
+    for (const merge of validatedMerges) {
+      const parents = merge.parents;
       if (parents.some((parent) => consumedParentIds.has(parent.row.id))) continue;
-      const inferredText = preserveFavoritePayload(merge.text, parents);
-      if (!mergePreservesFavoritePayload(inferredText, parents)) continue;
-      if (taskMergeWouldDropPreferencePayload(inferredText, parents)) continue;
 
       const inferred = await restoreMemory(db, provider, userId, userKey, {
         conversationId: parents[0]?.row.conversation_id ?? null,
         botId,
-        text: inferredText,
+        text: merge.text,
         confidence: merge.certainty,
         source: "inferred",
         certainty: merge.certainty,

@@ -30,6 +30,7 @@ function createTestDb(): DatabaseSync {
       name TEXT NOT NULL,
       color TEXT,
       glyph TEXT,
+      delete_protected INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

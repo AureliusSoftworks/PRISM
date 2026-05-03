@@ -2,9 +2,11 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildModelCatalog,
+  checkLocalModelHostStatus,
   LocalOllamaProvider,
   OpenAiProvider,
   readOpenAiErrorMessage,
+  SECONDARY_OLLAMA_MODEL_PREFIX,
   selectProvider,
 } from "../providers.ts";
 
@@ -184,6 +186,160 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.online.some((model) => model.id === "o3-mini"));
     assert.ok(!catalog.online.some((model) => model.id === "text-embedding-3-small"));
     assert.ok(!catalog.online.some((model) => model.id === "dall-e-3"));
+  });
+
+  it("merges secondary Ollama host models while preferring primary duplicate names", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("192.168.1.50") && url.includes("/api/tags")) {
+        return new Response(
+          JSON.stringify({
+            models: [
+              { name: "llama3.2" },
+              { name: "mistral:latest" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/tags")) {
+        return new Response(
+          JSON.stringify({
+            models: [
+              { name: "llama3.2" },
+              { name: "gemma3:latest" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog(undefined, "http://192.168.1.50:11434");
+
+    assert.ok(catalog.local.some((model) => model.id === "llama3.2"));
+    const secondaryLlama = catalog.local.find(
+      (model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}llama3.2`
+    );
+    assert.equal(secondaryLlama, undefined);
+    assert.ok(catalog.local.some((model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`));
+  });
+});
+
+describe("LocalOllamaProvider secondary routing", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("routes encoded secondary model ids to the secondary host with the raw model name", async () => {
+    let requestedUrl = "";
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      requestedUrl = String(input);
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: "hello from secondary" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider({
+      secondaryOllamaHost: "http://192.168.1.50:11434",
+    });
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` }
+    );
+
+    assert.equal(response, "hello from secondary");
+    assert.equal(requestedUrl, "http://192.168.1.50:11434/api/chat");
+    assert.equal(requestedBody.model, "mistral:latest");
+  });
+
+  it("does not silently route stale secondary model ids to the primary host", async () => {
+    const provider = new LocalOllamaProvider();
+
+    await assert.rejects(
+      () =>
+        provider.generateResponse(
+          [{ role: "user", content: "hi" }],
+          { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` }
+        ),
+      /Second Ollama host is not configured/
+    );
+  });
+});
+
+describe("checkLocalModelHostStatus", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("reports an unconfigured secondary host without probing the network", async () => {
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+
+    const status = await checkLocalModelHostStatus("");
+
+    assert.deepEqual(status, { configured: false, reachable: false, modelCount: 0 });
+    assert.equal(called, false);
+  });
+
+  it("distinguishes a reachable host with no models from a failed host", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    assert.deepEqual(await checkLocalModelHostStatus("http://192.168.1.50:11434"), {
+      configured: true,
+      reachable: true,
+      modelCount: 0,
+    });
+
+    globalThis.fetch = (async () => new Response("offline", { status: 503 })) as typeof fetch;
+    assert.deepEqual(await checkLocalModelHostStatus("http://192.168.1.50:11434"), {
+      configured: true,
+      reachable: false,
+      modelCount: 0,
+    });
+  });
+
+  it("falls back to IPv4 loopback when localhost resolves to an unreachable address", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      requestedUrls.push(url);
+      if (url.startsWith("http://localhost:11434/")) {
+        throw new Error("ECONNREFUSED ::1:11434");
+      }
+      if (url.startsWith("http://127.0.0.1:11434/")) {
+        return new Response(JSON.stringify({ models: [{ name: "llama3.2:latest" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("offline", { status: 503 });
+    }) as typeof fetch;
+
+    assert.deepEqual(await checkLocalModelHostStatus("http://localhost:11434"), {
+      configured: true,
+      reachable: true,
+      modelCount: 1,
+    });
+    assert.deepEqual(requestedUrls, [
+      "http://localhost:11434/api/tags",
+      "http://127.0.0.1:11434/api/tags",
+    ]);
   });
 });
 

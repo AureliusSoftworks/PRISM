@@ -1,3 +1,5 @@
+import { sanitizeHiddenModelIds } from "./model-routing.ts";
+
 /**
  * Pure validation + merge logic for PATCH /api/settings.
  *
@@ -16,6 +18,15 @@
 export type Theme = "light" | "dark" | "system";
 export type Provider = "local" | "openai";
 
+const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
+  "localhost",
+  "127.0.0.1",
+  "0.0.0.0",
+  "::1",
+  "::ffff:127.0.0.1",
+  "host.docker.internal",
+]);
+
 /** Current persisted settings loaded from the users table. */
 export interface CurrentSettings {
   theme: Theme;
@@ -23,6 +34,8 @@ export interface CurrentSettings {
   providerLocked: number;
   autoMemory: number;
   hiddenBotModelIds: string;
+  secondaryOllamaHost: string | null;
+  primaryOllamaHost: string;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -32,6 +45,7 @@ export interface NextSettings {
   providerLocked: number;
   autoMemory: number;
   hiddenBotModelIds: string[];
+  secondaryOllamaHost: string | null;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -50,19 +64,98 @@ function isProvider(value: unknown): value is Provider {
   return value === "local" || value === "openai";
 }
 
+function normalizeOllamaHostValue(input: string): string {
+  const raw = input.trim();
+  if (!raw) {
+    return "";
+  }
+
+  let normalized = raw;
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `http://${normalized}`;
+  }
+  normalized = normalized.replace(
+    /\/\/0\.0\.0\.0(?=$|[:\/])/i,
+    "//127.0.0.1"
+  );
+  normalized = normalized.replace(/\/+$/, "");
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error("Second Ollama host must be a valid host or URL.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Second Ollama host must use http:// or https://.");
+  }
+  return normalized;
+}
+
+function canonicalOllamaHostname(host: string): string {
+  try {
+    const parsed = new URL(normalizeOllamaHostValue(host));
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return LOOPBACK_OLLAMA_HOSTNAMES.has(hostname) ? "loopback" : hostname;
+  } catch {
+    return host.trim().toLowerCase();
+  }
+}
+
+export function normalizeSecondaryOllamaHostInput(
+  value: unknown,
+  primaryOllamaHost: string
+): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  if (value.trim().length === 0) {
+    return null;
+  }
+
+  const normalized = normalizeOllamaHostValue(value);
+  if (
+    canonicalOllamaHostname(normalized) === canonicalOllamaHostname(primaryOllamaHost)
+  ) {
+    throw new Error("Second Ollama host must use a different IP address than the primary host.");
+  }
+  return normalized;
+}
+
+/**
+ * Normalize a host value for *connectivity checks only*.
+ *
+ * Unlike `normalizeSecondaryOllamaHostInput`, this intentionally does NOT
+ * enforce the "must differ from primary host" rule. The settings UI uses it
+ * for immediate status probes while the user is typing so valid hosts (even
+ * the primary one) can report real reachability.
+ */
+export function normalizeOllamaHostForStatusCheck(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return normalizeOllamaHostValue(trimmed);
+}
+
 export function parseHiddenBotModelIds(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return Array.from(
+    return sanitizeHiddenModelIds(Array.from(
       new Set(
         parsed
           .filter((value): value is string => typeof value === "string")
           .map((value) => value.trim())
           .filter(Boolean)
       )
-    );
+    ));
   } catch {
     return [];
   }
@@ -70,14 +163,14 @@ export function parseHiddenBotModelIds(raw: string | null | undefined): string[]
 
 function readHiddenBotModelIds(value: unknown, fallback: string): string[] {
   if (!Array.isArray(value)) return parseHiddenBotModelIds(fallback);
-  return Array.from(
+  return sanitizeHiddenModelIds(Array.from(
     new Set(
       value
         .filter((item): item is string => typeof item === "string")
         .map((item) => item.trim())
         .filter(Boolean)
     )
-  );
+  ));
 }
 
 /**
@@ -144,6 +237,14 @@ export function resolveNextSettings(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
   );
+  const normalizedSecondaryOllamaHost = normalizeSecondaryOllamaHostInput(
+    body.secondaryOllamaHost,
+    current.primaryOllamaHost
+  );
+  const secondaryOllamaHost =
+    normalizedSecondaryOllamaHost === undefined
+      ? current.secondaryOllamaHost
+      : normalizedSecondaryOllamaHost;
 
   let openAiKeyIntent: NextSettings["openAiKeyIntent"] = { action: "keep" };
   if (typeof body.openAiApiKey === "string") {
@@ -168,6 +269,7 @@ export function resolveNextSettings(
     providerLocked,
     autoMemory,
     hiddenBotModelIds,
+    secondaryOllamaHost,
     openAiKeyIntent,
   };
 }

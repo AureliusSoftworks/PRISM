@@ -30,9 +30,14 @@ import {
   deleteBot,
   deleteBots,
 } from "./bots.ts";
-import { parseHiddenBotModelIds, resolveNextSettings } from "./settings.ts";
-import { buildModelCatalog, selectProvider } from "./providers.ts";
+import {
+  normalizeOllamaHostForStatusCheck,
+  parseHiddenBotModelIds,
+  resolveNextSettings,
+} from "./settings.ts";
+import { buildModelCatalog, checkLocalModelHostStatus, selectProvider } from "./providers.ts";
 import type { GenerateOptions } from "./providers.ts";
+import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import { generateImage } from "./image-provider.ts";
 import {
@@ -69,6 +74,7 @@ interface UserDbRow {
   auto_memory: number;
   auto_switch_model: number;
   hidden_bot_model_ids: string;
+  secondary_ollama_host: string | null;
   openai_key_ciphertext: string | null;
   openai_key_iv: string | null;
   openai_key_tag: string | null;
@@ -171,7 +177,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, hidden_bot_model_ids, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, hidden_bot_model_ids, secondary_ollama_host, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -655,6 +661,7 @@ function buildRoutes(): RouteDefinition[] {
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
       let botForcesLocalProvider = false;
+      let botPreferredModel: string | null = null;
       const generationOverrides: GenerateOptions = {};
       if (effectiveBotId) {
         const bot = db
@@ -684,13 +691,9 @@ function buildRoutes(): RouteDefinition[] {
             effectiveProvider = "local";
             botForcesLocalProvider = true;
           }
-          const botPreferredModel = effectiveProvider === "local"
+          botPreferredModel = effectiveProvider === "local"
             ? readOptionalString(bot.local_model) ?? readOptionalString(bot.model)
             : readOptionalString(bot.online_model);
-          const resolvedModelOverride =
-            (botForcesLocalProvider ? undefined : explicitModelOverride)
-              ?? botPreferredModel;
-          if (resolvedModelOverride) generationOverrides.model = resolvedModelOverride;
           if (typeof bot.temperature === "number") {
             generationOverrides.temperature = bot.temperature;
           }
@@ -699,42 +702,61 @@ function buildRoutes(): RouteDefinition[] {
           }
         }
       }
-      if (explicitModelOverride && !botForcesLocalProvider && !generationOverrides.model) {
-        generationOverrides.model = explicitModelOverride;
-      }
       if (!starterPromptLabel && effectiveBotId === null) {
         starterPromptLabel = "Prism";
       }
-      const botOverrides =
-        Object.keys(generationOverrides).length > 0
-          ? generationOverrides
-          : undefined;
 
       // Prefer the user's saved key; fall back to the server-wide env key so a
       // single OPENAI_API_KEY in .env makes chat work without double-entry.
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
+      const resolvedAuto = resolveAutoModel({
+        provider: effectiveProvider,
+        explicitModelOverride: botForcesLocalProvider ? null : explicitModelOverride,
+        botPreferredModel,
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+      });
+      effectiveProvider = resolvedAuto.provider;
+      generationOverrides.model = resolvedAuto.model;
+      const botOverrides =
+        Object.keys(generationOverrides).length > 0
+          ? generationOverrides
+          : undefined;
 
-      const { conversation, conversationStarters, memoryLearned } = await processChatMessage(
-        db,
-        userId,
-        message,
-        userKey,
-        {
-          preferredProvider: effectiveProvider,
-          autoMemory: !incognito && Boolean(user.auto_memory),
-          openAiApiKey,
-          starterPrompt,
-          starterPromptLabel,
-          botId: effectiveBotId,
-          incognito,
-          ephemeralMessages,
-          botSystemPrompt,
-          botOverrides,
-          mode,
-        },
-        conversationId
-      );
+      let result: Awaited<ReturnType<typeof processChatMessage>>;
+      try {
+        result = await processChatMessage(
+          db,
+          userId,
+          message,
+          userKey,
+          {
+            preferredProvider: effectiveProvider,
+            autoMemory: !incognito && Boolean(user.auto_memory),
+            openAiApiKey,
+            starterPrompt,
+            starterPromptLabel,
+            secondaryOllamaHost: user.secondary_ollama_host,
+            botId: effectiveBotId,
+            incognito,
+            ephemeralMessages,
+            botSystemPrompt,
+            botOverrides,
+            mode,
+          },
+          conversationId
+        );
+      } catch (error) {
+        if (resolvedAuto.usedRequiredLocalFallback) {
+          throw new Error(
+            `Prism Server setup problem: the required primary ${REQUIRED_PRIMARY_LOCAL_MODEL_ID} model is unavailable. Install it in Ollama, then try again.`
+          );
+        }
+        throw error;
+      }
+      const { conversation, conversationStarters, memoryLearned } = result;
       json(ctx.res, 200, {
         ok: true,
         conversation,
@@ -774,7 +796,11 @@ function buildRoutes(): RouteDefinition[] {
             const user = getUserRow(userId);
             const openAiApiKey =
               getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-            const provider = selectProvider(user.preferred_provider, openAiApiKey);
+            const provider = selectProvider(
+              user.preferred_provider,
+              openAiApiKey,
+              user.secondary_ollama_host
+            );
             await inferAndStoreBotMemories(db, provider, userId, botId, userKey);
           } catch (error) {
             console.warn("Memory inference skipped:", error);
@@ -1016,16 +1042,28 @@ function buildRoutes(): RouteDefinition[] {
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
           ollamaModel: config.ollamaModel,
+          secondaryOllamaHost: user.secondary_ollama_host ?? "",
         },
       });
     }),
     route("GET", "/api/models", async (ctx) => {
       const userId = requireAuth(ctx);
       const userKey = decryptUserKey(userId);
+      const user = getUserRow(userId);
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const catalog = await buildModelCatalog(openAiApiKey);
+      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
       json(ctx.res, 200, { ok: true, catalog });
+    }),
+    route("GET", "/api/settings/secondary-ollama-status", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      let hostToCheck: string | null = user.secondary_ollama_host;
+      if (ctx.query.has("host")) {
+        hostToCheck = normalizeOllamaHostForStatusCheck(ctx.query.get("host"));
+      }
+      const status = await checkLocalModelHostStatus(hostToCheck);
+      json(ctx.res, 200, { ok: true, status });
     }),
     route("PATCH", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -1041,6 +1079,8 @@ function buildRoutes(): RouteDefinition[] {
         providerLocked: user.provider_locked,
         autoMemory: user.auto_memory,
         hiddenBotModelIds: user.hidden_bot_model_ids,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        primaryOllamaHost: config.ollamaHost,
       });
 
       let openAiCipher = user.openai_key_ciphertext;
@@ -1064,7 +1104,7 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(`
         UPDATE users
         SET theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, hidden_bot_model_ids = ?,
-            openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
+            secondary_ollama_host = ?, openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
         WHERE id = ?
       `).run(
         next.theme,
@@ -1072,6 +1112,7 @@ function buildRoutes(): RouteDefinition[] {
         next.providerLocked,
         next.autoMemory,
         JSON.stringify(next.hiddenBotModelIds),
+        next.secondaryOllamaHost,
         openAiCipher,
         openAiIv,
         openAiTag,
@@ -1156,6 +1197,7 @@ function buildRoutes(): RouteDefinition[] {
       const localModel = readOptionalString(body.localModel);
       const onlineModel = readOptionalString(body.onlineModel);
       const onlineEnabled = body.onlineEnabled === false ? 0 : 1;
+      const deleteProtected = body.deleteProtected === true ? 1 : 0;
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
       const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 2048;
       // Accept any non-empty string for color (CSS parses the value at render
@@ -1175,8 +1217,8 @@ function buildRoutes(): RouteDefinition[] {
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, model, local_model, online_model, online_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
-      ).run(botId, userId, name, systemPrompt, model, localModel, onlineModel, onlineEnabled, temperature, maxTokens, color, glyph, chatEnabled, now, now);
+        "INSERT INTO bots (id, user_id, name, system_prompt, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(botId, userId, name, systemPrompt, model, localModel, onlineModel, onlineEnabled, deleteProtected, temperature, maxTokens, color, glyph, chatEnabled, now, now);
       json(ctx.res, 201, {
         ok: true,
         bot: {
@@ -1187,6 +1229,7 @@ function buildRoutes(): RouteDefinition[] {
           local_model: localModel,
           online_model: onlineModel,
           online_enabled: onlineEnabled,
+          delete_protected: deleteProtected,
           temperature,
           maxTokens,
           color,
@@ -1198,7 +1241,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, model, local_model, online_model, online_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -1226,6 +1269,10 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.onlineEnabled === "boolean") {
         fields.push("online_enabled = ?");
         values.push(body.onlineEnabled ? 1 : 0);
+      }
+      if (typeof body.deleteProtected === "boolean") {
+        fields.push("delete_protected = ?");
+        values.push(body.deleteProtected ? 1 : 0);
       }
       if (typeof body.temperature === "number") { fields.push("temperature = ?"); values.push(body.temperature); }
       if (typeof body.maxTokens === "number") { fields.push("max_tokens = ?"); values.push(body.maxTokens); }

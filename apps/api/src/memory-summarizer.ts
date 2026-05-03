@@ -3,6 +3,7 @@ import { randomId } from "./security.ts";
 import type { LlmProvider } from "./providers.ts";
 import { upsertVector, ensureCollection, searchVectors } from "./qdrant.ts";
 import { persistMemoryCandidates } from "./memory.ts";
+import { validateMemoryCandidates } from "./memory-validation.ts";
 
 /**
  * Chat-mode summarizer prompt: extracts cross-thread personal facts the
@@ -80,16 +81,22 @@ export async function summarizeAndStoreMemories(
       .filter((line) => line.toUpperCase() !== "NONE")
       .slice(0, 3);
     if (compiledFacts.length > 0) {
+      const validation = await validateMemoryCandidates(provider, {
+        source: "compiled",
+        scope: "global",
+        rawContext: thread,
+        candidates: compiledFacts.map((text, index) => ({
+          text,
+          confidence: Math.max(0.34, 0.52 - index * 0.06),
+        })),
+      });
       await persistMemoryCandidates(
         db,
         provider,
         userId,
         conversationId,
         null,
-        compiledFacts.map((text, index) => ({
-          text,
-          confidence: Math.max(0.34, 0.52 - index * 0.06),
-        })),
+        validation.candidates,
         userKey,
         {
           source: "compiled",

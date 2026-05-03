@@ -9,6 +9,11 @@ import {
   retrieveRelevantMemories,
 } from "./memory.ts";
 import {
+  validateMemoryCandidates,
+  type MemoryValidationReasonCode,
+  type MemoryValidationStatus,
+} from "./memory-validation.ts";
+import {
   selectProvider,
   OPENAI_DEFAULT_MODEL,
   type GenerateOptions,
@@ -40,6 +45,9 @@ export interface ProcessChatMessageResult {
       source?: "direct" | "inferred" | "compiled";
       certainty?: number;
       sourceMessageIds?: string[];
+      validationStatus?: MemoryValidationStatus;
+      originalText?: string;
+      reasonCodes?: MemoryValidationReasonCode[];
     }>;
     retracted: Array<{
       id: string;
@@ -50,6 +58,11 @@ export interface ProcessChatMessageResult {
       source?: "direct" | "inferred" | "compiled";
       certainty?: number;
       sourceMessageIds?: string[];
+    }>;
+    rejected: Array<{
+      originalText: string;
+      reasonCodes: MemoryValidationReasonCode[];
+      notes?: string;
     }>;
     maxConfidence: number;
   };
@@ -295,6 +308,8 @@ export interface UserChatSettings {
   botSystemPrompt?: string;
   /** Optional per-bot generation overrides, forwarded to the provider. */
   botOverrides?: GenerateOptions;
+  /** Optional user-saved second Ollama host for host-aware local model choices. */
+  secondaryOllamaHost?: string | null;
   /**
    * Which post-auth surface the request originated from. Changes what
    * "memory" means for this turn:
@@ -530,7 +545,11 @@ export async function processChatMessage(
     typeof activeBotId === "string" && activeBotId.trim().length > 0
       ? activeBotId.trim()
       : null;
-  const provider = selectProvider(effectiveProvider, settings.openAiApiKey);
+  const provider = selectProvider(
+    effectiveProvider,
+    settings.openAiApiKey,
+    settings.secondaryOllamaHost
+  );
 
   if (incognitoForTurn) {
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
@@ -813,6 +832,7 @@ export async function processChatMessage(
   ) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
     const retractedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["retracted"] = [];
+    const rejectedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["rejected"] = [];
     const cuePhrases =
       memoryIntent.kind === "retract" || memoryIntent.kind === "correct"
         ? memoryIntent.cuePhrases
@@ -848,38 +868,65 @@ export async function processChatMessage(
           ? memoryIntent.candidates
           : [];
     if (candidates.length > 0) {
+      const memoryIntentScope =
+        memoryIntent.kind === "retract" ? "bot" : memoryIntent.scope;
       const memoryBotId =
-        memoryIntent.kind !== "retract" && memoryIntent.scope === "global"
+        memoryIntentScope === "global"
           ? null
           : activeMemoryBotId;
+      const validation = await validateMemoryCandidates(provider, {
+        source: "direct",
+        scope: memoryIntentScope,
+        rawContext: message,
+        candidates,
+      });
+      rejectedMemories.push(...validation.rejected);
+      const validatedByText = new Map(
+        validation.candidates.map((candidate) => [candidate.text, candidate])
+      );
       const storedMemories = await persistMemoryCandidates(
         db,
         provider,
         userId,
         activeConversationId,
         memoryBotId,
-        candidates,
+        validation.candidates,
         userKey,
         { sourceMessageIds: userMessageId ? [userMessageId] : [] }
       );
       createdMemories.push(
-        ...storedMemories.map((memory) => ({
-          id: memory.id,
-          text: memory.text,
-          botId: memory.botId ?? null,
-          conversationId: memory.conversationId,
-          confidence: memory.confidence,
-          source: memory.source,
-          certainty: memory.certainty,
-          sourceMessageIds: memory.sourceMessageIds,
-        }))
+        ...storedMemories.map((memory) => {
+          const validationMatch = validatedByText.get(memory.text);
+          return {
+            id: memory.id,
+            text: memory.text,
+            botId: memory.botId ?? null,
+            conversationId: memory.conversationId,
+            confidence: memory.confidence,
+            source: memory.source,
+            certainty: memory.certainty,
+            sourceMessageIds: memory.sourceMessageIds,
+            ...(validationMatch
+              ? {
+                  validationStatus: validationMatch.validationStatus,
+                  originalText: validationMatch.originalText,
+                  reasonCodes: validationMatch.reasonCodes,
+                }
+              : {}),
+          };
+        })
       );
     }
 
-    if (createdMemories.length > 0 || retractedMemories.length > 0) {
+    if (
+      createdMemories.length > 0 ||
+      retractedMemories.length > 0 ||
+      rejectedMemories.length > 0
+    ) {
       memoryLearned = {
         created: createdMemories,
         retracted: retractedMemories,
+        rejected: rejectedMemories,
         maxConfidence: Math.max(
           0,
           ...createdMemories.map((memory) => memory.confidence),
