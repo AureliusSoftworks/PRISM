@@ -184,13 +184,15 @@ const PRISM_COLORS = {
 } as const;
 
 // ── Prism wordmark ────────────────────────────────────────────────────
-// Inline SVG replacement for public/wordmark.svg. The five letter colors
-// are locked to canonical spectral order — P=red, R=orange, I=lime,
-// S=cyan, M=violet — so the wordmark renders identically on every load
-// and stays in lockstep with every other surface that references PRISM
-// letter colors (category tiles, hue-lens segments, the 5-color brand
-// glyphs). The static asset on disk mirrors the same canonical ordering
-// for non-React consumers (meta tags, social preview cards).
+// Inline SVG replacement for public/wordmark.svg. The static asset is
+// kept on disk as a fallback and for any non-React consumers (meta tags,
+// social preview cards) but every in-app render of the wordmark goes
+// through this component so the five letter colors can be shuffled on
+// mount, giving each page load (and each independent instance) a fresh
+// chromatic identity while keeping the underlying letterforms unchanged.
+// Default ordering matches the original SVG so SSR and the client's
+// first paint agree; the shuffle fires in a mount-only effect which
+// avoids hydration mismatch warnings.
 
 const PRISM_WORDMARK_PALETTE = [
   PRISM_COLORS.p,
@@ -207,6 +209,18 @@ const PRISM_BOT_SEED_LIGHTNESS_MIN = 32;
 const PRISM_BOT_SEED_LIGHTNESS_MAX = 68;
 const BOT_COLOR_DIVERSITY_SAMPLE_ATTEMPTS = 40;
 const BOT_COLOR_DIVERSITY_MIN_DISTANCE = 0.3;
+
+// Fisher-Yates shuffle. Non-mutating: returns a new array so React state
+// updates remain referentially clean. Generic so future callers that
+// need to shuffle any 5-item palette (or other tuple) can reuse it.
+function shufflePalette<T>(source: readonly T[]): T[] {
+  const arr = [...source];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 function clampDevToolsBotQuantity(value: number): number {
   if (!Number.isFinite(value)) return DEV_TOOLS_BOT_QUANTITY_MIN;
@@ -269,9 +283,20 @@ interface PrismWordmarkProps {
 }
 
 function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
-  // Canonical P/R/I/S/M spectral order, locked. SSR markup and client
-  // first paint are byte-identical because there is no post-mount color
-  // mutation, so no hydration warnings are possible.
+  // Initial state = canonical P/R/I/S/M ordering so the server-rendered
+  // markup and the client's first paint are byte-identical. The shuffle
+  // only runs inside useEffect, which React guarantees not to execute
+  // during SSR; this means no hydration warning AND each mount produces
+  // its own independent random permutation.
+  const [colors, setColors] = useState<readonly string[]>(PRISM_WORDMARK_PALETTE);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setColors(shufflePalette(PRISM_WORDMARK_PALETTE));
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
   return (
     <svg
       className={className}
@@ -280,10 +305,9 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
       role="img"
       aria-label="Prism"
     >
-      {/* Shared stroke geometry lives on the <g>; the five per-letter
-          stroke colors are pulled directly from PRISM_COLORS so this
-          component stays in lockstep with every other surface that
-          references the canonical palette. */}
+      {/* Shared stroke geometry lives on the <g>; only the per-letter
+          stroke colors vary, which keeps the DOM diff on shuffle minimal
+          (only the five `stroke` attributes change, no path rewrites). */}
       <g
         fill="none"
         strokeLinecap="round"
@@ -292,24 +316,26 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
       >
         {/* P */}
         <path
-          stroke={PRISM_COLORS.p}
+          stroke={colors[0]}
           d="M6,66V6h50c10.67,0,16,5.33,16,16s-5.33,16-16,16H18"
+          suppressHydrationWarning
         />
-        {/* R — two subpaths grouped so both inherit the same color
-            from a single <g stroke>. */}
-        <g stroke={PRISM_COLORS.r}>
+        {/* R — two subpaths grouped so both subpaths inherit the same
+            shuffled color from a single <g stroke>. */}
+        <g stroke={colors[1]} suppressHydrationWarning>
           <path d="M134,66V6h50c10.67,0,16,5.33,16,16s-5.33,16-16,16h-38" />
           <path d="M162,38l44,28" />
         </g>
         {/* I */}
-        <path stroke={PRISM_COLORS.i} d="M282,6v60" />
+        <path stroke={colors[2]} d="M282,6v60" suppressHydrationWarning />
         {/* S */}
         <path
-          stroke={PRISM_COLORS.s}
+          stroke={colors[3]}
           d="M430,6h-48c-10.67,0-16,5.33-16,16,0,8,4,12.67,12,14l52,2c9.33,1.33,14,6,14,14,0,9.33-5.33,14-16,14h-48"
+          suppressHydrationWarning
         />
         {/* M — three subpaths (two uprights + the central chevron). */}
-        <g stroke={PRISM_COLORS.m}>
+        <g stroke={colors[4]} suppressHydrationWarning>
           <path d="M508,66V6" />
           <path d="M508,6l48,48,48-48" />
           <path d="M604,6v60" />
@@ -2602,14 +2628,21 @@ const PRISM_GROUPS: readonly PrismGroupDef[] = [
 
 // The bot-library color-group dashboard renders the All-bots △ tile in
 // row 1 col 1, then the five PRISM_GROUPS in iteration order across a
-// 2-column grid (default row-major flow). Natural left-to-right
-// top-to-bottom reading already spells the PRISM wordmark with
-// canonical letter↔color binding intact:
-//   r1c2 = P (pink/red)
-//   r2c1 = R (orange/yellow)    r2c2 = I (lime/green)
-//   r3c1 = S (cyan/blue)        r3c2 = M (indigo/violet)
-// Each tile renders its canonical PrismGroupDef.letter directly — no
-// override layer — so wordmark and category dashboard always agree.
+// 2-column grid: pink/red (r1c2), orange/yellow (r2c1), lime/green
+// (r2c2), cyan/blue (r3c1), indigo/violet (r3c2). Read column-major
+// (left col r2→r3, then right col r1→r3) the five color tiles arrive
+// in the sequence orange, cyan, pink, green, violet — so we override
+// each tile's displayed glyph below to spell the PRISM brand wordmark
+// in that reading order. The underlying group ids, labels, swatches,
+// and aria-labels still carry the canonical color identity; only the
+// visible letter glyph is remapped for the wordmark layout.
+const GROUP_LETTER_OVERRIDES: Record<PrismGroupId, string> = {
+  r: "P", // orange/yellow → 1st in column-major reading
+  s: "R", // cyan/blue     → 2nd
+  p: "I", // pink/red      → 3rd
+  i: "S", // lime/green    → 4th
+  m: "M", // indigo/violet → 5th
+};
 
 interface MemoryFamilyDirectory {
   id: PrismGroupId;
@@ -11836,9 +11869,9 @@ function HomeContent(): React.JSX.Element {
         itemCount,
         memoryCount,
         style: {
+          ["--memory-family-x" as string]: `${slot[0]}%`,
+          ["--memory-family-y" as string]: `${slot[1]}%`,
           ["--memory-family-size" as string]: `${size}px`,
-          ["--memory-family-left" as string]: `calc(${slot[0]}% - ${size / 2}px)`,
-          ["--memory-family-top" as string]: `calc(${slot[1]}% - ${size / 2}px)`,
           ["--memory-family-color" as string]: group.swatch,
           ["--memory-family-delay" as string]: `${(index * 0.18).toFixed(2)}s`,
         } as React.CSSProperties,
@@ -11856,9 +11889,9 @@ function HomeContent(): React.JSX.Element {
     );
     const size = ratioBubbleSize(defaultDirectMemoryCount, maxCount);
     return {
+      ["--memory-family-x" as string]: "50%",
+      ["--memory-family-y" as string]: "50%",
       ["--memory-family-size" as string]: `${size}px`,
-      ["--memory-family-left" as string]: `calc(50% - ${size / 2}px)`,
-      ["--memory-family-top" as string]: `calc(50% - ${size / 2}px)`,
       ["--memory-family-color" as string]: PRISM_DEFAULT_ACCENT,
       ["--memory-family-delay" as string]: "0.42s",
     } as React.CSSProperties;
@@ -12343,17 +12376,6 @@ function HomeContent(): React.JSX.Element {
     if (panel !== "memories") return;
     const root = memoryPanelRef.current;
     if (!root) return;
-    if (viewportWidth <= SIDEBAR_DRAWER_BREAKPOINT) {
-      const nodes = Array.from(
-        root.querySelectorAll<HTMLElement>("[data-memory-physics-id]")
-      );
-      for (const node of nodes) {
-        node.style.setProperty("--memory-physics-x", "0px");
-        node.style.setProperty("--memory-physics-y", "0px");
-      }
-      setMemoryPhysicsActive(false);
-      return;
-    }
 
     const startPhysics = () => {
       const cloud = root.querySelector<HTMLElement>(`.${styles.memoryBubbleCloud}`);
@@ -12362,6 +12384,19 @@ function HomeContent(): React.JSX.Element {
         cloud.querySelectorAll<HTMLElement>("[data-memory-physics-id]")
       );
       if (nodes.length === 0) return;
+
+      // Keep hit targets stable on narrow/drawer layouts. The one-shot
+      // drawer inertia effect slightly moves absolute-positioned orb bounds,
+      // which can cause pointer/default cursor flapping when a pointer sits
+      // near an edge. Desktop keeps the physics flourish.
+      if (viewportWidth <= SIDEBAR_DRAWER_BREAKPOINT) {
+        for (const node of nodes) {
+          node.style.setProperty("--memory-physics-x", "0px");
+          node.style.setProperty("--memory-physics-y", "0px");
+        }
+        setMemoryPhysicsActive(false);
+        return;
+      }
 
       if (memoryPhysicsFrameRef.current !== null) {
         window.cancelAnimationFrame(memoryPhysicsFrameRef.current);
@@ -13968,59 +14003,50 @@ function HomeContent(): React.JSX.Element {
           </p>
           {memoryPanelScope === "all" && !memoryPanelSelectedFamily ? (
             <div className={styles.memoryBubbleCloud} role="list" aria-label="PRISM memory directories">
-              <li
+              <button
+                type="button"
                 role="listitem"
-                tabIndex={0}
                 className={styles.memoryFamilyCluster}
-                draggable={false}
                 data-memory-default="true"
+                data-memory-physics-id="default:prism"
                 style={defaultMemoryDirectoryStyle}
                 onClick={() => void runMemoryTransition(openDefaultMemoriesPanel, "forward")}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  void runMemoryTransition(openDefaultMemoriesPanel, "forward");
-                }}
                 aria-label={`Prism default: ${defaultDirectMemoryCount} memories. Open default memories.`}
+                title={`Prism default: ${defaultDirectMemoryCount} memories`}
               >
                 <span className={styles.memoryDefaultGlyph} aria-hidden="true">
                   <PrismTriangleMark />
                 </span>
-              </li>
+              </button>
               {memoryFamilyDirectories.map((family) => (
-                <li
-                  key={`family:${family.id}`}
+                <button
+                  key={`family:${memoryPhysicsSeed}:${family.id}`}
+                  type="button"
                   role="listitem"
-                  tabIndex={family.itemCount > 0 ? 0 : -1}
                   className={styles.memoryFamilyCluster}
-                  draggable={false}
                   data-memory-family-empty={family.itemCount === 0 ? "true" : undefined}
+                  data-memory-physics-id={`family:${family.id}`}
                   style={family.style}
                   onClick={() => void runMemoryTransition(() => {
-                    if (family.itemCount === 0) return;
                     setMemoryPanelSelectedFamily(family.id);
                     setFocusedMemoryId(null);
                   }, "forward")}
-                  onKeyDown={(event) => {
-                    if (family.itemCount === 0) return;
-                    if (event.key !== "Enter" && event.key !== " ") return;
-                    event.preventDefault();
-                    void runMemoryTransition(() => {
-                      setMemoryPanelSelectedFamily(family.id);
-                      setFocusedMemoryId(null);
-                    }, "forward");
-                  }}
-                  aria-disabled={family.itemCount === 0 ? true : undefined}
+                  disabled={family.itemCount === 0}
                   aria-label={
                     family.itemCount > 0
                       ? `${family.label}: ${family.itemCount} bot${family.itemCount === 1 ? "" : "s"}, ${family.memoryCount} memories. Open directory.`
                       : `${family.label}: empty directory.`
                   }
+                  title={
+                    family.itemCount > 0
+                      ? `${family.label}: ${family.itemCount} bot${family.itemCount === 1 ? "" : "s"}, ${family.memoryCount} memories`
+                      : `${family.label}: empty`
+                  }
                 >
                   {family.itemCount > 0 && (
                     <span className={styles.memoryFamilyClusterLabel}>{family.letter}</span>
                   )}
-                </li>
+                </button>
               ))}
             </div>
           ) : memoryPanelScope === "all" && memoryPanelSelectedFamily ? (
@@ -14030,7 +14056,6 @@ function HomeContent(): React.JSX.Element {
                   <li
                     key={`cluster:${memoryPhysicsSeed}:${cluster.id}`}
                     className={styles.memoryBubble}
-                    draggable={false}
                     data-clickable="true"
                     data-source-cluster="true"
                     data-memory-physics-id={`cluster:${cluster.id}`}
@@ -14113,7 +14138,6 @@ function HomeContent(): React.JSX.Element {
                   <li
                     key={`memory:${memoryPhysicsSeed}:${memory.id}`}
                     className={styles.memoryBubble}
-                    draggable={false}
                     data-clickable="true"
                     data-memory-uncertain={uncertain ? "true" : undefined}
                     data-memory-selected={selected ? "true" : undefined}
@@ -15064,7 +15088,7 @@ function HomeContent(): React.JSX.Element {
                         aria-label={`Open ${group.label} bots (${count})`}
                       >
                         <span className={styles.botGroupTileLetter} aria-hidden="true">
-                          {group.letter}
+                          {GROUP_LETTER_OVERRIDES[group.id]}
                         </span>
                         <span className={styles.botGroupTileCount}>
                           {count === 1 ? "1 bot" : `${count} bots`}
@@ -15477,20 +15501,20 @@ function HomeContent(): React.JSX.Element {
         aria-hidden={sidebarOpen || panel !== null}
         tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
       >☰</button>
-      {panel === null && (
-        <button
-          type="button"
-          className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""}`}
-          onClick={() => {
-            setSidebarOpen(o => !o);
-          }}
-          aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
-          aria-pressed={sidebarOpen}
-          title={sidebarOpen ? "Close conversations" : "Open conversations"}
-        >
-          <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
-        </button>
-      )}
+      <button
+        type="button"
+        className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
+          panel !== null ? styles.sidebarHandleHidden : ""
+        }`}
+        onClick={() => {
+          setSidebarOpen(o => !o);
+        }}
+        aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
+        aria-pressed={sidebarOpen}
+        title={sidebarOpen ? "Close conversations" : "Open conversations"}
+      >
+        <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
+      </button>
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       <aside
@@ -16499,20 +16523,20 @@ function HomeContent(): React.JSX.Element {
         aria-hidden={sidebarOpen || panel !== null}
         tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
       >☰</button>
-      {panel === null && (
-        <button
-          type="button"
-          className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""}`}
-          onClick={() => {
-            setSidebarOpen(o => !o);
-          }}
-          aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
-          aria-pressed={sidebarOpen}
-          title={sidebarOpen ? "Close conversations" : "Open conversations"}
-        >
-          <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
-        </button>
-      )}
+      <button
+        type="button"
+        className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
+          panel !== null ? styles.sidebarHandleHidden : ""
+        }`}
+        onClick={() => {
+          setSidebarOpen(o => !o);
+        }}
+        aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
+        aria-pressed={sidebarOpen}
+        title={sidebarOpen ? "Close conversations" : "Open conversations"}
+      >
+        <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
+      </button>
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}

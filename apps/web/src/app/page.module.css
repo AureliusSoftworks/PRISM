@@ -8874,9 +8874,6 @@
       color-mix(in srgb, var(--memory-panel-color) 7%, transparent),
       transparent 70%
     );
-  touch-action: manipulation;
-  -webkit-touch-callout: none;
-  user-select: none;
 }
 
 .panelMemories[data-memory-scope="all"] .memoryBubbleCloud,
@@ -8998,22 +8995,11 @@
     rotate(var(--memory-bubble-tilt, 0deg));
   text-align: center;
   will-change: transform;
-  -webkit-touch-callout: none;
-  -webkit-user-drag: none;
-  user-select: none;
-  touch-action: manipulation;
   transition:
     border-color 0.16s ease,
     box-shadow 0.16s ease,
     filter 0.16s ease,
     opacity 0.16s ease;
-}
-
-.memoryBubble *,
-.memoryFamilyCluster *,
-.memoryConstellationStar * {
-  -webkit-user-drag: none;
-  user-select: none;
 }
 
 .memoryBubble[data-clickable="true"] {
@@ -9033,7 +9019,8 @@
       calc(-50% + var(--memory-physics-x, 0px)),
       calc(-50% + var(--memory-physics-y, 0px))
     )
-    rotate(var(--memory-bubble-tilt, 0deg));
+    rotate(var(--memory-bubble-tilt, 0deg))
+    scale(1.06);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, #ffffff 24%, transparent),
     inset 0 -20px 34px color-mix(in srgb, #000000 16%, transparent),
@@ -9077,7 +9064,6 @@
   pointer-events: none;
 }
 
-.memoryBubble[data-memory-uncertain="true"]:hover button,
 .memoryBubble[data-memory-uncertain="true"]:focus-within button {
   opacity: 1;
   pointer-events: auto;
@@ -9262,7 +9248,6 @@
     transform 0.16s ease;
 }
 
-.memoryBubbleAction:hover,
 .memoryBubbleAction:focus-visible {
   border-color: color-mix(in srgb, var(--memory-bubble-ink, var(--fg)) 54%, transparent);
   background: color-mix(in srgb, var(--bg) 72%, var(--memory-bubble-source-color, var(--memory-panel-color)) 10%);
@@ -9274,7 +9259,6 @@
   left: 8%;
 }
 
-.memoryBubbleDeleteAction:hover,
 .memoryBubbleDeleteAction:focus-visible {
   color: color-mix(in srgb, var(--danger) 70%, var(--memory-bubble-ink, #ffffff));
   border-color: color-mix(in srgb, var(--danger) 58%, transparent);
@@ -9313,10 +9297,8 @@
     0 0 10px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 22%, transparent),
     0 0 30px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 10%, transparent);
   cursor: pointer;
-  -webkit-touch-callout: none;
-  -webkit-user-drag: none;
-  user-select: none;
-  touch-action: manipulation;
+  animation: memoryConstellationStarPulse 4.6s ease-in-out infinite;
+  animation-delay: var(--memory-star-delay, 0s);
   transition:
     border-color 0.16s ease,
     box-shadow 0.16s ease,
@@ -9331,11 +9313,20 @@
 }
 
 .memoryConstellationStar:focus-visible {
-  outline: none;
+  z-index: 70;
+  border-color: color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 78%, var(--fg));
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 18%, transparent),
-    0 0 10px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 22%, transparent),
-    0 0 30px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 10%, transparent);
+    0 0 16px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 34%, transparent),
+    0 0 42px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 16%, transparent);
+  filter: saturate(1.24) brightness(1.08);
+  outline: none;
+  transform:
+    translate(
+      calc(-50% + var(--memory-physics-x, 0px)),
+      calc(-50% + var(--memory-physics-y, 0px))
+    )
+    scale(1.14);
 }
 
 .memoryConstellationStar :where(svg) {
@@ -9362,11 +9353,13 @@
 }
 
 .memoryFamilyCluster {
+  --memory-orb-x: var(--memory-family-x, 50%);
+  --memory-orb-y: var(--memory-family-y, 50%);
   appearance: none;
   font: inherit;
   position: absolute;
-  left: calc(var(--memory-family-left, 50%) + var(--memory-physics-x, 0px));
-  top: calc(var(--memory-family-top, 50%) + var(--memory-physics-y, 0px));
+  left: var(--memory-orb-x);
+  top: var(--memory-orb-y);
   z-index: 5;
   width: var(--memory-family-size, 92px);
   min-height: var(--memory-family-size, 92px);
@@ -9391,20 +9384,22 @@
   gap: 0;
   padding: 10px;
   text-align: center;
-  transform: none;
+  transform:
+    translate(
+      calc(-50% + var(--memory-physics-x, 0px)),
+      calc(-50% + var(--memory-physics-y, 0px))
+    );
   box-shadow:
     0 12px 30px color-mix(in srgb, #000000 18%, transparent),
     0 0 34px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 22%, transparent),
     0 0 84px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 10%, transparent);
   cursor: pointer;
-  -webkit-touch-callout: none;
-  -webkit-user-drag: none;
-  user-select: none;
-  touch-action: manipulation;
   transition:
     border-color 0.16s ease,
     box-shadow 0.16s ease,
     filter 0.16s ease;
+  animation: memoryFamilyClusterWarble 5.8s ease-in-out infinite;
+  animation-delay: var(--memory-family-delay, 0s);
 }
 
 /* Physics simulation drives transform and the per-frame --memory-physics-*
@@ -9442,10 +9437,6 @@
     inset 0 0 0 1px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 20%, transparent),
     0 6px 18px color-mix(in srgb, #000000 14%, transparent),
     0 0 28px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 10%, transparent);
-}
-
-.memoryFamilyCluster[aria-disabled="true"] {
-  pointer-events: none;
 }
 
 .memoryFamilyCluster[data-memory-family-empty="true"]::before {
@@ -9508,6 +9499,7 @@
   height: auto;
 }
 
+.memoryFamilyCluster:not(:disabled):focus-visible,
 .memoryFamilyCluster[data-memory-family-expanded="true"] {
   z-index: 72;
   border-color: color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 82%, var(--fg));
@@ -9518,11 +9510,6 @@
     0 0 104px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 14%, transparent);
   filter: saturate(1.18) brightness(1.06);
   outline: none;
-}
-
-.memoryFamilyCluster:not([aria-disabled="true"]):focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 72%, #ffffff);
-  outline-offset: 3px;
 }
 
 .memoryFamilyClusterLabel {
@@ -9591,9 +9578,78 @@
   border-radius: inherit;
 }
 
-.memoryBubble[data-clickable="true"]:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 72%, #ffffff);
-  outline-offset: 3px;
+.memoryBubble[data-clickable="true"]:focus-visible,
+.memoryBubble[data-clickable="true"]:focus-within {
+  border-color: color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 70%, var(--memory-bubble-ink));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--memory-bubble-border, var(--fg)) 36%, transparent),
+    0 16px 34px color-mix(in srgb, #000000 24%, transparent),
+    0 0 40px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 26%, transparent),
+    0 0 96px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 12%, transparent);
+  outline: none;
+}
+
+/* Hover motion/glow on the absolute-positioned memory cloud is desktop-only.
+   Narrow/touch layouts can stack orb hit areas closely, and iPad Pencil hover
+   can report hover-like input beside the intended target. Keeping these
+   effects behind a fine primary pointer prevents z-index/filter/transform churn
+   without taking away keyboard focus or selected states. */
+@media (hover: hover) and (pointer: fine) and (min-width: 1081px) {
+  .memoryBubble[data-memory-uncertain="true"]:hover button {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .memoryBubbleAction:hover {
+    border-color: color-mix(in srgb, var(--memory-bubble-ink, var(--fg)) 54%, transparent);
+    background: color-mix(in srgb, var(--bg) 72%, var(--memory-bubble-source-color, var(--memory-panel-color)) 10%);
+    outline: none;
+    transform: translateY(-50%) scale(1.08);
+  }
+
+  .memoryBubbleDeleteAction:hover {
+    color: color-mix(in srgb, var(--danger) 70%, var(--memory-bubble-ink, #ffffff));
+    border-color: color-mix(in srgb, var(--danger) 58%, transparent);
+  }
+
+  .memoryConstellationStar:hover {
+    z-index: 70;
+    border-color: color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 78%, var(--fg));
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 18%, transparent),
+      0 0 16px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 34%, transparent),
+      0 0 42px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 16%, transparent);
+    filter: saturate(1.24) brightness(1.08);
+    outline: none;
+    transform:
+      translate(
+        calc(-50% + var(--memory-physics-x, 0px)),
+        calc(-50% + var(--memory-physics-y, 0px))
+      )
+      scale(1.14);
+  }
+
+  .memoryFamilyCluster:not(:disabled):hover {
+    z-index: 72;
+    border-color: color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 82%, var(--fg));
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 18%, transparent),
+      0 12px 30px color-mix(in srgb, #000000 18%, transparent),
+      0 0 44px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 28%, transparent),
+      0 0 104px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 14%, transparent);
+    filter: saturate(1.18) brightness(1.06);
+    outline: none;
+  }
+
+  .memoryBubble[data-clickable="true"]:hover {
+    border-color: color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 70%, var(--memory-bubble-ink));
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--memory-bubble-border, var(--fg)) 36%, transparent),
+      0 16px 34px color-mix(in srgb, #000000 24%, transparent),
+      0 0 40px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 26%, transparent),
+      0 0 96px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 12%, transparent);
+    outline: none;
+  }
 }
 
 .memoryBubble[data-memory-muted="true"] {
@@ -9610,7 +9666,8 @@
       calc(-50% + var(--memory-physics-x, 0px)),
       calc(-50% + var(--memory-physics-y, 0px))
     )
-    rotate(var(--memory-bubble-tilt, 0deg));
+    rotate(var(--memory-bubble-tilt, 0deg))
+    scale(1.055);
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 30%, transparent),
     0 18px 34px color-mix(in srgb, #000000 24%, transparent),
@@ -9624,7 +9681,8 @@
       calc(-50% + var(--memory-physics-x, 0px)),
       calc(-50% + var(--memory-physics-y, 0px))
     )
-    rotate(var(--memory-bubble-tilt, 0deg));
+    rotate(var(--memory-bubble-tilt, 0deg))
+    scale(1.08);
 }
 
 .memoryDeleteGlyph {
@@ -9820,7 +9878,50 @@
   }
 }
 
-@media (max-width: 620px) {
+@keyframes memoryConstellationStarPulse {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 0.96;
+  }
+}
+
+@keyframes memoryFamilyClusterWarble {
+  0%,
+  100% {
+    border-radius: 40% 60% 48% 52% / 52% 42% 58% 48%;
+    transform:
+      translate(
+        calc(-50% + var(--memory-physics-x, 0px)),
+        calc(-50% + var(--memory-physics-y, 0px))
+      )
+      rotate(calc(-1deg + var(--memory-family-warble-a, 0deg)));
+  }
+  28% {
+    border-radius: 57% 43% 62% 38% / 41% 56% 44% 59%;
+    transform:
+      translate(
+        calc(-50% + var(--memory-physics-x, 0px)),
+        calc(-50% + var(--memory-physics-y, 0px))
+      )
+      rotate(var(--memory-family-warble-b, -1.4deg))
+      scale(1.018);
+  }
+  62% {
+    border-radius: 44% 56% 39% 61% / 61% 38% 62% 39%;
+    transform:
+      translate(
+        calc(-50% + var(--memory-physics-x, 0px)),
+        calc(-50% + var(--memory-physics-y, 0px))
+      )
+      rotate(calc(1.3deg + var(--memory-family-warble-a, 0deg)))
+      scale(0.992);
+  }
+}
+
+@media (max-width: 1080px) {
   .memoryBubbleCloud {
     height: clamp(390px, calc(100dvh - 245px), 640px);
   }
@@ -9828,6 +9929,37 @@
   .memoryBubble {
     width: min(var(--memory-bubble-size), 58vw);
     min-height: min(var(--memory-bubble-size), 58vw);
+    /* Each bubble normally reserves its own GPU compositor layer for the
+       physics burst (`will-change: transform`). On phones the cloud
+       packs many large bubbles into a small canvas, so the permanent
+       layer-per-bubble multiplies mobile GPU memory and is the source
+       of the post-physics shimmer adjacent to whatever orb the user is
+       touching. Browsers still promote a layer on demand while the
+       transform is actually animating, so the one-shot drawer-inertia
+       physics still composites smoothly without the standing reservation. */
+    will-change: auto;
+  }
+
+  /* When a memory bubble is selected every other bubble simultaneously
+     starts a 0.16s opacity + filter ease via `[data-memory-dimmed]`.
+     A dozen-plus bubbles dimming in unison is the visible "flicker
+     adjacent to the cursor" on narrow viewports — the focal pop is
+     already conveyed by the selected bubble's own transition, so snap
+     the surrounding dim instead of cascading a global ease. */
+  .memoryBubble[data-memory-dimmed="true"] {
+    transition: none;
+  }
+
+  /* The family-cluster warble animates `border-radius` + a transform
+     scale micro-pulse continuously. On narrow viewports the orbs pack
+     close enough that the scale variance brings adjacent orbs into
+     visual contact every cycle, and animating border-radius forces a
+     full layer re-rasterization of each multi-layer box-shadow on
+     every frame. Hold the orb still on phones — the open-panel
+     physics burst and the directional zoom on navigate already supply
+     plenty of motion for the small viewport. */
+  .memoryFamilyCluster {
+    animation: none;
   }
 }
 
@@ -9872,19 +10004,51 @@
 }
 
 .memoryTransitionLayer[data-memory-transition-phase="exiting"][data-memory-transition-direction="forward"] {
-  animation: memoryTransitionFadeOut 140ms linear forwards;
+  animation: memoryTransitionExitForward 190ms cubic-bezier(0.55, 0, 0.85, 0.4) forwards;
 }
 
 .memoryTransitionLayer[data-memory-transition-phase="entering"][data-memory-transition-direction="forward"] {
-  animation: memoryTransitionFadeIn 140ms linear forwards;
+  animation: memoryTransitionEnterForward 190ms cubic-bezier(0.16, 0.84, 0.32, 1) forwards;
 }
 
 .memoryTransitionLayer[data-memory-transition-phase="exiting"][data-memory-transition-direction="backward"] {
-  animation: memoryTransitionFadeOut 140ms linear forwards;
+  animation: memoryTransitionExitBackward 190ms cubic-bezier(0.55, 0, 0.85, 0.4) forwards;
 }
 
 .memoryTransitionLayer[data-memory-transition-phase="entering"][data-memory-transition-direction="backward"] {
-  animation: memoryTransitionFadeIn 140ms linear forwards;
+  animation: memoryTransitionEnterBackward 190ms cubic-bezier(0.16, 0.84, 0.32, 1) forwards;
+}
+
+@keyframes memoryTransitionExitForward {
+  from { transform: scale(1); opacity: 1; }
+  to   { transform: scale(1.06); opacity: 0; }
+}
+
+@keyframes memoryTransitionEnterForward {
+  from { transform: scale(0.94); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+@keyframes memoryTransitionExitBackward {
+  from { transform: scale(1); opacity: 1; }
+  to   { transform: scale(0.94); opacity: 0; }
+}
+
+@keyframes memoryTransitionEnterBackward {
+  from { transform: scale(1.06); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* Respect prefers-reduced-motion: collapse the directional zoom into a
+   short pure fade. Memory navigation should never punish motion-sensitive
+   users with parallax or scaling. */
+@media (prefers-reduced-motion: reduce) {
+  .memoryTransitionLayer[data-memory-transition-phase="exiting"] {
+    animation: memoryTransitionFadeOut 140ms linear forwards;
+  }
+  .memoryTransitionLayer[data-memory-transition-phase="entering"] {
+    animation: memoryTransitionFadeIn 140ms linear forwards;
+  }
 }
 
 @keyframes memoryTransitionFadeOut {
@@ -11495,13 +11659,6 @@
     transition-delay: 0s;
   }
 
-  .appLayout:has(.panel) .sidebar {
-    visibility: hidden;
-    transform: none;
-    transition: none;
-    pointer-events: none;
-  }
-
   .overlay {
     position: fixed;
     inset: 0;
@@ -12860,52 +13017,5 @@
     background: color-mix(in srgb, var(--bg) 72%, transparent) !important;
     color: var(--fg-muted) !important;
     border-color: color-mix(in srgb, var(--fg) 22%, transparent) !important;
-  }
-}
-
-@media (max-width: 1080px), (hover: none) {
-  .panelMemories .memoryBubble,
-  .panelMemories .memoryFamilyCluster,
-  .panelMemories .memoryConstellationStar,
-  .panelMemories .memoryBubbleAction,
-  .panelMemories .memoryFullProseDeleteButton {
-    animation: none !important;
-    transition: none !important;
-  }
-
-  .panelMemories .memoryBubble[data-clickable="true"]:hover,
-  .panelMemories .memoryBubble[data-clickable="true"]:focus-within {
-    border-color: var(--memory-bubble-border, color-mix(in srgb, var(--fg) 38%, transparent));
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, #ffffff 16%, transparent),
-      inset 0 -18px 30px color-mix(in srgb, #000000 12%, transparent),
-      0 12px 26px color-mix(in srgb, #000000 18%, transparent),
-      0 0 28px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 16%, transparent),
-      0 0 72px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 7%, transparent);
-  }
-
-  .panelMemories .memoryBubble[data-memory-inferred="true"]:hover,
-  .panelMemories .memoryBubble[data-memory-inferred="true"]:focus-within {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, #ffffff 18%, transparent),
-      inset 0 -18px 34px color-mix(in srgb, #000000 13%, transparent),
-      0 14px 28px color-mix(in srgb, #000000 18%, transparent),
-      0 0 54px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 22%, transparent);
-  }
-
-  .panelMemories .memoryBubbleAction:hover,
-  .panelMemories .memoryBubbleAction:focus-visible,
-  .panelMemories .memoryBubbleAction:active {
-    border-color: color-mix(in srgb, var(--fg) 22%, transparent);
-    background: color-mix(in srgb, var(--bg) 72%, transparent);
-    color: var(--fg-muted);
-    transform: translateY(-50%) !important;
-  }
-
-  .panelMemories .memoryConstellationStar:hover,
-  .panelMemories .memoryFullProseDeleteButton:hover,
-  .panelMemories .memoryFullProseDeleteButton:focus-visible,
-  .panelMemories .memoryFullProseDeleteButton:active {
-    transform: none !important;
   }
 }
