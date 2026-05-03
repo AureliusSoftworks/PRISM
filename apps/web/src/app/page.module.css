@@ -7860,11 +7860,19 @@
 
 .botLibraryContent {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
   align-content: stretch;
   gap: 8px;
   overflow: hidden;
   animation: botLibrarySlideUp 220ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.botLibraryContent[data-list-visible="true"] {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.botLibraryContent[data-dashboard-active="true"][data-list-visible="true"] {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 
 .botLibraryContent[data-closing="true"] {
@@ -8245,14 +8253,6 @@
   padding: 12px 14px 14px;
   display: grid;
   gap: 10px;
-}
-
-@media (max-width: 1320px) {
-  .botParameterToggleRow,
-  .botParameterModelRow {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
 }
 
 .botOnlineCapabilityToggle button {
@@ -8874,6 +8874,9 @@
       color-mix(in srgb, var(--memory-panel-color) 7%, transparent),
       transparent 70%
     );
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  user-select: none;
 }
 
 .panelMemories[data-memory-scope="all"] .memoryBubbleCloud,
@@ -8995,11 +8998,22 @@
     rotate(var(--memory-bubble-tilt, 0deg));
   text-align: center;
   will-change: transform;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
+  touch-action: manipulation;
   transition:
     border-color 0.16s ease,
     box-shadow 0.16s ease,
     filter 0.16s ease,
     opacity 0.16s ease;
+}
+
+.memoryBubble *,
+.memoryFamilyCluster *,
+.memoryConstellationStar * {
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 .memoryBubble[data-clickable="true"] {
@@ -9019,8 +9033,7 @@
       calc(-50% + var(--memory-physics-x, 0px)),
       calc(-50% + var(--memory-physics-y, 0px))
     )
-    rotate(var(--memory-bubble-tilt, 0deg))
-    scale(1.06);
+    rotate(var(--memory-bubble-tilt, 0deg));
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, #ffffff 24%, transparent),
     inset 0 -20px 34px color-mix(in srgb, #000000 16%, transparent),
@@ -9300,8 +9313,10 @@
     0 0 10px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 22%, transparent),
     0 0 30px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 10%, transparent);
   cursor: pointer;
-  animation: memoryConstellationStarPulse 4.6s ease-in-out infinite;
-  animation-delay: var(--memory-star-delay, 0s);
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
+  touch-action: manipulation;
   transition:
     border-color 0.16s ease,
     box-shadow 0.16s ease,
@@ -9315,17 +9330,12 @@
   box-shadow: 0 0 12px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 9%, transparent);
 }
 
-.memoryConstellationStar:hover,
 .memoryConstellationStar:focus-visible {
-  z-index: 70;
-  border-color: color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 78%, var(--fg));
+  outline: none;
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 18%, transparent),
-    0 0 16px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 34%, transparent),
-    0 0 42px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 16%, transparent);
-  filter: saturate(1.24) brightness(1.08);
-  outline: none;
-  transform: translate(-50%, -50%) scale(1.14);
+    0 0 10px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 22%, transparent),
+    0 0 30px color-mix(in srgb, var(--memory-star-color, var(--memory-panel-color)) 10%, transparent);
 }
 
 .memoryConstellationStar :where(svg) {
@@ -9352,13 +9362,11 @@
 }
 
 .memoryFamilyCluster {
-  --memory-orb-x: var(--memory-family-x, 50%);
-  --memory-orb-y: var(--memory-family-y, 50%);
   appearance: none;
   font: inherit;
   position: absolute;
-  left: var(--memory-orb-x);
-  top: var(--memory-orb-y);
+  left: calc(var(--memory-family-left, 50%) + var(--memory-physics-x, 0px));
+  top: calc(var(--memory-family-top, 50%) + var(--memory-physics-y, 0px));
   z-index: 5;
   width: var(--memory-family-size, 92px);
   min-height: var(--memory-family-size, 92px);
@@ -9383,22 +9391,20 @@
   gap: 0;
   padding: 10px;
   text-align: center;
-  transform:
-    translate(
-      calc(-50% + var(--memory-physics-x, 0px)),
-      calc(-50% + var(--memory-physics-y, 0px))
-    );
+  transform: none;
   box-shadow:
     0 12px 30px color-mix(in srgb, #000000 18%, transparent),
     0 0 34px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 22%, transparent),
     0 0 84px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 10%, transparent);
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
+  touch-action: manipulation;
   transition:
     border-color 0.16s ease,
     box-shadow 0.16s ease,
     filter 0.16s ease;
-  animation: memoryFamilyClusterWarble 5.8s ease-in-out infinite;
-  animation-delay: var(--memory-family-delay, 0s);
 }
 
 /* Physics simulation drives transform and the per-frame --memory-physics-*
@@ -9436,6 +9442,10 @@
     inset 0 0 0 1px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 20%, transparent),
     0 6px 18px color-mix(in srgb, #000000 14%, transparent),
     0 0 28px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 10%, transparent);
+}
+
+.memoryFamilyCluster[aria-disabled="true"] {
+  pointer-events: none;
 }
 
 .memoryFamilyCluster[data-memory-family-empty="true"]::before {
@@ -9498,8 +9508,6 @@
   height: auto;
 }
 
-.memoryFamilyCluster:not(:disabled):hover,
-.memoryFamilyCluster:not(:disabled):focus-visible,
 .memoryFamilyCluster[data-memory-family-expanded="true"] {
   z-index: 72;
   border-color: color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 82%, var(--fg));
@@ -9510,6 +9518,11 @@
     0 0 104px color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 14%, transparent);
   filter: saturate(1.18) brightness(1.06);
   outline: none;
+}
+
+.memoryFamilyCluster:not([aria-disabled="true"]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--memory-family-color, var(--memory-panel-color)) 72%, #ffffff);
+  outline-offset: 3px;
 }
 
 .memoryFamilyClusterLabel {
@@ -9578,16 +9591,9 @@
   border-radius: inherit;
 }
 
-.memoryBubble[data-clickable="true"]:hover,
-.memoryBubble[data-clickable="true"]:focus-visible,
-.memoryBubble[data-clickable="true"]:focus-within {
-  border-color: color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 70%, var(--memory-bubble-ink));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--memory-bubble-border, var(--fg)) 36%, transparent),
-    0 16px 34px color-mix(in srgb, #000000 24%, transparent),
-    0 0 40px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 26%, transparent),
-    0 0 96px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 12%, transparent);
-  outline: none;
+.memoryBubble[data-clickable="true"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 72%, #ffffff);
+  outline-offset: 3px;
 }
 
 .memoryBubble[data-memory-muted="true"] {
@@ -9604,8 +9610,7 @@
       calc(-50% + var(--memory-physics-x, 0px)),
       calc(-50% + var(--memory-physics-y, 0px))
     )
-    rotate(var(--memory-bubble-tilt, 0deg))
-    scale(1.055);
+    rotate(var(--memory-bubble-tilt, 0deg));
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 30%, transparent),
     0 18px 34px color-mix(in srgb, #000000 24%, transparent),
@@ -9619,8 +9624,7 @@
       calc(-50% + var(--memory-physics-x, 0px)),
       calc(-50% + var(--memory-physics-y, 0px))
     )
-    rotate(var(--memory-bubble-tilt, 0deg))
-    scale(1.08);
+    rotate(var(--memory-bubble-tilt, 0deg));
 }
 
 .memoryDeleteGlyph {
@@ -9816,49 +9820,6 @@
   }
 }
 
-@keyframes memoryConstellationStarPulse {
-  0%,
-  100% {
-    opacity: 0.7;
-  }
-  50% {
-    opacity: 0.96;
-  }
-}
-
-@keyframes memoryFamilyClusterWarble {
-  0%,
-  100% {
-    border-radius: 40% 60% 48% 52% / 52% 42% 58% 48%;
-    transform:
-      translate(
-        calc(-50% + var(--memory-physics-x, 0px)),
-        calc(-50% + var(--memory-physics-y, 0px))
-      )
-      rotate(calc(-1deg + var(--memory-family-warble-a, 0deg)));
-  }
-  28% {
-    border-radius: 57% 43% 62% 38% / 41% 56% 44% 59%;
-    transform:
-      translate(
-        calc(-50% + var(--memory-physics-x, 0px)),
-        calc(-50% + var(--memory-physics-y, 0px))
-      )
-      rotate(var(--memory-family-warble-b, -1.4deg))
-      scale(1.018);
-  }
-  62% {
-    border-radius: 44% 56% 39% 61% / 61% 38% 62% 39%;
-    transform:
-      translate(
-        calc(-50% + var(--memory-physics-x, 0px)),
-        calc(-50% + var(--memory-physics-y, 0px))
-      )
-      rotate(calc(1.3deg + var(--memory-family-warble-a, 0deg)))
-      scale(0.992);
-  }
-}
-
 @media (max-width: 620px) {
   .memoryBubbleCloud {
     height: clamp(390px, calc(100dvh - 245px), 640px);
@@ -9911,51 +9872,19 @@
 }
 
 .memoryTransitionLayer[data-memory-transition-phase="exiting"][data-memory-transition-direction="forward"] {
-  animation: memoryTransitionExitForward 190ms cubic-bezier(0.55, 0, 0.85, 0.4) forwards;
+  animation: memoryTransitionFadeOut 140ms linear forwards;
 }
 
 .memoryTransitionLayer[data-memory-transition-phase="entering"][data-memory-transition-direction="forward"] {
-  animation: memoryTransitionEnterForward 190ms cubic-bezier(0.16, 0.84, 0.32, 1) forwards;
+  animation: memoryTransitionFadeIn 140ms linear forwards;
 }
 
 .memoryTransitionLayer[data-memory-transition-phase="exiting"][data-memory-transition-direction="backward"] {
-  animation: memoryTransitionExitBackward 190ms cubic-bezier(0.55, 0, 0.85, 0.4) forwards;
+  animation: memoryTransitionFadeOut 140ms linear forwards;
 }
 
 .memoryTransitionLayer[data-memory-transition-phase="entering"][data-memory-transition-direction="backward"] {
-  animation: memoryTransitionEnterBackward 190ms cubic-bezier(0.16, 0.84, 0.32, 1) forwards;
-}
-
-@keyframes memoryTransitionExitForward {
-  from { transform: scale(1); opacity: 1; }
-  to   { transform: scale(1.06); opacity: 0; }
-}
-
-@keyframes memoryTransitionEnterForward {
-  from { transform: scale(0.94); opacity: 0; }
-  to   { transform: scale(1); opacity: 1; }
-}
-
-@keyframes memoryTransitionExitBackward {
-  from { transform: scale(1); opacity: 1; }
-  to   { transform: scale(0.94); opacity: 0; }
-}
-
-@keyframes memoryTransitionEnterBackward {
-  from { transform: scale(1.06); opacity: 0; }
-  to   { transform: scale(1); opacity: 1; }
-}
-
-/* Respect prefers-reduced-motion: collapse the directional zoom into a
-   short pure fade. Memory navigation should never punish motion-sensitive
-   users with parallax or scaling. */
-@media (prefers-reduced-motion: reduce) {
-  .memoryTransitionLayer[data-memory-transition-phase="exiting"] {
-    animation: memoryTransitionFadeOut 140ms linear forwards;
-  }
-  .memoryTransitionLayer[data-memory-transition-phase="entering"] {
-    animation: memoryTransitionFadeIn 140ms linear forwards;
-  }
+  animation: memoryTransitionFadeIn 140ms linear forwards;
 }
 
 @keyframes memoryTransitionFadeOut {
@@ -11566,6 +11495,13 @@
     transition-delay: 0s;
   }
 
+  .appLayout:has(.panel) .sidebar {
+    visibility: hidden;
+    transform: none;
+    transition: none;
+    pointer-events: none;
+  }
+
   .overlay {
     position: fixed;
     inset: 0;
@@ -12924,5 +12860,52 @@
     background: color-mix(in srgb, var(--bg) 72%, transparent) !important;
     color: var(--fg-muted) !important;
     border-color: color-mix(in srgb, var(--fg) 22%, transparent) !important;
+  }
+}
+
+@media (max-width: 1080px), (hover: none) {
+  .panelMemories .memoryBubble,
+  .panelMemories .memoryFamilyCluster,
+  .panelMemories .memoryConstellationStar,
+  .panelMemories .memoryBubbleAction,
+  .panelMemories .memoryFullProseDeleteButton {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .panelMemories .memoryBubble[data-clickable="true"]:hover,
+  .panelMemories .memoryBubble[data-clickable="true"]:focus-within {
+    border-color: var(--memory-bubble-border, color-mix(in srgb, var(--fg) 38%, transparent));
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, #ffffff 16%, transparent),
+      inset 0 -18px 30px color-mix(in srgb, #000000 12%, transparent),
+      0 12px 26px color-mix(in srgb, #000000 18%, transparent),
+      0 0 28px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 16%, transparent),
+      0 0 72px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 7%, transparent);
+  }
+
+  .panelMemories .memoryBubble[data-memory-inferred="true"]:hover,
+  .panelMemories .memoryBubble[data-memory-inferred="true"]:focus-within {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, #ffffff 18%, transparent),
+      inset 0 -18px 34px color-mix(in srgb, #000000 13%, transparent),
+      0 14px 28px color-mix(in srgb, #000000 18%, transparent),
+      0 0 54px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 22%, transparent);
+  }
+
+  .panelMemories .memoryBubbleAction:hover,
+  .panelMemories .memoryBubbleAction:focus-visible,
+  .panelMemories .memoryBubbleAction:active {
+    border-color: color-mix(in srgb, var(--fg) 22%, transparent);
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
+    color: var(--fg-muted);
+    transform: translateY(-50%) !important;
+  }
+
+  .panelMemories .memoryConstellationStar:hover,
+  .panelMemories .memoryFullProseDeleteButton:hover,
+  .panelMemories .memoryFullProseDeleteButton:focus-visible,
+  .panelMemories .memoryFullProseDeleteButton:active {
+    transform: none !important;
   }
 }
