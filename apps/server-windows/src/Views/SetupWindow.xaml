@@ -24,7 +24,9 @@
                     <TextBlock Text="{Binding DependencyStatus.LocalAI.Ollama.Detail}" TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,8" />
                     <TextBlock Text="{Binding DependencyStatus.LocalAI.DefaultModel.Name}" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding DependencyStatus.LocalAI.DefaultModel.Detail}" TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,8" />
-                    <Button Content="Download Default Model" Command="{Binding DownloadDefaultModelCommand}" HorizontalAlignment="Left" />
+                    <TextBlock Text="{Binding DependencyStatus.LocalAI.EmbeddingModel.Name}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding DependencyStatus.LocalAI.EmbeddingModel.Detail}" TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,8" />
+                    <Button Content="{Binding RequiredModelDownloadLabel, StringFormat=Download {0}}" Command="{Binding DownloadDefaultModelCommand}" HorizontalAlignment="Left" />
                 </StackPanel>
             </Border>
 
@@ -43,6 +45,7 @@
                         <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Text="Server name" Margin="0,4,8,8" />
@@ -57,17 +60,21 @@
                     <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding OllamaHost, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
                     <TextBlock Grid.Row="5" Text="Ollama model" Margin="0,4,8,8" />
                     <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding OllamaModel, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
-                    <TextBlock Grid.Row="6" Text="Qdrant URL" Margin="0,4,8,8" />
-                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding QdrantUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
-                    <TextBlock Grid.Row="7" Text="Encryption key" Margin="0,4,8,8" />
-                    <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding EncryptionMasterKey, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
-                    <TextBlock Grid.Row="8" Text="Session cookie" Margin="0,4,8,8" />
-                    <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding SessionCookieName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
-                    <TextBlock Grid.Row="9" Text="Session TTL hours" Margin="0,4,8,8" />
-                    <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding SessionTtlHours, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
-                    <TextBlock Grid.Row="10" Text="OpenAI API key" Margin="0,4,8,8" />
-                    <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding OpenAiApiKey, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
-                    <StackPanel Grid.Row="11" Grid.Column="1" Orientation="Horizontal">
+                    <TextBlock Grid.Row="6" Text="Auxiliary model" Margin="0,4,8,8" />
+                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding OllamaAuxiliaryModel, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
+                    <TextBlock Grid.Row="7" Text="Embedding model" Margin="0,4,8,8" />
+                    <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding OllamaEmbeddingModel, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
+                    <TextBlock Grid.Row="8" Text="Qdrant URL" Margin="0,4,8,8" />
+                    <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding QdrantUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
+                    <TextBlock Grid.Row="9" Text="Encryption key" Margin="0,4,8,8" />
+                    <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding EncryptionMasterKey, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
+                    <TextBlock Grid.Row="10" Text="Session cookie" Margin="0,4,8,8" />
+                    <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding SessionCookieName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
+                    <TextBlock Grid.Row="11" Text="Session TTL hours" Margin="0,4,8,8" />
+                    <TextBox Grid.Row="11" Grid.Column="1" Text="{Binding SessionTtlHours, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
+                    <TextBlock Grid.Row="12" Text="OpenAI API key" Margin="0,4,8,8" />
+                    <TextBox Grid.Row="12" Grid.Column="1" Text="{Binding OpenAiApiKey, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
+                    <StackPanel Grid.Row="13" Grid.Column="1" Orientation="Horizontal">
                         <Button Content="Save" Command="{Binding SaveConfigCommand}" Margin="0,0,8,0" />
                         <Button Content="Save and refresh" Command="{Binding SaveAndRefreshCommand}" />
                     </StackPanel>

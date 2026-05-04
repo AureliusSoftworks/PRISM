@@ -4,7 +4,10 @@ public sealed record PillarStatus(string Name, bool IsReady, string Detail);
 
 public sealed record ModelSubstatus(string Name, bool IsReady, string Detail);
 
-public sealed record LocalAIPillarStatus(PillarStatus Ollama, ModelSubstatus DefaultModel);
+public sealed record LocalAIPillarStatus(PillarStatus Ollama, ModelSubstatus DefaultModel, ModelSubstatus EmbeddingModel)
+{
+    public bool IsReady => Ollama.IsReady && DefaultModel.IsReady && EmbeddingModel.IsReady;
+}
 
 public sealed record DependencyStatus(
     PillarStatus ServerRuntime,
@@ -16,10 +19,11 @@ public sealed record DependencyStatus(
         new PillarStatus("Memory Engine", false, "Not checked yet."),
         new LocalAIPillarStatus(
             new PillarStatus("Local AI Engine", false, "Not checked yet."),
-            new ModelSubstatus("Default model", false, "Not checked yet.")));
+            new ModelSubstatus("Default model", false, "Not checked yet."),
+            new ModelSubstatus("Embedding model", false, "Not checked yet.")));
 
     /// <summary>
-    /// Ollama is not a hard gate for running the local Node services; the Memory Engine is.
+    /// Prism's app plumbing requires the local chat and embedding models to be present.
     /// </summary>
-    public bool CanStartNodeRuntime => MemoryEngine.IsReady;
+    public bool CanStartNodeRuntime => MemoryEngine.IsReady && LocalAI.IsReady;
 }

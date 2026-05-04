@@ -64,7 +64,7 @@ public sealed class DependencyService
     {
         var onPath = _commandLocator.FindExecutable("ollama.exe") is not null || _commandLocator.FindExecutable("ollama") is not null;
         var model = config.OllamaModel.Trim();
-        var modelOk = ModelPresent(tags, model);
+        var embeddingModel = config.OllamaEmbeddingModel.Trim();
 
         var ollamaDetail = ollamaReachable
             ? $"Ollama is responding at {ollamaHost}."
@@ -72,10 +72,19 @@ public sealed class DependencyService
                 ? "Ollama is installed but not reachable. Start it, then refresh."
                 : "Ollama is not installed or not on PATH. Install it when you are ready to use local models.";
 
+        return new LocalAIPillarStatus(
+            new PillarStatus("Local AI Engine", ollamaReachable, ollamaDetail),
+            ModelSubstatusFor("Default model", model, tags, ollamaReachable),
+            ModelSubstatusFor("Embedding model", embeddingModel, tags, ollamaReachable));
+    }
+
+    private static ModelSubstatus ModelSubstatusFor(string label, string model, IReadOnlyCollection<string> tags, bool ollamaReachable)
+    {
+        var modelOk = ModelPresent(tags, model);
         string modelDetail;
         if (model.Length == 0)
         {
-            modelDetail = "No default model is configured.";
+            modelDetail = $"No {label.ToLowerInvariant()} is configured.";
         }
         else if (!ollamaReachable)
         {
@@ -87,12 +96,13 @@ public sealed class DependencyService
         }
         else
         {
-            modelDetail = $"Pull \"{model}\" in Ollama when you are ready, or change the default model in Advanced.";
+            modelDetail = $"Pull \"{model}\" in Ollama to finish Prism setup.";
         }
 
-        return new LocalAIPillarStatus(
-            new PillarStatus("Local AI Engine", ollamaReachable, ollamaDetail),
-            new ModelSubstatus($"Default model ({(model.Length == 0 ? "-" : model)})", modelOk && ollamaReachable, modelDetail));
+        return new ModelSubstatus(
+            $"{label} ({(model.Length == 0 ? "-" : model)})",
+            modelOk && ollamaReachable,
+            modelDetail);
     }
 
     private static bool ModelPresent(IEnumerable<string> tagNames, string configured)

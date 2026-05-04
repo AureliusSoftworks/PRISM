@@ -13,8 +13,16 @@ struct ServerConfig: Equatable {
     var encryptionMasterKey: String
     var ollamaHost: String
     var ollamaModel: String
+    var ollamaAuxiliaryModel: String
+    var ollamaEmbeddingModel: String
     var qdrantURL: String
     var openAIAPIKey: String
+
+    static let requiredLocalModels = RequiredLocalModels(
+        chat: "llama3.2",
+        auxiliary: "llama3.2",
+        embedding: "nomic-embed-text"
+    )
 
     static let defaults = ServerConfig(
         serverName: "Prism Server",
@@ -26,6 +34,8 @@ struct ServerConfig: Equatable {
         encryptionMasterKey: "change-me-to-a-long-random-secret",
         ollamaHost: "http://localhost:11434",
         ollamaModel: "llama3.2",
+        ollamaAuxiliaryModel: "llama3.2",
+        ollamaEmbeddingModel: "nomic-embed-text",
         qdrantURL: "http://127.0.0.1:6333",
         openAIAPIKey: ""
     )
@@ -43,6 +53,8 @@ struct ServerConfig: Equatable {
             "ENCRYPTION_MASTER_KEY": encryptionMasterKey,
             "OLLAMA_HOST": ollamaHost,
             "OLLAMA_MODEL": ollamaModel,
+            "OLLAMA_AUXILIARY_MODEL": ollamaAuxiliaryModel,
+            "OLLAMA_EMBEDDING_MODEL": ollamaEmbeddingModel,
             "QDRANT_URL": qdrantURL,
             "LOCALAI_DATA_DIR": applicationSupportDirectory.appendingPathComponent("Data").path,
             "NEXT_TELEMETRY_DISABLED": "1",
@@ -54,5 +66,19 @@ struct ServerConfig: Equatable {
         }
 
         return env
+    }
+}
+
+struct RequiredLocalModels: Equatable {
+    let chat: String
+    let auxiliary: String
+    let embedding: String
+
+    var uniqueInstallOrder: [String] {
+        var seen = Set<String>()
+        return [chat, auxiliary, embedding]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
     }
 }

@@ -41,6 +41,8 @@ final class ConfigStore {
         config.encryptionMasterKey = env["ENCRYPTION_MASTER_KEY"] ?? config.encryptionMasterKey
         config.ollamaHost = env["OLLAMA_HOST"] ?? config.ollamaHost
         config.ollamaModel = env["OLLAMA_MODEL"] ?? config.ollamaModel
+        config.ollamaAuxiliaryModel = env["OLLAMA_AUXILIARY_MODEL"] ?? config.ollamaAuxiliaryModel
+        config.ollamaEmbeddingModel = env["OLLAMA_EMBEDDING_MODEL"] ?? config.ollamaEmbeddingModel
         config.qdrantURL = env["QDRANT_URL"] ?? config.qdrantURL
         config.openAIAPIKey = env["OPENAI_API_KEY"] ?? config.openAIAPIKey
         return config
@@ -60,6 +62,8 @@ final class ConfigStore {
         ENCRYPTION_MASTER_KEY=\(config.encryptionMasterKey)
         OLLAMA_HOST=\(config.ollamaHost)
         OLLAMA_MODEL=\(config.ollamaModel)
+        OLLAMA_AUXILIARY_MODEL=\(config.ollamaAuxiliaryModel)
+        OLLAMA_EMBEDDING_MODEL=\(config.ollamaEmbeddingModel)
         QDRANT_URL=\(config.qdrantURL)
         OPENAI_API_KEY=\(config.openAIAPIKey)
         NEXT_TELEMETRY_DISABLED=1

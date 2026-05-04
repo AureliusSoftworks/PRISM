@@ -22,6 +22,8 @@ public sealed class ServerConfigTests
         Assert.Equal("0.0.0.0", env["HOSTNAME"]);
         Assert.Equal("http://127.0.0.1:18787", env["LOCALAI_API_ORIGIN"]);
         Assert.Equal("Office Prism", env["PRISM_SERVER_NAME"]);
+        Assert.Equal("llama3.2", env["OLLAMA_AUXILIARY_MODEL"]);
+        Assert.Equal("nomic-embed-text", env["OLLAMA_EMBEDDING_MODEL"]);
         Assert.Equal("C:\\Users\\Jared\\AppData\\Local\\Prism" + Path.DirectorySeparatorChar + "Data", env["LOCALAI_DATA_DIR"]);
         Assert.Equal("sk-test", env["OPENAI_API_KEY"]);
     }

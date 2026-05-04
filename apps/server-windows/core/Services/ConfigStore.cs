@@ -38,6 +38,8 @@ public sealed class ConfigStore
             EncryptionMasterKey = ReadString(env, "ENCRYPTION_MASTER_KEY", defaults.EncryptionMasterKey),
             OllamaHost = ReadString(env, "OLLAMA_HOST", defaults.OllamaHost),
             OllamaModel = ReadString(env, "OLLAMA_MODEL", defaults.OllamaModel),
+            OllamaAuxiliaryModel = ReadString(env, "OLLAMA_AUXILIARY_MODEL", defaults.OllamaAuxiliaryModel),
+            OllamaEmbeddingModel = ReadString(env, "OLLAMA_EMBEDDING_MODEL", defaults.OllamaEmbeddingModel),
             QdrantUrl = ReadString(env, "QDRANT_URL", defaults.QdrantUrl),
             OpenAiApiKey = ReadString(env, "OPENAI_API_KEY", defaults.OpenAiApiKey)
         };
@@ -70,6 +72,8 @@ public sealed class ConfigStore
             $"ENCRYPTION_MASTER_KEY={config.EncryptionMasterKey}",
             $"OLLAMA_HOST={config.OllamaHost}",
             $"OLLAMA_MODEL={config.OllamaModel}",
+            $"OLLAMA_AUXILIARY_MODEL={config.OllamaAuxiliaryModel}",
+            $"OLLAMA_EMBEDDING_MODEL={config.OllamaEmbeddingModel}",
             $"QDRANT_URL={config.QdrantUrl}",
             $"OPENAI_API_KEY={config.OpenAiApiKey}",
             "NEXT_TELEMETRY_DISABLED=1"

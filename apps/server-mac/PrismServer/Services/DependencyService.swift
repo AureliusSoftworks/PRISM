@@ -75,7 +75,7 @@ final class DependencyService {
     ) -> LocalAIPillarStatus {
         let onPath = isCommandAvailable("ollama")
         let model = config.ollamaModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let modelOk = modelPresent(in: tags, configured: model)
+        let embeddingModel = config.ollamaEmbeddingModel.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let ollamaDetail: String
         if ollamaReachable {
@@ -86,28 +86,48 @@ final class DependencyService {
             ollamaDetail = "Ollama is not installed or not on PATH. Install it when you are ready to use local models."
         }
 
-        let modelDetail: String
-        if model.isEmpty {
-            modelDetail = "No default model is configured."
-        } else if !ollamaReachable {
-            modelDetail = "Can’t verify “\(model)” until Ollama is running."
-        } else if modelOk {
-            modelDetail = "The model “\(model)” is available in Ollama."
-        } else {
-            modelDetail = "Pull “\(model)” in Ollama when you are ready, or change the default model in Advanced."
-        }
-
         return LocalAIPillarStatus(
             ollama: PillarStatus(
                 name: "Local AI Engine",
                 isReady: ollamaReachable,
                 detail: ollamaDetail
             ),
-            defaultModel: ModelSubstatus(
-                name: "Default model (\(model.isEmpty ? "—" : model))",
-                isReady: modelOk && ollamaReachable,
-                detail: modelDetail
+            defaultModel: modelSubstatus(
+                label: "Default model",
+                model: model,
+                tags: tags,
+                ollamaReachable: ollamaReachable
+            ),
+            embeddingModel: modelSubstatus(
+                label: "Embedding model",
+                model: embeddingModel,
+                tags: tags,
+                ollamaReachable: ollamaReachable
             )
+        )
+    }
+
+    private func modelSubstatus(
+        label: String,
+        model: String,
+        tags: [String],
+        ollamaReachable: Bool
+    ) -> ModelSubstatus {
+        let modelOk = modelPresent(in: tags, configured: model)
+        let detail: String
+        if model.isEmpty {
+            detail = "No \(label.lowercased()) is configured."
+        } else if !ollamaReachable {
+            detail = "Can’t verify “\(model)” until Ollama is running."
+        } else if modelOk {
+            detail = "The model “\(model)” is available in Ollama."
+        } else {
+            detail = "Pull “\(model)” in Ollama to finish Prism setup."
+        }
+        return ModelSubstatus(
+            name: "\(label) (\(model.isEmpty ? "—" : model))",
+            isReady: modelOk && ollamaReachable,
+            detail: detail
         )
     }
 

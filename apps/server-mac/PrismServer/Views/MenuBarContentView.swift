@@ -70,20 +70,29 @@ struct MenuBarContentView: View {
             ReadinessPillarView(status: model.dependencyStatus.serverRuntime)
             ReadinessPillarView(status: model.dependencyStatus.memoryEngine)
             ReadinessPillarView(status: model.dependencyStatus.localAI.ollama)
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: model.dependencyStatus.localAI.defaultModel.isReady ? "checkmark.circle" : "exclamationmark.triangle")
-                    .foregroundStyle(model.dependencyStatus.localAI.defaultModel.isReady ? .green : .orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.dependencyStatus.localAI.defaultModel.name)
-                        .font(.subheadline)
-                    Text(model.dependencyStatus.localAI.defaultModel.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            ModelSubstatusView(status: model.dependencyStatus.localAI.defaultModel)
+            ModelSubstatusView(status: model.dependencyStatus.localAI.embeddingModel)
 
             Button("Refresh") {
                 Task { await model.refreshDependencies() }
+            }
+        }
+    }
+}
+
+private struct ModelSubstatusView: View {
+    let status: ModelSubstatus
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: status.isReady ? "checkmark.circle" : "exclamationmark.triangle")
+                .foregroundStyle(status.isReady ? .green : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(status.name)
+                    .font(.subheadline)
+                Text(status.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

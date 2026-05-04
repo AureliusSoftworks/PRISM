@@ -45,6 +45,8 @@ public sealed class ConfigStoreTests
 
         var raw = File.ReadAllText(paths.EnvFilePath);
         Assert.Contains("PRISM_SERVER_NAME=Kitchen Prism", raw);
+        Assert.Contains("OLLAMA_AUXILIARY_MODEL=llama3.2", raw);
+        Assert.Contains("OLLAMA_EMBEDDING_MODEL=nomic-embed-text", raw);
         Assert.Contains("OPENAI_API_KEY=sk-test", raw);
     }
 

@@ -43,19 +43,10 @@ struct SetupWindowView: View {
                         .disabled(model.isStartingMemoryEngine)
                     }
                     ReadinessPillarView(status: model.dependencyStatus.localAI.ollama)
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: model.dependencyStatus.localAI.defaultModel.isReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundStyle(model.dependencyStatus.localAI.defaultModel.isReady ? .green : .orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(model.dependencyStatus.localAI.defaultModel.name)
-                                .font(.subheadline.weight(.medium))
-                            Text(model.dependencyStatus.localAI.defaultModel.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    ModelSubstatusView(status: model.dependencyStatus.localAI.defaultModel)
+                    ModelSubstatusView(status: model.dependencyStatus.localAI.embeddingModel)
                     if model.canDownloadDefaultModel {
-                        Button(model.isDownloadingModel ? "Downloading Model…" : "Download \(model.config.ollamaModel)") {
+                        Button(model.isDownloadingModel ? "Downloading Models…" : "Download \(model.requiredModelDownloadLabel)") {
                             model.downloadDefaultModelTapped()
                         }
                         .disabled(model.isDownloadingModel)
@@ -88,6 +79,8 @@ struct SetupWindowView: View {
                         Section("AI runtime") {
                             TextField("Ollama host", text: $model.config.ollamaHost)
                             TextField("Ollama model", text: $model.config.ollamaModel)
+                            TextField("Auxiliary model", text: $model.config.ollamaAuxiliaryModel)
+                            TextField("Embedding model", text: $model.config.ollamaEmbeddingModel)
                             TextField("Qdrant URL", text: $model.config.qdrantURL)
                             Text("If this URL points at a running Qdrant, Prism will use it and will not start a sidecar.")
                                 .font(.caption)
@@ -192,6 +185,24 @@ private struct ReadinessPillarView: View {
             Text(status.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct ModelSubstatusView: View {
+    let status: ModelSubstatus
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: status.isReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(status.isReady ? .green : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(status.name)
+                    .font(.subheadline.weight(.medium))
+                Text(status.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

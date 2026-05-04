@@ -14,10 +14,13 @@ public sealed record ServerConfig
     public string EncryptionMasterKey { get; init; } = "change-me-to-a-long-random-secret";
     public string OllamaHost { get; init; } = "http://localhost:11434";
     public string OllamaModel { get; init; } = "llama3.2";
+    public string OllamaAuxiliaryModel { get; init; } = "llama3.2";
+    public string OllamaEmbeddingModel { get; init; } = "nomic-embed-text";
     public string QdrantUrl { get; init; } = "http://127.0.0.1:6333";
     public string OpenAiApiKey { get; init; } = string.Empty;
 
     public static ServerConfig Defaults { get; } = new();
+    public static RequiredLocalModels RequiredLocalModels { get; } = new("llama3.2", "llama3.2", "nomic-embed-text");
 
     public Dictionary<string, string> BuildEnvironment(string applicationSupportDirectory)
     {
@@ -36,6 +39,8 @@ public sealed record ServerConfig
             ["ENCRYPTION_MASTER_KEY"] = EncryptionMasterKey,
             ["OLLAMA_HOST"] = OllamaHost,
             ["OLLAMA_MODEL"] = OllamaModel,
+            ["OLLAMA_AUXILIARY_MODEL"] = OllamaAuxiliaryModel,
+            ["OLLAMA_EMBEDDING_MODEL"] = OllamaEmbeddingModel,
             ["QDRANT_URL"] = QdrantUrl,
             ["LOCALAI_DATA_DIR"] = dataDirectory,
             ["NEXT_TELEMETRY_DISABLED"] = "1",
@@ -49,4 +54,14 @@ public sealed record ServerConfig
 
         return env;
     }
+}
+
+public sealed record RequiredLocalModels(string Chat, string Auxiliary, string Embedding)
+{
+    public IReadOnlyList<string> UniqueInstallOrder =>
+        new[] { Chat, Auxiliary, Embedding }
+            .Select(model => model.Trim())
+            .Where(model => model.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 }

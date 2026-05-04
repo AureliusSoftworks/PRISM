@@ -109,9 +109,32 @@ final class AppModel: ObservableObject {
 
     var canDownloadDefaultModel: Bool {
         dependencyStatus.localAI.ollama.isReady
-            && !dependencyStatus.localAI.defaultModel.isReady
-            && !config.ollamaModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !missingRequiredModelNames.isEmpty
             && !isDownloadingModel
+    }
+
+    var requiredModelDownloadLabel: String {
+        let missing = missingRequiredModelNames
+        guard !missing.isEmpty else { return "Required Models" }
+        if missing.count == 1 {
+            return missing[0]
+        }
+        return "\(missing.count) Required Models"
+    }
+
+    private var missingRequiredModelNames: [String] {
+        var models: [String] = []
+        if !dependencyStatus.localAI.defaultModel.isReady {
+            models.append(config.ollamaModel)
+        }
+        if !dependencyStatus.localAI.embeddingModel.isReady {
+            models.append(config.ollamaEmbeddingModel)
+        }
+        var seen = Set<String>()
+        return models
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
     }
 
     /// Auto-start on launch when the Memory Engine is already satisfied; otherwise stay stopped without surfacing a failure.
@@ -150,7 +173,7 @@ final class AppModel: ObservableObject {
             dependencyStatus = await dependencyService.check(config: config, resolution: resolution)
 
             guard dependencyStatus.canStartNodeRuntime else {
-                runtimeState = .failed("The Memory Engine (Qdrant) is not ready yet.")
+                runtimeState = .failed("The Memory Engine and required local models must be ready before Prism can run.")
                 return
             }
 
@@ -184,14 +207,22 @@ final class AppModel: ObservableObject {
 
     func downloadDefaultModelTapped() {
         guard !isDownloadingModel else { return }
-        let model = config.ollamaModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let models = missingRequiredModelNames
+        guard !models.isEmpty else { return }
         isDownloadingModel = true
-        setupMessage = "Downloading \(model)…"
+        setupMessage = models.count == 1
+            ? "Downloading \(models[0])…"
+            : "Downloading \(models.count) required models…"
         Task {
             defer { isDownloadingModel = false }
             do {
-                try await ollamaModelInstaller.pull(model: model)
-                setupMessage = "\(model) is ready."
+                for model in models {
+                    setupMessage = "Downloading \(model)…"
+                    try await ollamaModelInstaller.pull(model: model)
+                }
+                setupMessage = models.count == 1
+                    ? "\(models[0]) is ready."
+                    : "Required models are ready."
                 await refreshDependencies()
             } catch {
                 runtimeState = .failed(error.localizedDescription)

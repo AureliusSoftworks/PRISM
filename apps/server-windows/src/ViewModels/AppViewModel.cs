@@ -143,6 +143,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             if (SetField(ref _isDownloadingModel, value))
             {
                 OnPropertyChanged(nameof(CanDownloadDefaultModel));
+                OnPropertyChanged(nameof(RequiredModelDownloadLabel));
                 RaiseCommandStates();
             }
         }
@@ -215,6 +216,18 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         set => UpdateConfig(_config with { OllamaModel = value });
     }
 
+    public string OllamaAuxiliaryModel
+    {
+        get => _config.OllamaAuxiliaryModel;
+        set => UpdateConfig(_config with { OllamaAuxiliaryModel = value });
+    }
+
+    public string OllamaEmbeddingModel
+    {
+        get => _config.OllamaEmbeddingModel;
+        set => UpdateConfig(_config with { OllamaEmbeddingModel = value });
+    }
+
     public string QdrantUrl
     {
         get => _config.QdrantUrl;
@@ -252,9 +265,43 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
 
     public bool CanDownloadDefaultModel =>
         DependencyStatus.LocalAI.Ollama.IsReady &&
-        !DependencyStatus.LocalAI.DefaultModel.IsReady &&
-        !string.IsNullOrWhiteSpace(OllamaModel) &&
+        MissingRequiredModelNames.Count > 0 &&
         !IsDownloadingModel;
+
+    public string RequiredModelDownloadLabel
+    {
+        get
+        {
+            var missing = MissingRequiredModelNames;
+            return missing.Count switch
+            {
+                0 => "Required Models",
+                1 => missing[0],
+                _ => $"{missing.Count} Required Models"
+            };
+        }
+    }
+
+    private IReadOnlyList<string> MissingRequiredModelNames
+    {
+        get
+        {
+            var models = new List<string>();
+            if (!DependencyStatus.LocalAI.DefaultModel.IsReady)
+            {
+                models.Add(OllamaModel);
+            }
+            if (!DependencyStatus.LocalAI.EmbeddingModel.IsReady)
+            {
+                models.Add(OllamaEmbeddingModel);
+            }
+            return models
+                .Select(model => model.Trim())
+                .Where(model => model.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+        }
+    }
 
     public string OwnershipFootnote => _qdrantResolution?.Ownership switch
     {
@@ -278,6 +325,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         DependencyStatus = await _dependencyService.CheckAsync(_config, resolution).ConfigureAwait(true);
         OnPropertyChanged(nameof(CanStartManagedMemoryEngine));
         OnPropertyChanged(nameof(CanDownloadDefaultModel));
+        OnPropertyChanged(nameof(RequiredModelDownloadLabel));
         OnPropertyChanged(nameof(OwnershipFootnote));
         RaiseCommandStates();
     }
@@ -314,7 +362,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             DependencyStatus = await _dependencyService.CheckAsync(_config, resolution).ConfigureAwait(true);
             if (!DependencyStatus.CanStartNodeRuntime)
             {
-                RuntimeState = RuntimeState.Failed("The Memory Engine (Qdrant) is not ready yet.");
+                RuntimeState = RuntimeState.Failed("The Memory Engine and required local models must be ready before Prism can run.");
                 return;
             }
 
@@ -366,11 +414,25 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         }
 
         IsDownloadingModel = true;
-        SetupMessage = $"Downloading {OllamaModel}...";
+        var models = MissingRequiredModelNames;
+        if (models.Count == 0)
+        {
+            IsDownloadingModel = false;
+            return;
+        }
+        SetupMessage = models.Count == 1
+            ? $"Downloading {models[0]}..."
+            : $"Downloading {models.Count} required models...";
         try
         {
-            await _ollamaModelInstaller.PullAsync(OllamaModel).ConfigureAwait(true);
-            SetupMessage = $"{OllamaModel} is ready.";
+            foreach (var model in models)
+            {
+                SetupMessage = $"Downloading {model}...";
+                await _ollamaModelInstaller.PullAsync(model).ConfigureAwait(true);
+            }
+            SetupMessage = models.Count == 1
+                ? $"{models[0]} is ready."
+                : "Required models are ready.";
             await RefreshDependenciesAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
@@ -450,6 +512,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         _config = config;
         OnPropertyChanged(propertyName);
         OnPropertyChanged(nameof(CanDownloadDefaultModel));
+        OnPropertyChanged(nameof(RequiredModelDownloadLabel));
         RaiseCommandStates();
     }
 

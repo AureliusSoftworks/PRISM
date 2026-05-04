@@ -26,13 +26,18 @@ struct DependencyStatus: Equatable {
                 name: "Default model",
                 isReady: false,
                 detail: "Not checked yet."
+            ),
+            embeddingModel: ModelSubstatus(
+                name: "Embedding model",
+                isReady: false,
+                detail: "Not checked yet."
             )
         )
     )
 
-    /// Ollama is not a hard gate for running the local Node services; the Memory Engine (Qdrant) is.
+    /// Prism's app plumbing requires the local chat and embedding models to be present.
     var canStartNodeRuntime: Bool {
-        memoryEngine.isReady
+        memoryEngine.isReady && localAI.isReady
     }
 }
 
@@ -50,6 +55,11 @@ struct PillarStatus: Equatable, Identifiable {
 struct LocalAIPillarStatus: Equatable {
     var ollama: PillarStatus
     var defaultModel: ModelSubstatus
+    var embeddingModel: ModelSubstatus
+
+    var isReady: Bool {
+        ollama.isReady && defaultModel.isReady && embeddingModel.isReady
+    }
 }
 
 struct ModelSubstatus: Equatable {
