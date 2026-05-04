@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, encryptJson, randomId } from "./security.ts";
-import { fallbackEmbedding, type LlmProvider } from "./providers.ts";
+import { embedTextLocal, fallbackEmbedding } from "./providers.ts";
 import type { UserMemory } from "@localai/shared";
 import type { MemoryCandidate } from "./memory-extraction.ts";
 import { analyzeMemoryIntent, extractMemoryCandidates } from "./memory-extraction.ts";
@@ -374,14 +374,13 @@ export function deleteMemoryById(
 
 export async function restoreMemory(
   db: DatabaseSync,
-  provider: LlmProvider,
   userId: string,
   userKey: Buffer,
   options: RestoreMemoryOptions
 ): Promise<UserMemory> {
   let embedding: number[];
   try {
-    embedding = await provider.embedText(options.text);
+    embedding = await embedTextLocal(options.text);
   } catch {
     embedding = fallbackEmbedding(options.text);
   }
@@ -499,7 +498,6 @@ function loadSameScopeDirectMemories(
 
 async function resolveMemoryCulmination(
   db: DatabaseSync,
-  provider: LlmProvider,
   userId: string,
   conversationId: string,
   botId: string | null,
@@ -542,7 +540,7 @@ async function resolveMemoryCulmination(
   );
   let compiledEmbedding: number[];
   try {
-    compiledEmbedding = await provider.embedText(compiledText);
+    compiledEmbedding = await embedTextLocal(compiledText);
   } catch {
     compiledEmbedding = fallbackEmbedding(compiledText);
   }
@@ -600,7 +598,6 @@ async function resolveMemoryCulmination(
 
 export async function persistMemoryCandidates(
   db: DatabaseSync,
-  provider: LlmProvider,
   userId: string,
   conversationId: string,
   botId: string | null,
@@ -619,7 +616,7 @@ export async function persistMemoryCandidates(
   for (const candidate of candidates) {
     let embedding: number[];
     try {
-      embedding = await provider.embedText(candidate.text);
+      embedding = await embedTextLocal(candidate.text);
     } catch {
       embedding = fallbackEmbedding(candidate.text);
     }
@@ -658,7 +655,6 @@ export async function persistMemoryCandidates(
 
     const culmination = await resolveMemoryCulmination(
       db,
-      provider,
       userId,
       conversationId,
       botId,
@@ -799,9 +795,9 @@ function lexicalMemoryTargetBoost(cueText: string, memoryText: string): number {
   return (overlap / cueTerms.size) * MEMORY_TARGET_TOKEN_BOOST;
 }
 
-async function embedWithFallback(provider: LlmProvider, text: string): Promise<number[]> {
+async function embedWithFallback(text: string): Promise<number[]> {
   try {
-    return await provider.embedText(text);
+    return await embedTextLocal(text);
   } catch {
     return fallbackEmbedding(text);
   }
@@ -809,7 +805,6 @@ async function embedWithFallback(provider: LlmProvider, text: string): Promise<n
 
 export async function findMemoryByCue(
   db: DatabaseSync,
-  provider: LlmProvider,
   userId: string,
   conversationId: string,
   botId: string | null,
@@ -836,7 +831,7 @@ export async function findMemoryByCue(
       `).all(userId, MEMORY_TARGET_LOOKBACK_LIMIT) as MemoryRow[];
   if (rows.length === 0) return null;
 
-  const cueEmbedding = await embedWithFallback(provider, cueText);
+  const cueEmbedding = await embedWithFallback(cueText);
   const now = Date.now();
   const best = rows
     .map((row) => {
@@ -866,7 +861,6 @@ export async function findMemoryByCue(
 
 export async function retrieveRelevantMemories(
   db: DatabaseSync,
-  provider: LlmProvider,
   userId: string,
   query: string,
   userKey: Buffer,
@@ -887,7 +881,7 @@ export async function retrieveRelevantMemories(
           "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR source = 'compiled') ORDER BY created_at DESC LIMIT 100"
         )
         .all(userId) as MemoryRow[];
-  const queryEmbedding = await embedWithFallback(provider, query);
+  const queryEmbedding = await embedWithFallback(query);
   const scored = rows.map((row) => {
     const memory = decryptMemoryRow(row, userKey);
     return {

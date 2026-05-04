@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomId } from "./security.ts";
-import type { LlmProvider } from "./providers.ts";
+import { embedTextLocal, type LlmProvider } from "./providers.ts";
 import { upsertVector, ensureCollection, searchVectors } from "./qdrant.ts";
 import { persistMemoryCandidates } from "./memory.ts";
 import { validateMemoryCandidates } from "./memory-validation.ts";
@@ -38,7 +38,7 @@ const RECENT_WINDOW_SIZE = 30;
  */
 export async function summarizeAndStoreMemories(
   db: DatabaseSync,
-  provider: LlmProvider,
+  auxiliaryProvider: LlmProvider,
   userId: string,
   conversationId: string,
   userKey?: Buffer
@@ -55,7 +55,7 @@ export async function summarizeAndStoreMemories(
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const summary = await provider.generateResponse([
+  const summary = await auxiliaryProvider.generateResponse([
     { role: "system", content: FACT_EXTRACTION_PROMPT },
     { role: "user", content: thread },
   ]);
@@ -81,7 +81,7 @@ export async function summarizeAndStoreMemories(
       .filter((line) => line.toUpperCase() !== "NONE")
       .slice(0, 3);
     if (compiledFacts.length > 0) {
-      const validation = await validateMemoryCandidates(provider, {
+      const validation = await validateMemoryCandidates(auxiliaryProvider, {
         source: "compiled",
         scope: "global",
         rawContext: thread,
@@ -92,7 +92,6 @@ export async function summarizeAndStoreMemories(
       });
       await persistMemoryCandidates(
         db,
-        provider,
         userId,
         conversationId,
         null,
@@ -108,7 +107,7 @@ export async function summarizeAndStoreMemories(
 
   try {
     await ensureCollection();
-    const embedding = await provider.embedText(summary);
+    const embedding = await embedTextLocal(summary);
     await upsertVector(summaryId, embedding, {
       userId,
       conversationId,
@@ -125,14 +124,13 @@ export async function summarizeAndStoreMemories(
  * from this path because its memory is strictly thread-scoped.
  */
 export async function retrieveMemorySummaries(
-  provider: LlmProvider,
   userId: string,
   query: string,
   limit = 4
 ): Promise<Array<{ id: string; text: string; score: number }>> {
   try {
     await ensureCollection();
-    const queryEmbedding = await provider.embedText(query);
+    const queryEmbedding = await embedTextLocal(query);
     const results = await searchVectors(queryEmbedding, userId, limit);
     return results.map((r) => ({
       id: r.id,
@@ -160,7 +158,7 @@ export async function retrieveMemorySummaries(
  */
 export async function summarizeThreadCompact(
   db: DatabaseSync,
-  provider: LlmProvider,
+  auxiliaryProvider: LlmProvider,
   userId: string,
   conversationId: string
 ): Promise<void> {
@@ -200,7 +198,7 @@ export async function summarizeThreadCompact(
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const compact = await provider.generateResponse([
+  const compact = await auxiliaryProvider.generateResponse([
     { role: "system", content: ROLLING_COMPACT_PROMPT },
     {
       role: "user",

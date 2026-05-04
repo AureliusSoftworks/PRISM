@@ -55,13 +55,11 @@ function inferenceProvider(response: string): LlmProvider {
 
 async function seedDirectMemories(
   db: DatabaseSync,
-  provider: LlmProvider,
   userKey: Buffer,
   texts: string[]
 ): Promise<void> {
   await persistMemoryCandidates(
     db,
-    provider,
     "user-1",
     "conversation-1",
     "bot-1",
@@ -106,7 +104,7 @@ describe("inferAndStoreBotMemories", () => {
         ],
       })
     );
-    await seedDirectMemories(db, provider, userKey, [
+    await seedDirectMemories(db, userKey, [
       "Your favorite instrument has black and white keys.",
       "You like to play the piano.",
     ]);
@@ -150,7 +148,7 @@ describe("inferAndStoreBotMemories", () => {
         ],
       })
     );
-    await seedDirectMemories(db, provider, userKey, [
+    await seedDirectMemories(db, userKey, [
       "Potatoes are your favorite.",
       "Spuds are your favorite.",
     ]);
@@ -192,7 +190,7 @@ describe("inferAndStoreBotMemories", () => {
         ],
       })
     );
-    await seedDirectMemories(db, provider, userKey, [
+    await seedDirectMemories(db, userKey, [
       "Potatoes are your favorite comfort food.",
       "Spuds are your favorite comfort food.",
     ]);
@@ -235,7 +233,7 @@ describe("inferAndStoreBotMemories", () => {
         ],
       })
     );
-    await seedDirectMemories(db, provider, userKey, [
+    await seedDirectMemories(db, userKey, [
       "Potatoes are your favorite.",
       "Spuds are your favorite.",
     ]);
@@ -268,7 +266,7 @@ describe("inferAndStoreBotMemories", () => {
         ],
       })
     );
-    await seedDirectMemories(db, provider, userKey, [
+    await seedDirectMemories(db, userKey, [
       "You dislike overly formal writing.",
       "Write a quick email to your landlord about the sink leak.",
     ]);
@@ -291,7 +289,7 @@ describe("inferAndStoreBotMemories", () => {
     const db = createMemoryInferenceTestDb();
     const userKey = Buffer.alloc(32, 7);
     const provider = inferenceProvider(JSON.stringify({ merges: [] }));
-    await seedDirectMemories(db, provider, userKey, [
+    await seedDirectMemories(db, userKey, [
       "You like cheese.",
       "Your favorite color is blue.",
     ]);
@@ -314,7 +312,7 @@ describe("inferAndStoreBotMemories", () => {
     const db = createMemoryInferenceTestDb();
     const userKey = Buffer.alloc(32, 7);
     const provider = inferenceProvider("Sure, I can merge those memories.");
-    await seedDirectMemories(db, provider, userKey, [
+    await seedDirectMemories(db, userKey, [
       "Your favorite instrument has black and white keys.",
       "You like to play the piano.",
     ]);
@@ -347,7 +345,7 @@ describe("inferAndStoreBotMemories", () => {
         ],
       })
     );
-    await seedDirectMemories(db, provider, userKey, [
+    await seedDirectMemories(db, userKey, [
       "Your favorite instrument has black and white keys.",
       "You like to play the piano.",
     ]);

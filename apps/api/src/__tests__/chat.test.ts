@@ -8,7 +8,7 @@ import {
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates } from "../memory.ts";
-import { fallbackEmbedding, type LlmProvider } from "../providers.ts";
+import { fallbackEmbedding } from "../providers.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -114,18 +114,6 @@ function installChatFetchStub(reply = "Memory-aware reply"): void {
       { status: 200, headers: { "content-type": "application/json" } }
     );
   }) as typeof fetch;
-}
-
-function fallbackProvider(): LlmProvider {
-  return {
-    name: "local",
-    async generateResponse(): Promise<string> {
-      return "";
-    },
-    async embedText(text: string): Promise<number[]> {
-      return fallbackEmbedding(text);
-    },
-  };
 }
 
 describe("conversation title inference helpers", () => {
@@ -680,7 +668,6 @@ describe("processChatMessage conversational memory cues", () => {
     installChatFetchStub();
     await persistMemoryCandidates(
       db,
-      fallbackProvider(),
       "user-1",
       "conversation-1",
       "bot-1",
@@ -719,7 +706,6 @@ describe("processChatMessage conversational memory cues", () => {
     installChatFetchStub();
     await persistMemoryCandidates(
       db,
-      fallbackProvider(),
       "user-1",
       "conversation-1",
       "bot-1",

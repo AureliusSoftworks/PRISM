@@ -84,6 +84,26 @@ export function fallbackEmbedding(text: string): number[] {
   return vector.map((value) => value / magnitude);
 }
 
+export async function embedTextLocal(text: string): Promise<number[]> {
+  try {
+    const response = await fetch(`${config.ollamaHost}/api/embeddings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: config.ollamaEmbeddingModel || "nomic-embed-text",
+        prompt: text
+      })
+    });
+    if (!response.ok) {
+      return fallbackEmbedding(text);
+    }
+    const payload = (await response.json()) as { embedding?: number[] };
+    return payload.embedding ?? fallbackEmbedding(text);
+  } catch {
+    return fallbackEmbedding(text);
+  }
+}
+
 /**
  * Pull the human-readable reason out of a failed OpenAI response.
  *
@@ -445,23 +465,7 @@ export class LocalOllamaProvider implements LlmProvider {
   }
 
   public async embedText(text: string): Promise<number[]> {
-    try {
-      const response = await fetch(`${config.ollamaHost}/api/embeddings`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          model: config.ollamaModel,
-          prompt: text
-        })
-      });
-      if (!response.ok) {
-        return fallbackEmbedding(text);
-      }
-      const payload = (await response.json()) as { embedding?: number[] };
-      return payload.embedding ?? fallbackEmbedding(text);
-    } catch {
-      return fallbackEmbedding(text);
-    }
+    return embedTextLocal(text);
   }
 }
 
@@ -521,31 +525,27 @@ export class OpenAiProvider implements LlmProvider {
   }
 
   public async embedText(text: string): Promise<number[]> {
-    const response = await fetch("https://api.openai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.openAiConfig.apiKey}`
-      },
-      body: JSON.stringify({
-        model: "text-embedding-3-small",
-        input: text
-      })
-    });
-    if (!response.ok) {
-      const detail = await readOpenAiErrorMessage(response);
-      console.error(
-        `[openai] embeddings failed status=${response.status} detail=${
-          detail || "<empty body>"
-        }`
-      );
-      throw new Error(formatOpenAiError("OpenAI embedding failed", response.status, detail));
-    }
-    const payload = (await response.json()) as {
-      data?: Array<{ embedding?: number[] }>;
-    };
-    return payload.data?.[0]?.embedding ?? fallbackEmbedding(text);
+    return embedTextLocal(text);
   }
+}
+
+export function getAuxiliaryProvider(): LlmProvider {
+  const inner = new LocalOllamaProvider();
+  return {
+    name: "local",
+    async generateResponse(
+      messages: ProviderMessage[],
+      options?: GenerateOptions
+    ): Promise<string> {
+      return inner.generateResponse(messages, {
+        ...options,
+        model: config.ollamaAuxiliaryModel || "llama3.2"
+      });
+    },
+    async embedText(text: string): Promise<number[]> {
+      return embedTextLocal(text);
+    }
+  };
 }
 
 /**

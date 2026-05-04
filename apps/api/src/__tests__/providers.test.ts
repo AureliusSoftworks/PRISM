@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildModelCatalog,
   checkLocalModelHostStatus,
+  embedTextLocal,
+  getAuxiliaryProvider,
   LocalOllamaProvider,
   OpenAiProvider,
   readOpenAiErrorMessage,
@@ -273,6 +275,81 @@ describe("LocalOllamaProvider secondary routing", () => {
   });
 });
 
+describe("system-owned local lanes", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("pins auxiliary generation to llama3.2 even when a caller supplies a different model", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ message: { content: "aux ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const provider = getAuxiliaryProvider();
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "title this" }],
+      { model: "gpt-4o", temperature: 0.2, maxTokens: 40 }
+    );
+
+    assert.equal(response, "aux ok");
+    assert.equal(provider.name, "local");
+    assert.equal(requestedBody.model, "llama3.2");
+    assert.deepEqual(requestedBody.options, { temperature: 0.2, num_predict: 40 });
+  });
+
+  it("pins local embeddings to nomic-embed-text", async () => {
+    let requestedUrl = "";
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      requestedUrl = input instanceof Request ? input.url : String(input);
+      const parsedBody = init?.body
+        ? JSON.parse(String(init.body)) as Record<string, unknown>
+        : input instanceof Request
+          ? await input.clone().json() as Record<string, unknown>
+          : {};
+      if (parsedBody.model) {
+        requestedBody = parsedBody;
+      }
+      return new Response(JSON.stringify({ embedding: [0.1, 0.2, 0.3] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const embedding = await embedTextLocal("hello");
+
+    assert.ok(requestedUrl.endsWith("/api/embeddings"));
+    assert.equal(requestedBody.model, "nomic-embed-text");
+    assert.equal(requestedBody.prompt, "hello");
+    assert.deepEqual(embedding, [0.1, 0.2, 0.3]);
+  });
+
+  it("keeps OpenAI embeddings on the local embedding lane", async () => {
+    let requestedUrl = "";
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify({ embedding: [0.4, 0.5] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    const embedding = await provider.embedText("hello");
+
+    assert.ok(requestedUrl.endsWith("/api/embeddings"));
+    assert.ok(!requestedUrl.includes("api.openai.com"));
+    assert.deepEqual(embedding, [0.4, 0.5]);
+  });
+});
+
 describe("checkLocalModelHostStatus", () => {
   const originalFetch = globalThis.fetch;
 
@@ -396,24 +473,4 @@ describe("OpenAiProvider error surfacing", () => {
     );
   });
 
-  it("surfaces the OpenAI error.message when embeddings return a failure", async () => {
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({
-          error: { message: "Incorrect API key provided" },
-        }),
-        { status: 401, headers: { "content-type": "application/json" } }
-      )) as typeof fetch;
-
-    const provider = new OpenAiProvider({ apiKey: "sk-test" });
-    await assert.rejects(
-      () => provider.embedText("hello"),
-      (error: unknown) => {
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /OpenAI embedding failed \(401\)/);
-        assert.match(error.message, /Incorrect API key provided/);
-        return true;
-      }
-    );
-  });
 });

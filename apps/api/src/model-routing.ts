@@ -1,6 +1,12 @@
 import type { ModelCatalog } from "./providers.ts";
 
-export const REQUIRED_PRIMARY_LOCAL_MODEL_ID = "llama3.2";
+export const REQUIRED_LOCAL_MODELS = {
+  chat: "llama3.2",
+  embedding: "nomic-embed-text",
+} as const;
+
+export const REQUIRED_PRIMARY_LOCAL_MODEL_ID = REQUIRED_LOCAL_MODELS.chat;
+const REQUIRED_LOCAL_MODEL_ID_SET = new Set<string>(Object.values(REQUIRED_LOCAL_MODELS));
 
 export type Provider = "local" | "openai";
 
@@ -24,7 +30,7 @@ export function sanitizeHiddenModelIds(ids: string[]): string[] {
       ids
         .map((id) => id.trim())
         .filter(Boolean)
-        .filter((id) => id !== REQUIRED_PRIMARY_LOCAL_MODEL_ID)
+        .filter((id) => !REQUIRED_LOCAL_MODEL_ID_SET.has(id))
     )
   );
 }

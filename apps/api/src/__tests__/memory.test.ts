@@ -1,7 +1,7 @@
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { fallbackEmbedding, type LlmProvider } from "../providers.ts";
+import { fallbackEmbedding } from "../providers.ts";
 import {
   analyzeMemoryIntent,
   createDevSeedMemories,
@@ -40,41 +40,21 @@ function createMemoryTestDb(): DatabaseSync {
   return db;
 }
 
-function stubProvider(): LlmProvider {
-  return {
-    name: "local",
-    async generateResponse(): Promise<string> {
-      return "";
-    },
-    async embedText(): Promise<number[]> {
-      return [1, 0, 0];
-    },
-  };
-}
+const originalFetch = globalThis.fetch;
 
-function throwingEmbedProvider(): LlmProvider {
-  return {
-    name: "local",
-    async generateResponse(): Promise<string> {
-      return "";
-    },
-    async embedText(): Promise<number[]> {
-      throw new Error("embedding model unavailable");
-    },
-  };
-}
+beforeEach(() => {
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as { prompt?: string };
+    return new Response(
+      JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }) as typeof fetch;
+});
 
-function fallbackTextProvider(): LlmProvider {
-  return {
-    name: "local",
-    async generateResponse(): Promise<string> {
-      return "";
-    },
-    async embedText(text: string): Promise<number[]> {
-      return fallbackEmbedding(text);
-    },
-  };
-}
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 function seedMemoryRow(
   db: DatabaseSync,
@@ -220,7 +200,6 @@ describe("persistMemoryCandidates", () => {
 
     await persistMemoryCandidates(
       db,
-      stubProvider(),
       "user-1",
       "conversation-1",
       "bot-1",
@@ -249,7 +228,6 @@ describe("persistMemoryCandidates", () => {
     const db = createMemoryTestDb();
     const [memory] = await persistMemoryCandidates(
       db,
-      stubProvider(),
       "user-1",
       "conversation-1",
       "bot-1",
@@ -268,10 +246,12 @@ describe("persistMemoryCandidates", () => {
 
   it("still stores memories when embedding generation is unavailable", async () => {
     const db = createMemoryTestDb();
+    globalThis.fetch = (async () => {
+      throw new Error("embedding model unavailable");
+    }) as typeof fetch;
 
     await persistMemoryCandidates(
       db,
-      throwingEmbedProvider(),
       "user-1",
       "conversation-1",
       "bot-1",
@@ -289,12 +269,10 @@ describe("persistMemoryCandidates", () => {
 
   it("retrieves global memories plus the active bot and excludes other bots", async () => {
     const db = createMemoryTestDb();
-    const provider = stubProvider();
     const userKey = Buffer.alloc(32, 7);
 
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-global",
       null,
@@ -303,7 +281,6 @@ describe("persistMemoryCandidates", () => {
     );
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-bot-1",
       "bot-1",
@@ -312,7 +289,6 @@ describe("persistMemoryCandidates", () => {
     );
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-bot-2",
       "bot-2",
@@ -322,7 +298,6 @@ describe("persistMemoryCandidates", () => {
 
     const memories = await retrieveRelevantMemories(
       db,
-      provider,
       "user-1",
       "What should you remember?",
       userKey,
@@ -342,12 +317,10 @@ describe("persistMemoryCandidates", () => {
 
   it("lets default retrieval see global and compiled memories but not raw bot memories", async () => {
     const db = createMemoryTestDb();
-    const provider = fallbackTextProvider();
     const userKey = Buffer.alloc(32, 7);
 
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-global",
       null,
@@ -356,7 +329,6 @@ describe("persistMemoryCandidates", () => {
     );
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-bot-direct",
       "bot-1",
@@ -365,7 +337,6 @@ describe("persistMemoryCandidates", () => {
     );
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-bot-compiled",
       "bot-1",
@@ -376,7 +347,6 @@ describe("persistMemoryCandidates", () => {
 
     const memories = await retrieveRelevantMemories(
       db,
-      provider,
       "user-1",
       "gentle quiet controls",
       userKey,
@@ -392,12 +362,10 @@ describe("persistMemoryCandidates", () => {
 
   it("finds the nearest in-scope memory for a retraction cue", async () => {
     const db = createMemoryTestDb();
-    const provider = fallbackTextProvider();
     const userKey = Buffer.alloc(32, 7);
 
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-1",
       "bot-1",
@@ -410,7 +378,6 @@ describe("persistMemoryCandidates", () => {
 
     const memory = await findMemoryByCue(
       db,
-      provider,
       "user-1",
       "conversation-1",
       "bot-1",
@@ -423,12 +390,10 @@ describe("persistMemoryCandidates", () => {
 
   it("creates a compiled memory and deletes aligned specifics at strict threshold", async () => {
     const db = createMemoryTestDb();
-    const provider = stubProvider();
     const userKey = Buffer.alloc(32, 7);
 
     const stored = await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-1",
       "bot-1",
@@ -447,7 +412,6 @@ describe("persistMemoryCandidates", () => {
     const counts = new Map(rows.map((row) => [row.source, row.count]));
     const memories = await retrieveRelevantMemories(
       db,
-      provider,
       "user-1",
       "animation preferences",
       userKey,
@@ -467,12 +431,10 @@ describe("persistMemoryCandidates", () => {
 
   it("deletes direct and compiled memories linked to a source message", async () => {
     const db = createMemoryTestDb();
-    const provider = stubProvider();
     const userKey = Buffer.alloc(32, 7);
 
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-1",
       "bot-1",
@@ -496,12 +458,10 @@ describe("persistMemoryCandidates", () => {
 
   it("culminates first-person preference statements like real chat input", async () => {
     const db = createMemoryTestDb();
-    const provider = stubProvider();
     const userKey = Buffer.alloc(32, 7);
 
     const stored = await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-1",
       "bot-1",
@@ -526,12 +486,10 @@ describe("persistMemoryCandidates", () => {
 
   it("keeps specifics when certainty is below the deletion threshold", async () => {
     const db = createMemoryTestDb();
-    const provider = stubProvider();
     const userKey = Buffer.alloc(32, 7);
 
     const stored = await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-1",
       "bot-1",
@@ -555,12 +513,10 @@ describe("persistMemoryCandidates", () => {
 
   it("does not culminate memories across different bot scopes", async () => {
     const db = createMemoryTestDb();
-    const provider = stubProvider();
     const userKey = Buffer.alloc(32, 7);
 
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-1",
       "bot-1",
@@ -572,7 +528,6 @@ describe("persistMemoryCandidates", () => {
     );
     await persistMemoryCandidates(
       db,
-      provider,
       "user-1",
       "conversation-2",
       "bot-2",

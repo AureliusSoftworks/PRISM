@@ -35,7 +35,7 @@ import {
   parseHiddenBotModelIds,
   resolveNextSettings,
 } from "./settings.ts";
-import { buildModelCatalog, checkLocalModelHostStatus, selectProvider } from "./providers.ts";
+import { buildModelCatalog, checkLocalModelHostStatus, getAuxiliaryProvider } from "./providers.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
@@ -413,6 +413,29 @@ function buildRoutes(): RouteDefinition[] {
         db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
       }
       clearCookie(ctx.res, config.sessionCookieName);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/auth/change-password", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const newPassword = readString(body.newPassword, "newPassword");
+      const creds = db
+        .prepare("SELECT password_hash, password_salt FROM users WHERE id = ?")
+        .get(userId) as { password_hash?: string; password_salt?: string } | undefined;
+      if (!creds?.password_hash || !creds?.password_salt) {
+        throw new Error("Unable to change password for this account.");
+      }
+      if (verifyPassword(newPassword, creds.password_salt, creds.password_hash)) {
+        throw new Error("New password must be different from your current password.");
+      }
+      const salt = randomId(8);
+      const passwordHash = hashPassword(newPassword, salt);
+      db.prepare("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?").run(
+        passwordHash,
+        salt,
+        userId
+      );
+      touchUserActivity(userId);
       json(ctx.res, 200, { ok: true });
     }),
     route("DELETE", "/api/account", async (ctx) => {
@@ -793,15 +816,8 @@ function buildRoutes(): RouteDefinition[] {
           memoryInferenceCheckedAtByScope.get(inferenceScopeKey) !== latestDirectAt;
         if (shouldInfer) {
           try {
-            const user = getUserRow(userId);
-            const openAiApiKey =
-              getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-            const provider = selectProvider(
-              user.preferred_provider,
-              openAiApiKey,
-              user.secondary_ollama_host
-            );
-            await inferAndStoreBotMemories(db, provider, userId, botId, userKey);
+            const auxiliaryProvider = getAuxiliaryProvider();
+            await inferAndStoreBotMemories(db, auxiliaryProvider, userId, botId, userKey);
           } catch (error) {
             console.warn("Memory inference skipped:", error);
           } finally {
@@ -963,11 +979,7 @@ function buildRoutes(): RouteDefinition[] {
       const sourceMessageIds = Array.isArray(body.sourceMessageIds)
         ? body.sourceMessageIds.filter((value): value is string => typeof value === "string")
         : [];
-      const provider = selectProvider(
-        user.preferred_provider,
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey
-      );
-      const memory = await restoreMemory(db, provider, userId, userKey, {
+      const memory = await restoreMemory(db, userId, userKey, {
         text,
         botId,
         conversationId,

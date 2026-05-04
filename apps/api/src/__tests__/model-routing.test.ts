@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  REQUIRED_LOCAL_MODELS,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
   resolveAutoModel,
   sanitizeHiddenModelIds,
@@ -90,10 +91,11 @@ describe("resolveAutoModel", () => {
 });
 
 describe("sanitizeHiddenModelIds", () => {
-  it("never persists the required primary local model as hidden", () => {
+  it("never persists required local models as hidden", () => {
     assert.deepEqual(
       sanitizeHiddenModelIds([
-        REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+        REQUIRED_LOCAL_MODELS.chat,
+        REQUIRED_LOCAL_MODELS.embedding,
         "gpt-4o-mini",
         "gpt-4o-mini",
         "  ",

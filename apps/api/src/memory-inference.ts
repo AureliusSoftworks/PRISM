@@ -311,7 +311,7 @@ function mergePreservesFavoritePayload(
  */
 export async function inferAndStoreBotMemories(
   db: DatabaseSync,
-  provider: LlmProvider,
+  auxiliaryProvider: LlmProvider,
   userId: string,
   botId: string,
   userKey: Buffer
@@ -319,7 +319,7 @@ export async function inferAndStoreBotMemories(
   const candidates = loadDirectMemoryCandidates(db, userId, botId, userKey);
   if (candidates.length < INFERENCE_MIN_PARENT_COUNT) return [];
 
-  const response = await provider.generateResponse([
+  const response = await auxiliaryProvider.generateResponse([
     { role: "system", content: MEMORY_INFERENCE_PROMPT },
     { role: "user", content: buildInferenceRequest(candidates) },
   ]);
@@ -345,7 +345,7 @@ export async function inferAndStoreBotMemories(
     if (!mergePreservesFavoritePayload(inferredText, parents)) continue;
     if (taskMergeWouldDropPreferencePayload(inferredText, parents)) continue;
 
-    const validation = await validateMemoryCandidates(provider, {
+    const validation = await validateMemoryCandidates(auxiliaryProvider, {
       source: "inferred",
       scope: "bot",
       rawContext: `[Parent memories]\n${parents.map((parent) => `- ${parent.text}`).join("\n")}`,
@@ -373,7 +373,7 @@ export async function inferAndStoreBotMemories(
       const parents = merge.parents;
       if (parents.some((parent) => consumedParentIds.has(parent.row.id))) continue;
 
-      const inferred = await restoreMemory(db, provider, userId, userKey, {
+      const inferred = await restoreMemory(db, userId, userKey, {
         conversationId: parents[0]?.row.conversation_id ?? null,
         botId,
         text: merge.text,

@@ -276,7 +276,7 @@ function malformedRejections(candidates: MemoryCandidate[]): RejectedMemoryCandi
  * not silent writes.
  */
 export async function validateMemoryCandidates(
-  provider: LlmProvider,
+  auxiliaryProvider: LlmProvider,
   options: MemoryValidationOptions
 ): Promise<MemoryValidationOutcome> {
   if (options.candidates.length === 0) {
@@ -305,7 +305,7 @@ export async function validateMemoryCandidates(
 
   let parsed: CriticPayload | null = null;
   try {
-    const response = await provider.generateResponse(
+    const response = await auxiliaryProvider.generateResponse(
       buildValidationMessages({
         ...options,
         candidates: candidatesForCritic,

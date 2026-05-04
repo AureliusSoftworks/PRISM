@@ -14,6 +14,7 @@ import {
   type MemoryValidationStatus,
 } from "./memory-validation.ts";
 import {
+  getAuxiliaryProvider,
   selectProvider,
   OPENAI_DEFAULT_MODEL,
   type GenerateOptions,
@@ -345,6 +346,7 @@ function buildStarterPromptInstruction(): string {
     "Deliver a SHORT opening message (a few sentences at most) that sounds unmistakably in-character.",
     "Functionally simple: invite the human in with ONE clear conversational hook—not a roadmap, briefing, or list of topics.",
     "Stay anchored in your persona; avoid generic-chatbot vibes.",
+    "Reply as plain prose only—do not wrap the opening in quotation marks.",
     "Do not mention system prompts, hidden instructions, or that this turn was auto-started.",
   ].join(" ");
 }
@@ -468,9 +470,9 @@ async function retrieveMemoriesWithFallback(
     setTimeout(() => resolve(timeoutSentinel), MEMORY_RETRIEVAL_TIMEOUT_MS);
   });
   const retrieval = Promise.allSettled([
-    retrieveRelevantMemories(db, provider, userId, message, userKey, botId),
+    retrieveRelevantMemories(db, userId, message, userKey, botId),
     includeThreadSummaries
-      ? retrieveMemorySummaries(provider, userId, message)
+      ? retrieveMemorySummaries(userId, message)
       : Promise.resolve([]),
   ]);
 
@@ -550,6 +552,7 @@ export async function processChatMessage(
     settings.openAiApiKey,
     settings.secondaryOllamaHost
   );
+  const auxiliaryProvider = getAuxiliaryProvider();
 
   if (incognitoForTurn) {
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
@@ -613,7 +616,7 @@ export async function processChatMessage(
     let conversationStartersIncognito: string[] | undefined;
     if (isStarterPrompt) {
       const startersInferred = await inferConversationStarters(
-        provider,
+        auxiliaryProvider,
         assistantReply,
         settings.starterPromptLabel,
         settings.botOverrides
@@ -785,7 +788,7 @@ export async function processChatMessage(
     const titleOverrides = settings.botOverrides;
     queueMicrotask(() => {
       void inferConversationTitle(
-        provider,
+        auxiliaryProvider,
         titleUserMessage,
         titleAssistantReply,
         titlePersonaLabel,
@@ -840,7 +843,6 @@ export async function processChatMessage(
     for (const cuePhrase of cuePhrases) {
       const target = await findMemoryByCue(
         db,
-        provider,
         userId,
         activeConversationId,
         activeMemoryBotId,
@@ -874,7 +876,7 @@ export async function processChatMessage(
         memoryIntentScope === "global"
           ? null
           : activeMemoryBotId;
-      const validation = await validateMemoryCandidates(provider, {
+      const validation = await validateMemoryCandidates(auxiliaryProvider, {
         source: "direct",
         scope: memoryIntentScope,
         rawContext: message,
@@ -886,7 +888,6 @@ export async function processChatMessage(
       );
       const storedMemories = await persistMemoryCandidates(
         db,
-        provider,
         userId,
         activeConversationId,
         memoryBotId,
@@ -944,7 +945,7 @@ export async function processChatMessage(
     if (mode === "chat" && settings.autoMemory) {
       summarizeAndStoreMemories(
         db,
-        provider,
+        auxiliaryProvider,
         userId,
         activeConversationId,
         userKey
@@ -955,7 +956,7 @@ export async function processChatMessage(
       // deliberately doesn't touch. Compaction is context plumbing.
       summarizeThreadCompact(
         db,
-        provider,
+        auxiliaryProvider,
         userId,
         activeConversationId
       ).catch(() => {});
@@ -1031,7 +1032,7 @@ export async function processChatMessage(
   let conversationStartersPersisted: string[] | undefined;
   if (isStarterPrompt) {
     const startersPersisted = await inferConversationStarters(
-      provider,
+      auxiliaryProvider,
       assistantReply,
       settings.starterPromptLabel,
       settings.botOverrides
