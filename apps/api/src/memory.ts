@@ -895,3 +895,35 @@ export async function retrieveRelevantMemories(
     .slice(0, limit)
     .map(({ score: _unused, embedding: _embedding, ...memory }) => memory);
 }
+
+export function retrieveRecentMemoriesForStarter(
+  db: DatabaseSync,
+  userId: string,
+  userKey: Buffer,
+  botId?: string | null,
+  limit = 4
+): UserMemory[] {
+  const normalizedBotId = typeof botId === "string" && botId.trim().length > 0
+    ? botId.trim()
+    : null;
+  const rows: MemoryRow[] = normalizedBotId
+    ? db
+        .prepare(
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
+        )
+        .all(userId, normalizedBotId) as MemoryRow[]
+    : db
+        .prepare(
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR source = 'compiled') ORDER BY created_at DESC LIMIT 100"
+        )
+        .all(userId) as MemoryRow[];
+
+  return filterConflictingMemories(
+    rows.map((row) => ({
+      ...decryptMemoryRow(row, userKey),
+      score: 0,
+    }))
+  )
+    .slice(0, limit)
+    .map(({ score: _unused, embedding: _embedding, ...memory }) => memory);
+}

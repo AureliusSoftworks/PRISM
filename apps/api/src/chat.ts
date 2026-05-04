@@ -6,6 +6,7 @@ import {
   deleteMemoryById,
   findMemoryByCue,
   persistMemoryCandidates,
+  retrieveRecentMemoriesForStarter,
   retrieveRelevantMemories,
 } from "./memory.ts";
 import {
@@ -543,10 +544,120 @@ function buildStarterPromptInstruction(): string {
   return [
     "Deliver a SHORT opening message (a few sentences at most) that sounds unmistakably in-character.",
     "Functionally simple: invite the human in with ONE clear conversational hook—not a roadmap, briefing, or list of topics.",
+    "Ask exactly ONE direct question to the user, and end that question with a question mark.",
+    "If memory hints are available, weave ONE specific remembered detail into the question naturally.",
+    "Vary the wording so the opener feels fresh, not canned.",
     "Stay anchored in your persona; avoid generic-chatbot vibes.",
     "Reply as plain prose only—do not wrap the opening in quotation marks.",
     "Do not mention system prompts, hidden instructions, or that this turn was auto-started.",
   ].join(" ");
+}
+
+function normalizeStarterOpeningDisplay(displayContent: string): string {
+  const trimmed = displayContent.trim();
+  if (!trimmed) return displayContent;
+
+  const lines = trimmed.split(/\r?\n/);
+  const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+  let normalized = trimmed;
+  if (nonEmptyLines.length > 0 && nonEmptyLines.every((line) => /^\s*>\s?/.test(line))) {
+    normalized = lines
+      .map((line) => line.replace(/^\s*>\s?/, ""))
+      .join("\n")
+      .trim();
+  }
+
+  const quotePairs: Array<{ open: string; close: string }> = [
+    { open: "\"", close: "\"" },
+    { open: "'", close: "'" },
+    { open: "`", close: "`" },
+    { open: "“", close: "”" },
+    { open: "‘", close: "’" },
+  ];
+  let unwrapped = normalized;
+  for (let i = 0; i < 2; i += 1) {
+    const pair = quotePairs.find(({ open, close }) =>
+      unwrapped.startsWith(open) && unwrapped.endsWith(close)
+    );
+    if (!pair) break;
+    const inner = unwrapped.slice(pair.open.length, unwrapped.length - pair.close.length).trim();
+    if (!inner) break;
+    unwrapped = inner;
+  }
+  return unwrapped;
+}
+
+const STARTER_MEMORY_STOP_WORDS = new Set([
+  "about",
+  "again",
+  "also",
+  "that",
+  "them",
+  "then",
+  "they",
+  "this",
+  "with",
+  "from",
+  "into",
+  "your",
+  "you",
+  "user",
+  "what",
+  "when",
+  "where",
+  "which",
+  "while",
+  "would",
+  "could",
+  "should",
+  "today",
+  "right",
+]);
+
+function toSecondPersonMemoryAnchor(memoryText: string): string {
+  const trimmed = memoryText.trim().replace(/[.!?]+$/, "");
+  if (!trimmed) return "you have something meaningful on your mind";
+  const normalized = trimmed
+    .replace(/^the user\b/i, "you")
+    .replace(/^user\b/i, "you")
+    .replace(/^i\b/i, "you")
+    .replace(/^you consistently\b/i, "you generally")
+    .trim();
+  return normalized.charAt(0).toLowerCase() + normalized.slice(1);
+}
+
+function memoryKeywords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 5 && !STARTER_MEMORY_STOP_WORDS.has(token));
+}
+
+function openingMentionsMemory(opening: string, memoryAnchor: string): boolean {
+  const openingLower = opening.toLowerCase();
+  const keywords = memoryKeywords(memoryAnchor);
+  if (keywords.length === 0) return false;
+  return keywords.some((keyword) => openingLower.includes(keyword));
+}
+
+function enforceStarterOpeningQuestion(
+  displayContent: string,
+  memoryLines: string[]
+): string {
+  const normalized = normalizeStarterOpeningDisplay(displayContent).trim();
+  const pickedMemory = memoryLines[0]?.trim() ?? "";
+  if (pickedMemory) {
+    const memoryAnchor = toSecondPersonMemoryAnchor(pickedMemory);
+    if (!openingMentionsMemory(normalized, memoryAnchor)) {
+      return `Given that ${memoryAnchor}, what feels most important to explore right now?`;
+    }
+  }
+  if (normalized.includes("?")) return normalized;
+  const base = normalized.replace(/[.!]+$/, "").trim();
+  if (!base) return "What feels most important to explore right now?";
+  return `${base}. What feels most important to explore right now?`;
 }
 
 type MessageRow = {
@@ -803,10 +914,13 @@ export async function processChatMessage(
       (forceAskQuestion
         ? buildAskQuestionFallback(parsedAssistant.displayContent, message)
         : undefined);
-    const assistantDisplay = stripAskQuestionDuplicatesFromDisplay(
+    const assistantDisplayRaw = stripAskQuestionDuplicatesFromDisplay(
       parsedAssistant.displayContent,
       askQuestionForTurn
     );
+    const assistantDisplay = isStarterPrompt
+      ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
+      : assistantDisplayRaw;
     const modelUsed =
       settings.botOverrides?.model?.trim() ||
       (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
@@ -923,16 +1037,25 @@ export async function processChatMessage(
   if (retrievalMode === "thread_only") {
     threadSummary = getLatestThreadSummary(db, userId, activeConversationId);
   }
-  if (!incognitoForTurn && !isStarterPrompt) {
-    memoryLines = await retrieveMemoriesWithFallback(
-      db,
-      provider,
-      userId,
-      message,
-      userKey,
-      activeMemoryBotId,
-      retrievalMode === "cross_thread"
-    );
+  if (!incognitoForTurn) {
+    if (isStarterPrompt && retrievalMode === "cross_thread") {
+      memoryLines = retrieveRecentMemoriesForStarter(
+        db,
+        userId,
+        userKey,
+        activeMemoryBotId
+      ).map((memory) => memory.text);
+    } else if (!isStarterPrompt) {
+      memoryLines = await retrieveMemoriesWithFallback(
+        db,
+        provider,
+        userId,
+        message,
+        userKey,
+        activeMemoryBotId,
+        retrievalMode === "cross_thread"
+      );
+    }
   }
 
   const promptMessages = buildPromptMessages({
@@ -962,10 +1085,13 @@ export async function processChatMessage(
     (forceAskQuestion
       ? buildAskQuestionFallback(parsedAssistant.displayContent, message)
       : undefined);
-  const assistantDisplay = stripAskQuestionDuplicatesFromDisplay(
+  const assistantDisplayRaw = stripAskQuestionDuplicatesFromDisplay(
     parsedAssistant.displayContent,
     askQuestionForTurn
   );
+  const assistantDisplay = isStarterPrompt
+    ? enforceStarterOpeningQuestion(assistantDisplayRaw, memoryLines)
+    : assistantDisplayRaw;
   const toolPayloadStored =
     askQuestionForTurn !== undefined
       ? serializeAskQuestionTool(askQuestionForTurn)

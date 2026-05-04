@@ -244,6 +244,171 @@ describe("processChatMessage starter prompts", () => {
     assert.equal(fetchCount, 3);
   });
 
+  it("injects recent memories into starter opener prompts for personalization", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.from("test-key");
+    await persistMemoryCandidates(
+      db,
+      "user-1",
+      "memory-conv-1",
+      null,
+      [{ text: "The user prefers reflective evening check-ins.", confidence: 0.96 }],
+      userKey,
+      { sourceMessageIds: ["memory-source-1"] }
+    );
+
+    type ProviderBodies = Array<{
+      messages?: Array<{ role: string; content: string }>;
+    }>;
+    const bodies: ProviderBodies = [];
+    let providerCallCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        prompt?: string;
+        messages?: Array<{ role: string; content: string }>;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      providerCallCount += 1;
+      if (providerCallCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What would a gentle evening check-in look like for you tonight?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (providerCallCount === 2) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                '{"suggestions":["Keep it reflective","Give me one concrete action","Ask me something playful","Try a different angle"]}',
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: '{"title":"Evening check-in"}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        starterPrompt: true,
+        starterPromptLabel: "Ethan",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const starterBody = bodies[0];
+    assert.match(starterBody?.messages?.[1]?.content ?? "", /Ask exactly ONE direct question/i);
+    const memoryBlock = starterBody?.messages?.find((msg) =>
+      msg.content.startsWith("User memory hints:\n")
+    );
+    assert.ok(memoryBlock);
+    assert.match(memoryBlock?.content ?? "", /reflective evening check-ins/i);
+  });
+
+  it("rewrites generic starter openers into memory-anchored questions", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.from("test-key");
+    await persistMemoryCandidates(
+      db,
+      "user-1",
+      "memory-conv-2",
+      null,
+      [{ text: "The user prefers reflective evening check-ins.", confidence: 0.96 }],
+      userKey,
+      { sourceMessageIds: ["memory-source-2"] }
+    );
+
+    let providerCallCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        prompt?: string;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      providerCallCount += 1;
+      if (providerCallCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What's on your mind today?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (providerCallCount === 2) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                '{"suggestions":["Keep going","Ask a playful one","Give me a concrete step","New angle please"]}',
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: '{"title":"Starter"}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        starterPrompt: true,
+        starterPromptLabel: "Ethan",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.match(
+      result.conversation.messages[0]?.content ?? "",
+      /Given that you prefer reflective evening check-ins, what feels most important to explore right now\?/i
+    );
+  });
+
   it("falls back to local starter chips when inference returns non-json", async () => {
     const db = createChatTestDb();
     let fetchCount = 0;
@@ -286,6 +451,54 @@ describe("processChatMessage starter prompts", () => {
 
     assert.equal(result.conversationStarters?.length, 4);
     assert.match(result.conversationStarters?.[1] ?? "", /Henry/);
+  });
+
+  it("strips quote wrappers from starter opener replies", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                '> "Hello, I\'m glad you\'re here. Can you tell me about the last decision you made when you felt it might have been less than ideal?"',
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["What should I notice about hello?","Ask me a playful question, Ethan.","Give me one concrete next step.","Surprise me with another angle."]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      Buffer.from("test-key"),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Ethan",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(
+      result.conversation.messages[0]?.content,
+      "Hello, I'm glad you're here. Can you tell me about the last decision you made when you felt it might have been less than ideal?"
+    );
   });
 
   it("keeps private chats ephemeral while honoring the selected provider and bot", async () => {
