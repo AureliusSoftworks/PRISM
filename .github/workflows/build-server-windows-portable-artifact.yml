@@ -1,0 +1,87 @@
+name: Build Windows server portable (artifact)
+
+# The Prism Server tray app (WPF/WinForms) must compile on Windows. If you work
+# on macOS, trigger this workflow and download the ZIP artifact — same layout as
+# the portable asset on GitHub Releases, without cutting a release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_label:
+        description: "Version string for the ZIP name (e.g. 0.1.0 or dev-20260503)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-win-portable-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  portable:
+    name: win-x64 publish + runtime + ZIP
+    runs-on: windows-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version_label }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run portable Windows server tests
+        shell: pwsh
+        run: dotnet test apps/server-windows/tests/PrismServer.Tests.csproj -c Release -f net8.0
+
+      - name: Publish Prism Server.exe
+        shell: pwsh
+        run: |
+          dotnet publish apps/server-windows/src/PrismServer.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:Version=${env:RELEASE_VERSION}
+
+      - name: Stage runtime, Node, and Qdrant
+        shell: pwsh
+        run: |
+          pwsh apps/server-windows/scripts/build-runtime.ps1 `
+            -OutputDir "apps/server-windows/src/bin/Release/net8.0-windows/win-x64/publish/runtime" `
+            -VendorNode `
+            -VendorQdrant
+
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          $pub = Resolve-Path "apps/server-windows/src/bin/Release/net8.0-windows/win-x64/publish"
+          New-Item -ItemType Directory -Force -Path "dist-artifact" | Out-Null
+          $zipPath = Join-Path (Resolve-Path "dist-artifact") "Prism-Server-v${env:RELEASE_VERSION}-win-x64-portable.zip"
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Push-Location $pub
+          try {
+            Compress-Archive -Path * -DestinationPath $zipPath -CompressionLevel Optimal
+          } finally {
+            Pop-Location
+          }
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prism-Server-v${{ inputs.version_label }}-win-x64-portable
+          path: dist-artifact/Prism-Server-v${{ inputs.version_label }}-win-x64-portable.zip
+          retention-days: 14

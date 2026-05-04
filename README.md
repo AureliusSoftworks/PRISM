@@ -132,6 +132,8 @@ and pairing-code generation for native clients. It also adds a default-on
 "Start Prism Server when I sign in" installer option and a normal Apps &
 Features uninstaller. See [docs/prism-server-app-windows.md](docs/prism-server-app-windows.md).
 
+**On a Mac:** you cannot compile the WPF app locally; run **Actions → Build Windows server portable (artifact)** (or `scripts/trigger-windows-portable-build.sh`) to get the same portable ZIP the release pipeline uses, then copy it to the PC.
+
 Release builds use `.github/workflows/release-server-windows.yml`
 and upload to the same `server/v<version>` GitHub Release as the Mac DMG.
 The existing `start.bat` remains as a legacy/dev fallback for headless Windows
