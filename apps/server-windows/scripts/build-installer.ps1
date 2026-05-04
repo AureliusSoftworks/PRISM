@@ -18,7 +18,8 @@ if (-not (Test-Path (Join-Path $PayloadDir "Prism Server.exe"))) {
 }
 
 if ([string]::IsNullOrWhiteSpace($InnoCompiler)) {
-    $InnoCompiler = (Get-Command iscc.exe -ErrorAction SilentlyContinue)?.Source
+    $isccCmd = Get-Command iscc.exe -ErrorAction SilentlyContinue
+    if ($null -ne $isccCmd) { $InnoCompiler = $isccCmd.Source }
 }
 if ([string]::IsNullOrWhiteSpace($InnoCompiler) -or -not (Test-Path $InnoCompiler)) {
     $default = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"

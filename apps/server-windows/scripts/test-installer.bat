@@ -39,8 +39,17 @@ echo.
 
 where npm >nul 2>&1 || goto missing_npm
 where dotnet >nul 2>&1 || goto missing_dotnet
-where pwsh >nul 2>&1 || goto missing_pwsh
 
+set "PWSH_EXE="
+where pwsh >nul 2>&1 && set "PWSH_EXE=pwsh"
+if not defined PWSH_EXE where powershell >nul 2>&1 && set "PWSH_EXE=powershell"
+if not defined PWSH_EXE (
+  echo ERROR: PowerShell was not found on PATH ^(tried pwsh, then powershell^).
+  echo Install PowerShell 7 from https://aka.ms/powershell-release-page - or use Windows PowerShell (included with Windows).
+  goto die
+)
+
+echo [using %PWSH_EXE% for packaging scripts]
 echo [1/5] Installing Node dependencies...
 call npm ci
 if errorlevel 1 goto failed
@@ -71,7 +80,7 @@ if /I "%RUN_PUBLISHED%"=="YES" start "" "%PUBLISHED_EXE%"
 
 echo.
 echo [4/5] Staging runtime, Node, and Qdrant...
-pwsh -NoProfile -ExecutionPolicy Bypass -File apps\server-windows\scripts\build-runtime.ps1 ^
+"%PWSH_EXE%" -NoProfile -ExecutionPolicy Bypass -File "apps\server-windows\scripts\build-runtime.ps1" ^
   -OutputDir "%RUNTIME_DIR%" ^
   -VendorNode ^
   -VendorQdrant
@@ -79,7 +88,7 @@ if errorlevel 1 goto failed
 
 echo.
 echo [5/5] Building Inno Setup installer...
-pwsh -NoProfile -ExecutionPolicy Bypass -File apps\server-windows\scripts\build-installer.ps1 -Version %VERSION%
+"%PWSH_EXE%" -NoProfile -ExecutionPolicy Bypass -File "apps\server-windows\scripts\build-installer.ps1" -Version %VERSION%
 if errorlevel 1 goto failed
 
 echo.
@@ -109,10 +118,6 @@ goto failed
 
 :missing_dotnet
 echo ERROR: dotnet was not found. Install the .NET 8 SDK, then rerun this script.
-goto failed
-
-:missing_pwsh
-echo ERROR: pwsh was not found. Install PowerShell 7, then rerun this script.
 goto failed
 
 :failed
