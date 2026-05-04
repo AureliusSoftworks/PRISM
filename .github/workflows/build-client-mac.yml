@@ -10,6 +10,12 @@ on:
         description: "Marketing version label for the artifact name (example: 0.1.0)"
         required: true
         type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Marketing version label for the artifact name (example: 0.1.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read

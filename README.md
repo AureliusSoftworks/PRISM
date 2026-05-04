@@ -13,6 +13,27 @@ Markdown rendering in chat and Markdown conversation export.
 development happens on `dev`. Every release is a merge of `dev` into `main`
 with a matching `CHANGELOG.md` entry and a semver tag.
 
+## Get Prism Server (GitHub Releases)
+
+The **`server/v<version>`** draft or published release lists **primary** server
+artifacts for end users (replace `<version>` with the semver, e.g. `0.1.0`):
+
+| Platform | File on the release |
+|----------|----------------------|
+| macOS | `Prism-Server-v<version>.dmg` |
+| Windows (installer) | `Prism-Server-Setup-v<version>-win-x64.exe` |
+| Windows (portable folder) | `Prism-Server-v<version>-win-x64-portable.zip` |
+| Linux x86_64 | `Prism-Server-v<version>-linux-x64.tar.gz` |
+
+**Developers / audit:** `prism-server-v<version>-bundle.tar.gz` is a **trimmed
+source tree export** (not a turnkey runtime). Use it for inspection, custom
+builds, or advanced Linux-from-source workflows — not as the default Linux
+download (use the Linux row above).
+
+Workflows: draft + bundle asset from **Release Pipeline (dev -> main)**; platform
+builds from **Release Prism Server (all platforms)** (one run) or individual
+`release-server-*.yml` workflows. See [docs/release-process.md](docs/release-process.md).
+
 ### Local `dev` push guardrail (temporary)
 
 To reduce accidental branch damage without paid GitHub branch-protection
@@ -110,6 +131,8 @@ Memory Engine startup, local Ollama/model detection, logs, start/stop/restart,
 and pairing-code generation for native clients. It also adds a default-on
 "Start Prism Server when I sign in" installer option and a normal Apps &
 Features uninstaller. See [docs/prism-server-app-windows.md](docs/prism-server-app-windows.md).
+
+**On a Mac:** you cannot compile the WPF app locally; run **Actions → Build Windows server portable (artifact)** (or `scripts/trigger-windows-portable-build.sh`) to get the same portable ZIP the release pipeline uses, then copy it to the PC.
 
 Release builds use `.github/workflows/release-server-windows.yml`
 and upload to the same `server/v<version>` GitHub Release as the Mac DMG.

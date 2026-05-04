@@ -27,6 +27,13 @@ PHONE_DEVICE_ID="Device UDID" prism phone
 `prism web` is the only command that runs a long-lived dev server rather than
 a build-and-launch — see [Web Dev Server](#web-dev-server) below.
 
+## GitHub Actions release shortcuts (/🏗️)
+
+Shipping **Prism Server** builds to GitHub Releases is documented in
+[release-process.md](release-process.md) (operator checklist, workflow names, and
+artifact filenames). Use that doc as the source of truth after native changes;
+this file focuses on **local** Debug rebuild-and-launch commands.
+
 ## Merge Main + Build Runbook
 
 Use this when local `dev` work has already been committed and tested, and you
@@ -186,7 +193,8 @@ repository root:
 Release installer builds run on `windows-latest` via
 `.github/workflows/release-server-windows.yml`. The workflow publishes the WPF
 tray app, stages the Node/Qdrant runtime, packages it with Inno Setup, and
-uploads `Prism-Server-Setup-v<version>-win-x64.exe` to the server release.
+uploads `Prism-Server-Setup-v<version>-win-x64.exe` and the optional portable
+`Prism-Server-v<version>-win-x64-portable.zip` to the server release.
 
 ## Web Dev Server
 

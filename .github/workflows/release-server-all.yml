@@ -1,4 +1,7 @@
-name: Release Pipeline (dev -> main)
+name: Release Prism Server (all platforms)
+
+# Runs release-main-style draft creation, then Mac DMG + Windows installer (+ portable ZIP)
+# + Linux tarball in parallel. Optional Mac client CI (artifact only).
 
 on:
   workflow_dispatch:
@@ -11,12 +14,17 @@ on:
         description: "Required App Store Connect/TestFlight build reference"
         required: true
         type: string
+      build_mac_client:
+        description: "After server uploads, run Mac client CI (Actions artifact only)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-main-${{ github.ref }}
+  group: release-server-all-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -147,16 +155,17 @@ jobs:
           - Shared version: \`v${RELEASE_VERSION}\`
 
           ### Public server downloads (end users)
-          - **macOS:** \`Prism-Server-v${RELEASE_VERSION}.dmg\` — upload via \`.github/workflows/release-server-mac.yml\` (or run \`release-server-all.yml\`).
-          - **Windows:** \`Prism-Server-Setup-v${RELEASE_VERSION}-win-x64.exe\` — Inno installer.
-          - **Windows (portable):** \`Prism-Server-v${RELEASE_VERSION}-win-x64-portable.zip\` — folder run, no installer.
+          - **macOS:** \`Prism-Server-v${RELEASE_VERSION}.dmg\` — run \`release-server-mac.yml\` or this orchestrator.
+          - **Windows:** \`Prism-Server-Setup-v${RELEASE_VERSION}-win-x64.exe\` — main installer.
+          - **Windows (portable):** \`Prism-Server-v${RELEASE_VERSION}-win-x64-portable.zip\` — extracted folder run (no installer).
           - **Linux x86_64:** \`Prism-Server-v${RELEASE_VERSION}-linux-x64.tar.gz\` — vendored Node + Qdrant + \`start.sh\`.
 
           ### Developer / audit bundle
-          - **Source tree export:** \`prism-server-v${RELEASE_VERSION}-bundle.tar.gz\` — attached by this workflow; for inspection, custom builds, or advanced Linux from source (not the turnkey Linux download).
+          - **Source tree export:** \`prism-server-v${RELEASE_VERSION}-bundle.tar.gz\` — not a turnkey runtime; for inspection, custom builds, or advanced Linux from source.
 
           ### Next steps
-          - Run platform workflows (or \`release-server-all.yml\`) until the assets above are present, then publish manually after the deployment gate is confirmed.
+          - Upload any missing assets via platform workflows or re-run \`release-server-all.yml\`.
+          - Publish manually after deployment gate is confirmed.
           EOF
 
           cat <<EOF > /tmp/client-notes.md
@@ -180,3 +189,36 @@ jobs:
           gh release upload "client/v${RELEASE_VERSION}" \
             "release-artifacts/client/prism-client-v${RELEASE_VERSION}-private-lane.txt" \
             --clobber
+
+  mac-server:
+    name: macOS DMG
+    needs: create-releases
+    uses: ./.github/workflows/release-server-mac.yml
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit
+
+  win-server:
+    name: Windows installer
+    needs: create-releases
+    uses: ./.github/workflows/release-server-windows.yml
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit
+
+  linux-server:
+    name: Linux tarball
+    needs: create-releases
+    uses: ./.github/workflows/release-server-linux.yml
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit
+
+  client-mac:
+    name: Mac client (artifact)
+    needs: [mac-server, win-server, linux-server]
+    if: ${{ inputs.build_mac_client }}
+    uses: ./.github/workflows/build-client-mac.yml
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit

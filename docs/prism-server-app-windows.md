@@ -105,6 +105,27 @@ Uninstall leaves `%LOCALAPPDATA%\Prism\` in place by default so reinstalling pre
 
 Ollama and Ollama models are never removed by Prism Server's uninstaller.
 
+## Build from macOS (or Linux)
+
+The tray app uses **WPF and Windows Forms** (`net8.0-windows`). The .NET SDK on
+macOS **cannot** produce a working `Prism Server.exe` (Windows-only UI stacks).
+To ship a Windows folder you built **from your Mac**, use GitHub Actions:
+
+1. Push your branch to GitHub.
+2. In the repo on GitHub: **Actions** → **Build Windows server portable (artifact)** → **Run workflow** — set **version label** (e.g. `0.1.0` or `dev-20260503`) and your branch.
+3. When the run finishes, open it and download the **artifact** ZIP.
+
+Or from the repo root on your Mac (requires [GitHub CLI](https://cli.github.com/) and `gh auth login`):
+
+```bash
+chmod +x scripts/trigger-windows-portable-build.sh
+./scripts/trigger-windows-portable-build.sh 0.1.0
+```
+
+Optional second argument: git ref to run against (defaults to your current branch).
+
+The ZIP matches the release **portable** layout: extract anywhere on Windows and run **`Prism Server.exe`**. It does not register Start Menu entries or auto-start (use the Inno installer from GitHub Releases for that experience).
+
 ## Local Build
 
 For repeated installer smoke tests on Windows, run the batch wrapper from the repository root:

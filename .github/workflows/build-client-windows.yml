@@ -1,0 +1,43 @@
+name: Build Prism Client Windows (artifact only)
+
+# Placeholder until `apps/client-windows` is scaffolded. Does not upload to
+# GitHub Releases; retail distribution will follow the Windows store path.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Marketing version label for future artifact names (example: 0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-client-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  not-yet-available:
+    name: Windows client project pending
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce main-only client build lane
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Client Windows CI build is allowed only from main."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Explain gap
+        run: |
+          echo "::notice title=Prism Client Windows CI::No apps/client-windows yet — scaffold the WPF/WinUI project first, then replace this job with a real build + actions/upload-artifact."
+          echo "See docs/release-process.md (Native client builds)."
+          if [ -d apps/client-windows ]; then
+            echo "::error::apps/client-windows exists — update this workflow to build it."
+            exit 1
+          fi
