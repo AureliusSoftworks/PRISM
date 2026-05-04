@@ -25,6 +25,7 @@ import styles from "./page.module.css";
 import {
   BOT_VOICE_PRESET_LABELS,
   defaultBotPurpose,
+  parseAssistantPrismTools,
   parseStoredBotPrompt,
   randomBotProfile,
   serializeStoredBotPrompt,
@@ -35,6 +36,11 @@ import {
   type BotVoicePreset,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
+import {
+  looksLikePrismDevComposerCommand,
+  parsePrismDevChatCommand,
+  PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
+} from "./prismDevChatCommands";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
 // Long enough for a deliberate confirmation click, short enough that the armed
@@ -165,6 +171,7 @@ const MESSAGE_COPY_FEEDBACK_MS = 1600;
 const MEMORY_TOAST_DISMISS_MS = 7000;
 const MEMORY_TOAST_REARM_MS = 2500;
 const MEMORY_TOAST_VISIBLE_LIMIT = 3;
+const COMPOSER_HISTORY_LIMIT = 50;
 
 // ── Prism logo letter palette ─────────────────────────────────────────
 // One hex per letter of "prism", mirroring the per-letter stroke colors
@@ -1588,8 +1595,183 @@ interface Message {
   botName?: string;
   botColor?: string;
   botGlyph?: string;
+  /** Present when assistant used Prism AskQuestion (server `tool_payload`). */
+  askQuestion?: {
+    v: 1;
+    name: "AskQuestion";
+    prompt: string;
+    options: Array<{ id: string; label: string }>;
+  };
 }
 
+/** Prefer server `askQuestion`; if missing, re-parse assistant `content` (fenced JSON / older rows). */
+function resolveAssistantAskQuestion(msg: Message): NonNullable<Message["askQuestion"]> | undefined {
+  if (msg.role !== "assistant") return undefined;
+  const direct = msg.askQuestion;
+  if (
+    direct?.name === "AskQuestion" &&
+    Array.isArray(direct.options) &&
+    direct.options.length === 3
+  ) {
+    return direct;
+  }
+  const parsed = parseAssistantPrismTools(msg.content);
+  if (
+    parsed.askQuestion?.name === "AskQuestion" &&
+    parsed.askQuestion.options.length === 3
+  ) {
+    return parsed.askQuestion;
+  }
+  return undefined;
+}
+
+const ASKQUESTION_INTENT_PATTERN =
+  /\b(ask\s+me\s+(?:a|another)\s+question|quiz\s+me|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
+
+function messageRequestedAskQuestion(content: string): boolean {
+  return ASKQUESTION_INTENT_PATTERN.test(content);
+}
+
+function normalizeAskQuestionText(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractDynamicAskQuestion(content: string): NonNullable<Message["askQuestion"]> | undefined {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) return undefined;
+
+  const questionIndex = lines.findIndex((line) => line.includes("?"));
+  if (questionIndex < 0) return undefined;
+  const prompt = normalizeAskQuestionText(lines[questionIndex] ?? "");
+
+  const optionRegex = /^(?:[-*]\s*)?(?:[A-Da-d1-4])[)\].:-]\s*(.+)$/;
+  const options: string[] = [];
+  for (let i = questionIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (line.includes("?") && options.length > 0) break;
+    const match = line.match(optionRegex);
+    if (!match?.[1]) continue;
+    const cleaned = normalizeAskQuestionText(match[1]);
+    if (cleaned.length === 0) continue;
+    options.push(cleaned);
+    if (options.length === 3) break;
+  }
+  if (!prompt || options.length < 3) return undefined;
+
+  return {
+    v: 1,
+    name: "AskQuestion",
+    prompt,
+    options: [
+      { id: "a", label: options[0]! },
+      { id: "b", label: options[1]! },
+      { id: "c", label: options[2]! },
+    ],
+  };
+}
+
+function coerceAskQuestionPromptFromAssistant(content: string): string {
+  const firstLine =
+    content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? "Which option fits best?";
+  let prompt = firstLine
+    .replace(/^[-*]\s+/, "")
+    .replace(/^[>#`]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (prompt.length > 88) {
+    prompt = `${prompt.slice(0, 85).trimEnd()}...`;
+  }
+  if (!prompt) {
+    prompt = "Which option fits best?";
+  } else if (!/[?.!]$/.test(prompt)) {
+    prompt = `${prompt}?`;
+  }
+  return prompt;
+}
+
+function applyExplicitAskQuestionFallback(
+  conversation: ConversationDetail
+): ConversationDetail {
+  const { messages } = conversation;
+  if (!messages || messages.length < 2) return conversation;
+
+  const lastIdx = messages.length - 1;
+  const last = messages[lastIdx];
+  if (!last || last.role !== "assistant") return conversation;
+  if (resolveAssistantAskQuestion(last)) return conversation;
+
+  let previousUser: Message | undefined;
+  for (let i = lastIdx - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      previousUser = messages[i];
+      break;
+    }
+  }
+  if (!previousUser || !messageRequestedAskQuestion(previousUser.content)) {
+    return conversation;
+  }
+
+  const dynamic = extractDynamicAskQuestion(last.content);
+  const patchedLast: Message = {
+    ...last,
+    askQuestion: {
+      v: 1,
+      name: "AskQuestion",
+      prompt:
+        dynamic?.prompt ?? coerceAskQuestionPromptFromAssistant(last.content),
+      options: dynamic?.options ?? [
+        { id: "a", label: "Yes" },
+        { id: "b", label: "Maybe / need context" },
+        { id: "c", label: "No" },
+      ],
+    },
+  };
+  return {
+    ...conversation,
+    messages: [...messages.slice(0, lastIdx), patchedLast],
+  };
+}
+
+/**
+ * Last-assistant AskQuestion that is waiting for the user — no newer user bubble
+ * after it; AskQuestion superseded starter chips via `getComposerChipRail()` until replied.
+ */
+function getConversationPendingAskQuestion(
+  messages: Message[] | undefined
+): NonNullable<Message["askQuestion"]> | undefined {
+  if (!messages || messages.length === 0) return undefined;
+  let lastAssistIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "assistant") {
+      lastAssistIndex = i;
+      break;
+    }
+  }
+  if (lastAssistIndex < 0) return undefined;
+  const lastAssistant = messages[lastAssistIndex]!;
+  const qa = resolveAssistantAskQuestion(lastAssistant);
+  if (!qa || qa.name !== "AskQuestion" || qa.options.length !== 3) return undefined;
+  const afterAssistant = messages.slice(lastAssistIndex + 1);
+  if (afterAssistant.some((m) => m.role === "user")) return undefined;
+  return qa;
+}
+
+function stripEmojiFromAskQuestionLabel(label: string): string {
+  const withoutEmoji = label.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "");
+  return withoutEmoji.replace(/\s+/g, " ").trim();
+}
 type StatusTag = "human" | "local" | "online";
 
 const STATUS_LABEL: Record<StatusTag, string> = {
@@ -6845,6 +7027,8 @@ function GlyphPseudo({ size = 88 }: GlyphProps): React.JSX.Element {
 
 interface MessageBodyProps {
   content: string;
+  /** Assistant bubbles only: strips leaked <<<PRISM_TOOL>>>… blocks from display. */
+  assistantStripPrismToolTail?: boolean;
 }
 
 /** Imperative focus for plain textarea vs TipTap WYSIWYG compose field. */
@@ -6948,10 +7132,14 @@ function useMobileKeyboardInset(active: boolean): number {
   return active ? inset : 0;
 }
 
-function MessageBody({ content }: MessageBodyProps): React.JSX.Element {
+function MessageBody({ content, assistantStripPrismToolTail }: MessageBodyProps): React.JSX.Element {
+  const source =
+    assistantStripPrismToolTail === true
+      ? parseAssistantPrismTools(content).displayContent
+      : content;
   return (
     <div className={styles.markdownBody}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
     </div>
   );
 }
@@ -7673,11 +7861,14 @@ function HomeContent(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [draft, setDraft] = useState("");
+  const [composerHistory, setComposerHistory] = useState<string[]>([]);
+  const composerHistoryIndexRef = useRef<number | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingOriginalText, setEditingOriginalText] = useState("");
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
-  /** Quick-replies after “Talk to me!”; scoped to `conversationId` so thread switches cannot show stale chips. */
+  const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
+  /** Server “Talk to me!” inferred prompts; Prism AskQuestion uses the same rail via getComposerChipRail(). */
   const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
     conversationId: string;
     prompts: string[];
@@ -8516,8 +8707,17 @@ function HomeContent(): React.JSX.Element {
     explicitDefault: boolean;
   }>(() => {
     if (privateChatActive) {
+      if (chatBotOverride !== undefined) {
+        return {
+          botId: chatBotOverride,
+          explicitDefault: chatBotOverride === null,
+        };
+      }
+      if (detail?.id !== undefined && detail.id !== "pending") {
+        return { botId: detail.botId, explicitDefault: false };
+      }
       return {
-        botId: detail?.botId ?? selectedBotId,
+        botId: detail?.botId ?? selectedBotId ?? null,
         explicitDefault: false,
       };
     }
@@ -8536,10 +8736,14 @@ function HomeContent(): React.JSX.Element {
           explicitDefault: chatBotOverride === null,
         };
       }
+      if (detail?.id !== undefined && detail.id !== "pending") {
+        return {
+          botId: detail.lastBotId ?? detail.botId,
+          explicitDefault: false,
+        };
+      }
       return {
-        botId: detail?.lastBotId
-          ?? detail?.botId
-          ?? selectedBotId,
+        botId: detail?.botId ?? selectedBotId ?? null,
         explicitDefault: false,
       };
     }
@@ -8575,7 +8779,11 @@ function HomeContent(): React.JSX.Element {
   }, [activeBot, resolvedTheme]);
 
   const composeBotAccentId = useMemo<string | null>(() => {
-    if (privateChatActive) return detail?.botId ?? selectedBotId;
+    if (privateChatActive) {
+      if (chatBotOverride !== undefined) return chatBotOverride;
+      if (detail?.id !== undefined && detail.id !== "pending") return detail.botId;
+      return detail?.botId ?? selectedBotId ?? null;
+    }
     if (view === "chat") {
       if (chatBotOverride !== undefined) return chatBotOverride;
       if (detail) return detail.botId;
@@ -9279,7 +9487,7 @@ function HomeContent(): React.JSX.Element {
     const d = await api<{ conversation: ConversationDetail }>(
       `/api/conversations/${id}`
     );
-    setDetail(d.conversation);
+    setDetail(applyExplicitAskQuestionFallback(d.conversation));
     setSelectedId(id);
     // Sync the composer's bot dropdown to match whoever was last active
     // in the chat we're switching into. Without this, picking a chat
@@ -9534,16 +9742,19 @@ function HomeContent(): React.JSX.Element {
     //      pick, just use whatever the conversation already resolves
     //      to", which keeps the send idempotent on bot_id when the
     //      user hasn't touched the dropdown.
-    //   2. detail.botId (the conversation's persisted bot, if any).
-    //   3. selectedBotId (empty-state picker for brand-new chats).
-    //   4. null — sent explicitly so the server's three-valued botId
-    //      parse can persist a demotion to Default. Contrast with
-    //      Sandbox below, which still drops the key (legacy behavior:
-    //      Sandbox doesn't touch conversation.bot_id persistence).
+    //   2. Saved chat: conversation.botId verbatim (INCLUDING null for
+    //      Prism Default). Never substitute selectedBotId here — `??` treats
+    //      null like "missing", which wrongly hijacks Default threads with
+    //      whichever bot tile was clicked last elsewhere in the sidebar.
+    //   3. Pending / no saved row yet: detail.botId (optimistic) then
+    //      selectedBotId from the picker.
+    //   4. null — explicit Default for new chat or override.
     const chatBotId: string | null =
       chatBotOverride !== undefined
         ? chatBotOverride
-        : (detail?.botId ?? selectedBotId ?? null);
+        : detail?.id !== undefined && detail.id !== "pending"
+          ? detail.botId
+          : (detail?.botId ?? selectedBotId ?? null);
     // Private chats do not override the provider; they only change the
     // persistence/memory path.
     const providerForSend = settings?.preferredProvider;
@@ -9625,8 +9836,9 @@ function HomeContent(): React.JSX.Element {
           ),
         });
         pushMemoryToasts(d.memoryLearned);
-        setDetail(d.conversation);
-        editedConversation = d.conversation;
+        const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
+        setDetail(patchedConversation);
+        editedConversation = patchedConversation;
       } else {
         setPendingReplyConversationId(selectedId);
         setDetail({
@@ -9650,8 +9862,9 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify(buildChatRequestBody(text)),
         });
         pushMemoryToasts(d.memoryLearned);
-        setDetail(d.conversation);
-        editedConversation = d.conversation;
+        const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
+        setDetail(patchedConversation);
+        editedConversation = patchedConversation;
       }
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -9683,6 +9896,81 @@ function HomeContent(): React.JSX.Element {
     void performMessageEdit(messageId, text);
   }
 
+  /** `/dev …` — local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
+  function consumePrismDevComposerCommand(trimmedLine: string): boolean {
+    if (!PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED) return false;
+    const parsed = parsePrismDevChatCommand(trimmedLine);
+    if (!parsed) return false;
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    setConversationStarterPrompts(null);
+    setError(null);
+
+    const devAssistShell = (): Pick<Message, "id" | "role" | "createdAt"> & {
+      provider?: Message["provider"];
+      model?: string;
+    } => ({
+      id: `dev-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      role: "assistant",
+      createdAt: new Date().toISOString(),
+      provider: "local",
+      model: "dev/ui",
+    });
+
+    if (!detail) {
+      setError('Open a chat first — then try /dev commands in the composer.');
+      return true;
+    }
+
+    if (parsed.kind === "unknown") {
+      setError(
+        `Unknown dev command “${parsed.token}”. Type /dev help for a short list.`,
+      );
+      return true;
+    }
+
+    if (parsed.kind === "help") {
+      const m: Message = {
+        ...devAssistShell(),
+        content:
+          "**Dev commands** (local preview only — nothing is sent to the server)\n\n" +
+          "- `/dev help` — this list\n" +
+          "- `/dev askquestion` — inject a sample AskQuestion chip row",
+      };
+      setDetail({
+        ...detail,
+        hasAssistantReply: true,
+        messages: [...detail.messages, m],
+      });
+      return true;
+    }
+
+    const m: Message = {
+      ...devAssistShell(),
+      content:
+        "Sample **AskQuestion** rail preview from `/dev askquestion`.\n\n" +
+        "_Ephemeral — this row is only in memory in this browser tab._",
+      askQuestion: {
+        v: 1,
+        name: "AskQuestion",
+        prompt: "Dev preview (tap a chip)",
+        options: [
+          { id: "a", label: "🟢 Smoke A" },
+          { id: "b", label: "🟡 Smoke B" },
+          { id: "c", label: "🔴 Smoke C" },
+        ],
+      },
+    };
+    setDetail({
+      ...detail,
+      hasAssistantReply: true,
+      messages: [...detail.messages, m],
+    });
+    return true;
+  }
+
   async function sendMessage(
     e: React.FormEvent | React.KeyboardEvent<HTMLTextAreaElement | HTMLFormElement>,
     options: { starterPrompt?: boolean; draftOverride?: string } = {}
@@ -9693,6 +9981,16 @@ function HomeContent(): React.JSX.Element {
     const isStarterPrompt =
       options.starterPrompt === true &&
       (!detail || detail.messages.length === 0);
+    // `/dev …` bypasses pendingReply — otherwise tooling looks "broken"
+    // while the model is streaming or between turns.
+    if (
+      trimmed.length > 0 &&
+      !options.starterPrompt &&
+      consumePrismDevComposerCommand(trimmed)
+    ) {
+      setDraft("");
+      return;
+    }
     if ((!trimmed && !isStarterPrompt) || pendingReply) return;
     if (editingMessageId && !isStarterPrompt) {
       requestMessageEdit(editingMessageId, trimmed);
@@ -9771,6 +10069,9 @@ function HomeContent(): React.JSX.Element {
         messages: [...(detail?.messages ?? []), optimisticMessage],
       });
     }
+    if (!isStarterPrompt && !editingMessageId) {
+      appendComposerHistoryEntry(rawDraft);
+    }
     setDraft("");
 
     try {
@@ -9788,7 +10089,7 @@ function HomeContent(): React.JSX.Element {
           detailIdRef.current === requestConversationId
         : selectedIdRef.current === null && detailIdRef.current === "pending";
       if (stillViewingRequest) {
-        setDetail(d.conversation);
+        setDetail(applyExplicitAskQuestionFallback(d.conversation));
         setSelectedId(d.conversation.id);
         setUnreadConversationIds(previous => {
           if (!previous.has(d.conversation.id)) return previous;
@@ -9909,19 +10210,35 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function handleConversationStarterPick(prompt: string): void {
+  type ComposerChip = {
+    id: string;
+    label: string;
+    action: "send" | "other";
+    sendValue?: string;
+  };
+
+  function handleComposerChipPick(chip: ComposerChip): void {
+    if (chip.action === "other") {
+      setAskQuestionComposerRevealed(true);
+      requestAnimationFrame(() => draftComposerRef.current?.focus());
+      return;
+    }
     setConversationStarterPrompts(null);
     const syntheticSubmit = {
       preventDefault: () => {
         /* no-op — used so sendMessage can share the submit pathway */
       },
     } as React.FormEvent<HTMLFormElement>;
-    void sendMessage(syntheticSubmit, { draftOverride: prompt });
+    void sendMessage(syntheticSubmit, { draftOverride: chip.sendValue ?? chip.label });
   }
 
   function randomChatNudgeFromContext(): string {
     const activeBotId =
-      chatBotOverride !== undefined ? chatBotOverride : detail?.botId ?? selectedBotId ?? null;
+      chatBotOverride !== undefined
+        ? chatBotOverride
+        : detail?.id !== undefined && detail.id !== "pending"
+          ? detail.botId
+          : (detail?.botId ?? selectedBotId ?? null);
     const activeBotName =
       activeBotId !== null
         ? bots.find((candidate) => candidate.id === activeBotId)?.name ?? "this bot"
@@ -9948,14 +10265,99 @@ function HomeContent(): React.JSX.Element {
     return randomArrayItem(templates);
   }
 
+  /** Quick chips: Prism AskQuestion (if pending) beats server “Talk to me” prompts. Single UI path. */
+  function getComposerChipRail(): {
+    conversationId: string;
+    chips: ComposerChip[];
+    heading: string | null;
+    kind: "askquestion" | "starter";
+  } | null {
+    const id = detail?.id;
+    if (!detail || id === undefined || id === "pending") return null;
+    const qa = getConversationPendingAskQuestion(detail.messages);
+    if (qa) {
+      const optionChips = qa.options.map((option, index) => {
+        const cleaned = stripEmojiFromAskQuestionLabel(option.label);
+        const fallback = `Option ${index + 1}`;
+        return {
+          id: option.id,
+          label: cleaned || fallback,
+          action: "send" as const,
+          sendValue: cleaned || fallback,
+        };
+      });
+      return {
+        conversationId: id,
+        chips: [
+          ...optionChips,
+          {
+            id: "other",
+            label: "Other",
+            action: "other",
+          },
+        ],
+        heading: normalizeAskQuestionText(qa.prompt) || null,
+        kind: "askquestion",
+      };
+    }
+    if (
+      conversationStarterPrompts &&
+      conversationStarterPrompts.conversationId === id &&
+      conversationStarterPrompts.prompts.length > 0
+    ) {
+      return {
+        conversationId: id,
+        chips: conversationStarterPrompts.prompts.map((prompt, index) => ({
+          id: `starter-${index}`,
+          label: prompt,
+          action: "send",
+          sendValue: prompt,
+        })),
+        heading: null,
+        kind: "starter",
+      };
+    }
+    return null;
+  }
+
+  function renderComposerChipRail(): React.ReactNode {
+    const rail = getComposerChipRail();
+    if (!rail) return null;
+    return (
+      <div
+        role="group"
+        aria-label="Suggested replies"
+        className={styles.conversationStarterRail}
+      >
+        {rail.heading ? (
+          <p className={styles.conversationStarterChipHeading}>{rail.heading}</p>
+        ) : null}
+        {rail.chips.map((chip, chipIndex) => (
+          <button
+            key={`${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
+            type="button"
+            disabled={pendingReply}
+            className={styles.conversationStarterChip}
+            onClick={() => handleComposerChipPick(chip)}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function sendRandomConversationNudge(): void {
     if (pendingReply) return;
+    const rail =
+      detail?.id && detail.id !== "pending"
+        ? getComposerChipRail()
+        : null;
     const starterPromptChoices =
-      conversationStarterPrompts &&
-      detail?.id &&
-      detail.id !== "pending" &&
-      detail.id === conversationStarterPrompts.conversationId
-        ? conversationStarterPrompts.prompts
+      rail && detail?.id === rail.conversationId
+        ? rail.chips
+            .filter((chip) => chip.action === "send")
+            .map((chip) => chip.sendValue ?? chip.label)
         : [];
     const chosenPrompt =
       starterPromptChoices.length > 0
@@ -9969,44 +10371,56 @@ function HomeContent(): React.JSX.Element {
     void sendMessage(syntheticSubmit, { draftOverride: chosenPrompt });
   }
 
-  function renderConversationStarterRail(): React.ReactNode {
-    const ready =
-      conversationStarterPrompts &&
-      detail?.id !== undefined &&
-      detail.id !== "pending" &&
-      detail.id === conversationStarterPrompts.conversationId &&
-      conversationStarterPrompts.prompts.length > 0;
-    if (!ready || !conversationStarterPrompts) {
-      return null;
-    }
-    const { prompts } = conversationStarterPrompts;
-    return (
-      <div
-        role="group"
-        aria-label="Suggested replies"
-        className={styles.conversationStarterRail}
-      >
-        {prompts.map((prompt, chipIndex) => (
-          <button
-            key={`${prompt.slice(0, 48)}-${chipIndex}`}
-            type="button"
-            disabled={pendingReply}
-            className={styles.conversationStarterChip}
-            onClick={() => handleConversationStarterPick(prompt)}
-          >
-            {prompt}
-          </button>
-        ))}
-      </div>
-    );
-  }
-
   function isStarterPromptAvailable(value: string): boolean {
     return value.trim().length === 0 && (!detail || detail.messages.length === 0);
   }
 
   function isStarterPromptReady(value: string): boolean {
     return composerPrimed && isStarterPromptAvailable(value);
+  }
+
+  const pendingAskQuestion = detail
+    ? getConversationPendingAskQuestion(detail.messages)
+    : undefined;
+  const pendingAskQuestionKey = pendingAskQuestion
+    ? `${detail?.id ?? ""}:${pendingAskQuestion.prompt}:${pendingAskQuestion.options
+        .map((opt) => `${opt.id}:${opt.label}`)
+        .join("|")}`
+    : null;
+  const composerHiddenByAskQuestion = pendingAskQuestion !== undefined && !askQuestionComposerRevealed;
+
+  useEffect(() => {
+    if (pendingAskQuestionKey) {
+      setAskQuestionComposerRevealed(false);
+      return;
+    }
+    setAskQuestionComposerRevealed(false);
+  }, [pendingAskQuestionKey]);
+
+  function resetComposerHistoryCursor(): void {
+    composerHistoryIndexRef.current = null;
+  }
+
+  function appendComposerHistoryEntry(entry: string): void {
+    if (entry.trim().length === 0) return;
+    setComposerHistory((previous) => {
+      const next = [...previous, entry];
+      return next.length <= COMPOSER_HISTORY_LIMIT
+        ? next
+        : next.slice(next.length - COMPOSER_HISTORY_LIMIT);
+    });
+    resetComposerHistoryCursor();
+  }
+
+  function recallPreviousComposerHistory(): string | null {
+    if (composerHistory.length === 0) return null;
+    if (composerHistoryIndexRef.current === null) {
+      composerHistoryIndexRef.current = composerHistory.length - 1;
+      return composerHistory[composerHistoryIndexRef.current] ?? null;
+    }
+    const nextIndex = Math.max(0, composerHistoryIndexRef.current - 1);
+    composerHistoryIndexRef.current = nextIndex;
+    return composerHistory[nextIndex] ?? null;
   }
 
   function composerSubmitLabel(value: string): string {
@@ -10035,6 +10449,7 @@ function HomeContent(): React.JSX.Element {
   }, [detail]);
 
   function updateComposerDraft(nextDraft: string) {
+    resetComposerHistoryCursor();
     setDraft(nextDraft);
   }
 
@@ -10054,13 +10469,37 @@ function HomeContent(): React.JSX.Element {
   }
 
   function handleComposerKeyDown(e: React.KeyboardEvent<HTMLFormElement>) {
-    if (e.key !== "Enter" || e.shiftKey) return;
     const target = e.target;
     if (!(target instanceof HTMLElement)) return;
     const fromMarkdownEditor = target.closest("[data-markdown-cm-host='true']") !== null;
     const fromPlainTextarea = target instanceof HTMLTextAreaElement;
-    if (fromMarkdownEditor) return;
     if (!fromMarkdownEditor && !fromPlainTextarea) return;
+
+    if (
+      e.key === "ArrowUp" &&
+      !e.shiftKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      !e.ctrlKey
+    ) {
+      const plainTextareaAtStart =
+        fromPlainTextarea &&
+        target.selectionStart === 0 &&
+        target.selectionEnd === 0;
+      const markdownReadyForHistory = fromMarkdownEditor && draft.trim().length === 0;
+      if (plainTextareaAtStart || markdownReadyForHistory) {
+        const recalled = recallPreviousComposerHistory();
+        if (recalled !== null) {
+          e.preventDefault();
+          setComposerPrimed(false);
+          setDraft(recalled);
+        }
+      }
+      return;
+    }
+
+    if (e.key !== "Enter" || e.shiftKey) return;
+    if (fromMarkdownEditor) return;
     e.preventDefault();
     void sendMessage(e, {
       starterPrompt: isStarterPromptReady(draft),
@@ -10080,7 +10519,9 @@ function HomeContent(): React.JSX.Element {
     const privateStarterBotId = privateMode
       ? chatBotOverride !== undefined
         ? chatBotOverride
-        : detail?.botId ?? selectedBotId
+        : detail?.id !== undefined && detail.id !== "pending"
+          ? detail.botId
+          : (detail?.botId ?? selectedBotId ?? null)
       : null;
     const starterBotId = privateMode ? privateStarterBotId : normalStarterBotId;
     // A selected Chat-mode bot should leave the picker surface immediately;
@@ -13223,7 +13664,7 @@ function HomeContent(): React.JSX.Element {
                 {group.name}
               </span>
               <span className={styles.conversationGroupCount}>
-                {group.count} chats
+                {group.count}
               </span>
             </span>
           </button>
@@ -16377,6 +16818,7 @@ function HomeContent(): React.JSX.Element {
                 </h4>
                 <MessageBody
                   content={msg.content}
+                  assistantStripPrismToolTail={msg.role === "assistant"}
                 />
                 {copied && (
                   <span
@@ -16448,7 +16890,7 @@ function HomeContent(): React.JSX.Element {
           {typingIndicatorNode}
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
-          {renderConversationStarterRail()}
+          {renderComposerChipRail()}
         </div>
 
         <form
@@ -16647,24 +17089,26 @@ function HomeContent(): React.JSX.Element {
               </div>
             );
           })()}
-          {editingMessageId && (
+          {!composerHiddenByAskQuestion && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
               <span>Editing message. Save creates a new fork and sends the revised text.</span>
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}
-          <ComposerInput
-            ref={draftComposerRef}
-            enabled={composerMarkdownEditorEnabled}
-            value={draft}
-            placeholder="Say something..."
-            submitDisabled={composerSubmitDisabled(draft)}
-            submitLabel={composerSubmitLabel(draft)}
-            hideSubmitButton={hideMobileEmptySend}
-            onChange={handleComposerChange}
-            onValueChange={updateComposerDraft}
-            onFocus={handleComposerFocus}
-          />
+          {!composerHiddenByAskQuestion ? (
+            <ComposerInput
+              ref={draftComposerRef}
+              enabled={composerMarkdownEditorEnabled}
+              value={draft}
+              placeholder="Say something..."
+              submitDisabled={composerSubmitDisabled(draft)}
+              submitLabel={composerSubmitLabel(draft)}
+              hideSubmitButton={hideMobileEmptySend}
+              onChange={handleComposerChange}
+              onValueChange={updateComposerDraft}
+              onFocus={handleComposerFocus}
+            />
+          ) : null}
         </form>
         {renderMessageContextMenu()}
         {renderBotContextMenu()}
@@ -17377,6 +17821,7 @@ function HomeContent(): React.JSX.Element {
                 </h4>
                 <MessageBody
                   content={msg.content}
+                  assistantStripPrismToolTail={msg.role === "assistant"}
                 />
                 {copied && (
                   <span
@@ -17446,7 +17891,7 @@ function HomeContent(): React.JSX.Element {
               always bring the latest content into view. */}
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
-          {renderConversationStarterRail()}
+          {renderComposerChipRail()}
         </div>
 
         <form
@@ -17599,24 +18044,26 @@ function HomeContent(): React.JSX.Element {
               );
             })()}
           </div>
-          {editingMessageId && (
+          {!composerHiddenByAskQuestion && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
               <span>Editing message. Save creates a new fork and sends the revised text.</span>
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}
-          <ComposerInput
-            ref={draftComposerRef}
-            enabled={composerMarkdownEditorEnabled}
-            value={draft}
-            placeholder="Ask anything..."
-            submitDisabled={composerSubmitDisabled(draft)}
-            submitLabel={composerSubmitLabel(draft)}
-            hideSubmitButton={hideMobileEmptySend}
-            onChange={handleComposerChange}
-            onValueChange={updateComposerDraft}
-            onFocus={handleComposerFocus}
-          />
+          {!composerHiddenByAskQuestion ? (
+            <ComposerInput
+              ref={draftComposerRef}
+              enabled={composerMarkdownEditorEnabled}
+              value={draft}
+              placeholder="Ask anything..."
+              submitDisabled={composerSubmitDisabled(draft)}
+              submitLabel={composerSubmitLabel(draft)}
+              hideSubmitButton={hideMobileEmptySend}
+              onChange={handleComposerChange}
+              onValueChange={updateComposerDraft}
+              onFocus={handleComposerFocus}
+            />
+          ) : null}
         </form>
         {renderMessageContextMenu()}
         {renderBotContextMenu()}
