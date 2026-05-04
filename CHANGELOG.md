@@ -10,6 +10,12 @@ Active development happens on the `dev` branch; every release is a merge into
 
 ## [Unreleased]
 
+_Staging area — nothing queued for release yet._
+
+## [0.1.0] - 2026-05-03
+
+First **production** public release: product and marketing version **0.1.0** across web UI, native server binaries, and App Store–bound clients. GitHub `server/v0.1.0` is the canonical download lane for macOS (DMG), Windows (Inno installer), and Linux (runtime tarball). Native retail clients are built in CI as **Actions artifacts only** until App Store distribution is wired.
+
 ### Added
 
 - **Structured Bot Profile Builder.** The freeform bot prompt is replaced
@@ -216,7 +222,9 @@ Active development happens on the `dev` branch; every release is a merge into
   `overflow: clip`, which preserves the clipping without the BFC side
   effect.
 
-## [0.1.0] - 2026-04-22
+## [0.1.0-preproduction] - 2026-04-22
+
+_Historic first public tag; superseded by the **production** `0.1.0` release (2026-05-03) on the server lane._
 
 First tagged release. The project ships under the name **Prism** (previously
 prototyped as "LocalAI ChatGov"). A local-first AI playground with the
@@ -296,6 +304,7 @@ command-center UI.
   `QDRANT_URL`, and — only in ONLINE mode — `api.openai.com`. Documented
   in `DESIGN.md`.
 
-[0.2.0]: https://github.com/prism/prism/releases/tag/v0.2.0
-[0.1.1]: https://github.com/prism/prism/releases/tag/v0.1.1
-[0.1.0]: https://github.com/prism/prism/releases/tag/v0.1.0
+[0.2.0]: https://github.com/AureliusSoftworks/LocalAI/releases/tag/server%2Fv0.2.0
+[0.1.1]: https://github.com/AureliusSoftworks/LocalAI/releases/tag/server%2Fv0.1.1
+[0.1.0]: https://github.com/AureliusSoftworks/LocalAI/releases/tag/server%2Fv0.1.0
+[0.1.0-preproduction]: https://github.com/AureliusSoftworks/LocalAI/releases/tag/v0.1.0

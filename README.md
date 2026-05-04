@@ -7,7 +7,7 @@ trusted device. Every account is its own sandbox — encrypted memory,
 customizable chatbots, OpenAI image generation, forkable conversations,
 Markdown rendering in chat and Markdown conversation export.
 
-**Current release:** v0.2.0. See [CHANGELOG.md](CHANGELOG.md) for release notes.
+**Current release:** v0.1.0 (first production build). See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Branch model:** `main` holds tagged, released versions only; all active
 development happens on `dev`. Every release is a merge of `dev` into `main`
@@ -111,10 +111,18 @@ and pairing-code generation for native clients. It also adds a default-on
 "Start Prism Server when I sign in" installer option and a normal Apps &
 Features uninstaller. See [docs/prism-server-app-windows.md](docs/prism-server-app-windows.md).
 
-Release builds are produced by `.github/workflows/release-server-windows.yml`
-and uploaded to the same `server/v<version>` GitHub Release as the Mac DMG.
+Release builds use `.github/workflows/release-server-windows.yml`
+and upload to the same `server/v<version>` GitHub Release as the Mac DMG.
 The existing `start.bat` remains as a legacy/dev fallback for headless Windows
 startup, not the primary user-facing Windows distribution path.
+
+## Prism Server for Linux
+
+Headless **x86_64** bundle with vendored Node and Qdrant: download
+`Prism-Server-v<version>-linux-x64.tar.gz` from the `server/v<version>` release,
+extract, optionally run `./qdrant` in a second terminal, then `./start.sh`.
+Produced by `.github/workflows/release-server-linux.yml` (after the draft
+`server/v*` release exists). Local packaging: `scripts/package-linux-server-release.sh 0.1.0`.
 
 ## Prism.app (macOS Client)
 

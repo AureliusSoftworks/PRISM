@@ -34,6 +34,7 @@ import {
   type BotProfileScaleValue,
   type BotVoicePreset,
 } from "@localai/shared";
+import { PRISM_APP_VERSION } from "../prismAppVersion";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
 // Long enough for a deliberate confirmation click, short enough that the armed
@@ -12959,6 +12960,9 @@ function HomeContent(): React.JSX.Element {
           <PrismWordmark className={styles.brandWordmark} />
         </div>
         <p className={styles.muted}>Local-first AI playground. ChatGPT Gov fidelity, FL Studio creativity.</p>
+        <p className={styles.muted} data-testid="auth-app-version">
+          Prism <strong>{PRISM_APP_VERSION}</strong>
+        </p>
         <div className={styles.authControls}>
           <div className={styles.authToggle}>
             <a
@@ -14411,6 +14415,9 @@ function HomeContent(): React.JSX.Element {
                 </div>
               </details>
               <button type="submit" disabled={busy}>Save</button>
+              <p className={styles.muted} style={{ marginTop: 12 }}>
+                Prism {PRISM_APP_VERSION}
+              </p>
             </form>
           )}
           {settingsAboutModalOpen && (
@@ -14441,6 +14448,9 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 </header>
                 <div className={styles.settingsAboutModalBody}>
+                  <p>
+                    <strong>Version {PRISM_APP_VERSION}</strong> — first production release alignment across web and native server builds.
+                  </p>
                   <p>
                     PRISM is a playful, personal AI workspace: surreal in style, practical in interaction.
                   </p>

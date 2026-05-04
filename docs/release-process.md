@@ -58,9 +58,12 @@ Output lanes:
   - Tag: `server/v<version>`
   - GitHub draft release: `Prism Server v<version>`
   - Assets:
-    - `prism-server-v<version>-bundle.tar.gz` for self-builders, Linux users,
-      Docker/manual deployments, and source audit.
-    - `Prism-Server-v<version>.dmg` from the macOS app workflow for end users.
+    - `prism-server-v<version>-bundle.tar.gz` for self-builders, source audit,
+      and custom deployments (not the primary Linux download).
+    - `Prism-Server-v<version>-linux-x64.tar.gz` from the Linux workflow
+      (vendored Node + Qdrant + `start.sh`) for x86_64 Linux servers.
+    - `Prism-Server-v<version>.dmg` from the macOS app workflow for Mac users.
+    - `Prism-Server-Setup-v<version>-win-x64.exe` from the Windows workflow.
 2. **Client lane**
   - Tag: `client/v<version>`
   - GitHub draft release: `Prism Client v<version> (Private Lane)`
@@ -107,3 +110,56 @@ Required secrets:
 
 See `docs/prism-server-app.md` for the local build, signing, notarization, and
 DMG packaging details.
+
+## Linux Server bundle workflow
+
+Workflow file: `.github/workflows/release-server-linux.yml`
+
+Trigger:
+
+- Manual dispatch from `main` only, after `release-main.yml` has created the
+  `server/v<version>` draft release (same as macOS/Windows server workflows).
+
+Inputs:
+
+- `version`: semantic version without leading `v` (example: `0.1.0`)
+
+Output:
+
+- `Prism-Server-v<version>-linux-x64.tar.gz` uploaded to the existing
+  `server/v<version>` GitHub Release.
+
+Local packaging (any OS with bash, for debugging):
+
+- `scripts/package-linux-server-release.sh <version> [dist-dir]`
+
+## Native client builds (not on GitHub Releases)
+
+Retail **Prism Client** binaries are sold through the App Store (future /
+TestFlight today). CI still produces **internal artifacts** for QA:
+
+- **macOS:** `.github/workflows/build-client-mac.yml` — uploads `Prism.app` as
+  a workflow artifact only (no `gh release upload`).
+- **Windows:** no `apps/client-windows` project yet; add a matching workflow
+  when the app exists.
+
+## /🏗️ build — operator quick checklist
+
+Use this order on **`main`** after merging `dev` (and with `CHANGELOG.md`
+already listing `## [<version>]`):
+
+1. **Preflight —** Run `npm run typecheck` and `npm run lint` locally or rely on CI.
+2. **Draft releases —** Actions → `Release Pipeline (dev -> main)` → Run workflow:
+   `version`, `client_testflight_build` (TestFlight reference string required).
+3. **Server binaries —** Run in any order (each requires the `server/v<version>` draft):
+   - `Release Prism Server macOS App`
+   - `Release Prism Server Windows App`
+   - `Release Prism Server Linux bundle`
+4. **Client QA artifact —** `Build Prism Client macOS (artifact only)` — download
+   `Prism.app` from the run’s Artifacts; submit retail builds via Xcode /
+   App Store Connect separately.
+5. **Verify —** On the `server/v<version>` draft, confirm DMG, Windows setup,
+   Linux tarball, and optional source bundle; then **Publish** when ready.
+
+Do **not** merge, tag, or publish without human verification of the draft
+artifacts. Git operations stay explicit in chat per repo rules.
