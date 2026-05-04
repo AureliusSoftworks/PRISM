@@ -1,0 +1,3 @@
+# Windows batch relies on CRLF; LF-only files can fail to parse or exit immediately.
+*.bat text eol=crlf
+*.cmd text eol=crlf

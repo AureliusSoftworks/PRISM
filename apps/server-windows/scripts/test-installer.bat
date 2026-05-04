@@ -1,9 +1,40 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-REM Tip: If the window closes too fast, open "Developer Command Prompt" or PowerShell,
-REM cd to the repo root, and run: apps\server-windows\scripts\test-installer.bat
-REM For CI/automation, set PRISM_INSTALLER_NO_PAUSE=1 to skip "Press any key..." at exit.
+REM Launch quirks:
+REM - Double-click / "start *.bat" often run under cmd /c (window closes on exit).
+REM - We relaunch once under cmd /k when we detect that (see DO_REL below).
+REM - Or double-click run-test-installer.cmd (always keeps a normal console).
+REM Env: PRISM_INSTALLER_NO_PAUSE=1 (CI: no relaunch, no pause)
+REM      PRISM_INSTALLER_NORELAUNCH=1 (run in current console; used by run-test-installer.cmd)
+REM      PRISM_INSTALLER_FORCE_K=1 (always relaunch under cmd /k)
+
+if /i "%PRISM_INSTALLER_NO_PAUSE%"=="1" goto prism_smoke_main
+if /i "%PRISM_INSTALLER_NORELAUNCH%"=="1" goto prism_smoke_main
+if /i not "%~1"=="_stayopen" goto prism_smoke_after_stayopen_shift
+shift
+goto prism_smoke_main
+:prism_smoke_after_stayopen_shift
+
+set "DO_REL=0"
+if /i "!PRISM_INSTALLER_FORCE_K!"=="1" set "DO_REL=1"
+set "CC=!CMDCMDLINE!"
+if "!DO_REL!"=="1" goto prism_smoke_rel_done
+if not "!CC!"=="" echo !CC!| findstr /i ".bat" >nul && set "DO_REL=1"
+if "!DO_REL!"=="1" goto prism_smoke_rel_done
+if not "!CC!"=="" echo !CC!| findstr /i "/c" >nul && set "DO_REL=1"
+:prism_smoke_rel_done
+if "!DO_REL!"=="0" goto prism_smoke_main
+
+start "Prism Server smoke test" cmd.exe /k call "%~f0" _stayopen %*
+exit /b 0
+
+:prism_smoke_main
+echo.
+echo [Prism Server] Smoke test running...
+echo     Script: %~f0
+echo.
+REM From an open terminal you can run this .bat directly. For CI use PRISM_INSTALLER_NO_PAUSE=1.
 
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..\..") do set "REPO_ROOT=%%~fI"
