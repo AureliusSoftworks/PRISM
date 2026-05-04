@@ -28,6 +28,7 @@ OutputBaseFilename=Prism-Server-Setup-v{#MyAppVersion}-win-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\src\Assets\prism-server.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=no

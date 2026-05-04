@@ -86,6 +86,27 @@ public partial class App : System.Windows.Application
         base.OnExit(e);
     }
 
+    /// <summary>
+    /// Prefer the Prism Server.ico embedded on the exe (utility mark: white field, black triangle).
+    /// </summary>
+    private static WinForms.Icon? TrayIconFromExecutable()
+    {
+        try
+        {
+            var path = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(path))
+            {
+                return null;
+            }
+
+            return WinForms.Icon.ExtractAssociatedIcon(path);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static AppViewModel CreateViewModel()
     {
         var paths = new PrismPaths();
@@ -114,9 +135,10 @@ public partial class App : System.Windows.Application
 
     private void CreateTrayIcon()
     {
+        var trayIcon = TrayIconFromExecutable();
         _notifyIcon = new WinForms.NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = trayIcon ?? SystemIcons.Application,
             Text = "Prism Server",
             Visible = true
         };

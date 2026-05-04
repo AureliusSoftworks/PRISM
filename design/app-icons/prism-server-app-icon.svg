@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Prism Server: white field, solid black triangle with inner white triangle (utility mark).
+  Outer path: same geometry as icon-triangle.svg; inner triangle ~0.42 scale from centroid.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#ffffff"/>
+  <g transform="translate(62 62) scale(16.07142857)">
+    <path fill="#000000" d="M28 6L48 43H8L28 6Z"/>
+    <!-- Centroid (28, 92/3); inset factor controls black band thickness -->
+    <path
+      fill="#ffffff"
+      d="M28 20.31L36.4 35.85L19.6 35.85L28 20.31Z"
+    />
+  </g>
+</svg>

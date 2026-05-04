@@ -18,7 +18,12 @@
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <StartupObject>PrismServer.Program</StartupObject>
+    <ApplicationIcon>Assets\prism-server.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="Assets\prism-server.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\core\PrismServer.Core.csproj" />

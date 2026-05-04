@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Prism client (stores + web raster): same mark as dark-theme Auth + default-bot hero —
+  near-black tile with the prismatic stroked triangle from public/icon-triangle.svg.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <rect width="1024" height="1024" fill="#111827"/>
+  <g transform="translate(62 62) scale(16.07142857)">
+    <defs>
+      <linearGradient
+        id="prismClientStroke"
+        gradientUnits="userSpaceOnUse"
+        x1="8"
+        y1="43"
+        x2="48"
+        y2="6"
+      >
+        <stop offset="0" stop-color="#e11d48"/>
+        <stop offset="0.18" stop-color="#d97706"/>
+        <stop offset="0.36" stop-color="#0d9488"/>
+        <stop offset="0.54" stop-color="#0284c7"/>
+        <stop offset="0.72" stop-color="#7c3aed"/>
+        <stop offset="0.9" stop-color="#db2777"/>
+        <stop offset="1" stop-color="#e11d48"/>
+      </linearGradient>
+    </defs>
+    <path
+      d="M28 6L48 43H8L28 6Z"
+      stroke="#111827"
+      stroke-opacity="0.2"
+      stroke-width="8.5"
+      stroke-linecap="butt"
+      stroke-linejoin="miter"
+      stroke-miterlimit="10"
+    />
+    <path
+      d="M28 6L48 43H8L28 6Z"
+      stroke="url(#prismClientStroke)"
+      stroke-width="7"
+      stroke-linecap="butt"
+      stroke-linejoin="miter"
+      stroke-miterlimit="10"
+    />
+  </g>
+</svg>

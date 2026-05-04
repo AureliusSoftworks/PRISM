@@ -30,6 +30,18 @@ there as well.
 via `bash scripts/install_git_safeguards.sh`. See
 [docs/git-safeguards.md](docs/git-safeguards.md).
 
+## App icons
+
+Vector sources live under [`design/app-icons/`](design/app-icons/). **Prism
+Client** (web, iOS, macOS Prism.app) uses the dark-field prismatic triangle;
+**Prism Server** (macOS server app, Windows exe + installer) uses a white field
+with a solid black triangle. Regenerate PNG/ICO/app-icon sets after editing
+the SVGs (requires macOS `qlmanage` plus Python [Pillow](https://pypi.org/project/pillow/)):
+
+```bash
+python3 scripts/render-app-icons.py
+```
+
 ## App Store Split Roadmap
 
 Prism's planned Apple distribution model is a two-binary split:

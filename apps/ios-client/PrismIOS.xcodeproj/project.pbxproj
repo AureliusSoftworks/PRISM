@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		I00000000000000000000216 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000217 /* Assets.xcassets */; };
 		I00000000000000000000101 /* PrismIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000201 /* PrismIOSApp.swift */; };
 		I00000000000000000000102 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000202 /* AppModel.swift */; };
 		I00000000000000000000103 /* PairedServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = I00000000000000000000203 /* PairedServer.swift */; };
@@ -46,6 +47,7 @@
 		I0000000000000000000020A /* PairingExchangeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingExchangeServiceTests.swift; sourceTree = "<group>"; };
 		I0000000000000000000020B /* SessionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStoreTests.swift; sourceTree = "<group>"; };
 		I0000000000000000000020C /* MemoryTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryTokenStore.swift; sourceTree = "<group>"; };
+		I00000000000000000000217 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		I0000000000000000000020E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		I0000000000000000000020F /* Prism.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Prism.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		I00000000000000000000210 /* PrismIOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrismIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -81,6 +83,7 @@
 		I00000000000000000000602 /* PrismIOS */ = {
 			isa = PBXGroup;
 			children = (
+				I00000000000000000000217 /* Assets.xcassets */,
 				I00000000000000000000201 /* PrismIOSApp.swift */,
 				I00000000000000000000202 /* AppModel.swift */,
 				I0000000000000000000020E /* Info.plist */,
@@ -222,6 +225,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				I00000000000000000000216 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -305,6 +309,7 @@
 		I00000000000000000000A20 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
@@ -329,6 +334,7 @@
 		I00000000000000000000A21 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;

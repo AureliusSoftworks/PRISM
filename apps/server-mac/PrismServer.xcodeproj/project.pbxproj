@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		10000000000000000000011E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000011F /* Assets.xcassets */; };
 		100000000000000000000101 /* PrismServerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000201 /* PrismServerApp.swift */; };
 		100000000000000000000102 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000202 /* AppModel.swift */; };
 		10000000000000000000010F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000211 /* AppDelegate.swift */; };
@@ -68,6 +69,7 @@
 		100000000000000000000219 /* OllamaModelInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaModelInstallerTests.swift; sourceTree = "<group>"; };
 		10000000000000000000021A /* PairingCodeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCodeService.swift; sourceTree = "<group>"; };
 		10000000000000000000021B /* PairingCodeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCodeServiceTests.swift; sourceTree = "<group>"; };
+		10000000000000000000011F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		10000000000000000000020E /* Prism Server.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Prism Server.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		10000000000000000000020F /* PrismServerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrismServerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -90,6 +92,7 @@
 		100000000000000000000602 /* PrismServer */ = {
 			isa = PBXGroup;
 			children = (
+				10000000000000000000011F /* Assets.xcassets */,
 				100000000000000000000201 /* PrismServerApp.swift */,
 				100000000000000000000202 /* AppModel.swift */,
 				100000000000000000000211 /* AppDelegate.swift */,
@@ -232,7 +235,9 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		100000000000000000000801 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		100000000000000000000801 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (
+				10000000000000000000011E /* Assets.xcassets in Resources */,
+			); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
