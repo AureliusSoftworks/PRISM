@@ -77,6 +77,11 @@ Active development happens on the `dev` branch; every release is a merge into
   message (`PATCH /api/messages/:id`), and revert a conversation
   (`POST /api/conversations/:id/revert`) so the rebuilt panel and devtools
   can rehearse realistic states. Bot deletion now cascades to its memories.
+- **Mandatory local system models.** Prism now treats `llama3.2` and
+  `nomic-embed-text` as required Ollama installs. User-facing chat can still
+  use local or OpenAI, but internal titles, starters, summaries, memory
+  validation, bot-memory inference, and all embeddings stay local on those
+  dedicated models.
 
 ### Changed
 
@@ -84,6 +89,11 @@ Active development happens on the `dev` branch; every release is a merge into
   cues ("save globally", "forget X", "actually...") are always honored.
 - Default-scope memory queries now also include compiled memories so
   global recall surfaces the most useful summary facts.
+- Memory embeddings now use `nomic-embed-text` instead of reusing the active
+  chat provider. Existing vectors remain readable via the current padded
+  Qdrant shape, though recall quality may briefly drift while older
+  `llama3.2` or OpenAI-embedded memories coexist with new local embedding
+  entries.
 - Recent-memory retrieval uses an embed-with-fallback path so a missing or
   failing embedder no longer kills retrieval — the hash fallback kicks in.
 

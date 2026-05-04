@@ -186,6 +186,8 @@ docker compose up -d
 ```bash
 cd /Users/jared/Documents/LocalAI-local
 cp .env.example .env
+ollama pull llama3.2
+ollama pull nomic-embed-text
 npm install --prefix packages/shared
 npm install --prefix packages/config
 npm install --prefix apps/api
@@ -206,6 +208,8 @@ npm run dev
 | `ENCRYPTION_MASTER_KEY` | (dev default) | Master key for per-user key wrapping |
 | `OLLAMA_HOST` | `http://host.docker.internal:11434` | Ollama endpoint |
 | `OLLAMA_MODEL` | `llama3.2` | Default local model |
+| `OLLAMA_AUXILIARY_MODEL` | `llama3.2` | Mandatory local model for Prism's internal title, starter, summary, and memory-critic calls |
+| `OLLAMA_EMBEDDING_MODEL` | `nomic-embed-text` | Mandatory local embedding model for memory vectors and Qdrant search |
 | `OPENAI_API_KEY` | (empty) | Global fallback OpenAI key |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant vector DB URL |
 | `NEXT_PUBLIC_API_BASE_URL` | `/api` | Frontend API base |
@@ -214,6 +218,7 @@ npm run dev
 
 - **Per-user auth** with encrypted session cookies
 - **Optional second Ollama host** — add another LAN Ollama machine from Settings, merge its offline models into Prism's local model lists, and route selected models back to the correct host.
+- **Dedicated system models** — user-facing chat can use local or OpenAI, but Prism's internal titles, starters, summaries, memory critic, and embeddings always stay local on mandatory Ollama models (`llama3.2` + `nomic-embed-text`).
 - **Native-client web gate** — the hosted web shell requires a paired Prism client access token, so direct browser visits show an app-required screen instead of bypassing the client.
 - **Post-auth Hub** with 5-colour prism-glyph mode tiles:
   - **Chat** — a calm, stripped-down "personal Prism" surface (sidebar + history + typing + send). The only compose-adjacent control is an **Incognito** pill that doubles as an online/offline toggle: on = this send is local-only and bypasses memory; off = saved provider + normal memory pipeline.
@@ -229,13 +234,14 @@ npm run dev
 - **Customizable chatbots** with a structured profile builder, OCEAN-inspired personality sliders, temperature, model overrides, and optional delete protection for favorite bots (composed into the model system prompt)
 - **Expanded bot glyph picker** with hundreds of Lucide-backed glyphs alongside the original inline set
 - **Forkable chats** — branch from any message in a conversation (Sandbox)
-- **Auto-generated chat titles** — first replies trigger a background local/online LLM pass that gives saved conversations short sidebar titles.
+- **Auto-generated chat titles** — first replies trigger a background local `llama3.2` pass that gives saved conversations short sidebar titles.
 - **Markdown in message bubbles** — assistant and user messages render GitHub-flavored Markdown safely in the thread (`react-markdown` + `remark-gfm`); the compose field is plain text.
 - **Per-chat deletion** — remove individual chats from the sidebar (subtle × that embosses red on hover, click-to-confirm) or from the chat header. **Press-and-hold any × (or the header Delete button) for ~1 s** to clear *every* chat at once: on pointerdown every × immediately glows red and tilts to its own small angle; at the 900 ms threshold the whole row shakes like iOS edit-mode while a centered confirmation modal ("Delete all chats?" · Cancel / Delete all) takes over the decision. Release before the threshold to snap the ×'s back. Messages and exports are purged; generated images and extracted memories are preserved.
 - **OpenAI image generation** (DALL-E 3) with gallery (Sandbox)
 - **Conversation export** to Markdown files persisted in the database (Sandbox)
 - **Mobile-first UI** — responsive chat interface with slide-out sidebar
 - **Dark/light themes** per user
+- **Change password** from Settings (Account actions)
 - **Self-serve account deletion** from Settings
 - **Automatic 60-day inactive account cleanup**
 

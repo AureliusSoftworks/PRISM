@@ -60,6 +60,14 @@ selectProvider(preferredProvider, apiKey?)
   └─ "openai"  → OpenAiProvider       → OpenAI /v1/chat/completions
                                         (throws if apiKey is missing)
 
+getAuxiliaryProvider()
+  └─ LocalOllamaProvider → Ollama /api/chat
+                            (pinned to OLLAMA_AUXILIARY_MODEL, default llama3.2)
+
+embedTextLocal(text)
+  └─ Ollama /api/embeddings
+       (pinned to OLLAMA_EMBEDDING_MODEL, default nomic-embed-text)
+
 generateImage(prompt, apiKey, size, quality)
   └─ OpenAI /v1/images/generations (DALL-E 3)
 ```
@@ -74,8 +82,10 @@ user's network.
 
 | File | Host | When does it fire? |
 | --- | --- | --- |
-| `apps/api/src/providers.ts` (`LocalOllamaProvider`) | `OLLAMA_HOST` | Every LOCAL chat turn and every embedding call that routes through a LOCAL provider. Local by config. |
-| `apps/api/src/providers.ts` (`OpenAiProvider`) | `api.openai.com` | Only when the effective mode is ONLINE. |
+| `apps/api/src/providers.ts` (`LocalOllamaProvider`) | `OLLAMA_HOST` | Every LOCAL user-facing chat turn. Local by config. |
+| `apps/api/src/providers.ts` (`getAuxiliaryProvider`) | `OLLAMA_HOST` | Internal title, starter, summary, memory-critic, and memory-inference calls. Always local, pinned to `OLLAMA_AUXILIARY_MODEL`. |
+| `apps/api/src/providers.ts` (`embedTextLocal`) | `OLLAMA_HOST` | All memory embeddings and Qdrant queries. Always local, pinned to `OLLAMA_EMBEDDING_MODEL`. |
+| `apps/api/src/providers.ts` (`OpenAiProvider`) | `api.openai.com` | Only when the effective mode is ONLINE for the user's actual chat reply. |
 | `apps/api/src/qdrant.ts` | `QDRANT_URL` | Memory summary vector read/write. Local by config. |
 | `apps/api/src/image-provider.ts` | `api.openai.com` | Only when the effective mode is ONLINE (gated in `/api/images/generate`). |
 
@@ -89,6 +99,9 @@ the backend on the same origin by `apps/web/next.config.ts`.
   been removed from the signature. Retained under test in
   `apps/api/src/__tests__/providers.test.ts` — that test file is the canary
   for this invariant.
+- `getAuxiliaryProvider()` and `embedTextLocal()` never call OpenAI. They
+  are system-owned local lanes pinned to the mandatory `llama3.2` and
+  `nomic-embed-text` Ollama models.
 - `/api/images/generate` reads the user's stored mode and the request's
   optional `preferredProvider` override (mirroring the chat route) and
   refuses with a clear 4xx error if the effective mode is LOCAL. The web
