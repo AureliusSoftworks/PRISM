@@ -24,15 +24,14 @@ REM #endregion
 
 set "DO_REL=0"
 if /i "!PRISM_INSTALLER_FORCE_K!"=="1" set "DO_REL=1"
-REM CMDCMDLINE often contains ")" (e.g. Program Files (x86)) — never expand it inside
-REM parenthesized IF blocks; that triggers ". was unexpected at this time."
-set "CC=!CMDCMDLINE!"
+REM CMDCMDLINE contains '"' and ')'; never feed it to "set /p "=Z!CC!"" — embedded
+REM quotes end the assignment early and cmd reports ". was unexpected at this time."
 REM #region agent log
-call :agent_dbglog "H-SETP" "test-installer:L26" "after_set_CC_before_setp"
+call :agent_dbglog "H-SETP" "test-installer:L28" "before_ps_write_temp"
 REM #endregion
-<nul > "%TEMP%\prism-smoke-cc.txt" set /p "=Z!CC!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=Join-Path $env:TEMP 'prism-smoke-cc.txt'; $t=([char]90) + [Environment]::GetCommandLine(); [IO.File]::WriteAllText($p,$t)"
 REM #region agent log
-call :agent_dbglog "H-SETP" "test-installer:L30" "after_setp_write_temp"
+call :agent_dbglog "H-SETP" "test-installer:L32" "after_ps_write_temp"
 REM #endregion
 if "!DO_REL!"=="1" goto prism_smoke_rel_done
 findstr /i /c:".bat" "%TEMP%\prism-smoke-cc.txt" >nul && set "DO_REL=1"
