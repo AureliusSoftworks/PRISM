@@ -64,6 +64,7 @@ Output lanes:
       (vendored Node + Qdrant + `start.sh`) for x86_64 Linux servers.
     - `Prism-Server-v<version>.dmg` from the macOS app workflow for Mac users.
     - `Prism-Server-Setup-v<version>-win-x64.exe` from the Windows workflow.
+    - `Prism-Server-v<version>-win-x64-portable.zip` from the same Windows workflow (no installer).
 2. **Client lane**
   - Tag: `client/v<version>`
   - GitHub draft release: `Prism Client v<version> (Private Lane)`
@@ -133,6 +134,24 @@ Local packaging (any OS with bash, for debugging):
 
 - `scripts/package-linux-server-release.sh <version> [dist-dir]`
 
+## Orchestrator (draft + all server platforms)
+
+Workflow file: `.github/workflows/release-server-all.yml`
+
+Trigger:
+
+- Manual dispatch from `main` only (same inputs as `release-main.yml`, plus an optional **Build Mac client** checkbox).
+
+Behavior:
+
+- Runs the same preflight checks and **draft** `server/v*` + `client/v*` setup as
+  `release-main.yml` (including the dev `prism-server-v*-bundle.tar.gz` upload).
+- Then runs **in parallel**: macOS DMG, Windows (installer + portable ZIP), and
+  Linux runtime tarball workflows.
+- Optionally runs `build-client-mac.yml` afterward (workflow artifact only).
+
+Use this when you want **one workflow** instead of separate Actions runs per platform.
+
 ## Native client builds (not on GitHub Releases)
 
 Retail **Prism Client** binaries are sold through the App Store (future /
@@ -140,8 +159,8 @@ TestFlight today). CI still produces **internal artifacts** for QA:
 
 - **macOS:** `.github/workflows/build-client-mac.yml` — uploads `Prism.app` as
   a workflow artifact only (no `gh release upload`).
-- **Windows:** no `apps/client-windows` project yet; add a matching workflow
-  when the app exists.
+- **Windows:** `.github/workflows/build-client-windows.yml` — placeholder until
+  `apps/client-windows` exists; then replace with a real build + artifact upload.
 
 ## /🏗️ build — operator quick checklist
 
@@ -149,17 +168,19 @@ Use this order on **`main`** after merging `dev` (and with `CHANGELOG.md`
 already listing `## [<version>]`):
 
 1. **Preflight —** Run `npm run typecheck` and `npm run lint` locally or rely on CI.
-2. **Draft releases —** Actions → `Release Pipeline (dev -> main)` → Run workflow:
-   `version`, `client_testflight_build` (TestFlight reference string required).
-3. **Server binaries —** Run in any order (each requires the `server/v<version>` draft):
+2. **Draft releases —** Actions → **Release Pipeline (dev -> main)** → Run workflow:
+   `version`, `client_testflight_build` (TestFlight reference string required).  
+   *Or* use **Release Prism Server (all platforms)** to create the same drafts **and**
+   build every server artifact in one run (optional Mac client artifact at the end).
+3. **Server binaries —** If you used **Release Pipeline** only, run in any order (each requires the `server/v<version>` draft):
    - `Release Prism Server macOS App`
    - `Release Prism Server Windows App`
    - `Release Prism Server Linux bundle`
 4. **Client QA artifact —** `Build Prism Client macOS (artifact only)` — download
    `Prism.app` from the run’s Artifacts; submit retail builds via Xcode /
-   App Store Connect separately.
+   App Store Connect separately. (Windows: `Build Prism Client Windows` is a placeholder until the client app exists.)
 5. **Verify —** On the `server/v<version>` draft, confirm DMG, Windows setup,
-   Linux tarball, and optional source bundle; then **Publish** when ready.
+   portable ZIP, Linux tarball, and the developer source bundle; then **Publish** when ready.
 
 Do **not** merge, tag, or publish without human verification of the draft
 artifacts. Git operations stay explicit in chat per repo rules.

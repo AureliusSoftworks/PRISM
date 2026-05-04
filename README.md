@@ -13,6 +13,27 @@ Markdown rendering in chat and Markdown conversation export.
 development happens on `dev`. Every release is a merge of `dev` into `main`
 with a matching `CHANGELOG.md` entry and a semver tag.
 
+## Get Prism Server (GitHub Releases)
+
+The **`server/v<version>`** draft or published release lists **primary** server
+artifacts for end users (replace `<version>` with the semver, e.g. `0.1.0`):
+
+| Platform | File on the release |
+|----------|----------------------|
+| macOS | `Prism-Server-v<version>.dmg` |
+| Windows (installer) | `Prism-Server-Setup-v<version>-win-x64.exe` |
+| Windows (portable folder) | `Prism-Server-v<version>-win-x64-portable.zip` |
+| Linux x86_64 | `Prism-Server-v<version>-linux-x64.tar.gz` |
+
+**Developers / audit:** `prism-server-v<version>-bundle.tar.gz` is a **trimmed
+source tree export** (not a turnkey runtime). Use it for inspection, custom
+builds, or advanced Linux-from-source workflows — not as the default Linux
+download (use the Linux row above).
+
+Workflows: draft + bundle asset from **Release Pipeline (dev -> main)**; platform
+builds from **Release Prism Server (all platforms)** (one run) or individual
+`release-server-*.yml` workflows. See [docs/release-process.md](docs/release-process.md).
+
 ### Local `dev` push guardrail (temporary)
 
 To reduce accidental branch damage without paid GitHub branch-protection
