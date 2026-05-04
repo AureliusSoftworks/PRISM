@@ -108,6 +108,8 @@ export interface AppConfig {
   encryptionMasterKey: string;
   ollamaHost: string;
   ollamaModel: string;
+  ollamaAuxiliaryModel: string;
+  ollamaEmbeddingModel: string;
   openAiApiKey?: string;
   qdrantUrl: string;
 }
@@ -125,6 +127,8 @@ export function getAppConfig(): AppConfig {
     ),
     ollamaHost: normalizeOllamaHost(process.env.OLLAMA_HOST),
     ollamaModel: process.env.OLLAMA_MODEL ?? "llama3.2",
+    ollamaAuxiliaryModel: process.env.OLLAMA_AUXILIARY_MODEL ?? "llama3.2",
+    ollamaEmbeddingModel: process.env.OLLAMA_EMBEDDING_MODEL ?? "nomic-embed-text",
     openAiApiKey: process.env.OPENAI_API_KEY,
     qdrantUrl: normalizeQdrantUrl(process.env.QDRANT_URL),
   };
