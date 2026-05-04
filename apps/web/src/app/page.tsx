@@ -187,12 +187,8 @@ const PRISM_COLORS = {
 // Inline SVG replacement for public/wordmark.svg. The static asset is
 // kept on disk as a fallback and for any non-React consumers (meta tags,
 // social preview cards) but every in-app render of the wordmark goes
-// through this component so the five letter colors can be shuffled on
-// mount, giving each page load (and each independent instance) a fresh
-// chromatic identity while keeping the underlying letterforms unchanged.
-// Default ordering matches the original SVG so SSR and the client's
-// first paint agree; the shuffle fires in a mount-only effect which
-// avoids hydration mismatch warnings.
+// through this component so every in-app render uses the canonical
+// fixed P/R/I/S/M color assignment from the source SVG.
 
 const PRISM_WORDMARK_PALETTE = [
   PRISM_COLORS.p,
@@ -209,18 +205,6 @@ const PRISM_BOT_SEED_LIGHTNESS_MIN = 32;
 const PRISM_BOT_SEED_LIGHTNESS_MAX = 68;
 const BOT_COLOR_DIVERSITY_SAMPLE_ATTEMPTS = 40;
 const BOT_COLOR_DIVERSITY_MIN_DISTANCE = 0.3;
-
-// Fisher-Yates shuffle. Non-mutating: returns a new array so React state
-// updates remain referentially clean. Generic so future callers that
-// need to shuffle any 5-item palette (or other tuple) can reuse it.
-function shufflePalette<T>(source: readonly T[]): T[] {
-  const arr = [...source];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
 
 function clampDevToolsBotQuantity(value: number): number {
   if (!Number.isFinite(value)) return DEV_TOOLS_BOT_QUANTITY_MIN;
@@ -283,19 +267,7 @@ interface PrismWordmarkProps {
 }
 
 function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
-  // Initial state = canonical P/R/I/S/M ordering so the server-rendered
-  // markup and the client's first paint are byte-identical. The shuffle
-  // only runs inside useEffect, which React guarantees not to execute
-  // during SSR; this means no hydration warning AND each mount produces
-  // its own independent random permutation.
-  const [colors, setColors] = useState<readonly string[]>(PRISM_WORDMARK_PALETTE);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setColors(shufflePalette(PRISM_WORDMARK_PALETTE));
-    }, 0);
-    return () => window.clearTimeout(timeout);
-  }, []);
+  const colors = PRISM_WORDMARK_PALETTE;
 
   return (
     <svg
@@ -306,8 +278,8 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
       aria-label="Prism"
     >
       {/* Shared stroke geometry lives on the <g>; only the per-letter
-          stroke colors vary, which keeps the DOM diff on shuffle minimal
-          (only the five `stroke` attributes change, no path rewrites). */}
+          stroke colors vary, which keeps the letterforms consistent
+          while preserving the canonical Prism palette mapping. */}
       <g
         fill="none"
         strokeLinecap="round"
@@ -318,24 +290,22 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
         <path
           stroke={colors[0]}
           d="M6,66V6h50c10.67,0,16,5.33,16,16s-5.33,16-16,16H18"
-          suppressHydrationWarning
         />
         {/* R — two subpaths grouped so both subpaths inherit the same
-            shuffled color from a single <g stroke>. */}
-        <g stroke={colors[1]} suppressHydrationWarning>
+            fixed color from a single <g stroke>. */}
+        <g stroke={colors[1]}>
           <path d="M134,66V6h50c10.67,0,16,5.33,16,16s-5.33,16-16,16h-38" />
           <path d="M162,38l44,28" />
         </g>
         {/* I */}
-        <path stroke={colors[2]} d="M282,6v60" suppressHydrationWarning />
+        <path stroke={colors[2]} d="M282,6v60" />
         {/* S */}
         <path
           stroke={colors[3]}
           d="M430,6h-48c-10.67,0-16,5.33-16,16,0,8,4,12.67,12,14l52,2c9.33,1.33,14,6,14,14,0,9.33-5.33,14-16,14h-48"
-          suppressHydrationWarning
         />
         {/* M — three subpaths (two uprights + the central chevron). */}
-        <g stroke={colors[4]} suppressHydrationWarning>
+        <g stroke={colors[4]}>
           <path d="M508,66V6" />
           <path d="M508,6l48,48,48-48" />
           <path d="M604,6v60" />
@@ -1633,6 +1603,30 @@ function getMessageStatus(msg: Message): StatusTag | null {
   if (msg.provider === "local") return "local";
   // Pre-existing assistant messages without a provider record: no indicator.
   return null;
+}
+
+/** Line shown while the assistant slot is loading — variant index from hash(salt). */
+const GENERATING_PHRASE_BUILDERS = [
+  (name: string) => `${name} is thinking`,
+  (name: string) => `${name} is composing`,
+  (name: string) => `${name} is shaping a reply`,
+  (name: string) => `${name} is gathering words`,
+  (name: string) => `${name} is tuning in`,
+  (name: string) => `${name} is reflecting`,
+] as const;
+
+function hashToUnsignedInt(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function pickGeneratingLabel(displayName: string, salt: string): string {
+  const idx = hashToUnsignedInt(salt) % GENERATING_PHRASE_BUILDERS.length;
+  return GENERATING_PHRASE_BUILDERS[idx](displayName);
 }
 interface ConversationDetail {
   id: string;
@@ -7875,6 +7869,9 @@ function HomeContent(): React.JSX.Element {
   const [botProfileBuilderOpen, setBotProfileBuilderOpen] = useState(false);
   const [botPreferredModelsModalOpen, setBotPreferredModelsModalOpen] = useState(false);
   const [settingsAboutModalOpen, setSettingsAboutModalOpen] = useState(false);
+  const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
+  const [changePasswordNew, setChangePasswordNew] = useState("");
+  const [changePasswordConfirm, setChangePasswordConfirm] = useState("");
   const [botProfileActivePage, setBotProfileActivePage] =
     useState<BotProfileBuilderPageId>("purpose");
   // Side-tooltip state for the bot editor's parameter help text. The
@@ -8047,6 +8044,17 @@ function HomeContent(): React.JSX.Element {
   }, [settingsAboutModalOpen]);
 
   useEffect(() => {
+    if (!changePasswordModalOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setChangePasswordModalOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [changePasswordModalOpen]);
+
+  useEffect(() => {
     setChatOverflowMenuOpen(false);
   }, [detail?.id]);
 
@@ -8183,6 +8191,9 @@ function HomeContent(): React.JSX.Element {
     setColorWheelOpen(false);
     setBotPreferredModelsModalOpen(false);
     setSettingsAboutModalOpen(false);
+    setChangePasswordModalOpen(false);
+    setChangePasswordNew("");
+    setChangePasswordConfirm("");
     setEditingBotId(null);
     if (botLibraryCloseTimerRef.current) {
       clearTimeout(botLibraryCloseTimerRef.current);
@@ -8723,6 +8734,47 @@ function HomeContent(): React.JSX.Element {
       (pendingReplyConversationId !== null && detail?.id === pendingReplyConversationId) ||
       (pendingReplyIsNewConversation && detail?.id === "pending")
     );
+
+  const typingIndicatorNode = useMemo(() => {
+    if (!pendingReplyVisible) return null;
+    const pendingRespondent =
+      composeBotAccentId !== null
+        ? bots.find((b) => b.id === composeBotAccentId)
+        : null;
+    const displayName =
+      pendingRespondent?.name?.trim() ??
+      headerIdentity?.name ??
+      DEFAULT_ASSISTANT_NAME;
+    const salt = `${composeBotAccentId ?? "none"}:${detail?.messages.length ?? 0}:${pendingReplyConversationId ?? "new"}`;
+    const label = pickGeneratingLabel(displayName, salt);
+    const style = selectedComposeBotAccent
+      ? ({ ["--typing-accent" as string]: selectedComposeBotAccent } as React.CSSProperties)
+      : undefined;
+    return (
+      <div
+        className={styles.typingIndicator}
+        style={style}
+        role="status"
+        aria-live="polite"
+        aria-label={label}
+      >
+        <span>{label}</span>
+        <span className={styles.typingDots} aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      </div>
+    );
+  }, [
+    pendingReplyVisible,
+    composeBotAccentId,
+    bots,
+    headerIdentity?.name,
+    detail?.messages.length,
+    pendingReplyConversationId,
+    selectedComposeBotAccent,
+  ]);
 
   const clearConversationUnread = useCallback((conversationId: string) => {
     setUnreadConversationIds(previous => {
@@ -9411,6 +9463,30 @@ function HomeContent(): React.JSX.Element {
       window.location.href = "/?mode=register";
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Account deletion failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitChangePassword() {
+    setPanelError(null);
+    if (changePasswordNew !== changePasswordConfirm) {
+      setPanelError("New password and confirmation do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/api/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({
+          newPassword: changePasswordNew,
+        }),
+      });
+      setChangePasswordModalOpen(false);
+      setChangePasswordNew("");
+      setChangePasswordConfirm("");
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Password change failed.");
     } finally {
       setBusy(false);
     }
@@ -12574,7 +12650,7 @@ function HomeContent(): React.JSX.Element {
               ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
               : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
           }
-          title={
+          data-title={
             effectiveThemeMode === "system"
               ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
               : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
@@ -12900,7 +12976,7 @@ function HomeContent(): React.JSX.Element {
                 ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
                 : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
             }
-            title={
+            data-title={
               effectiveThemeMode === "system"
                 ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
                 : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
@@ -14214,11 +14290,13 @@ function HomeContent(): React.JSX.Element {
 
       {/* ── Settings panel ── */}
       {panel === "settings" && (
-        <div className={styles.panel} data-closing={panelClosing ? "true" : undefined}>
+        <div
+          className={`${styles.panel} ${styles.panelSettings}`}
+          data-closing={panelClosing ? "true" : undefined}
+        >
           <div className={styles.panelHeader}><h3>Settings</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
           {settings && (
             <form className={styles.form} onSubmit={saveSettings}>
-              <label>Theme<select value={settings.theme} onChange={e => setSettings(p => p ? { ...p, theme: e.target.value as Theme } : p)}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Auto (system)</option></select></label>
               <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
               <label className={styles.settingsHostField}>
                 <span className={styles.settingsHostLabel}>Second Ollama host</span>
@@ -14385,28 +14463,102 @@ function HomeContent(): React.JSX.Element {
           </div>
           <div className={styles.accountActions}>
             <h4>Account</h4>
-            <p className={styles.muted}>Sign out of this Prism session.</p>
-            <button
-              type="button"
-              className={styles.accountLogoutButton}
-              onClick={() => void logout()}
-              disabled={busy}
-            >
-              Log out
-            </button>
+            <p className={styles.muted}>Sign out, change your password, or permanently delete this account.</p>
+            <div className={styles.accountActionsButtonRow}>
+              <button
+                type="button"
+                className={styles.accountLogoutButton}
+                onClick={() => void logout()}
+                disabled={busy}
+              >
+                Log out
+              </button>
+              <button
+                type="button"
+                className={styles.accountLogoutButton}
+                onClick={() => {
+                  setPanelError(null);
+                  setChangePasswordNew("");
+                  setChangePasswordConfirm("");
+                  setChangePasswordModalOpen(true);
+                }}
+                disabled={busy}
+              >
+                Change password
+              </button>
+              <button
+                type="button"
+                className={styles.dangerButton}
+                onClick={() => void deleteAccount()}
+                disabled={busy}
+              >
+                Delete account
+              </button>
+            </div>
           </div>
-          <div className={styles.dangerZone}>
-            <h4>Danger Zone</h4>
-            <p className={styles.muted}>Accounts inactive for over 60 days are removed automatically. You can also permanently delete this account right now.</p>
-            <button
-              type="button"
-              className={styles.dangerButton}
-              onClick={() => void deleteAccount()}
-              disabled={busy}
+          {changePasswordModalOpen && (
+            <div
+              className={styles.settingsAboutModalBackdrop}
+              role="presentation"
+              onClick={() => {
+                setChangePasswordModalOpen(false);
+              }}
             >
-              Delete account
-            </button>
-          </div>
+              <div
+                className={styles.settingsAboutModal}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Change password"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <header className={styles.settingsAboutModalHeader}>
+                  <div>
+                    <span>Security</span>
+                    <h4>Change password</h4>
+                    <p>You&apos;re already signed in, so you can set a new password without the old one.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setChangePasswordModalOpen(false)}
+                    aria-label="Close change password"
+                  >
+                    ×
+                  </button>
+                </header>
+                <div className={styles.settingsAboutModalBody}>
+                  <form
+                    className={styles.form}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void submitChangePassword();
+                    }}
+                  >
+                    <label>
+                      New password
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={changePasswordNew}
+                        onChange={(event) => setChangePasswordNew(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Confirm new password
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={changePasswordConfirm}
+                        onChange={(event) => setChangePasswordConfirm(event.target.value)}
+                      />
+                    </label>
+                    <button type="submit" disabled={busy}>
+                      {busy ? "Saving…" : "Update password"}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Scoped to panelError so a chat-send 401 doesn't render a
               duplicate error on top of the Settings drawer. The legacy
               in-settings memory list was removed once the dedicated
@@ -15226,7 +15378,10 @@ function HomeContent(): React.JSX.Element {
         // stay visible so the gallery remains useful.
         const canGenerate = settings?.preferredProvider === "openai";
         return (
-          <div className={styles.panel} data-closing={panelClosing ? "true" : undefined}>
+          <div
+            className={`${styles.panel} ${styles.panelImages}`}
+            data-closing={panelClosing ? "true" : undefined}
+          >
             <div className={styles.panelHeader}><h3>Images</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
             {canGenerate ? (
               <form className={styles.form} onSubmit={generateImg}>
@@ -15453,7 +15608,7 @@ function HomeContent(): React.JSX.Element {
                 ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
                 : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
             }
-            title={
+            data-title={
               effectiveThemeMode === "system"
                 ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
                 : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
@@ -16242,16 +16397,7 @@ function HomeContent(): React.JSX.Element {
               </article>
             );
           })}
-          {pendingReplyVisible && (
-            <div className={styles.typingIndicator} role="status" aria-live="polite">
-              <span>Thinking</span>
-              <span className={styles.typingDots} aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </div>
-          )}
+          {typingIndicatorNode}
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
           {renderConversationStarterRail()}
@@ -17247,16 +17393,7 @@ function HomeContent(): React.JSX.Element {
               </article>
             );
           })}
-          {pendingReplyVisible && (
-            <div className={styles.typingIndicator} role="status" aria-live="polite">
-              <span>Generating response</span>
-              <span className={styles.typingDots} aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </div>
-          )}
+          {typingIndicatorNode}
           {/* Scroll sentinel: kept at the very end so the scroll effect can
               always bring the latest content into view. */}
             <div ref={messagesEndRef} aria-hidden="true" />

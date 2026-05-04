@@ -5095,7 +5095,11 @@
 
 .typingIndicator {
   justify-self: start;
-  color: var(--fg-muted);
+  color: color-mix(
+    in srgb,
+    var(--typing-accent, var(--fg-muted)) 52%,
+    var(--fg-muted)
+  );
   font-size: 13px;
   display: flex;
   align-items: center;
@@ -5112,7 +5116,11 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--fg-muted);
+  background: color-mix(
+    in srgb,
+    var(--typing-accent, var(--fg-muted)) 78%,
+    var(--fg-muted)
+  );
   animation: typingPulse 1.2s infinite;
 }
 
@@ -8525,13 +8533,6 @@
   cursor: not-allowed;
 }
 
-.dangerZone {
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
-  display: grid;
-  gap: 8px;
-}
-
 .accountActions {
   border-top: 1px solid var(--line);
   padding-top: 14px;
@@ -8590,6 +8591,19 @@
   gap: 10px;
 }
 
+.accountActionsButtonRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.accountActionsButtonRow .accountLogoutButton,
+.accountActionsButtonRow .dangerButton {
+  margin-top: 0;
+}
+
 .accountLogoutButton {
   margin-top: 4px;
   border-radius: 10px;
@@ -8611,14 +8625,6 @@
 .accountLogoutButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.dangerZone h4 {
-  color: var(--danger);
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
 .dangerButton {
@@ -12270,6 +12276,17 @@
   }
 
   .panelMemories {
+    left: env(safe-area-inset-left);
+    right: env(safe-area-inset-right);
+    width: auto;
+    border-left: 0;
+    padding-left: max(16px, calc(env(safe-area-inset-left) + 16px));
+    padding-right: max(16px, calc(env(safe-area-inset-right) + 16px));
+  }
+
+  /* Match Bots / Memories: edge-to-edge drawer on phone. */
+  .panelSettings,
+  .panelImages {
     left: env(safe-area-inset-left);
     right: env(safe-area-inset-right);
     width: auto;
