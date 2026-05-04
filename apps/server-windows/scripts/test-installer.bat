@@ -18,12 +18,16 @@ goto prism_smoke_main
 
 set "DO_REL=0"
 if /i "!PRISM_INSTALLER_FORCE_K!"=="1" set "DO_REL=1"
+REM CMDCMDLINE often contains ")" (e.g. Program Files (x86)) — never expand it inside
+REM parenthesized IF blocks; that triggers ". was unexpected at this time."
 set "CC=!CMDCMDLINE!"
+<nul > "%TEMP%\prism-smoke-cc.txt" set /p "=Z!CC!"
 if "!DO_REL!"=="1" goto prism_smoke_rel_done
-if not "!CC!"=="" echo !CC!| findstr /i ".bat" >nul && set "DO_REL=1"
+findstr /i /c:".bat" "%TEMP%\prism-smoke-cc.txt" >nul && set "DO_REL=1"
 if "!DO_REL!"=="1" goto prism_smoke_rel_done
-if not "!CC!"=="" echo !CC!| findstr /i "/c" >nul && set "DO_REL=1"
+findstr /i /c:"/c" "%TEMP%\prism-smoke-cc.txt" >nul && set "DO_REL=1"
 :prism_smoke_rel_done
+del "%TEMP%\prism-smoke-cc.txt" >nul 2>&1
 if "!DO_REL!"=="0" goto prism_smoke_main
 
 start "Prism Server smoke test" cmd.exe /k call "%~f0" _stayopen %*
