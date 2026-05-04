@@ -7,6 +7,12 @@ on:
         description: "Shared release version without leading v (example: 0.2.0)"
         required: true
         type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Shared release version without leading v (example: 0.2.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -103,4 +109,27 @@ jobs:
         run: |
           gh release upload "server/v${env:RELEASE_VERSION}" `
             "apps/server-windows/dist/Prism-Server-Setup-v${env:RELEASE_VERSION}-win-x64.exe" `
+            --clobber
+
+      - name: Package portable ZIP (extract and run)
+        shell: pwsh
+        run: |
+          $pub = Resolve-Path "apps/server-windows/src/bin/Release/net8.0-windows/win-x64/publish"
+          $dist = New-Item -ItemType Directory -Force -Path "apps/server-windows/dist"
+          $zipPath = Join-Path $dist.FullName "Prism-Server-v${env:RELEASE_VERSION}-win-x64-portable.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Push-Location $pub
+          try {
+            Compress-Archive -Path * -DestinationPath $zipPath -CompressionLevel Optimal
+          } finally {
+            Pop-Location
+          }
+
+      - name: Upload portable ZIP
+        shell: pwsh
+        run: |
+          gh release upload "server/v${env:RELEASE_VERSION}" `
+            "apps/server-windows/dist/Prism-Server-v${env:RELEASE_VERSION}-win-x64-portable.zip" `
             --clobber
