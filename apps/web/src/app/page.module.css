@@ -7242,6 +7242,35 @@
   resize: vertical;
 }
 
+.panelBots .form button.botFormDeleteButton,
+.botFormDeleteButton {
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg));
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
+  color: var(--danger);
+}
+
+.panelBots .form button.botFormDeleteButton:hover:not(:disabled),
+.panelBots .form button.botFormDeleteButton:focus-visible,
+.botFormDeleteButton:hover:not(:disabled),
+.botFormDeleteButton:focus-visible {
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg));
+  border-color: color-mix(in srgb, var(--danger) 56%, var(--line-strong));
+  color: var(--danger);
+  outline: none;
+}
+
+.panelBots .form button.botFormDeleteButtonArmed,
+.panelBots .form button.botFormDeleteButtonArmed:hover:not(:disabled),
+.panelBots .form button.botFormDeleteButtonArmed:focus-visible,
+.botFormDeleteButtonArmed,
+.botFormDeleteButtonArmed:hover:not(:disabled),
+.botFormDeleteButtonArmed:focus-visible {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff8ef;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 48%, transparent);
+}
+
 .botProfileFieldHint {
   color: var(--fg-muted);
   font-size: 11.5px;
@@ -8048,6 +8077,40 @@
   align-items: center;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
+}
+
+.panelHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panelHiddenFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.panelHeaderIconButton {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.panelHeaderIconButton:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
 .panelHeader h3 {
@@ -11592,6 +11655,10 @@
 .chatHeaderActionsHidden {
   opacity: 0;
   pointer-events: none;
+}
+
+.chatHeaderActionsDisabled {
+  opacity: 0.52;
 }
 
 .chatHeaderAction {

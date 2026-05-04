@@ -279,6 +279,7 @@ npm run dev
 - **Forkable chats** — branch from any message in a conversation (Sandbox)
 - **Auto-generated chat titles** — first replies trigger a background local `llama3.2` pass that gives saved conversations short sidebar titles.
 - **AskQuestion bot tool** — assistants can optionally end a turn with a Prism `<<<PRISM_TOOL>>>` JSON envelope; the transcript stores clean prose plus structured payload, and the chat surface shows three tappable chips (same visual language as "Talk to me!" starters) until the user sends another message.
+- **Bot portability** — export/import individual bots as Markdown files (profile + settings + bot-scoped memories) from the Bots panel.
 - **Markdown in message bubbles** — assistant and user messages render GitHub-flavored Markdown safely in the thread (`react-markdown` + `remark-gfm`); the compose field is plain text.
 - **Per-chat deletion** — remove individual chats from the sidebar (subtle × that embosses red on hover, click-to-confirm) or from the chat header. **Press-and-hold any × (or the header Delete button) for ~1 s** to clear *every* chat at once: on pointerdown every × immediately glows red and tilts to its own small angle; at the 900 ms threshold the whole row shakes like iOS edit-mode while a centered confirmation modal ("Delete all chats?" · Cancel / Delete all) takes over the decision. Release before the threshold to snap the ×'s back. Messages and exports are purged; generated images and extracted memories are preserved.
 - **OpenAI image generation** (DALL-E 3) with gallery (Sandbox)

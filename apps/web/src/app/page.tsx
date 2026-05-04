@@ -1953,6 +1953,34 @@ interface Bot {
   chat_enabled: number;
 }
 
+interface BotExportMemory {
+  text: string;
+  confidence?: number;
+  source?: "direct" | "inferred" | "compiled";
+  certainty?: number;
+  sourceMessageIds?: string[];
+}
+
+interface BotExportPayloadV1 {
+  schema: "prism-bot-export-v1";
+  bot: {
+    name: string;
+    color?: string | null;
+    glyph?: string | null;
+    temperature?: number;
+    maxTokens?: number;
+    localModel?: string | null;
+    onlineModel?: string | null;
+    onlineEnabled?: boolean;
+    deleteProtected?: boolean;
+    chatEnabled?: boolean;
+  };
+  profile?: BotProfileFields;
+  systemPrompt?: string;
+  memories?: BotExportMemory[];
+  exportedAt?: string;
+}
+
 const BOT_COLOR_SORT_GRAYSCALE_SATURATION_MAX = 6;
 const BOT_COLOR_SORT_GRAYSCALE_GROUP = 10;
 const BOT_COLOR_SORT_COLORLESS_GROUP = 11;
@@ -8204,6 +8232,7 @@ function HomeContent(): React.JSX.Element {
   const emptyStateSearchInputRef = useRef<HTMLInputElement | null>(null);
   const emptyStateSearchRef = useRef<HTMLDivElement | null>(null);
   const draftComposerRef = useRef<ComposerInputHandle | null>(null);
+  const botImportInputRef = useRef<HTMLInputElement | null>(null);
   const emptyStateSearchOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Theme preference used before a user has logged in (or when the user
   // explicitly logs out). Seeded from localStorage so the auth screen
@@ -9356,8 +9385,9 @@ function HomeContent(): React.JSX.Element {
     botPanelGroup === BOT_LIBRARY_FILTER_ALL
       ? "All bots"
       : activeBotPanelGroup?.label ?? "Filtered bots";
-  const botPanelListVisible =
-    !botPanelDashboardActive || botPanelGroup !== BOT_LIBRARY_FILTER_ALL;
+  // Keep the library list visible for every active filter, including the
+  // neutral "all bots" tile. Group tiles still narrow the same shared list.
+  const botPanelListVisible = bots.length > 0;
 
   const bootstrap = useCallback(async () => {
     const controller = new AbortController();
@@ -11002,6 +11032,201 @@ function HomeContent(): React.JSX.Element {
     const a = document.createElement("a"); a.href = url; a.download = `chat-${selectedId}.md`; a.click(); URL.revokeObjectURL(url);
   }
 
+  function slugifyFileToken(input: string): string {
+    return input
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "bot";
+  }
+
+  function extractBotExportJson(raw: string): string {
+    const trimmed = raw.trim();
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced?.[1]) return fenced[1].trim();
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      return trimmed.slice(firstBrace, lastBrace + 1);
+    }
+    return trimmed;
+  }
+
+  async function exportBotProfile(bot: Bot) {
+    setPanelError(null);
+    setPanelNotice(null);
+    const trimmedName = bot.name.trim() || "Unnamed bot";
+    const profile = parseStoredBotPrompt(bot.system_prompt).fields;
+    const visiblePrompt = stripBotProfileMetaSuffix(bot.system_prompt).trim();
+    const memoryResult = await api<{
+      memories?: Array<{
+        text?: string;
+        confidence?: number;
+        source?: "direct" | "inferred" | "compiled";
+        certainty?: number;
+        sourceMessageIds?: string[];
+      }>;
+    }>(`/api/memories?botId=${encodeURIComponent(bot.id)}`);
+    const memories: BotExportMemory[] = (memoryResult.memories ?? [])
+      .filter((memory): memory is { text: string; confidence?: number; source?: "direct" | "inferred" | "compiled"; certainty?: number; sourceMessageIds?: string[] } =>
+        typeof memory.text === "string" && memory.text.trim().length > 0
+      )
+      .map((memory) => ({
+        text: memory.text.trim(),
+        confidence: memory.confidence,
+        source: memory.source,
+        certainty: memory.certainty,
+        sourceMessageIds: Array.isArray(memory.sourceMessageIds) ? memory.sourceMessageIds : [],
+      }));
+    const exportPayload = {
+      schema: "prism-bot-export-v1",
+      bot: {
+        name: trimmedName,
+        color: bot.color ?? null,
+        glyph: bot.glyph ?? null,
+        temperature: bot.temperature,
+        maxTokens: bot.max_tokens,
+        localModel: bot.local_model ?? bot.model ?? null,
+        onlineModel: bot.online_model ?? null,
+        onlineEnabled: bot.online_enabled === 1,
+        chatEnabled: bot.chat_enabled === 1,
+        deleteProtected: bot.delete_protected === 1,
+      },
+      profile,
+      systemPrompt: visiblePrompt,
+      memories,
+      exportedAt: new Date().toISOString(),
+    };
+    const markdown = [
+      `# Bot Export · ${trimmedName}`,
+      "",
+      "This file can be used to re-create this bot in another Prism setup.",
+      "",
+      "## Import Data",
+      "```json",
+      JSON.stringify(exportPayload, null, 2),
+      "```",
+      "",
+    ].join("\n");
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bot-${slugifyFileToken(trimmedName)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setPanelNotice(
+      memories.length > 0
+        ? `${trimmedName} exported with ${memories.length} memories.`
+        : `${trimmedName} exported.`
+    );
+  }
+
+  async function importBotFromFile(file: File): Promise<void> {
+    setPanelError(null);
+    setPanelNotice(null);
+    const raw = await file.text();
+    const parsed = JSON.parse(extractBotExportJson(raw)) as Partial<BotExportPayloadV1>;
+    if (parsed.schema !== "prism-bot-export-v1" || !parsed.bot?.name) {
+      throw new Error("Invalid bot export file.");
+    }
+    const importedName = parsed.bot.name.trim();
+    if (!importedName) {
+      throw new Error("Bot export is missing a valid name.");
+    }
+
+    const fallbackProfile = blankBotProfile();
+    const profile =
+      parsed.profile && typeof parsed.profile === "object"
+        ? parsed.profile
+        : fallbackProfile;
+    const systemPrompt =
+      typeof parsed.systemPrompt === "string" && parsed.systemPrompt.trim().length > 0
+        ? parsed.systemPrompt
+        : serializeStoredBotPrompt(profile, importedName);
+
+    const created = await api<{ bot?: { id?: string } }>("/api/bots", {
+      method: "POST",
+      body: JSON.stringify({
+        name: importedName,
+        systemPrompt,
+        localModel: parsed.bot.localModel ?? "",
+        onlineModel: parsed.bot.onlineModel ?? "",
+        onlineEnabled: parsed.bot.onlineEnabled !== false,
+        deleteProtected: parsed.bot.deleteProtected === true,
+        temperature:
+          typeof parsed.bot.temperature === "number"
+            ? normalizeBotTemperature(parsed.bot.temperature)
+            : BOT_TEMPERATURE_DEFAULT,
+        maxTokens:
+          typeof parsed.bot.maxTokens === "number"
+            ? normalizeBotMaxTokens(parsed.bot.maxTokens)
+            : BOT_REPLY_LENGTH_DEFAULT_TOKENS,
+        color: typeof parsed.bot.color === "string" && parsed.bot.color.trim().length > 0
+          ? parsed.bot.color.trim()
+          : null,
+        glyph: typeof parsed.bot.glyph === "string" && parsed.bot.glyph.trim().length > 0
+          ? parsed.bot.glyph.trim()
+          : null,
+      }),
+    });
+    const createdBotId = created.bot?.id;
+    if (!createdBotId) {
+      throw new Error("Imported bot was created without an id.");
+    }
+
+    const memories = Array.isArray(parsed.memories) ? parsed.memories : [];
+    let restored = 0;
+    for (const memory of memories) {
+      if (!memory || typeof memory.text !== "string" || memory.text.trim().length === 0) continue;
+      await api("/api/memories/restore", {
+        method: "POST",
+        body: JSON.stringify({
+          text: memory.text.trim(),
+          botId: createdBotId,
+          source:
+            memory.source === "inferred" || memory.source === "compiled"
+              ? memory.source
+              : "direct",
+          confidence:
+            typeof memory.confidence === "number" ? memory.confidence : undefined,
+          certainty:
+            typeof memory.certainty === "number" ? memory.certainty : undefined,
+          sourceMessageIds: Array.isArray(memory.sourceMessageIds)
+            ? memory.sourceMessageIds
+            : [],
+        }),
+      });
+      restored += 1;
+    }
+
+    await refreshBots();
+    setSelectedBotId(createdBotId);
+    setPanelNotice(
+      restored > 0
+        ? `${importedName} imported with ${restored} memories.`
+        : `${importedName} imported.`
+    );
+  }
+
+  async function handleBotImportFileSelection(
+    event: React.ChangeEvent<HTMLInputElement>
+  ): Promise<void> {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    try {
+      await importBotFromFile(file);
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Bot import failed.");
+    }
+  }
+
+  function openBotImportPicker(): void {
+    setPanelError(null);
+    botImportInputRef.current?.click();
+  }
+
   const resetEmptyStateBotSelection = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
     setSelectedBotId(null);
@@ -11378,13 +11603,26 @@ function HomeContent(): React.JSX.Element {
     }
   }, []);
 
-  // Right-click is suppressed app-wide: we intend to ship our own
-  // context menu eventually. Until then, secondary clicks should do
-  // nothing at all (no dismissal, no native menu) so the gesture
-  // doesn't conflict with future custom affordances.
-  const handleAppContextMenu = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    event.preventDefault();
+  // Right-click is suppressed app-wide for custom surfaces, but text-entry
+  // controls should keep native OS context menus (copy/paste/spellcheck).
+  // This preserves expected platform behavior in all textarea/input fields.
+  const shouldAllowNativeContextMenu = useCallback((target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) return false;
+    return target.closest(
+      [
+        "textarea",
+        "input:not([type='button']):not([type='submit']):not([type='reset'])",
+        "[contenteditable='true']",
+        "[contenteditable='']",
+        "[role='textbox']",
+      ].join(", ")
+    ) !== null;
   }, []);
+
+  const handleAppContextMenu = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (shouldAllowNativeContextMenu(event.target)) return;
+    event.preventDefault();
+  }, [shouldAllowNativeContextMenu]);
 
   // ── Hold-to-delete-all gesture ────────────────────────────────────────
   // `startHoldDelete` / `cancelHoldDelete` are called from pointer events
@@ -13877,8 +14115,11 @@ function HomeContent(): React.JSX.Element {
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
     const canBotActions = Boolean(activeBot);
     const canMemoryActions = Boolean(activeBot || defaultConversationUsesPrismIdentity);
-    const canExport = Boolean(detail && selectedId);
-    const canDelete = Boolean(detail && selectedId);
+    const canExport = Boolean((detail && selectedId) || activeBot);
+    const selectedBotCanDelete = Boolean(activeBot && activeBot.delete_protected !== 1);
+    const canDelete = Boolean((detail && selectedId) || selectedBotCanDelete);
+    const headerActionsDisabled =
+      Boolean(detail) && (!detail.hasAssistantReply || pendingReply);
     const isMobileGear = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
 
     const closeMenu = () => setChatOverflowMenuOpen(false);
@@ -13897,18 +14138,64 @@ function HomeContent(): React.JSX.Element {
     };
     const handleExport = () => {
       closeMenu();
-      void exportChat();
-    };
-    const handleDelete = () => {
-      if (!selectedId) return;
-      if (deleteArmed) {
-        void deleteConversation(selectedId);
-        closeMenu();
-      } else {
-        armDelete(HEADER_DELETE_KEY);
-        closeMenu();
+      if (detail && selectedId) {
+        void exportChat();
+        return;
+      }
+      if (activeBot) {
+        void exportBotProfile(activeBot);
       }
     };
+    const exportTitle =
+      detail && selectedId
+        ? "Export chat as Markdown"
+        : activeBot
+          ? "Export bot profile as Markdown"
+          : "Export";
+    const exportButtonText =
+      detail && selectedId ? "Export chat" : activeBot ? "Export bot" : "Export";
+    const handleDelete = () => {
+      if (!deleteArmed) {
+        armDelete(HEADER_DELETE_KEY);
+        return;
+      }
+      if (detail && selectedId) {
+        disarmDelete();
+        void deleteConversation(selectedId);
+        closeMenu();
+        return;
+      }
+      if (activeBot && activeBot.delete_protected !== 1) {
+        disarmDelete();
+        void deleteBot(activeBot.id);
+        closeMenu();
+        return;
+      }
+      disarmDelete();
+      closeMenu();
+    };
+    const deleteLabel =
+      deleteArmed
+        ? detail && selectedId
+          ? "Confirm delete this chat"
+          : activeBot
+            ? `Confirm delete ${activeBot.name}`
+            : "Confirm delete"
+        : detail && selectedId
+          ? "Delete this chat"
+          : activeBot
+            ? activeBot.delete_protected === 1
+              ? "Delete is disabled for protected bots"
+              : "Delete this bot"
+            : "Delete";
+    const deleteButtonText =
+      deleteArmed
+        ? "Are you sure?"
+        : detail && selectedId
+          ? "Delete chat"
+          : activeBot
+            ? "Delete bot"
+            : "Delete";
     const swallowMenuPointerDown = (
       event: React.PointerEvent<HTMLElement>
     ) => {
@@ -13930,14 +14217,17 @@ function HomeContent(): React.JSX.Element {
         <div
           className={`${styles.chatHeaderActions} ${
             gearHidden ? styles.chatHeaderActionsHidden : ""
+          } ${
+            headerActionsDisabled ? styles.chatHeaderActionsDisabled : ""
           }`}
           aria-label="Conversation tools"
+          aria-disabled={headerActionsDisabled}
         >
           {renderMemoryToasts()}
           <button
             type="button"
             className={styles.chatHeaderAction}
-            disabled={!canMemoryActions}
+            disabled={headerActionsDisabled || !canMemoryActions}
             onClick={handleMemories}
             title={activeBot ? "Bot memories" : "Default Prism memories"}
           >
@@ -13947,6 +14237,7 @@ function HomeContent(): React.JSX.Element {
             <button
               type="button"
               className={styles.chatHeaderAction}
+              disabled={headerActionsDisabled}
               onClick={handleEditBot}
               title="Edit bot"
             >
@@ -13956,26 +14247,24 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={styles.chatHeaderAction}
-            disabled={!canExport}
+            disabled={headerActionsDisabled || !canExport}
             onClick={handleExport}
-            title="Export chat as Markdown"
+            title={exportTitle}
           >
-            Export .md
+            {exportButtonText}
           </button>
           <button
             type="button"
             className={`${styles.chatHeaderAction} ${
               deleteArmed ? styles.chatHeaderActionDanger : ""
             }`}
-            disabled={!canDelete}
+            disabled={headerActionsDisabled || !canDelete}
             data-delete-affordance="true"
-            aria-label={
-              deleteArmed ? "Confirm delete this chat" : "Delete this chat"
-            }
-            title={deleteArmed ? "Tap to confirm" : "Delete chat"}
+            aria-label={deleteLabel}
+            title={deleteLabel}
             onClick={handleDelete}
           >
-            {deleteArmed ? "✓ Confirm" : "Delete"}
+            {deleteButtonText}
           </button>
         </div>
       );
@@ -14043,8 +14332,9 @@ function HomeContent(): React.JSX.Element {
                 swallowMenuEvent(event);
                 handleExport();
               }}
+              title={exportTitle}
             >
-              Export .md
+              {exportButtonText}
             </button>
             <button
               type="button"
@@ -14052,15 +14342,14 @@ function HomeContent(): React.JSX.Element {
               className={`${styles.chatOverflowMenuItem} ${deleteArmed ? styles.chatOverflowMenuItemDanger : ""}`}
               disabled={!canDelete}
               data-delete-affordance="true"
-              aria-label={
-                deleteArmed ? "Confirm delete this chat" : "Delete this chat"
-              }
+              aria-label={deleteLabel}
+              title={deleteLabel}
               onClick={(event) => {
                 swallowMenuEvent(event);
                 handleDelete();
               }}
             >
-              {deleteArmed ? "✓ Confirm delete" : "Delete chat"}
+              {deleteButtonText}
             </button>
           </div>
         )}
@@ -15131,6 +15420,13 @@ function HomeContent(): React.JSX.Element {
         // the inert "Update" button remains visually identical to the
         // inert "Create bot" button — same chrome, different word.
         const primaryLabel = editingBotId ? "Update" : "Create bot";
+        const editingBotDeleteKey = editingBot ? `${BOT_DELETE_KEY_PREFIX}${editingBot.id}` : null;
+        const deleteArmed = Boolean(
+          editingBotDeleteKey && pendingDeleteKey === editingBotDeleteKey
+        );
+        const canDeleteEditingBot = Boolean(
+          editingBot && editingBot.delete_protected !== 1
+        );
 
         // Derive the inline --accent / --accent-text / --accent-ink
         // triad from the currently-picked color so the primary button
@@ -15194,7 +15490,34 @@ function HomeContent(): React.JSX.Element {
             data-editor-only={!botPanelLibraryEnabled ? "true" : undefined}
             style={editorPanelStyle}
           >
-            <div className={styles.panelHeader}><h3>{!botPanelLibraryEnabled ? "Edit Bot" : "Bots"}</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
+            <div className={styles.panelHeader}>
+              <h3>{!botPanelLibraryEnabled ? "Edit Bot" : "Bots"}</h3>
+              <div className={styles.panelHeaderActions}>
+                {botPanelLibraryEnabled && (
+                  <>
+                    <input
+                      ref={botImportInputRef}
+                      type="file"
+                      accept=".md,.json,text/markdown,application/json"
+                      className={styles.panelHiddenFileInput}
+                      onChange={(event) => {
+                        void handleBotImportFileSelection(event);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className={styles.panelHeaderIconButton}
+                      onClick={openBotImportPicker}
+                      aria-label="Import bot file"
+                      title="Import bot file"
+                    >
+                      ↑
+                    </button>
+                  </>
+                )}
+                <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
+              </div>
+            </div>
             {activeFieldHelp && (
               <div
                 className={styles.botParameterHelpTooltip}
@@ -15618,6 +15941,33 @@ function HomeContent(): React.JSX.Element {
               >
                 {primaryLabel}
               </button>
+              {canDeleteEditingBot && editingBotDeleteKey && (
+                <button
+                  type="button"
+                  className={`${styles.botFormDeleteButton} ${deleteArmed ? styles.botFormDeleteButtonArmed : ""}`}
+                  data-delete-affordance="true"
+                  aria-label={
+                    deleteArmed
+                      ? `Confirm delete ${editingBot.name}`
+                      : `Delete ${editingBot.name}`
+                  }
+                  title={
+                    deleteArmed
+                      ? `Confirm delete ${editingBot.name}`
+                      : `Delete ${editingBot.name}`
+                  }
+                  onClick={() => {
+                    if (deleteArmed) {
+                      void deleteBot(editingBot.id);
+                    } else {
+                      armDelete(editingBotDeleteKey);
+                    }
+                  }}
+                  disabled={busy}
+                >
+                  {deleteArmed ? "Are you sure?" : "Delete"}
+                </button>
+              )}
               </form>
             )}
 
