@@ -1,9 +1,25 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
+REM Tip: If the window closes too fast, open "Developer Command Prompt" or PowerShell,
+REM cd to the repo root, and run: apps\server-windows\scripts\test-installer.bat
+REM For CI/automation, set PRISM_INSTALLER_NO_PAUSE=1 to skip "Press any key..." at exit.
+
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..\..") do set "REPO_ROOT=%%~fI"
 cd /d "%REPO_ROOT%"
+if errorlevel 1 (
+  echo ERROR: Could not change directory to repo root:
+  echo   "%REPO_ROOT%"
+  goto die
+)
+if not exist "package.json" (
+  echo ERROR: package.json not found. Expected LocalAI repo root:
+  echo   "%REPO_ROOT%"
+  echo Run this script from a full checkout, or open cmd, cd to the repo root, then run:
+  echo   apps\server-windows\scripts\test-installer.bat
+  goto die
+)
 
 set "VERSION=%~1"
 if "%VERSION%"=="" set "VERSION=0.2.0"
@@ -83,6 +99,10 @@ if /I "%RUN_INSTALLER%"=="YES" start "" "%INSTALLER%"
 
 goto end
 
+:die
+call :maybe_pause
+exit /b 1
+
 :missing_npm
 echo ERROR: npm was not found. Install Node 22, then rerun this script.
 goto failed
@@ -98,7 +118,26 @@ goto failed
 :failed
 echo.
 echo Prism Server installer smoke test failed.
+call :maybe_pause
 exit /b 1
 
 :end
 endlocal
+call :maybe_pause_outside_setlocal
+exit /b 0
+
+:maybe_pause_outside_setlocal
+setlocal EnableExtensions
+if /i "%PRISM_INSTALLER_NO_PAUSE%"=="1" goto :eof
+echo.
+echo Press any key to close this window...
+pause >nul
+endlocal
+goto :eof
+
+:maybe_pause
+if /i "%PRISM_INSTALLER_NO_PAUSE%"=="1" goto :eof
+echo.
+echo Press any key to close this window...
+pause >nul
+goto :eof
