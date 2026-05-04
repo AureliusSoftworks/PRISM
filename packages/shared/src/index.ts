@@ -22,7 +22,21 @@ export {
   type BotPurposeProfile,
   type BotVoicePreset,
   type BotWorldviewProfile,
-} from "./botProfile.js";
+} from "./botProfile";
+
+export {
+  PRISM_TOOL_END,
+  PRISM_TOOL_START,
+  assistantContentHasPrismToolFraming,
+  hydrateAssistantMessageParts,
+  parseAssistantPrismTools,
+  parseStoredToolPayload,
+  serializeAskQuestionTool,
+  type AskQuestionOption,
+  type AskQuestionPayload,
+  type ParsedAssistantTurn,
+  type StoredAssistantToolPayload,
+} from "./prismTool";
 
 export {
   ACCENT_LUMINANCE_MAX_LIGHT,
@@ -42,7 +56,9 @@ export {
   pickReadableText,
   relativeLuminance,
   swatchBorderCompensation,
-} from "./color.js";
+} from "./color";
+
+import type { AskQuestionPayload } from "./prismTool";
 
 export type UserRole = "user";
 
@@ -77,6 +93,8 @@ export interface ChatMessage {
   botColor?: string;
   /** Bot's associated glyph identifier (opaque key looked up in the client's glyph registry). */
   botGlyph?: string;
+  /** When this assistant row used AskQuestion (`tool_payload` on the server). */
+  askQuestion?: AskQuestionPayload;
 }
 
 export interface Conversation {

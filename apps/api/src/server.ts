@@ -49,7 +49,7 @@ import {
   purgeExpiredImages
 } from "./image-retention.ts";
 import { deleteVectorsForUser } from "./qdrant.ts";
-import type { ChatMessage } from "@localai/shared";
+import { hydrateAssistantMessageParts, type ChatMessage } from "@localai/shared";
 
 const config = getAppConfig();
 const db = createDatabase();
@@ -551,7 +551,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const messageRows = db
         .prepare(
-          `SELECT m.id, m.role, m.content, m.provider, m.model, m.created_at,
+          `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
                   b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
            FROM messages m
            LEFT JOIN bots b ON b.id = m.bot_id
@@ -564,6 +564,7 @@ function buildRoutes(): RouteDefinition[] {
         content: string;
         provider: string | null;
         model: string | null;
+        tool_payload: string | null;
         bot_name: string | null;
         bot_color: string | null;
         bot_glyph: string | null;
@@ -571,20 +572,32 @@ function buildRoutes(): RouteDefinition[] {
       }>;
       // Match the shared ChatMessage shape used by POST /api/chat and the
       // web UI so both endpoints agree.
-      const messages = messageRows.map((row) => ({
-        id: row.id,
-        role: row.role,
-        content: row.content,
-        createdAt: row.created_at,
-        provider:
-          row.provider === "local" || row.provider === "openai"
-            ? row.provider
-            : undefined,
-        model: row.model ?? undefined,
-        botName: row.bot_name ?? undefined,
-        botColor: row.bot_color ?? undefined,
-        botGlyph: row.bot_glyph ?? undefined,
-      }));
+      const messages = messageRows.map((row): ChatMessage => {
+        const shared: ChatMessage = {
+          id: row.id,
+          role: row.role,
+          content: row.content,
+          createdAt: row.created_at,
+          provider:
+            row.provider === "local" || row.provider === "openai"
+              ? row.provider
+              : undefined,
+          model: row.model ?? undefined,
+          botName: row.bot_name ?? undefined,
+          botColor: row.bot_color ?? undefined,
+          botGlyph: row.bot_glyph ?? undefined,
+        };
+        if (row.role !== "assistant") return shared;
+        const assembled = hydrateAssistantMessageParts({
+          content: row.content,
+          toolPayload: row.tool_payload,
+        });
+        return {
+          ...shared,
+          content: assembled.content,
+          ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+        };
+      });
       json(ctx.res, 200, {
         ok: true,
         conversation: {
@@ -1437,7 +1450,8 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         "INSERT INTO conversations (id, user_id, title, bot_id, parent_id, fork_message_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).run(forkId, userId, `Fork of ${parent.title}`, parent.bot_id, parentId, forkMessageId, parent.incognito, now, now);
-      let messageQuery = "SELECT id, role, content, provider, model, bot_id, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC";
+      let messageQuery =
+        "SELECT id, role, content, provider, model, bot_id, tool_payload, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC";
       let messages: Array<{
         id: string;
         role: string;
@@ -1445,6 +1459,7 @@ function buildRoutes(): RouteDefinition[] {
         provider: string | null;
         model: string | null;
         bot_id: string | null;
+        tool_payload: string | null;
         created_at: string;
       }>;
       if (forkMessageId) {
@@ -1459,8 +1474,19 @@ function buildRoutes(): RouteDefinition[] {
       }
       for (const msg of messages) {
         db.prepare(
-          "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(randomId(12), forkId, userId, msg.role, msg.content, msg.provider, msg.model, msg.bot_id, msg.created_at);
+          "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(
+          randomId(12),
+          forkId,
+          userId,
+          msg.role,
+          msg.content,
+          msg.provider,
+          msg.model,
+          msg.bot_id,
+          msg.tool_payload,
+          msg.created_at
+        );
       }
       json(ctx.res, 201, { ok: true, conversationId: forkId });
     }),

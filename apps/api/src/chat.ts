@@ -28,7 +28,19 @@ import {
   summarizeAndStoreMemories,
   summarizeThreadCompact,
 } from "./memory-summarizer.ts";
-import type { ChatMessage, ChatMode, Conversation } from "@localai/shared";
+import type {
+  AskQuestionPayload,
+  ChatMessage,
+  ChatMode,
+  Conversation,
+} from "@localai/shared";
+import {
+  hydrateAssistantMessageParts,
+  PRISM_TOOL_END,
+  PRISM_TOOL_START,
+  parseAssistantPrismTools,
+  serializeAskQuestionTool,
+} from "@localai/shared";
 
 const config = getAppConfig();
 
@@ -328,6 +340,192 @@ export interface UserChatSettings {
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
 const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
 
+const PRISM_ASSISTANT_TOOLS_APPENDIX = [
+  "Prism assistant tools — optional:",
+  `When you want the user to pick exactly one tap-to-reply chip, append ONE trailing block AFTER your readable prose.`,
+  `If you do not need chips this turn, omit the entire block.`,
+  "",
+  `${PRISM_TOOL_START}`,
+  '{"v":1,"name":"AskQuestion","prompt":"Short UI heading for the picks","options":[{"id":"a","label":"🟢 first choice"},{"id":"b","label":"🟡 second choice"},{"id":"c","label":"🔴 third choice"}]}',
+  `${PRISM_TOOL_END}`,
+  "Rules:",
+  "- Keep normal conversation in plain prose BEFORE the delimiter block.",
+  "- AskQuestion represents one question in this turn; never output a quiz or multi-question list.",
+  "- Inside JSON only: emit exactly three options with ids a, b, c (distinct).",
+  "- Labels are what the USER sends verbatim when they tap; keep each short (single clause).",
+].join("\n");
+
+const ASKQUESTION_REQUEST_PATTERN =
+  /\b(ask\s+me\s+(?:a|another)\s+question|quiz\s+me|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
+
+function userExplicitlyRequestedAskQuestion(userMessage: string): boolean {
+  return ASKQUESTION_REQUEST_PATTERN.test(userMessage);
+}
+
+function normalizeAskQuestionText(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractDynamicAskQuestion(displayContent: string): AskQuestionPayload | undefined {
+  const lines = displayContent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) return undefined;
+
+  const questionIndex = lines.findIndex((line) => line.includes("?"));
+  if (questionIndex < 0) return undefined;
+  const rawPrompt = normalizeAskQuestionText(lines[questionIndex] ?? "");
+  const prompt = rawPrompt.length > 0 ? rawPrompt : "Which option fits best?";
+
+  const optionRegex = /^(?:[-*]\s*)?(?:[A-Da-d1-4])[)\].:-]\s*(.+)$/;
+  const options: string[] = [];
+  for (let i = questionIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (line.includes("?") && options.length > 0) break;
+    const match = line.match(optionRegex);
+    if (!match?.[1]) continue;
+    const cleaned = normalizeAskQuestionText(match[1]);
+    if (cleaned.length === 0) continue;
+    options.push(cleaned);
+    if (options.length === 3) break;
+  }
+  if (options.length < 3) return undefined;
+
+  return {
+    v: 1,
+    name: "AskQuestion",
+    prompt,
+    options: [
+      { id: "a", label: options[0]! },
+      { id: "b", label: options[1]! },
+      { id: "c", label: options[2]! },
+    ],
+  };
+}
+
+function coerceAskQuestionPrompt(displayContent: string, userMessage: string): string {
+  const firstLine =
+    displayContent
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? userMessage.trim();
+  let prompt = firstLine
+    .replace(/^[-*]\s+/, "")
+    .replace(/^[>#`]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (prompt.length > 88) {
+    prompt = `${prompt.slice(0, 85).trimEnd()}...`;
+  }
+  if (!prompt) {
+    prompt = "Which option fits best?";
+  } else if (!/[?.!]$/.test(prompt)) {
+    prompt = `${prompt}?`;
+  }
+  return prompt;
+}
+
+function buildAskQuestionFallback(displayContent: string, userMessage: string): AskQuestionPayload {
+  const dynamic = extractDynamicAskQuestion(displayContent);
+  if (dynamic) return dynamic;
+  return {
+    v: 1,
+    name: "AskQuestion",
+    prompt: coerceAskQuestionPrompt(displayContent, userMessage),
+    options: [
+      { id: "a", label: "🟢 Yes" },
+      { id: "b", label: "🟡 Maybe / need context" },
+      { id: "c", label: "🔴 No" },
+    ],
+  };
+}
+
+function normalizeAskQuestionComparisonText(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "")
+    .replace(/[“”"']/g, "")
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[^\p{L}\p{N}\s\-?:]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function stripAskQuestionDuplicatesFromDisplay(
+  displayContent: string,
+  askQuestion: AskQuestionPayload | undefined
+): string {
+  if (!askQuestion) return displayContent;
+  const promptNorm = normalizeAskQuestionComparisonText(askQuestion.prompt);
+  const optionNorms = askQuestion.options.map((opt) =>
+    normalizeAskQuestionComparisonText(opt.label)
+  );
+  const optionSet = new Set(optionNorms);
+  const optionLeadRegex = /^(?:[-*]\s*)?(?:[A-Da-d1-4])[)\].:-]\s*/;
+  const bridgeLinePatterns: RegExp[] = [
+    /\bwhich option do you choose\b/i,
+    /\bwhich one do you choose\b/i,
+    /\bwhich answer do you choose\b/i,
+    /\bchoose one\b/i,
+    /\bpick one\b/i,
+    /\bselect one\b/i,
+  ];
+
+  const lines = displayContent.split(/\r?\n/);
+  const filtered = lines.filter((line) => {
+    const norm = normalizeAskQuestionComparisonText(line);
+    if (!norm) return true;
+
+    // Duplicate heading question rendered again in the bubble.
+    if (promptNorm && norm === promptNorm) return false;
+
+    // Single option line duplication: "A) Fish", "B) Krill", etc.
+    const markerStripped = normalizeAskQuestionComparisonText(
+      line.replace(optionLeadRegex, "")
+    );
+    if (markerStripped && optionSet.has(markerStripped)) return false;
+
+    // Inline multi-option duplication: "A) Fish B) Krill C) Squid".
+    const markerChunks = line
+      .split(/(?=(?:[-*]\s*)?(?:[A-Da-d1-4])[)\].:-]\s*)/g)
+      .map((chunk) => normalizeAskQuestionComparisonText(chunk.replace(optionLeadRegex, "")))
+      .filter((chunk) => chunk.length > 0);
+    if (
+      markerChunks.length >= 2 &&
+      markerChunks.every((chunk) => optionSet.has(chunk))
+    ) {
+      return false;
+    }
+
+    // Generic bridge lines become redundant once chips are visible.
+    if (bridgeLinePatterns.some((pattern) => pattern.test(norm))) {
+      return false;
+    }
+
+    return true;
+  });
+
+  // Collapse excessive blank lines after stripping duplicates.
+  const compacted: string[] = [];
+  for (const line of filtered) {
+    const isBlank = line.trim().length === 0;
+    const prevBlank = compacted.length > 0 && compacted[compacted.length - 1]!.trim().length === 0;
+    if (isBlank && prevBlank) continue;
+    compacted.push(line);
+  }
+  return compacted.join("\n").trim();
+}
+
 function generateConversationTitle(message: string): string {
   const trimmed = message.trim();
   if (!trimmed) {
@@ -360,31 +558,47 @@ type MessageRow = {
   bot_name: string | null;
   bot_color: string | null;
   bot_glyph: string | null;
+  tool_payload: string | null;
   created_at: string;
 };
 
 function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
-  return rows.map((row) => ({
-    id: row.id,
-    role: row.role,
-    content: row.content,
-    createdAt: row.created_at,
-    provider:
-      row.provider === "local" || row.provider === "openai"
-        ? row.provider
-        : undefined,
-    model: row.model ?? undefined,
-    botName: row.bot_name ? row.bot_name : undefined,
-    botColor: row.bot_color ? row.bot_color : undefined,
-    botGlyph: row.bot_glyph ? row.bot_glyph : undefined,
-  }));
+  return rows.map((row) => {
+    const base: ChatMessage = {
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      createdAt: row.created_at,
+      provider:
+        row.provider === "local" || row.provider === "openai"
+          ? row.provider
+          : undefined,
+      model: row.model ?? undefined,
+      botName: row.bot_name ? row.bot_name : undefined,
+      botColor: row.bot_color ? row.bot_color : undefined,
+      botGlyph: row.bot_glyph ? row.bot_glyph : undefined,
+    };
+    if (row.role !== "assistant") {
+      return base;
+    }
+    const assembled = hydrateAssistantMessageParts({
+      content: row.content,
+      toolPayload: row.tool_payload,
+    });
+    return {
+      ...base,
+      content: assembled.content,
+      ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+    };
+  });
 }
 
 /**
  * Assemble the final system+history payload the provider actually sees.
  *
  * Order is deliberate:
- *   1. Bot persona (if any)
+ *   1. Bot persona (if any) plus Prism AskQuestion appendix — or appendix only
+ *      when Default / no composeBotSystemPrompt.
  *   2. Thread-compaction summary (Sandbox rolling context — present ONLY
  *      once the conversation has grown past the live window)
  *   3. Cross-thread memory hints (Chat mode only)
@@ -402,10 +616,23 @@ function buildPromptMessages(args: {
   memoryLines: string[];
   chatHistory: ChatMessage[];
   userMessage: string;
+  forceAskQuestion: boolean;
 }): ProviderMessage[] {
   const promptMessages: ProviderMessage[] = [];
-  if (args.botSystemPrompt) {
-    promptMessages.push({ role: "system", content: args.botSystemPrompt });
+  const trimmedBot = args.botSystemPrompt?.trim();
+  const toolsBlock =
+    trimmedBot &&
+    trimmedBot.length > 0
+      ? `${trimmedBot}\n\n${PRISM_ASSISTANT_TOOLS_APPENDIX}`
+      : PRISM_ASSISTANT_TOOLS_APPENDIX;
+  promptMessages.push({ role: "system", content: toolsBlock });
+  if (args.forceAskQuestion) {
+    promptMessages.push({
+      role: "system",
+      content:
+        "The user's latest message explicitly asks for AskQuestion/multiple-choice. " +
+        "For this turn, ask exactly ONE multiple-choice question (not a quiz), keep exactly three options, and append one valid Prism AskQuestion tool block after your prose.",
+    });
   }
   if (args.threadSummary && args.threadSummary.trim().length > 0) {
     promptMessages.push({
@@ -518,6 +745,7 @@ export async function processChatMessage(
   const now = new Date().toISOString();
   const mode: ChatMode = settings.mode ?? "sandbox";
   const isStarterPrompt = settings.starterPrompt === true;
+  const forceAskQuestion = !isStarterPrompt && userExplicitlyRequestedAskQuestion(message);
   const promptUserMessage = isStarterPrompt
     ? buildStarterPromptInstruction()
     : message;
@@ -562,11 +790,22 @@ export async function processChatMessage(
       memoryLines: [],
       chatHistory: history,
       userMessage: promptUserMessage,
+      forceAskQuestion,
     });
 
-    const assistantReply = await provider.generateResponse(
+    const assistantReplyRaw = await provider.generateResponse(
       promptMessages,
       settings.botOverrides
+    );
+    const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
+    const askQuestionForTurn =
+      parsedAssistant.askQuestion ??
+      (forceAskQuestion
+        ? buildAskQuestionFallback(parsedAssistant.displayContent, message)
+        : undefined);
+    const assistantDisplay = stripAskQuestionDuplicatesFromDisplay(
+      parsedAssistant.displayContent,
+      askQuestionForTurn
     );
     const modelUsed =
       settings.botOverrides?.model?.trim() ||
@@ -579,11 +818,12 @@ export async function processChatMessage(
     const assistantMessage: ChatMessage = {
       id: randomId(12),
       role: "assistant",
-      content: assistantReply,
+      content: assistantDisplay,
       createdAt: assistantCreatedAt,
       provider: provider.name,
       model: modelUsed,
       ...(activeBotName ? { botName: activeBotName } : {}),
+      ...(askQuestionForTurn ? { askQuestion: askQuestionForTurn } : {}),
     };
     const nextMessages: ChatMessage[] = [
       ...history,
@@ -617,7 +857,7 @@ export async function processChatMessage(
     if (isStarterPrompt) {
       const startersInferred = await inferConversationStarters(
         auxiliaryProvider,
-        assistantReply,
+        assistantDisplay,
         settings.starterPromptLabel,
         settings.botOverrides
       );
@@ -667,7 +907,7 @@ export async function processChatMessage(
   // thread-compaction summary in Sandbox mode.
   const historyRowsDesc = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.model, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
@@ -701,6 +941,7 @@ export async function processChatMessage(
     memoryLines,
     chatHistory: history,
     userMessage: promptUserMessage,
+    forceAskQuestion,
   });
 
   let userMessageId: string | null = null;
@@ -711,25 +952,40 @@ export async function processChatMessage(
     ).run(userMessageId, activeConversationId, userId, message, now);
   }
 
-  const assistantReply = await provider.generateResponse(
+  const assistantReplyRaw = await provider.generateResponse(
     promptMessages,
     settings.botOverrides
   );
+  const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
+  const askQuestionForTurn =
+    parsedAssistant.askQuestion ??
+    (forceAskQuestion
+      ? buildAskQuestionFallback(parsedAssistant.displayContent, message)
+      : undefined);
+  const assistantDisplay = stripAskQuestionDuplicatesFromDisplay(
+    parsedAssistant.displayContent,
+    askQuestionForTurn
+  );
+  const toolPayloadStored =
+    askQuestionForTurn !== undefined
+      ? serializeAskQuestionTool(askQuestionForTurn)
+      : null;
   const modelUsed =
     settings.botOverrides?.model?.trim() ||
     (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
   const assistantCreatedAt = new Date().toISOString();
   const assistantMessageId = randomId(12);
   db.prepare(
-    "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)"
+    "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)"
   ).run(
     assistantMessageId,
     activeConversationId,
     userId,
-    assistantReply,
+    assistantDisplay,
     provider.name,
     modelUsed,
     activeBotId ?? null,
+    toolPayloadStored,
     assistantCreatedAt
   );
 
@@ -782,7 +1038,7 @@ export async function processChatMessage(
     const titleConversationId = activeConversationId;
     const titleUserId = userId;
     const titleUserMessage = message;
-    const titleAssistantReply = assistantReply;
+    const titleAssistantReply = assistantDisplay;
     const titleAssistantMessageId = assistantMessageId;
     const titlePersonaLabel = settings.starterPromptLabel;
     const titleOverrides = settings.botOverrides;
@@ -1006,7 +1262,7 @@ export async function processChatMessage(
 
   const messageRows = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.model, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
@@ -1033,7 +1289,7 @@ export async function processChatMessage(
   if (isStarterPrompt) {
     const startersPersisted = await inferConversationStarters(
       auxiliaryProvider,
-      assistantReply,
+      assistantDisplay,
       settings.starterPromptLabel,
       settings.botOverrides
     );

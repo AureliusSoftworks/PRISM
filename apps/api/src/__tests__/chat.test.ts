@@ -37,6 +37,7 @@ function createChatTestDb(): DatabaseSync {
       provider TEXT,
       model TEXT,
       bot_id TEXT,
+      tool_payload TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE bots (
@@ -368,6 +369,102 @@ describe("processChatMessage starter prompts", () => {
       .get() as { n: number };
     assert.equal(conversationCount.n, 0);
     assert.equal(messageCount.n, 0);
+  });
+});
+
+describe("processChatMessage AskQuestion tool", () => {
+  it("persists stripped prose and attaches askQuestion hydration", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, color, glyph, delete_protected) VALUES (?, ?, ?, ?, 0)"
+    ).run("bot-1", "Guide Bot", "#5b8cff", "north");
+
+    const askPayload = {
+      v: 1 as const,
+      name: "AskQuestion" as const,
+      prompt: "Which path?",
+      options: [
+        { id: "a", label: "🟢 Left" },
+        { id: "b", label: "🟡 Pause" },
+        { id: "c", label: "🔴 Right" },
+      ],
+    };
+    const prismTail =
+      `\n<<<PRISM_TOOL>>>\n${JSON.stringify(askPayload)}\n<<<END_PRISM_TOOL>>>`;
+    globalThis.fetch = (async (_input: string | URL | Request) =>
+      new Response(
+        JSON.stringify({
+          message: { content: `Turn here softly.${prismTail}` },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Which way?",
+      Buffer.from("test-key"),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        botId: "bot-1",
+        incognito: false,
+        botSystemPrompt: "You are Guide Bot. Offer gentle forks.",
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "Turn here softly.");
+    assert.deepEqual(lastAssistant?.askQuestion, askPayload);
+
+    const row = db.prepare(
+      "SELECT content, tool_payload FROM messages WHERE role = ?"
+    ).get("assistant") as { content: string; tool_payload: string };
+
+    assert.equal(row.content, "Turn here softly.");
+    assert.deepEqual(JSON.parse(row.tool_payload), askPayload);
+  });
+
+  it("forces fallback AskQuestion payload when user explicitly requests multiple-choice", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (_input: string | URL | Request) =>
+      new Response(
+        JSON.stringify({
+          message: { content: "Sure — here's one. Do you want to keep going?" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Please ask me a multiple-choice question.",
+      Buffer.from("test-key"),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.askQuestion?.name, "AskQuestion");
+    assert.equal(lastAssistant?.askQuestion?.options.length, 3);
+    assert.deepEqual(
+      lastAssistant?.askQuestion?.options.map((opt) => opt.id),
+      ["a", "b", "c"]
+    );
+    assert.equal(lastAssistant?.askQuestion?.options[0]?.label, "🟢 Yes");
+
+    const row = db.prepare(
+      "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
+    ).get("assistant") as { tool_payload: string | null };
+    assert.notEqual(row.tool_payload, null);
+    assert.equal(JSON.parse(String(row.tool_payload)).name, "AskQuestion");
   });
 });
 

@@ -14,12 +14,14 @@ export interface BackupSnapshot {
       role: string;
       content: string;
       createdAt: string;
-      /** Optional; older v1 snapshots (pre-provider tracking) omit this. */
+      /** Optional; older v1 snapshots omit this. */
       provider?: "local" | "openai";
       /** Optional; older v1 snapshots (pre-model tracking) omit this. */
       model?: string;
       /** Optional; older v1 snapshots (pre-per-message bot tracking) omit this. */
       botId?: string;
+      /** Serialized AskQuestion envelope; optional snapshots omit this. */
+      toolPayload?: string;
     }>;
   }>;
   memories: Array<{
@@ -74,7 +76,7 @@ export function exportUserSnapshot(
   const conversationPayload = conversations.map((conversation) => {
     const messages = db
       .prepare(
-        "SELECT id, role, content, provider, model, bot_id, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
+        "SELECT id, role, content, provider, model, bot_id, tool_payload, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
       )
       .all(conversation.id, userId) as Array<{
       id: string;
@@ -83,6 +85,7 @@ export function exportUserSnapshot(
       provider: string | null;
       model: string | null;
       bot_id: string | null;
+      tool_payload: string | null;
       created_at: string;
     }>;
     return {
@@ -97,6 +100,10 @@ export function exportUserSnapshot(
             : undefined;
         const botId: string | undefined = message.bot_id ?? undefined;
         const model: string | undefined = message.model ?? undefined;
+        const toolPayload =
+          typeof message.tool_payload === "string" && message.tool_payload.trim().length > 0
+            ? message.tool_payload
+            : undefined;
         return {
           id: message.id,
           role: message.role,
@@ -105,6 +112,7 @@ export function exportUserSnapshot(
           provider,
           model,
           botId,
+          ...(toolPayload ? { toolPayload } : {}),
         };
       }),
     };
@@ -158,8 +166,8 @@ export function importUserSnapshot(
     VALUES (?, ?, ?, ?, ?)
   `);
   const insertMessage = db.prepare(`
-    INSERT OR REPLACE INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMemory = db.prepare(`
     INSERT OR REPLACE INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, created_at)
@@ -187,6 +195,10 @@ export function importUserSnapshot(
         typeof message.model === "string" && message.model.trim().length > 0
           ? message.model.trim()
           : null;
+      const toolPayloadValue =
+        typeof message.toolPayload === "string" && message.toolPayload.trim().length > 0
+          ? message.toolPayload.trim()
+          : null;
       insertMessage.run(
         message.id,
         conversation.id,
@@ -196,6 +208,7 @@ export function importUserSnapshot(
         providerValue,
         modelValue,
         botIdValue,
+        toolPayloadValue,
         message.createdAt
       );
     }

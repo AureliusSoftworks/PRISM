@@ -20,8 +20,8 @@ import { stripBotProfileMetaSuffix } from "@localai/shared";
  *   - Structured bot-editor metadata (`<<<PRISM_BOT_META>>>` …), when present,
  *     is stripped before this helper runs so providers never see JSON tails.
  *   - Returns undefined when neither a usable name nor prompt is present,
- *     so the chat pipeline sends no system message at all (the Default
- *     "Always on" bot case).
+ *     so callers pass no bot-owned persona; `buildPromptMessages` still ships
+ *     the Prism tool appendix alone for Default chats.
  */
 export function composeBotSystemPrompt(
   name: string | null | undefined,

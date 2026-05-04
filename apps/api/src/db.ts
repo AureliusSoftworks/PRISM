@@ -122,6 +122,7 @@ export function createDatabase(): DatabaseSync {
       provider TEXT,
       model TEXT,
       bot_id TEXT,
+      tool_payload TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -239,6 +240,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotIdColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN bot_id TEXT;");
+  }
+  const hasToolPayloadColumn = messageColumns.some(
+    (column) => column.name === "tool_payload"
+  );
+  if (!hasToolPayloadColumn) {
+    db.exec("ALTER TABLE messages ADD COLUMN tool_payload TEXT;");
   }
 
   const memoryColumns = db
