@@ -1580,7 +1580,7 @@
   width: 100%;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   text-align: left;
@@ -1606,7 +1606,7 @@
     );
   color: var(--fg);
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 9px 12px;
   cursor: pointer;
   font: inherit;
   font-size: var(--font-size-conversation-title);
@@ -1625,9 +1625,73 @@
   border-color: var(--fg);
 }
 
+.conversationGroupChevron {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 7px;
+  border-color: transparent transparent transparent
+    color-mix(in srgb, var(--fg) 70%, transparent);
+  flex-shrink: 0;
+  transform-origin: 35% 50%;
+  transition: transform 0.2s ease;
+}
+
+.conversationGroupChevronExpanded {
+  transform: rotate(90deg);
+}
+
+.conversationGroupAccordionItem {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.conversationGroupCollapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.conversationGroupCollapseExpanded {
+  grid-template-rows: 1fr;
+}
+
+.conversationGroupCollapseInner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.conversationGroupNestedList {
+  list-style: none;
+  margin: 5px 0 4px 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid color-mix(in srgb, var(--line) 72%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.conversationRowNested .conversationTitleButton {
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: calc(var(--font-size-conversation-title) - 1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversationGroupCollapse {
+    transition: none;
+  }
+
+  .conversationGroupChevron {
+    transition: none;
+  }
+}
+
 .conversationGroupGlyph {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   color: var(--fg);

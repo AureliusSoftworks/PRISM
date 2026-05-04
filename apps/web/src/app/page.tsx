@@ -2873,6 +2873,19 @@ function conversationGroupDeleteKey(key: string): string {
   return `group:${key}`;
 }
 
+/** HTML `id` slug — `group.key` may contain `:` (e.g. `bot:uuid`). */
+function conversationGroupDomSafeSlug(key: string): string {
+  return key.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function conversationGroupNestedListId(key: string): string {
+  return `conversation-group-chats-${conversationGroupDomSafeSlug(key)}`;
+}
+
+function conversationGroupHeaderButtonId(key: string): string {
+  return `conversation-group-toggle-${conversationGroupDomSafeSlug(key)}`;
+}
+
 function buildConversationGroupSummary(
   key: string,
   conversations: ConversationSummary[],
@@ -7709,7 +7722,9 @@ function HomeContent(): React.JSX.Element {
     () => new Set()
   );
   const [unreadConversationOrder, setUnreadConversationOrder] = useState<string[]>([]);
-  const [openConversationGroupKey, setOpenConversationGroupKey] = useState<string | null>(null);
+  const [expandedConversationGroupKey, setExpandedConversationGroupKey] = useState<
+    string | null
+  >(null);
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
   const selectedIdRef = useRef<string | null>(null);
   const detailIdRef = useRef<string | null>(null);
@@ -8697,16 +8712,7 @@ function HomeContent(): React.JSX.Element {
     () => new Map(conversationGroups.map((group) => [group.key, group])),
     [conversationGroups]
   );
-  const openConversationGroup = openConversationGroupKey
-    ? conversationGroupsByKey.get(openConversationGroupKey) ?? null
-    : null;
   const sidebarConversationItems = useMemo<SidebarConversationItem[]>(() => {
-    if (openConversationGroup) {
-      return openConversationGroup.conversations.map((conversation) => ({
-        kind: "conversation",
-        conversation,
-      }));
-    }
     const renderedGroupKeys = new Set<string>();
     return visibleConversations.flatMap((conversation): SidebarConversationItem[] => {
       const key = conversationGroupKey(conversation);
@@ -8718,13 +8724,16 @@ function HomeContent(): React.JSX.Element {
       }
       return [{ kind: "conversation", conversation }];
     });
-  }, [conversationGroupsByKey, openConversationGroup, visibleConversations]);
+  }, [conversationGroupsByKey, visibleConversations]);
 
   useEffect(() => {
-    if (openConversationGroupKey && !conversationGroupsByKey.has(openConversationGroupKey)) {
-      setOpenConversationGroupKey(null);
+    if (
+      expandedConversationGroupKey &&
+      !conversationGroupsByKey.has(expandedConversationGroupKey)
+    ) {
+      setExpandedConversationGroupKey(null);
     }
-  }, [conversationGroupsByKey, openConversationGroupKey]);
+  }, [conversationGroupsByKey, expandedConversationGroupKey]);
 
   const showPrivateConversationEmptyState =
     privateChatActive && visibleConversations.length === 0;
@@ -9852,7 +9861,7 @@ function HomeContent(): React.JSX.Element {
             nextOpenKey = conversationGroupKeyForBotId(newBotId);
           }
         }
-        setOpenConversationGroupKey((prev) =>
+        setExpandedConversationGroupKey((prev) =>
           prev === nextOpenKey ? prev : nextOpenKey,
         );
       }
@@ -11160,7 +11169,7 @@ function HomeContent(): React.JSX.Element {
     const previousDetail = detail;
     const previousUnreadIds = unreadConversationIds;
     const previousUnreadOrder = unreadConversationOrder;
-    const previousOpenGroupKey = openConversationGroupKey;
+    const previousExpandedGroupKey = expandedConversationGroupKey;
     const groupConversationIds = new Set(
       previousConversations
         .filter((conversation) => conversationGroupKey(conversation) === group.key)
@@ -11185,7 +11194,7 @@ function HomeContent(): React.JSX.Element {
     setUnreadConversationOrder((previous) =>
       previous.filter((id) => !groupConversationIds.has(id))
     );
-    setOpenConversationGroupKey(null);
+    setExpandedConversationGroupKey(null);
     if (selectedGroupKey === group.key) {
       setSelectedId(null);
       setDetail(null);
@@ -11202,7 +11211,7 @@ function HomeContent(): React.JSX.Element {
       setDetail(previousDetail);
       setUnreadConversationIds(previousUnreadIds);
       setUnreadConversationOrder(previousUnreadOrder);
-      setOpenConversationGroupKey(previousOpenGroupKey);
+      setExpandedConversationGroupKey(previousExpandedGroupKey);
       setError(err instanceof Error ? err.message : "Delete conversation group failed.");
     }
   }
@@ -13086,14 +13095,17 @@ function HomeContent(): React.JSX.Element {
 
   const renderConversationRow = (
     c: ConversationSummary,
-    index: number
+    index: number,
+    nested = false
   ): React.JSX.Element => {
     const isSelected = c.id === selectedId;
     const isUnread = unreadConversationIds.has(c.id);
     return (
       <li
         key={c.id}
-        className={styles.conversationRow}
+        className={[styles.conversationRow, nested ? styles.conversationRowNested : ""]
+          .filter(Boolean)
+          .join(" ")}
         data-private={c.incognito ? "true" : undefined}
         data-unread={isUnread ? "true" : undefined}
         style={conversationRowStyle(c, index)}
@@ -13157,36 +13169,83 @@ function HomeContent(): React.JSX.Element {
 
   const renderConversationGroupTile = (
     group: ConversationGroupSummary,
-    index: number
+    headerGlowIndex: number
   ): React.JSX.Element => {
+    const isExpanded = expandedConversationGroupKey === group.key;
+    const nestedListId = conversationGroupNestedListId(group.key);
+    const headerButtonId = conversationGroupHeaderButtonId(group.key);
+    const groupNameLabelId = `${headerButtonId}-name`;
+
     return (
-      <li
-        key={group.key}
-        className={styles.conversationRow}
-        data-unread={group.unread ? "true" : undefined}
-        style={conversationGroupStyle(group, index)}
-      >
-        <button
-          type="button"
-          className={styles.conversationGroupTile}
-          onClick={() => {
-            disarmDelete();
-            setOpenConversationGroupKey(group.key);
-            setConversationListScrollTop(0);
-          }}
-          aria-label={`Open ${group.name} conversations`}
+      <li key={group.key} className={styles.conversationGroupAccordionItem}>
+        <div
+          className={styles.conversationRow}
+          data-unread={group.unread ? "true" : undefined}
+          style={conversationGroupStyle(group, headerGlowIndex)}
         >
-          <span className={styles.conversationGroupGlyph} aria-hidden="true">
-            <BotGlyph name={group.glyph} size={20} strokeWidth={1.5} />
-          </span>
-          <span className={styles.conversationGroupText}>
-            <span className={styles.conversationGroupName}>{group.name}</span>
-            <span className={styles.conversationGroupCount}>
-              {group.count} chats
+          <button
+            type="button"
+            className={styles.conversationGroupTile}
+            id={headerButtonId}
+            aria-expanded={isExpanded}
+            aria-controls={nestedListId}
+            onClick={() => {
+              disarmDelete();
+              setExpandedConversationGroupKey((prev) =>
+                prev === group.key ? null : group.key
+              );
+              setConversationListScrollTop(0);
+            }}
+            aria-label={
+              isExpanded
+                ? `Collapse ${group.name} conversations`
+                : `Expand ${group.name} conversations`
+            }
+          >
+            <span
+              className={[
+                styles.conversationGroupChevron,
+                isExpanded ? styles.conversationGroupChevronExpanded : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              aria-hidden="true"
+            />
+            <span className={styles.conversationGroupGlyph} aria-hidden="true">
+              <BotGlyph name={group.glyph} size={22} strokeWidth={1.5} />
             </span>
-          </span>
-        </button>
-        {renderConversationGroupDeleteButton(group)}
+            <span className={styles.conversationGroupText}>
+              <span className={styles.conversationGroupName} id={groupNameLabelId}>
+                {group.name}
+              </span>
+              <span className={styles.conversationGroupCount}>
+                {group.count} chats
+              </span>
+            </span>
+          </button>
+          {renderConversationGroupDeleteButton(group)}
+        </div>
+        <div
+          className={[
+            styles.conversationGroupCollapse,
+            isExpanded ? styles.conversationGroupCollapseExpanded : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          <div className={styles.conversationGroupCollapseInner}>
+            <ul
+              id={nestedListId}
+              className={styles.conversationGroupNestedList}
+              role="group"
+              aria-labelledby={groupNameLabelId}
+            >
+              {group.conversations.map((conversation, childIndex) =>
+                renderConversationRow(conversation, headerGlowIndex + 1 + childIndex, true)
+              )}
+            </ul>
+          </div>
+        </div>
       </li>
     );
   };
@@ -13200,39 +13259,18 @@ function HomeContent(): React.JSX.Element {
         </li>
       );
     }
-    if (openConversationGroup) {
-      rows.push(
-        <li key="group-back" className={styles.conversationGroupBackRow}>
-          <button
-            type="button"
-            className={styles.conversationGroupBackButton}
-            onClick={() => {
-              disarmDelete();
-              setOpenConversationGroupKey(null);
-            }}
-          >
-            ← Back to conversations
-          </button>
-          <div className={styles.conversationGroupOpenHeader}>
-            <span className={styles.conversationGroupGlyph} aria-hidden="true">
-              <BotGlyph name={openConversationGroup.glyph} size={18} strokeWidth={1.5} />
-            </span>
-            <span className={styles.conversationGroupText}>
-              <span className={styles.conversationGroupName}>{openConversationGroup.name}</span>
-              <span className={styles.conversationGroupCount}>
-                {openConversationGroup.count} chats
-              </span>
-            </span>
-          </div>
-        </li>
-      );
-    }
+    let glowRowIndex = 0;
     sidebarConversationItems.forEach((item) => {
-      rows.push(
-        item.kind === "group"
-          ? renderConversationGroupTile(item.group, rows.length)
-          : renderConversationRow(item.conversation, rows.length)
-      );
+      if (item.kind === "group") {
+        rows.push(renderConversationGroupTile(item.group, glowRowIndex));
+        glowRowIndex += 1;
+        if (expandedConversationGroupKey === item.group.key) {
+          glowRowIndex += item.group.conversations.length;
+        }
+      } else {
+        rows.push(renderConversationRow(item.conversation, glowRowIndex));
+        glowRowIndex += 1;
+      }
     });
     return rows;
   };
