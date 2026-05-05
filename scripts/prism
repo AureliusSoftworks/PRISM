@@ -30,9 +30,9 @@ Aliases:
   prism server
 
 Notes:
-  prism web runs `next dev` on http://localhost:18788 and stays in the
-  foreground; press Ctrl+C to stop. Assumes the API is already running
-  (e.g. via `prism mac-server`).
+  prism web now runs the combined dev launcher (`npm run dev`) which
+  starts/restarts both API (http://localhost:18787) and web
+  (http://localhost:18788) together in one foreground session.
 
 Environment:
   SIMULATOR_ID="Simulator UDID" prism ios
@@ -168,7 +168,7 @@ run_mac_server() {
 # Foreground long-running dev server; exec replaces the script process so
 # Ctrl+C is delivered straight to `next dev` without a stray bash hop.
 run_web() {
-  exec npm run dev:web
+  exec npm run dev
 }
 
 cd "$REPO_ROOT"

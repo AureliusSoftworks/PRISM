@@ -16,7 +16,8 @@ Usage:
 
 Notes:
   windows-server is Windows-only and runs the WPF tray app from source.
-  web runs the Next.js dev server on http://localhost:18788.
+  web runs the combined dev launcher and starts both API
+  (http://localhost:18787) and web (http://localhost:18788).
 "@
 }
 
@@ -31,7 +32,7 @@ switch ($Command.ToLowerInvariant()) {
         break
     }
     "web" {
-        npm run dev:web
+        npm run dev
         break
     }
     default {
