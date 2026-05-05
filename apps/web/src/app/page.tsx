@@ -5798,7 +5798,6 @@ function useComposeMenuPortalStyle(
 
   useLayoutEffect(() => {
     if (!menuOpen || !triggerRef.current) {
-      setFixedStyle(undefined);
       return;
     }
     const update = (): void => {
