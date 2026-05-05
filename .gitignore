@@ -20,6 +20,9 @@ apps/api/data/
 .cursor/output/
 .cursor/todo.md
 .githooks/
+vault/.obsidian/workspace.json
+vault/.obsidian/workspace-mobile.json
+scripts/kb/.cache/
 
 # Apple signing and distribution secrets
 *.p12

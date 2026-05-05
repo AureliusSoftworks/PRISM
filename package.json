@@ -10,6 +10,10 @@
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
     "dev:web": "npm run dev -w apps/web",
     "dev:api": "npm run dev -w apps/api",
+    "kb": "node --env-file-if-exists=.env scripts/kb.mjs sync",
+    "kb:incremental": "node --env-file-if-exists=.env scripts/kb.mjs incremental",
+    "kb:augment": "node --env-file-if-exists=.env scripts/kb.mjs augment",
+    "kb:install-hook": "bash scripts/install_kb_hook.sh",
     "build": "npm run build -w packages/shared && npm run build -w packages/config && npm run build -w apps/api && npm run build -w apps/web",
     "lint": "npm run lint -w apps/api && npm run lint -w apps/web",
     "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w packages/config && npm run typecheck -w apps/api && npm run typecheck -w apps/web"

@@ -357,6 +357,30 @@ Prism is built so that the `LOCAL` mode toggle is a real invariant, not a sugges
 - **No outbound telemetry**: Next.js anonymous telemetry is disabled via `NEXT_TELEMETRY_DISABLED=1` (set in the web Dockerfile and `.env.example`). If you run `npm run dev` directly on your shell instead of via Docker, export the same variable or run `npx next telemetry disable` once. The API process makes no telemetry calls.
 - **Outbound surface** (exhaustive): Ollama at `OLLAMA_HOST`, Qdrant at `QDRANT_URL`, and — only in ONLINE mode — `api.openai.com`. Any reviewer adding a new `fetch(` to a non-config host needs an explicit mode gate. See `DESIGN.md` for details.
 
+## Knowledge Base (Obsidian)
+
+Prism includes a self-building Obsidian knowledge base in `vault/`. It converts
+repo source files, docs, lessons, and releases into linked notes with MOCs
+(Maps of Content), backlinks, and optional AI summaries + semantic related-links.
+
+Run it:
+
+```bash
+npm run kb
+```
+
+Useful commands:
+
+```bash
+npm run kb:incremental   # Fast refresh for post-commit changes
+npm run kb:augment       # Re-run AI summary + semantic related-link pass only
+npm run kb:install-hook  # Install .git/hooks/post-commit auto-refresh
+```
+
+Open `vault/` in Obsidian to browse the generated graph. If `OLLAMA_HOST` or
+`QDRANT_URL` are missing, the deterministic skeleton still builds and AI
+augmentation is skipped gracefully.
+
 ## Troubleshooting
 
 | Symptom | Fix |
