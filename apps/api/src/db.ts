@@ -122,6 +122,7 @@ export function createDatabase(): DatabaseSync {
       provider TEXT,
       model TEXT,
       bot_id TEXT,
+      tool_payload TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -159,6 +160,7 @@ export function createDatabase(): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
+      export_hash TEXT,
       model TEXT,
       local_model TEXT,
       online_model TEXT,
@@ -191,6 +193,21 @@ export function createDatabase(): DatabaseSync {
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS session_opinions (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      bot_id TEXT,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'warming',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, bot_scope_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
   const userColumns = db
@@ -239,6 +256,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotIdColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN bot_id TEXT;");
+  }
+  const hasToolPayloadColumn = messageColumns.some(
+    (column) => column.name === "tool_payload"
+  );
+  if (!hasToolPayloadColumn) {
+    db.exec("ALTER TABLE messages ADD COLUMN tool_payload TEXT;");
   }
 
   const memoryColumns = db
@@ -338,6 +361,26 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotOnlineModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN online_model TEXT;");
   }
+  const hasBotExportHashColumn = botColumns.some(
+    (column) => column.name === "export_hash"
+  );
+  if (!hasBotExportHashColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN export_hash TEXT;");
+  }
+  db.exec(`
+    UPDATE bots
+    SET export_hash = lower(hex(randomblob(16)))
+    WHERE export_hash IS NULL OR trim(export_hash) = '';
+  `);
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_user_export_hash ON bots (user_id, export_hash) WHERE export_hash IS NOT NULL;"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_session_opinions_user_conversation ON session_opinions (user_id, conversation_id);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_session_opinions_user_bot ON session_opinions (user_id, bot_id);"
+  );
 
   return db;
 }

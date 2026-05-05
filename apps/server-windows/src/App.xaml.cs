@@ -89,7 +89,7 @@ public partial class App : System.Windows.Application
     /// <summary>
     /// Prefer the Prism Server.ico embedded on the exe (utility mark: white field, black triangle).
     /// </summary>
-    private static WinForms.Icon? TrayIconFromExecutable()
+    private static Icon? TrayIconFromExecutable()
     {
         try
         {
@@ -99,7 +99,7 @@ public partial class App : System.Windows.Application
                 return null;
             }
 
-            return WinForms.Icon.ExtractAssociatedIcon(path);
+            return Icon.ExtractAssociatedIcon(path);
         }
         catch
         {

@@ -66,6 +66,18 @@
       color-mix(in srgb, var(--accent) 10%, transparent),
       transparent 55%
     );
+
+  /* Dark mode: keep AskQuestion backdrop neutral/shadowed (less intrusive). */
+  --askq-rail-tone: #181512;
+  --askq-rail-heading: color-mix(in srgb, #f7efe4 92%, var(--fg));
+  --askq-rail-heading-shadow: rgba(0, 0, 0, 0.32);
+  --askq-chip-bg: color-mix(in srgb, #cabba8 14%, var(--bg-surface));
+  --askq-chip-bg-hover: color-mix(in srgb, #d8c8b3 22%, var(--bg-hover));
+  --askq-chip-border: color-mix(in srgb, #d8c7b2 38%, var(--line));
+  --askq-chip-border-hover: color-mix(in srgb, #e3d2bf 50%, var(--line));
+  --askq-chip-text: color-mix(in srgb, #f7efe4 88%, var(--fg));
+  --askq-chip-inset: color-mix(in srgb, #f7efe4 10%, transparent);
+  --askq-chip-focus: color-mix(in srgb, #eadcc9 54%, transparent);
 }
 
 .themeLight {
@@ -122,6 +134,18 @@
       color-mix(in srgb, var(--accent) 5%, transparent),
       transparent 52%
     );
+
+  /* Light mode keeps warm chips, but AskQuestion backdrop is bot-tinted. */
+  --askq-rail-tone: color-mix(in srgb, var(--accent) 42%, #fff3e0 58%);
+  --askq-rail-heading: #000000;
+  --askq-rail-heading-shadow: rgba(255, 248, 239, 0.5);
+  --askq-chip-bg: color-mix(in srgb, #f8f1e7 84%, var(--bg-surface));
+  --askq-chip-bg-hover: color-mix(in srgb, #f3e8da 78%, var(--bg-hover));
+  --askq-chip-border: color-mix(in srgb, #cdbca8 48%, var(--line));
+  --askq-chip-border-hover: color-mix(in srgb, #c2b09b 62%, var(--line));
+  --askq-chip-text: #13100d;
+  --askq-chip-inset: color-mix(in srgb, #ffffff 34%, transparent);
+  --askq-chip-focus: color-mix(in srgb, #9a7f60 34%, transparent);
 }
 
 /* ── Shared primitives ── */
@@ -167,7 +191,7 @@
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
   padding: 0 13px 0 6px;
   margin: 2px 0 0;
 }
@@ -179,34 +203,78 @@
 .conversationDeleteAllButton {
   appearance: none;
   -webkit-appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--danger);
-  width: auto;
-  min-width: 32px;
-  height: 20px;
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 84%, var(--danger) 16%),
+      color-mix(in srgb, var(--bg) 88%, var(--danger) 12%)
+    );
+  color: color-mix(in srgb, var(--danger) 82%, var(--fg) 18%);
+  min-width: 34px;
+  height: 24px;
   padding: 0 8px;
   display: inline-grid;
   place-items: center;
   cursor: pointer;
-  border-radius: 999px;
+  border-radius: 9px;
   font: inherit;
-  font-size: 18px;
-  line-height: 1;
-  opacity: 0.92;
-  transition: color 0.15s, background 0.15s, opacity 0.15s, transform 0.05s;
+  line-height: 0;
+  opacity: 0.94;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
+    0 1px 4px color-mix(in srgb, var(--danger) 16%, transparent);
+  transition:
+    color 130ms ease-out,
+    background 130ms ease-out,
+    border-color 130ms ease-out,
+    box-shadow 130ms ease-out,
+    opacity 130ms ease-out,
+    transform 80ms ease-out;
+}
+
+.conversationDeleteAllButtonGlyph :where(svg) {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.15;
 }
 
 .conversationDeleteAllButton:hover,
 .conversationDeleteAllButton:focus-visible {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: color-mix(in srgb, var(--danger) 92%, var(--fg) 8%);
+  border-color: color-mix(in srgb, var(--danger) 62%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 78%, var(--danger) 22%),
+      color-mix(in srgb, var(--bg) 82%, var(--danger) 18%)
+    );
   opacity: 1;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent),
+    0 4px 12px color-mix(in srgb, var(--danger) 22%, transparent);
   outline: none;
 }
 
 .conversationDeleteAllButton:active {
   transform: translateY(1px);
+}
+
+.conversationDeleteAllButton[data-holding="true"] {
+  border-color: color-mix(in srgb, var(--danger) 74%, var(--line));
+  color: var(--danger);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 70%, var(--danger) 30%),
+      color-mix(in srgb, var(--bg) 74%, var(--danger) 26%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--danger) 34%, transparent),
+    0 0 18px color-mix(in srgb, var(--danger) 38%, transparent);
+  transform: scale(1.04);
 }
 
 /* ── Auth ── */
@@ -711,6 +779,34 @@
   background: color-mix(in srgb, #ff7a7a 10%, var(--bg));
 }
 
+/* Light mode needs stronger contrast for the in-input status pill. */
+.themeLight .settingsHostStatus {
+  border-color: color-mix(in srgb, var(--line-strong) 72%, var(--line));
+  background: color-mix(in srgb, var(--bg) 82%, var(--bg-deep));
+  color: color-mix(in srgb, var(--fg) 82%, var(--fg-muted));
+}
+
+.themeLight .settingsHostInputWrap[data-status="connected"] .settingsHostStatus {
+  color: #0e7d58;
+  border-color: color-mix(in srgb, #12b886 64%, var(--line-strong));
+  background: color-mix(in srgb, #12b886 20%, var(--bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #12b886 20%, transparent);
+}
+
+.themeLight .settingsHostInputWrap[data-status="empty"] .settingsHostStatus,
+.themeLight .settingsHostInputWrap[data-status="unsaved"] .settingsHostStatus,
+.themeLight .settingsHostInputWrap[data-status="checking"] .settingsHostStatus {
+  color: #8a5f00;
+  border-color: color-mix(in srgb, #e6b84f 56%, var(--line-strong));
+  background: color-mix(in srgb, #f2c94c 24%, var(--bg));
+}
+
+.themeLight .settingsHostInputWrap[data-status="error"] .settingsHostStatus {
+  color: #a83b3b;
+  border-color: color-mix(in srgb, #ff7a7a 62%, var(--line-strong));
+  background: color-mix(in srgb, #ff7a7a 20%, var(--bg));
+}
+
 .form button,
 .btnPrimary {
   background: var(--accent);
@@ -963,6 +1059,13 @@
   color: var(--header-identity-color);
 }
 
+.headerIdentityCopy {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+
 .headerIdentityGlyph {
   display: inline-flex;
   align-items: center;
@@ -1032,6 +1135,52 @@
   color: var(--fg);
 }
 
+.headerIdentityHint {
+  max-width: min(28vw, 220px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--accent-ink) 30%);
+  opacity: 0.9;
+  animation: headerIdentityHintNudge 1800ms cubic-bezier(0.22, 1, 0.36, 1) 1 320ms;
+  transition: color 120ms ease-out, opacity 120ms ease-out;
+}
+
+.hubHomeButton:hover .headerIdentityHint,
+.hubHomeButton:focus-visible .headerIdentityHint {
+  color: color-mix(in srgb, var(--accent-ink) 82%, var(--fg) 18%);
+  opacity: 1;
+}
+
+@keyframes headerIdentityHintNudge {
+  0% {
+    opacity: 0.58;
+    transform: translateX(0);
+  }
+  36% {
+    opacity: 1;
+    transform: translateX(-4px);
+  }
+  70% {
+    transform: translateX(1px);
+  }
+  100% {
+    opacity: 0.9;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .headerIdentityHint {
+    animation: none;
+  }
+}
+
 /* Mirror the auth/hub lockup in light mode: force every letter stroke
    to solid black so the back-to-Hub wordmark reads as a calm, high-
    contrast mark against the white chat header. `brightness(0)` is the
@@ -1047,6 +1196,12 @@
 
 /* ── App shell ── */
 .appLayout {
+  /* Prevent grid/flex descendants with large intrinsic widths (compose rail,
+     empty-state picker) from forcing horizontal overflow + asymmetric clipping
+     against html/body overflow-x: hidden. */
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   /* Instrument Sans keeps body/supporting text flexible and readable while
      Raleway carries the thin Prism-line title treatment. */
   --font-size-conversation-title: 14px;
@@ -1339,6 +1494,113 @@
   color: #000000;
 }
 
+/* Light mode only: shift New chat into a darker brushed-metal treatment so
+   it reads clearly on pale surfaces. Dark mode keeps the default pearlescent
+   skin above unchanged. */
+.themeLight .newChatButton {
+  border-color: color-mix(in srgb, #ffffff 26%, #26221d 74%);
+  background:
+    linear-gradient(
+      138deg,
+      color-mix(in srgb, #4a463f 86%, #1f1b17) 0%,
+      color-mix(in srgb, #5a554d 78%, #25201b) 42%,
+      color-mix(in srgb, #3f3a34 84%, #1b1713) 100%
+    ),
+    radial-gradient(
+      ellipse at 22% 18%,
+      color-mix(in srgb, #ffffff 22%, transparent),
+      transparent 46%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 14%, transparent),
+      color-mix(in srgb, #ff9f1c 10%, transparent) 24%,
+      color-mix(in srgb, #b7e63a 10%, transparent) 48%,
+      color-mix(in srgb, #2fd3e3 10%, transparent) 72%,
+      color-mix(in srgb, #7b5cff 14%, transparent)
+    );
+  color: #ffffff;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 28%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000000 36%, transparent),
+    0 8px 22px -14px rgba(0, 0, 0, 0.48);
+}
+
+.themeLight .newChatButton:hover {
+  border-color: color-mix(in srgb, #ffffff 34%, #1f1b17 66%);
+  background:
+    linear-gradient(
+      138deg,
+      color-mix(in srgb, #575249 84%, #1f1b17) 0%,
+      color-mix(in srgb, #666054 76%, #231e19) 42%,
+      color-mix(in srgb, #4a443c 82%, #1a1612) 100%
+    ),
+    radial-gradient(
+      ellipse at 22% 18%,
+      color-mix(in srgb, #ffffff 28%, transparent),
+      transparent 48%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 18%, transparent),
+      color-mix(in srgb, #ff9f1c 13%, transparent) 24%,
+      color-mix(in srgb, #b7e63a 13%, transparent) 48%,
+      color-mix(in srgb, #2fd3e3 13%, transparent) 72%,
+      color-mix(in srgb, #7b5cff 18%, transparent)
+    );
+  color: #ffffff;
+}
+
+.themeLight.appLayout[data-accent-active="true"] .newChatButton {
+  border-color: color-mix(in srgb, var(--accent-ink) 42%, #f3eee5 18%);
+  background:
+    radial-gradient(
+      circle at 82% 50%,
+      color-mix(in srgb, var(--accent) 24%, transparent),
+      transparent 58%
+    ),
+    linear-gradient(
+      138deg,
+      color-mix(in srgb, #4a463f 86%, #1f1b17) 0%,
+      color-mix(in srgb, #5a554d 78%, #25201b) 42%,
+      color-mix(in srgb, #3f3a34 84%, #1b1713) 100%
+    ),
+    radial-gradient(
+      ellipse at 22% 18%,
+      color-mix(in srgb, #ffffff 22%, transparent),
+      transparent 46%
+    );
+  color: #ffffff;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 26%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000000 34%, transparent),
+    0 0 16px -10px color-mix(in srgb, var(--accent) 36%, transparent);
+}
+
+.themeLight.appLayout[data-accent-active="true"] .newChatButton:hover {
+  border-color: color-mix(in srgb, var(--accent-ink) 50%, #f3eee5 24%);
+  background:
+    radial-gradient(
+      circle at 82% 50%,
+      color-mix(in srgb, var(--accent) 30%, transparent),
+      transparent 60%
+    ),
+    linear-gradient(
+      138deg,
+      color-mix(in srgb, #575249 84%, #1f1b17) 0%,
+      color-mix(in srgb, #666054 76%, #231e19) 42%,
+      color-mix(in srgb, #4a443c 82%, #1a1612) 100%
+    ),
+    radial-gradient(
+      ellipse at 22% 18%,
+      color-mix(in srgb, #ffffff 28%, transparent),
+      transparent 48%
+    );
+  color: #ffffff;
+}
+
 .newChatButton:active {
   transform: translateY(1px);
 }
@@ -1402,6 +1664,37 @@
   border-color: var(--private-chat-color, var(--fg));
   background: color-mix(in srgb, var(--private-chat-color, var(--fg)) 18%, transparent);
   color: var(--private-chat-color, var(--fg));
+}
+
+/* Light mode: clamp private-chat chroma to a darker ink so pale accents
+   (e.g. cyan) remain readable on ivory surfaces. */
+.themeLight .privateChatButton {
+  --private-chat-ink: color-mix(in srgb, var(--private-chat-color, var(--fg)) 60%, #17130f 40%);
+  border-color: var(--private-chat-ink);
+  color: var(--private-chat-ink);
+}
+
+.themeLight .privateChatButton:hover {
+  border-color: var(--private-chat-ink);
+  color: var(--private-chat-ink);
+  background: color-mix(in srgb, var(--private-chat-ink) 11%, transparent);
+}
+
+.themeLight .privateChatButton:focus-visible {
+  border-color: var(--private-chat-ink);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--private-chat-ink) 24%, transparent);
+}
+
+.themeLight .privateChatButtonActive {
+  border-color: var(--private-chat-ink);
+  color: var(--private-chat-ink);
+  background: color-mix(in srgb, var(--private-chat-ink) 15%, transparent);
+}
+
+.themeLight .privateChatButtonActive:hover {
+  border-color: var(--private-chat-ink);
+  color: var(--private-chat-ink);
+  background: color-mix(in srgb, var(--private-chat-ink) 19%, transparent);
 }
 
 .privateChatButtonIcon {
@@ -1699,6 +1992,7 @@
 
 .conversationGroupText {
   min-width: 0;
+  width: 100%;
   display: flex;
   align-items: baseline;
   flex-wrap: nowrap;
@@ -1707,7 +2001,7 @@
 
 .conversationGroupName {
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1716,24 +2010,45 @@
 
 .conversationGroupCount {
   flex: 0 0 auto;
+  margin-left: auto;
   white-space: nowrap;
-  /* Match the row title's text color (which already ramps with row position
-     to stay readable against the bot tint). The 10px uppercase letter-
-     spacing keeps the count visually distinct from the bolder name even
-     at full opacity, so dropping the prior 78% mix recovers legibility on
-     pale/gray bot tints without making the count compete with the name. */
-  color: var(--row-text-color, var(--fg-muted));
-  font-size: 10px;
-  line-height: 1.1;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  /* Use the normalized row accent directly for the count so the number reads
+     as a compact color cue while remaining crisp against dark gradients. */
+  color: var(--row-color, var(--fg));
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 0.95;
+  letter-spacing: 0.01em;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.75),
+    0 0 1px rgba(0, 0, 0, 0.6);
 }
 
-.conversationGroupCount::before {
-  /* Em dash separator so the tile reads "PRISM — 4 CHATS" on a single line.
-     Letter-spacing/uppercase don't apply to the dash, but the muted color
-     blends it into the count's visual rhythm. */
-  content: "— ";
+/* Dark mode: lift saturated accents (especially deep blues/purples)
+   so the count remains readable on tinted group tiles. */
+.themeDark .conversationGroupCount {
+  color: color-mix(in srgb, var(--row-color, var(--fg)) 74%, #d7e9ff 26%);
+  text-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.78),
+    0 0 1px rgba(0, 0, 0, 0.62),
+    0 0 8px color-mix(in srgb, var(--row-color, #8ab4ff) 36%, transparent);
+}
+
+/* Light mode: make group counts feel cleaner and brighter.
+   - Prism/neutral group uses white numerals.
+   - Bot groups use a brighter normalized accent color. */
+.themeLight .conversationGroupCount {
+  color: color-mix(in srgb, var(--row-color, var(--fg)) 58%, #17130f 42%);
+  text-shadow:
+    0 1px 1px rgba(255, 255, 255, 0.34),
+    0 0 1px rgba(0, 0, 0, 0.14);
+}
+
+.themeLight .conversationRow[data-group-neutral="true"] .conversationGroupCount {
+  color: #ffffff;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.28),
+    0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 .conversationRow[data-unread="true"] .conversationGroupTile {
@@ -1974,13 +2289,19 @@
    the text-shadow, not a background tint, so the button stays a clean
    glyph-on-negative-space.                                              */
 .conversationDelete {
-  width: auto;
+  width: 32px;
   min-width: 32px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--fg-muted);
-  opacity: 0.45;
+  height: 32px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 92%, transparent),
+      color-mix(in srgb, var(--bg) 96%, transparent)
+    );
+  color: color-mix(in srgb, var(--fg-muted) 78%, var(--danger) 22%);
+  opacity: 0.7;
   border-radius: 8px;
   cursor: pointer;
   font: inherit;
@@ -1991,6 +2312,9 @@
   transition:
     opacity 130ms ease-out,
     color 130ms ease-out,
+    border-color 130ms ease-out,
+    background 130ms ease-out,
+    box-shadow 130ms ease-out,
     text-shadow 130ms ease-out,
     transform 130ms ease-out;
   /* Disable the iOS/Android long-press callout and text-selection halo
@@ -2005,8 +2329,50 @@
 .conversationDelete:focus-visible {
   opacity: 1;
   color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 80%, var(--danger) 20%),
+      color-mix(in srgb, var(--bg) 86%, var(--danger) 14%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 26%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--danger) 24%, transparent);
   text-shadow: 0 0 6px color-mix(in srgb, var(--danger) 32%, transparent);
   outline: none;
+}
+
+.themeLight .conversationDelete {
+  border-color: color-mix(in srgb, var(--line-strong) 56%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 84%, var(--bg-elevated)),
+      color-mix(in srgb, var(--bg-surface) 86%, var(--bg) 14%)
+    );
+  color: color-mix(in srgb, var(--fg) 62%, var(--danger) 38%);
+  opacity: 0.9;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 62%, transparent),
+    0 1px 2px color-mix(in srgb, #3a2a19 10%, transparent);
+}
+
+.themeLight .conversationDelete:hover,
+.themeLight .conversationDelete:focus-visible {
+  color: color-mix(in srgb, var(--danger) 92%, #6f0f0f 8%);
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 84%, var(--danger) 16%),
+      color-mix(in srgb, var(--bg-surface) 84%, var(--danger) 16%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 74%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--danger) 20%, transparent),
+    0 3px 8px color-mix(in srgb, var(--danger) 16%, transparent);
+  text-shadow: 0 0 5px color-mix(in srgb, var(--danger) 24%, transparent);
 }
 
 .conversationDeleteGlyph {
@@ -2016,6 +2382,18 @@
   font-weight: 500;
   line-height: 1;
   transform: translateY(-2px);
+}
+
+.themeLight .conversationDeleteGlyph {
+  font-size: 20px;
+  transform: translateY(-1px);
+}
+
+.conversationDeleteGlyph :where(svg) {
+  width: 14px;
+  height: 14px;
+  transform: translateY(1px);
+  stroke-width: 2.15;
 }
 
 /* Single-chat armed confirm: unchanged pill anchored to the × slot that
@@ -2319,25 +2697,126 @@
 /* Developer Tools: local-dev floating surface for stress testing bot density,
    sidebar seed chats, and viewport-sensitive picker stages. */
 .devToolsButton {
-  border-color: color-mix(in srgb, var(--line-strong) 70%, var(--danger) 30%) !important;
-  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--danger) 12%) !important;
-  color: color-mix(in srgb, var(--fg) 84%, var(--danger) 16%) !important;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18) !important;
+  --dev-tools-button-accent: var(--accent);
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px !important;
+  border-radius: 999px !important;
+  border-color: #050505 !important;
+  background: #050505 !important;
+  color: #050505 !important;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.28),
+    0 0 0 1px #050505 !important;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.devToolsButton::before {
+  content: "";
+  position: absolute;
+  inset: -11px;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.56) 0 18%, transparent 42%),
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--dev-tools-button-accent) 42%, transparent) 0%,
+      color-mix(in srgb, var(--dev-tools-button-accent) 22%, transparent) 48%,
+      transparent 72%
+    );
+  filter: blur(7px) saturate(1.45);
+  opacity: 0.9;
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--dev-tools-button-accent) 44%, transparent),
+    0 0 36px color-mix(in srgb, var(--dev-tools-button-accent) 42%, transparent),
+    0 0 56px color-mix(in srgb, var(--dev-tools-button-accent) 30%, transparent);
+  pointer-events: none;
+}
+
+.devToolsButton::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      circle,
+      transparent 0 44%,
+      color-mix(in srgb, var(--dev-tools-button-accent) 38%, rgba(255, 255, 255, 0.24)) 52%,
+      transparent 66%
+    );
+  pointer-events: none;
+}
+
+.devToolsButton svg {
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.95))
+    drop-shadow(0 0 4px color-mix(in srgb, var(--dev-tools-button-accent) 62%, transparent));
+}
+
+.devToolsButton[data-dev-tools-default="true"]::before {
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.7) 0 18%, transparent 42%),
+    conic-gradient(
+      from 18deg,
+      #ff4f8b,
+      #ffb84d,
+      #ffe66d,
+      #55f7a4,
+      #4ddcff,
+      #9b7cff,
+      #ff4f8b
+    );
+  filter: blur(7px) saturate(1.55);
+  opacity: 0.9;
+  box-shadow:
+    0 0 18px color-mix(in srgb, #ffe66d 44%, transparent),
+    0 0 36px color-mix(in srgb, #4ddcff 42%, transparent),
+    0 0 56px color-mix(in srgb, #ff4f8b 34%, transparent),
+    0 0 72px color-mix(in srgb, #9b7cff 26%, transparent);
+}
+
+.devToolsButton[data-dev-tools-default="true"]::after {
+  background:
+    radial-gradient(circle, transparent 0 44%, rgba(255, 255, 255, 0.42) 52%, transparent 66%);
 }
 
 .devToolsButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--bg-hover) 82%, var(--danger) 18%) !important;
-  color: var(--fg) !important;
+  background: #050505 !important;
+  color: #050505 !important;
+}
+
+.devToolsButton:active {
+  cursor: grabbing;
 }
 
 .devToolsFloatingPanel {
+  --dev-tools-panel-top: 76px;
+  --dev-tools-panel-left: 14px;
+  --dev-tools-panel-viewport-margin: 14px;
   position: fixed;
   top: 76px;
   left: 14px;
   z-index: 2147483646;
-  width: min(460px, calc(100vw - 28px));
-  max-height: calc(100dvh - 48px);
+  box-sizing: border-box;
+  width: min(760px, calc(100vw - 28px));
+  min-width: min(360px, calc(100vw - 28px));
+  max-width: calc(
+    100vw - var(--dev-tools-panel-left) - var(--dev-tools-panel-viewport-margin)
+  );
+  min-height: 220px;
+  max-height: calc(
+    100dvh - var(--dev-tools-panel-top) - var(--dev-tools-panel-viewport-margin)
+  );
   overflow: auto;
+  resize: both;
   display: grid;
   gap: 10px;
   padding: 22px 22px 18px;
@@ -2385,6 +2864,29 @@
   background: color-mix(in srgb, var(--bg-surface) 92%, var(--danger) 8%);
 }
 
+.devToolsSectionButton {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease-out,
+    background 120ms ease-out,
+    transform 90ms ease-out;
+}
+
+.devToolsSectionButton:hover,
+.devToolsSectionButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line-strong) 42%);
+  background: color-mix(in srgb, var(--bg-hover) 88%, var(--danger) 12%);
+  outline: none;
+}
+
+.devToolsSectionButton:active {
+  transform: translateY(1px);
+}
+
 .devToolsSectionTitle {
   margin: 0;
   font-size: 11px;
@@ -2403,6 +2905,48 @@
 .devToolsSectionHint strong {
   color: var(--fg);
   font-weight: 600;
+}
+
+.devToolsToggleSummary {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.devToolsToggleSummary strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.devTogglesModalOption {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  color: var(--fg);
+}
+
+.devTogglesModalBackdrop {
+  z-index: 2147483647;
+}
+
+.devTogglesModalOption input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.devTogglesModalOption span {
+  display: grid;
+  gap: 4px;
+}
+
+.devTogglesModalOption small {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .devToolsViewportStatus {
@@ -2527,7 +3071,7 @@
 
 .devToolsStageRail {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -2647,11 +3191,18 @@
   border-radius: 8px;
 }
 
+@media (max-width: 760px) {
+  .devToolsStageRail {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 560px) {
   .devToolsFloatingPanel {
     width: min(460px, calc(100vw - 28px));
-    max-height: calc(100dvh - 82px);
+    min-width: min(320px, calc(100vw - 28px));
     padding: 20px 18px 16px;
+    resize: vertical;
   }
 
   .devToolsAction {
@@ -2670,6 +3221,7 @@
   height: 100%;
   min-height: 0;
   min-width: 0;
+  width: 100%;
 }
 
 .chatHeader {
@@ -2684,16 +3236,31 @@
 
 .chatHeader h2 {
   font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
-  font-size: 15px;
-  font-weight: var(--font-weight-title, 300);
-  letter-spacing: 0.025em;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  grid-template-rows: auto auto minmax(0, 1fr);
   text-overflow: ellipsis;
   white-space: nowrap;
-  visibility: hidden;
+  visibility: visible;
+  color: color-mix(in srgb, var(--fg) 90%, var(--fg-muted) 10%);
+}
+
+.chatHeaderTitle {
+  text-align: left;
+  font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--bg) 68%, transparent);
+}
+
+.chatHeader h2.chatHeaderTitle {
+  white-space: pre;
+}
+
+.chatHeaderTitlePlaceholder {
+  flex: 1;
+  min-width: 0;
 }
 
 .headerActions {
@@ -2954,8 +3521,49 @@
   position: relative;
   height: 100%;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
   overflow: hidden;
   isolation: isolate;
+  /* Default/engaged dark canvas: neutral depth with restrained bot-color glow. */
+  background:
+    radial-gradient(
+      ellipse 80% 56% at 14% 12%,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 74% 52% at 88% 24%,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      transparent 72%
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg-deep) 84%, #000000 16%) 0%,
+      color-mix(in srgb, var(--bg) 94%, #000000 6%) 58%,
+      var(--bg-surface) 100%
+    );
+}
+
+.themeLight .messagesFrame {
+  /* Light canvas: warm whites/tans for eye comfort. */
+  background:
+    radial-gradient(
+      ellipse 86% 58% at 12% 10%,
+      color-mix(in srgb, #fffdf8 84%, transparent),
+      transparent 74%
+    ),
+    radial-gradient(
+      ellipse 82% 56% at 88% 20%,
+      color-mix(in srgb, #f2e4d2 46%, transparent),
+      transparent 76%
+    ),
+    linear-gradient(
+      to bottom,
+      #fffaf2 0%,
+      color-mix(in srgb, var(--bg-surface) 88%, #f4e7d7 12%) 56%,
+      color-mix(in srgb, var(--bg) 90%, #e9d8c2 10%) 100%
+    );
 }
 
 .messagesFrame[data-mode="home"] {
@@ -3117,6 +3725,7 @@
 
 .messages {
   overflow-y: auto;
+  overflow-x: clip;
   /* Keep thread scrolling, but hide browser chrome so no floating rail cuts
      through the scene on desktop/mobile. */
   scrollbar-width: none;
@@ -3130,7 +3739,20 @@
   width: 100%;
   height: 100%;
   min-height: 0;
+  min-width: 0;
   margin: 0 auto;
+}
+
+/* Extra breathing room when AskQuestion chips dock over the thread. */
+.messages.messagesAskQuestionTailSpace {
+  padding-bottom: max(160px, 48dvh);
+  transition: padding-bottom 0.22s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .messages.messagesAskQuestionTailSpace {
+    transition: none;
+  }
 }
 
 .messages::-webkit-scrollbar {
@@ -3197,6 +3819,8 @@
   text-align: center;
   color: var(--fg-muted);
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   position: relative;
   overflow: visible;
@@ -3377,6 +4001,8 @@
   border-radius: 16px;
   display: grid;
   place-items: center;
+  position: relative;
+  overflow: visible;
   color: inherit;
   font: inherit;
   transition:
@@ -3401,6 +4027,65 @@
 
 .emptyStateIconButton:active {
   transform: scale(0.98);
+}
+
+.emptyStateIconButtonNudge::after {
+  content: "";
+  position: absolute;
+  inset: -9px;
+  border-radius: 22px;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-ink, var(--fg)) 26%, transparent),
+    0 0 16px color-mix(in srgb, var(--accent-glow, var(--accent)) 34%, transparent);
+  animation: emptyStateHeroNudgePulse 2.6s ease-out infinite;
+}
+
+.emptyStateIconButtonNudge:active::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
+  border-radius: 24px;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--accent-ink, var(--fg)) 36%, transparent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent-glow, var(--accent)) 42%, transparent);
+  animation: emptyStateHeroTapRipple 320ms ease-out both;
+}
+
+@keyframes emptyStateHeroNudgePulse {
+  0%,
+  62% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  70% {
+    opacity: 0.7;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes emptyStateHeroTapRipple {
+  from {
+    opacity: 0.9;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .emptyStateIconButtonNudge::after,
+  .emptyStateIconButtonNudge:active::before {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 .emptyStateSearchTrigger {
@@ -3554,6 +4239,66 @@
   color: var(--fg);
 }
 
+.emptyStateHeader {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+/* Hero + title/hint row inside the info band (hero left, copy right). */
+.emptyStateInfoBandRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px 16px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+.emptyStateInfoBandRow .emptyStateHeader {
+  justify-items: start;
+  text-align: left;
+  min-width: 0;
+}
+
+.emptyStateInfoBandRow .emptyStateTitle {
+  margin-top: 0;
+}
+
+/* Match the band card: no frosted panel below 980px — stack hero + copy
+   centered; at 980px+ the panel appears and the row goes horizontal + 2-col header. */
+@media (max-width: 979px) {
+  .emptyStateInfoBandRow {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .emptyStateInfoBandRow .emptyStateHeader {
+    justify-items: center;
+    text-align: center;
+  }
+
+  /* No frosted band card — match the centered hero; `safe` keeps start
+     alignment when the chip row overflows and needs horizontal scroll. */
+  .emptyStateRecentRail {
+    justify-content: center;
+    justify-content: safe center;
+  }
+}
+
+.emptyStateInfoBand {
+  width: min(720px, calc(100% - 40px));
+  /* Grid item default `min-width: auto` uses content min-size; long unbroken
+     copy + a nowrap chip rail can otherwise force the band wider than its
+     `width` cap and paint past the rounded card. */
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  justify-items: stretch;
+}
+
 .emptyStateHint {
   font-size: 15px;
   font-weight: var(--font-weight-subtext, 600);
@@ -3563,13 +4308,262 @@
   margin: 0;
 }
 
-.emptyStateActionHint {
-  margin: -4px 0 0;
-  color: color-mix(in srgb, var(--accent-ink, var(--fg)) 74%, var(--fg-muted));
-  font-size: 12px;
-  font-weight: 720;
-  letter-spacing: 0.045em;
+@media (min-width: 980px) {
+  .emptyStateInfoBandRow {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    text-align: left;
+  }
+
+  .emptyStateInfoBand {
+    width: min(1060px, calc(100% - 72px));
+    gap: 14px;
+    padding: 12px 18px 14px;
+    border-radius: 18px;
+    /* Clip to the card so chips/copy cannot spill past the border curve. */
+    overflow: hidden;
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--bg-surface) 82%, transparent),
+        color-mix(in srgb, var(--bg) 88%, transparent)
+      );
+    border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+    box-shadow:
+      0 18px 44px color-mix(in srgb, #000000 14%, transparent),
+      inset 0 1px 0 color-mix(in srgb, #ffffff 16%, transparent);
+    backdrop-filter: blur(8px) saturate(1.05);
+  }
+
+  .emptyStateInfoBand[data-empty-state-band-emphasis="bot"] {
+    min-height: 112px;
+    border-color: color-mix(in srgb, var(--accent-ink, var(--fg)) 30%, var(--line));
+    box-shadow:
+      0 22px 52px color-mix(in srgb, #000000 16%, transparent),
+      0 0 30px color-mix(in srgb, var(--accent-glow, var(--accent)) 18%, transparent),
+      inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent);
+  }
+
+  .emptyStateInfoBandRow .emptyStateHeader {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr);
+    gap: 10px 14px;
+    align-items: start;
+    justify-items: stretch;
+    max-width: none;
+    width: 100%;
+    text-align: left;
+  }
+
+  .emptyStateInfoBandRow .emptyStateTitle {
+    margin-top: 0;
+    margin-bottom: 0;
+    white-space: normal;
+  }
+
+  .emptyStateInfoBandRow .emptyStateHint {
+    margin: 0;
+    max-width: none;
+    white-space: normal;
+  }
+
+  .emptyStateRecentRailWrap {
+    width: 100%;
+    display: grid;
+    gap: 6px;
+  }
+
+  .emptyStateRecentRailLabel {
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .emptyStateRecentRail {
+    width: 100%;
+    min-width: 0;
+    padding-bottom: 2px;
+  }
+
+  .emptyStateRecentChip {
+    max-width: min(300px, 30vw);
+    padding: 8px 14px;
+    font-size: 12.5px;
+    letter-spacing: 0.01em;
+  }
+
+  .themeDark .emptyStateRecentChip {
+    border-color: color-mix(in srgb, var(--line) 58%, var(--accent-ink, var(--fg)) 42%);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 80%, var(--accent-glow, transparent) 20%),
+      color-mix(in srgb, var(--bg) 86%, var(--accent-glow, transparent) 14%)
+    );
+  }
+
+  .themeLight .emptyStateRecentChip {
+    border-color: color-mix(in srgb, var(--line) 64%, var(--accent-ink, var(--fg)) 36%);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 72%, var(--bg-surface)),
+      color-mix(in srgb, var(--bg) 94%, transparent)
+    );
+  }
+}
+
+.emptyStateRecentRailWrap {
+  width: min(680px, calc(100% - 48px));
+  /* Same grid `min-width: auto` trap as the band — must shrink so the chip
+     row scrolls inside the card instead of widening the layout. */
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.emptyStateRecentRailLabel {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 78%, var(--accent-ink, var(--fg)) 22%);
+}
+
+.emptyStateRecentRail {
+  /* Horizontal fade at both edges so chips don’t read as “clipped off”;
+     `mask-image` keeps pills sharp while softening the cutoff (blur would smear text). */
+  --recent-rail-edge-fade: min(36px, 20%);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 4px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--recent-rail-edge-fade),
+    #000 calc(100% - var(--recent-rail-edge-fade)),
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--recent-rail-edge-fade),
+    #000 calc(100% - var(--recent-rail-edge-fade)),
+    transparent
+  );
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-size: 100% 100%;
+  -webkit-mask-size: 100% 100%;
+}
+
+.emptyStateRecentRail::-webkit-scrollbar {
+  height: 7px;
+}
+
+.emptyStateRecentRail::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 70%, var(--accent-ink, var(--fg)) 30%);
+}
+
+.emptyStateRecentChip {
+  flex: 0 0 auto;
+  max-width: min(240px, 56vw);
+  border: 1px solid color-mix(in srgb, var(--line) 68%, var(--accent-ink, var(--fg)) 32%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-surface) 88%, transparent),
+    color-mix(in srgb, var(--bg) 92%, transparent)
+  );
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  scroll-snap-align: start;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 24%, transparent),
+    0 2px 8px color-mix(in srgb, #000000 10%, transparent);
+  transition:
+    border-color 120ms ease-out,
+    background 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 90ms ease-out;
+}
+
+.emptyStateRecentChip:hover,
+.emptyStateRecentChip:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-ink, var(--fg)) 52%, var(--line));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-hover) 76%, var(--accent-glow, transparent) 24%),
+    color-mix(in srgb, var(--bg-surface) 86%, var(--accent-glow, transparent) 14%)
+  );
+  color: color-mix(in srgb, var(--fg) 90%, var(--accent-ink, var(--fg)) 10%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 30%, transparent),
+    0 8px 16px color-mix(in srgb, #000000 16%, transparent);
+}
+
+.emptyStateRecentChip:active {
+  transform: translateY(1px);
+}
+
+@media (min-width: 980px) {
+  .emptyStateRecentRailWrap {
+    width: 100%;
+    display: grid;
+    gap: 6px;
+  }
+
+  .emptyStateRecentRailLabel {
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .emptyStateRecentRail {
+    width: 100%;
+    min-width: 0;
+    padding-bottom: 2px;
+  }
+
+  .emptyStateRecentChip {
+    max-width: min(300px, 30vw);
+    padding: 8px 14px;
+    font-size: 12.5px;
+    letter-spacing: 0.01em;
+  }
+
+  .themeDark .emptyStateRecentChip {
+    border-color: color-mix(in srgb, var(--line) 58%, var(--accent-ink, var(--fg)) 42%);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 80%, var(--accent-glow, transparent) 20%),
+      color-mix(in srgb, var(--bg) 86%, var(--accent-glow, transparent) 14%)
+    );
+  }
+
+  .themeLight .emptyStateRecentChip {
+    border-color: color-mix(in srgb, var(--line) 64%, var(--accent-ink, var(--fg)) 36%);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 72%, var(--bg-surface)),
+      color-mix(in srgb, var(--bg) 94%, transparent)
+    );
+  }
 }
 
 /* Chat-mode start-of-conversation bot picker.
@@ -3606,6 +4600,7 @@
   width: var(--picker-width, 320px);
   height: var(--picker-height, 320px);
   max-width: calc(100% - 48px);
+  box-sizing: border-box;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -3867,6 +4862,49 @@
 .chatBotTileWithName .chatBotTileBotGlyph {
   grid-area: auto;
   min-width: 0;
+}
+
+/* Dark-mode Stage 1 readability: named tiles should be legible even before
+   hover. Keep hover/selection behavior unchanged; only lift the resting
+   baseline contrast for glyph + label. */
+.themeDark .chatBotTileWithName {
+  color: color-mix(in srgb, var(--bot-color, var(--fg)) 84%, #f2f6ff);
+}
+
+.themeDark .chatBotTileWithName .chatBotTileBotGlyph {
+  color: color-mix(in srgb, var(--bot-color, var(--fg)) 88%, #f2f6ff);
+  opacity: 0.92;
+}
+
+.themeDark .chatBotTileWithName .chatBotTileFeaturedName {
+  color: color-mix(in srgb, var(--bot-color, var(--fg)) 82%, #f2f6ff);
+  opacity: 0.94;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.42),
+    0 0 10px color-mix(in srgb, var(--bot-color, var(--fg)) 24%, transparent);
+}
+
+/* Light-mode Stage 1 readability: bright/pastel bot accents can wash out the
+   resting glyph + label (e.g. cyan/yellow). Clamp the foreground to a darker
+   contrast mix while preserving bot hue identity. */
+.themeLight .chatBotTileWithName {
+  --tile-rest-contrast-color: color-mix(
+    in srgb,
+    var(--bot-color, var(--fg)) 64%,
+    #17130f
+  );
+  color: var(--tile-rest-contrast-color);
+}
+
+.themeLight .chatBotTileWithName .chatBotTileBotGlyph {
+  color: var(--tile-rest-contrast-color);
+  opacity: 0.94;
+}
+
+.themeLight .chatBotTileWithName .chatBotTileFeaturedName {
+  color: var(--tile-rest-contrast-color);
+  opacity: 0.96;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .chatBotTileWithName:hover,
@@ -4386,6 +5424,94 @@
   border-color: color-mix(in srgb, var(--bot-color, #17130f) 58%, var(--line));
 }
 
+/* Absolute selected-tile palette lock:
+   - Dark mode: white tile + black glyph/text
+   - Light mode: black tile + white glyph/text
+   Applies to normal, single-picker, and hover/focus/active states. */
+.themeDark :where(.chatBotTileSelected, .chatBotPickerSingle .chatBotTileSelected) {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #000000;
+}
+
+.themeDark :where(
+  .chatBotTileSelected:hover,
+  .chatBotTileSelected:focus-visible,
+  .chatBotTileSelected:active,
+  .chatBotPickerSingle .chatBotTileSelected:hover,
+  .chatBotPickerSingle .chatBotTileSelected:focus-visible,
+  .chatBotPickerSingle .chatBotTileSelected:active
+) {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #000000;
+}
+
+.themeLight :where(.chatBotTileSelected, .chatBotPickerSingle .chatBotTileSelected) {
+  background: #000000;
+  border-color: #000000;
+  color: #ffffff;
+}
+
+.themeLight :where(
+  .chatBotTileSelected:hover,
+  .chatBotTileSelected:focus-visible,
+  .chatBotTileSelected:active,
+  .chatBotPickerSingle .chatBotTileSelected:hover,
+  .chatBotPickerSingle .chatBotTileSelected:focus-visible,
+  .chatBotPickerSingle .chatBotTileSelected:active
+) {
+  background: #000000;
+  border-color: #000000;
+  color: #ffffff;
+}
+
+.themeDark :where(.chatBotTileSelected, .chatBotPickerSingle .chatBotTileSelected)
+  :where(.chatBotTileBotGlyph, .chatBotTileFeaturedName),
+.themeLight :where(.chatBotTileSelected, .chatBotPickerSingle .chatBotTileSelected)
+  :where(.chatBotTileBotGlyph, .chatBotTileFeaturedName) {
+  color: currentColor;
+  text-shadow: none;
+  filter: none;
+}
+
+/* Final selected-state lock for named tiles.
+   High-specificity selectors intentionally override baseline named-tile
+   accent rules so selected tiles always obey the exact palette contract. */
+.themeDark .chatBotTile.chatBotTileSelected.chatBotTileWithName,
+.themeDark .chatBotPickerSingle .chatBotTile.chatBotTileSelected.chatBotTileWithName {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #000000;
+}
+
+.themeDark .chatBotTile.chatBotTileSelected.chatBotTileWithName .chatBotTileBotGlyph,
+.themeDark .chatBotTile.chatBotTileSelected.chatBotTileWithName .chatBotTileFeaturedName,
+.themeDark .chatBotPickerSingle .chatBotTile.chatBotTileSelected.chatBotTileWithName .chatBotTileBotGlyph,
+.themeDark .chatBotPickerSingle .chatBotTile.chatBotTileSelected.chatBotTileWithName .chatBotTileFeaturedName {
+  color: #000000;
+  opacity: 1;
+  text-shadow: none;
+  filter: none;
+}
+
+.themeLight .chatBotTile.chatBotTileSelected.chatBotTileWithName,
+.themeLight .chatBotPickerSingle .chatBotTile.chatBotTileSelected.chatBotTileWithName {
+  background: #000000;
+  border-color: #000000;
+  color: #ffffff;
+}
+
+.themeLight .chatBotTile.chatBotTileSelected.chatBotTileWithName .chatBotTileBotGlyph,
+.themeLight .chatBotTile.chatBotTileSelected.chatBotTileWithName .chatBotTileFeaturedName,
+.themeLight .chatBotPickerSingle .chatBotTile.chatBotTileSelected.chatBotTileWithName .chatBotTileBotGlyph,
+.themeLight .chatBotPickerSingle .chatBotTile.chatBotTileSelected.chatBotTileWithName .chatBotTileFeaturedName {
+  color: #ffffff;
+  opacity: 1;
+  text-shadow: none;
+  filter: none;
+}
+
 /* In the final pixel-grid stage, selection uses the high-contrast inverted
    tile treatment. Hovered cells also reveal their glyph via the rules above. */
 .chatBotPickerPixelGrid .chatBotTileSelected {
@@ -4779,6 +5905,12 @@
      the role label subdued without flipping to the wrong contrast direction
      when the bubble goes from a dark accent to a light one. */
   color: color-mix(in srgb, var(--accent-text) 78%, transparent);
+}
+
+/* Private user bubbles invert the usual "You" label treatment by shifting
+   from accent-contrast text to the opposite neutral tone. */
+.messageUser[data-private-user-role-header="true"] .messageRoleLabel {
+  color: color-mix(in srgb, var(--bg) 78%, var(--fg) 22%);
 }
 
 /* Subtle "who generated this" tag shown next to the role label.
@@ -5208,6 +6340,11 @@
 }
 
 .compose {
+  min-width: 0;
+  width: 100%;
+  /* Do not set overflow-x here: any non-visible overflow-x pairs with
+     overflow-y: visible → y resolves to auto, which clips upward-opening
+     `.composeBotMenu` / model popovers anchored to compose controls. */
   border-top: 1px solid var(--line);
   padding: 14px 20px 18px;
   background:
@@ -5286,45 +6423,133 @@
    so the row's left edge lines up with the textarea below it. */
 .composeTools {
   max-width: min(1240px, 100%);
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   margin: 0 auto 8px;
   display: flex;
   align-items: center;
+  /* One continuous rail: BOT / LOCAL / model + utility glyphs (scroll horizontally
+     on very narrow widths instead of wrapping to a second row). */
   justify-content: flex-start;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* Wider BOT / model pills (+ slightly wider LOCAL track) consume more of the row
+   so the flexing glyph cluster doesn’t spread five icons across a huge gap. */
+.composeTools > .composeBotControl,
+.composeTools > .composeModelControl {
+  flex: 0 1 auto;
+  min-width: clamp(132px, 15vw, 232px);
+}
+
+.composeTools > .composeBotControl .composeBotTrigger,
+.composeTools > .composeModelControl .composeModelTrigger {
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.composeTools > .modeControl {
+  flex: 0 0 auto;
+}
+
+/* Compose-only LOCAL rail: wider thumb travel keeps geometry consistent (thumb +
+   one slide step = inner width; padding unchanged). */
+.composeTools .modeToggleTrack {
+  width: 96px;
+}
+
+.composeTools .modeThumb {
+  width: 64px;
+}
+
+.composeTools .modeThumbOnline {
+  transform: translateX(28px);
 }
 
 .conversationStarterRail {
   position: absolute;
-  left: 50%;
-  bottom: clamp(18px, 4vh, 34px);
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 3;
-  width: min(860px, calc(100% - clamp(32px, 8vw, 112px)));
-  transform: translateX(-50%);
+  width: 100%;
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 260px));
   justify-content: center;
   gap: 10px;
-  padding: 54px clamp(8px, 2vw, 18px) 0;
+  padding: 74px clamp(16px, 4vw, 40px) 16px;
   background: linear-gradient(
     to top,
-    color-mix(in srgb, var(--bg-surface) 92%, transparent),
-    color-mix(in srgb, var(--bg-surface) 50%, transparent) 64%,
+    color-mix(in srgb, #000 96%, transparent) 0%,
+    color-mix(in srgb, #000 90%, transparent) 34%,
+    color-mix(in srgb, #000 62%, transparent) 58%,
+    color-mix(in srgb, #000 28%, transparent) 76%,
     transparent
   );
   pointer-events: none;
   animation: messageIn 0.18s ease-out;
+  isolation: isolate;
+}
+
+.conversationStarterRail::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: -260px;
+  z-index: -1;
+  pointer-events: none;
+  /* Readability layer: blur extends well above chips for heading + nearby text. */
+  backdrop-filter: blur(24px) saturate(130%);
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.95) 0%,
+    rgba(0, 0, 0, 0.91) 24%,
+    rgba(0, 0, 0, 0.82) 44%,
+    rgba(0, 0, 0, 0.66) 62%,
+    rgba(0, 0, 0, 0.45) 76%,
+    rgba(0, 0, 0, 0.22) 88%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+/* Optional line above quick-reply chips (Prism AskQuestion prompt or Talk-to-me supersets). */
+.conversationStarterChipHeading {
+  grid-column: 1 / -1;
+  pointer-events: auto;
+  margin: 0 0 8px;
+  padding: 0 clamp(12px, 3vw, 24px);
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 620;
+  line-height: 1.38;
+  color: color-mix(in srgb, #fff 94%, var(--fg));
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
 }
 
 @media (max-width: 620px) {
   .conversationStarterRail {
-    width: calc(100% - 28px);
-    bottom: 14px;
+    width: 100%;
+    bottom: 0;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow: visible;
     justify-content: center;
-    padding: 42px 0 0;
+    padding: 52px 14px 12px;
     gap: 8px;
+  }
+
+  .conversationStarterChipHeading {
+    margin-bottom: 6px;
   }
 }
 
@@ -5382,6 +6607,139 @@
 .conversationStarterChip:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.conversationStarterChipStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: left;
+  width: 100%;
+}
+
+.conversationStarterChipPrimary {
+  font-weight: 620;
+  line-height: 1.25;
+}
+
+.conversationStarterChipSub {
+  font-size: 0.78rem;
+  font-weight: 520;
+  line-height: 1.22;
+  opacity: 0.84;
+}
+
+.askQuestionRail {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--askq-rail-tone) 96%, transparent) 0%,
+    color-mix(in srgb, var(--askq-rail-tone) 90%, transparent) 34%,
+    color-mix(in srgb, var(--askq-rail-tone) 62%, transparent) 58%,
+    color-mix(in srgb, var(--askq-rail-tone) 28%, transparent) 76%,
+    transparent
+  );
+  transition:
+    opacity 0.22s ease-out,
+    transform 0.22s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .askQuestionRail {
+    transition: none;
+  }
+}
+
+.askQuestionRail::before {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--askq-rail-tone) 95%, transparent) 0%,
+    color-mix(in srgb, var(--askq-rail-tone) 91%, transparent) 24%,
+    color-mix(in srgb, var(--askq-rail-tone) 82%, transparent) 44%,
+    color-mix(in srgb, var(--askq-rail-tone) 66%, transparent) 62%,
+    color-mix(in srgb, var(--askq-rail-tone) 45%, transparent) 76%,
+    color-mix(in srgb, var(--askq-rail-tone) 22%, transparent) 88%,
+    color-mix(in srgb, var(--askq-rail-tone) 0%, transparent) 100%
+  );
+}
+
+.askQuestionRail .conversationStarterChipHeading {
+  color: var(--askq-rail-heading);
+  text-shadow: 0 1px 6px var(--askq-rail-heading-shadow);
+}
+
+.askQuestionRail .conversationStarterChipSub {
+  color: color-mix(in srgb, var(--askq-chip-text) 88%, transparent);
+}
+
+.askQuestionRail .conversationStarterChip {
+  border-color: var(--askq-chip-border);
+  background:
+    radial-gradient(
+      circle at 12% 22%,
+      color-mix(in srgb, #ffffff 12%, transparent),
+      transparent 42%
+    ),
+    var(--askq-chip-bg);
+  color: var(--askq-chip-text);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--askq-chip-inset);
+}
+
+.askQuestionRail .conversationStarterChipOther {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--askq-chip-border));
+  background:
+    radial-gradient(
+      circle at 12% 22%,
+      color-mix(in srgb, #ffffff 14%, transparent),
+      transparent 42%
+    ),
+    linear-gradient(
+      140deg,
+      color-mix(in srgb, var(--accent) 40%, var(--askq-chip-bg)),
+      color-mix(in srgb, var(--accent) 22%, var(--askq-chip-bg))
+    );
+  color: var(--accent-text);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.askQuestionRail .conversationStarterChip:hover:not(:disabled) {
+  border-color: var(--askq-chip-border-hover);
+  background:
+    radial-gradient(
+      circle at 12% 22%,
+      color-mix(in srgb, #ffffff 14%, transparent),
+      transparent 42%
+    ),
+    var(--askq-chip-bg-hover);
+}
+
+.askQuestionRail .conversationStarterChipOther:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 74%, var(--askq-chip-border-hover));
+  background:
+    radial-gradient(
+      circle at 12% 22%,
+      color-mix(in srgb, #ffffff 16%, transparent),
+      transparent 42%
+    ),
+    linear-gradient(
+      140deg,
+      color-mix(in srgb, var(--accent) 52%, var(--askq-chip-bg-hover)),
+      color-mix(in srgb, var(--accent) 30%, var(--askq-chip-bg-hover))
+    );
+}
+
+.askQuestionRail .conversationStarterChip:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--bg-surface),
+    0 0 0 4px var(--askq-chip-focus);
+}
+
+.askQuestionRail .conversationStarterChipOther:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--bg-surface),
+    0 0 0 4px color-mix(in srgb, var(--accent) 52%, transparent);
 }
 
 .memoryToastStack {
@@ -5531,13 +6889,32 @@
 }
 
 .composeUtilityActions {
-  display: inline-flex;
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: clamp(2px, 1.5vw, 6px);
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Breathing room between the model pill (Auto) and the five glyph buttons. */
+.composeTools > .composeUtilityActions {
+  margin-left: clamp(14px, 2.5vw, 24px);
 }
 
 .composeUtilityButton {
   flex-shrink: 0;
+}
+
+/* Belt-and-suspenders for split-screen / tiny widths: icon rail must stay inside
+   `.composeTools` even when five 30px controls would exceed the line. */
+@media (max-width: 380px) {
+  .composeUtilityActions .composeUtilityButton {
+    width: 24px !important;
+    height: 24px !important;
+  }
 }
 
 /* Outer deck — matches the messages column width so the compose surface
@@ -5995,6 +7372,7 @@
   height: 36px;
   border: 1px solid var(--line);
   border-radius: 999px;
+  background-color: var(--bg-deep);
   background: var(--bg-deep);
   position: relative;
   transition:
@@ -6015,10 +7393,34 @@
   background: color-mix(in srgb, var(--bg-deep) 88%, #7db7ff 12%);
 }
 
+.compose[data-compose-bot-selected="true"] .composeModelControl:not([data-disabled="true"]) {
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--line-strong)) 54%, var(--line));
+  background: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--bg-deep)) 18%,
+    var(--bg-deep)
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--fg)) 16%, transparent),
+    0 0 16px color-mix(in srgb, var(--compose-bot-color, var(--fg)) 14%, transparent);
+}
+
+.themeLight .compose[data-compose-bot-selected="true"] .composeModelControl:not([data-disabled="true"]) {
+  background: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--bg-deep)) 13%,
+    var(--bg-deep)
+  );
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--line-strong)) 40%, var(--line-strong));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--fg)) 10%, transparent),
+    0 0 12px color-mix(in srgb, var(--compose-bot-color, var(--fg)) 10%, transparent);
+}
+
 .composeModelControl[data-disabled="true"] {
   border-color: var(--line);
   background: color-mix(in srgb, var(--bg-deep) 88%, var(--fg) 12%);
-  filter: saturate(0);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 .composeModelTrigger {
@@ -6030,7 +7432,7 @@
   min-width: 0;
   height: 100%;
   padding: 0 12px 0 10px;
-  background: transparent;
+  background: inherit;
   border: 0;
   color: var(--fg);
   font: inherit;
@@ -6047,7 +7449,7 @@
 .composeModelTrigger:disabled {
   cursor: not-allowed;
   color: var(--fg-muted);
-  opacity: 0.68;
+  opacity: 1;
 }
 
 .composeModelTriggerName {
@@ -6064,6 +7466,18 @@
   color: var(--fg-subtle);
   flex-shrink: 0;
   transition: transform 0.18s ease;
+}
+
+.compose[data-compose-bot-selected="true"] .composeModelTrigger {
+  color: color-mix(in srgb, var(--compose-bot-color, var(--fg)) 16%, var(--fg));
+}
+
+.compose[data-compose-bot-selected="true"] .composeModelTriggerName {
+  color: color-mix(in srgb, var(--compose-bot-color, var(--fg)) 22%, var(--fg));
+}
+
+.compose[data-compose-bot-selected="true"] .composeModelTriggerChevron {
+  color: color-mix(in srgb, var(--compose-bot-color, var(--fg-subtle)) 46%, var(--fg-subtle));
 }
 
 .composeModelControl[data-open="true"] .composeModelTriggerChevron {
@@ -6312,6 +7726,7 @@
   height: 36px;
   border: 1px solid var(--line);
   border-radius: 999px;
+  background-color: var(--bg-deep);
   background: var(--bg-deep);
   position: relative; /* anchor for the absolute-positioned popover */
   transition:
@@ -6339,7 +7754,7 @@
 .composeBotControl[data-disabled="true"] {
   border-color: var(--line);
   background: color-mix(in srgb, var(--bg-deep) 88%, var(--fg) 12%);
-  filter: saturate(0);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 .composeControlLabel {
@@ -6365,7 +7780,7 @@
   min-width: 0;
   height: 100%;
   padding: 0 12px 0 10px;
-  background: transparent;
+  background: inherit;
   border: 0;
   color: var(--bot-color, var(--fg));
   font: inherit;
@@ -6387,7 +7802,7 @@
 .composeBotTrigger:disabled {
   cursor: not-allowed;
   color: var(--fg-muted);
-  opacity: 0.68;
+  opacity: 1;
 }
 
 .composeBotTriggerGlyph {
@@ -6449,6 +7864,7 @@
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--line-strong);
+  background-color: var(--bg);
   background: var(--bg);
   border-radius: 10px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
@@ -6511,6 +7927,25 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* Opaque scroll surface: options use transparent rows; without this,
+     underlying page / overlapping popovers show through the list area. */
+  position: relative;
+  z-index: 1;
+  background-color: var(--bg-surface);
+  background: var(--bg-surface);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 5%, transparent),
+    var(--shadow-sm);
+  /* Optional glass: skipped here — solid --bg-surface keeps rows readable;
+     blur + opacity would fight the opaque fill requirement. */
+}
+
+.themeLight .composeBotListbox {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent),
+    var(--shadow-sm);
 }
 
 .themeLight .composeBotFilters {
@@ -7147,6 +8582,218 @@
 .panelBots[data-editor-only="true"] .botParameterCard {
   border-color: color-mix(in srgb, var(--editor-bot-color) 34%, var(--line));
   background: color-mix(in srgb, var(--editor-bot-color) 7%, var(--bg));
+}
+
+.panelOpinions {
+  --opinion-hue: 196deg;
+  --opinion-sat: 74%;
+  --opinion-light: 62%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.panelOpinions :where(.panelHeader) {
+  margin-bottom: 6px;
+}
+
+.opinionPanelBody {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.opinionPanelIntro {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.opinionOrbShell {
+  --orb-size: min(220px, 70vw);
+  width: var(--orb-size);
+  height: var(--orb-size);
+  margin: 8px auto 4px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  isolation: isolate;
+}
+
+.opinionOrbShell[data-band="guarded"] {
+  --opinion-hue: 344deg;
+  --opinion-sat: 74%;
+  --opinion-light: 61%;
+}
+
+.opinionOrbShell[data-band="warming"] {
+  --opinion-hue: 210deg;
+  --opinion-sat: 75%;
+  --opinion-light: 63%;
+}
+
+.opinionOrbShell[data-band="trusting"] {
+  --opinion-hue: 145deg;
+  --opinion-sat: 60%;
+  --opinion-light: 58%;
+}
+
+.opinionOrbRing {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid
+    hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) + 8%) / 0.34);
+  box-shadow:
+    0 0 38px hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.2),
+    inset 0 0 22px hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.14);
+  animation: opinionOrbBreath 4.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.opinionOrbRing:nth-child(1) {
+  animation-delay: 0ms;
+}
+
+.opinionOrbRing:nth-child(2) {
+  animation-delay: 480ms;
+  transform: scale(0.86);
+}
+
+.opinionOrbRing:nth-child(3) {
+  animation-delay: 960ms;
+  transform: scale(0.72);
+}
+
+.opinionOrbShell[data-trend="up"] .opinionOrbRing {
+  animation-duration: 3.8s;
+}
+
+.opinionOrbShell[data-trend="down"] .opinionOrbRing {
+  animation-duration: 5.4s;
+  opacity: 0.8;
+}
+
+.opinionOrbCore {
+  width: 54%;
+  height: 54%;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 2px;
+  color: var(--fg);
+  background:
+    radial-gradient(
+      circle at 32% 28%,
+      hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) + 24%) / 0.9),
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 64% 68%,
+      hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) - 8%) / 0.75),
+      hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) - 18%) / 0.35)
+    );
+  border: 1px solid hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) + 10%) / 0.45);
+  box-shadow:
+    0 10px 30px hsl(var(--opinion-hue) var(--opinion-sat) 34% / 0.35),
+    inset 0 1px 0 rgb(255 255 255 / 0.28);
+}
+
+.opinionOrbCore strong {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.opinionOrbCore small {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg) 30%);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.opinionSummary {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
+}
+
+.opinionSummary strong {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.opinionSummary p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.opinionSummary small {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.opinionReasonList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.opinionReasonList li {
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 82%, var(--fg) 18%);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.opinionEmptyState {
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 14px 12px;
+  display: grid;
+  gap: 6px;
+  color: var(--fg-muted);
+}
+
+.opinionEmptyState strong {
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.opinionEmptyState p {
+  margin: 0;
+  font-size: 12px;
+}
+
+@keyframes opinionOrbBreath {
+  0%,
+  100% {
+    transform: scale(0.94);
+    opacity: 0.58;
+  }
+  50% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .opinionOrbRing {
+    animation: none;
+    opacity: 0.72;
+  }
 }
 
 .panelBots[data-editor-only="true"] .form input,
@@ -8010,6 +9657,104 @@
   border-bottom: 1px solid var(--line);
 }
 
+.panelHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panelHiddenFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.panelHeaderIconButton {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.panelHeaderIconButton:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+/* Panel trash delete — danger chrome aligned with .conversationDeleteAllButton */
+.panelHeaderIconButton.panelHeaderDangerTrashButton {
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 84%, var(--danger) 16%),
+      color-mix(in srgb, var(--bg) 88%, var(--danger) 12%)
+    );
+  color: color-mix(in srgb, var(--danger) 82%, var(--fg) 18%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
+    0 1px 4px color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.panelHeaderIconButton.panelHeaderDangerTrashButton:hover:not(:disabled),
+.panelHeaderIconButton.panelHeaderDangerTrashButton:focus-visible:not(:disabled) {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 78%, var(--danger) 22%),
+      color-mix(in srgb, var(--bg) 82%, var(--danger) 18%)
+    );
+  color: color-mix(in srgb, var(--danger) 92%, var(--fg) 8%);
+  border-color: color-mix(in srgb, var(--danger) 62%, var(--line));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent),
+    0 4px 12px color-mix(in srgb, var(--danger) 22%, transparent);
+  outline: none;
+}
+
+.panelHeaderIconButton.panelHeaderDangerTrashButton:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  color: color-mix(in srgb, var(--fg-muted) 72%, var(--danger) 28%);
+  border-color: color-mix(in srgb, var(--line) 88%, var(--danger) 12%);
+  box-shadow: none;
+}
+
+.panelHeaderImportGlyph {
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+}
+
+.panelHeaderImportGlyph :where(svg) {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.1;
+}
+
+.panelHeaderDangerTrashGlyph {
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+}
+
+.panelHeaderDangerTrashGlyph :where(svg) {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.1;
+}
+
 .panelHeader h3 {
   font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
   font-size: 16px;
@@ -8325,6 +10070,73 @@
   padding: 12px 14px 14px;
   display: grid;
   gap: 10px;
+}
+
+.importBotModalChoiceButton {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-deep);
+  color: var(--fg);
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 12px 12px;
+  text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.importBotModalChoiceButton:hover:not(:disabled),
+.importBotModalChoiceButton:focus-visible {
+  border-color: color-mix(in srgb, var(--fg-muted) 35%, var(--line));
+  background: color-mix(in srgb, var(--bg-deep) 88%, var(--fg-muted) 12%);
+}
+
+.importBotModalChoiceButton strong {
+  font-size: 15px;
+}
+
+.importBotModalChoiceButton small {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.importBotModalPasteLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.importBotModalPasteTextarea {
+  width: 100%;
+  min-height: 200px;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px 11px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.importBotModalPasteTextarea:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--fg-muted) 42%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg-muted) 18%, transparent);
+}
+
+.importBotModalPasteActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 4px;
 }
 
 .botOnlineCapabilityToggle button {
@@ -11554,12 +13366,16 @@
   pointer-events: none;
 }
 
+.chatHeaderActionsDisabled {
+  opacity: 0.52;
+}
+
 .chatHeaderAction {
   appearance: none;
   -webkit-appearance: none;
-  background: var(--accent-soft);
+  background: var(--accent);
   color: var(--accent-ink);
-  border: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 72%, var(--line-strong));
   border-radius: 999px;
   height: 30px;
   padding: 0 14px;
@@ -11573,14 +13389,73 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition: transform 0.15s ease;
+}
+
+.chatHeaderActionText {
+  color: inherit;
+  -webkit-text-fill-color: currentColor;
+}
+
+.chatHeaderActions > .chatHeaderAction:nth-of-type(1) {
+  background: color-mix(in srgb, var(--accent) 100%, transparent);
+  color: #050505;
+}
+
+.chatHeaderActions > .chatHeaderAction:nth-of-type(2) {
+  background: color-mix(in srgb, var(--accent) 75%, transparent);
+  color: #050505;
+}
+
+.chatHeaderActions > .chatHeaderAction:nth-of-type(2) .chatHeaderActionText {
+  opacity: 1;
+}
+
+.chatHeaderActions > .chatHeaderAction:nth-of-type(3) {
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: #050505;
+}
+
+.chatHeaderActions > .chatHeaderAction:nth-of-type(3) .chatHeaderActionText {
+  opacity: 1;
+}
+
+.chatHeaderActions > .chatHeaderAction:nth-of-type(4) {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.chatHeaderActions > .chatHeaderAction:nth-of-type(4) .chatHeaderActionText {
+  opacity: 1;
+}
+
+.chatHeaderActions > .chatHeaderAction:nth-of-type(5) {
+  background: transparent;
+}
+
+.themeLight .chatHeaderAction {
+  color: color-mix(in srgb, var(--accent-ink) 72%, var(--fg) 28%);
+  border-color: color-mix(in srgb, var(--accent-ink) 58%, var(--line-strong));
+  text-shadow: 0 1px 1px color-mix(in srgb, var(--bg-surface) 72%, transparent);
+}
+
+.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(1),
+.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(2),
+.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(3) {
+  color: #050505;
+}
+
+.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(4),
+.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(5) {
+  color: color-mix(in srgb, var(--accent-ink) 78%, #17130f 22%);
+  border-color: color-mix(in srgb, var(--accent-ink) 66%, var(--line-strong));
+}
+
+.themeLight .chatHeaderAction:disabled {
+  opacity: 0.68;
 }
 
 .chatHeaderAction:hover:not(:disabled),
 .chatHeaderAction:focus-visible:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: color-mix(in srgb, var(--accent-ink) 55%, transparent);
-  color: var(--accent-text);
   outline: none;
   transform: translateY(-1px);
 }
@@ -11608,16 +13483,13 @@
 }
 
 .chatHeaderActionDanger {
-  background: color-mix(in srgb, var(--danger) 18%, var(--bg-surface));
-  border-color: color-mix(in srgb, var(--danger) 48%, transparent);
+  border-color: var(--danger);
   color: var(--danger);
 }
 
 .chatHeaderActionDanger:hover:not(:disabled),
 .chatHeaderActionDanger:focus-visible:not(:disabled) {
-  background: var(--danger);
   border-color: var(--danger);
-  color: #fff;
   transform: translateY(-1px);
 }
 
@@ -11701,7 +13573,9 @@
    At tablet / narrow-desktop widths the permanent 280px sidebar leaves
    the chat feeling cramped. Collapse it into the same drawer model as
    mobile, but use a side handle instead of the phone header hamburger. */
-@media (min-width: 721px) and (max-width: 1080px) {
+/* Letterbox / narrow desktop: drawer sidebar + edge handle (‹ ›).
+   Starts at 561px so 561–720 shares this chrome while ≤560 is phone (☰). */
+@media (min-width: 561px) and (max-width: 1080px) {
   .appLayout {
     --sidebar-drawer-width: 290px;
     grid-template-columns: 1fr;
@@ -11983,9 +13857,10 @@
     }
   }
 
-  /* On mobile, the ☰ + wrench live INSIDE the chat header bar. Stripping
-     pill chrome makes them read as embedded icons so the bar visually wraps
-     all three (☰ · identity · wrench) as one continuous top deck. */
+  @media (max-width: 560px) {
+  /* On phone widths (≤560px): ☰ + fixed wrench live outside the chat header.
+     561–720px uses the › sidebar handle + desktop-style header (see nested
+     gutter rule below). */
   .menuToggle {
     display: inline-flex;
     position: fixed;
@@ -12121,19 +13996,52 @@
     max-width: min(36vw, 200px);
   }
 
+  .chatHeader .headerIdentityHint {
+    max-width: min(36vw, 200px);
+  }
+
+  /* Wide side gutters: room for fixed ☰ / wrench + centered identity. */
+  .chatPane {
+    --chat-inline-gutter: max(
+      60px,
+      calc(env(safe-area-inset-left) + 12px),
+      calc(env(safe-area-inset-right) + 12px)
+    );
+  }
+  }
+
+  @media (min-width: 561px) {
+    .chatPane {
+      --chat-inline-gutter: max(
+        20px,
+        calc(env(safe-area-inset-left) + 12px),
+        calc(env(safe-area-inset-right) + 12px)
+      );
+    }
+  }
+
+  /* Messages follow `--chat-inline-gutter` on `.chatPane` (60px on ≤560px phones
+     for fixed ☰ / wrench; 20px for 561–720 letterbox). */
   .messages {
-    padding: 18px 14px;
+    padding: 18px var(--chat-inline-gutter);
     /* Reduce scroll-anchoring feedback loops with the collapsing header + threshold logic. */
     overflow-anchor: none;
   }
 
-  /* Left/right pads match `.menuToggle` and `.chatGearAnchor` (mobile) so the
-     toolbar's first/last items line up with the floating ☰ + wrench above. */
+  /* Uses the gutter above by default for 561–720; on phones the nested ≤560 rule
+     tightens horizontal padding (composer sits in bottom chrome, not under ☰). */
   .compose {
     padding:
-      12px max(12px, calc(env(safe-area-inset-right) + 12px))
+      12px var(--chat-inline-gutter)
       calc(env(safe-area-inset-bottom) + 14px)
-      max(12px, calc(env(safe-area-inset-left) + 12px));
+      var(--chat-inline-gutter);
+  }
+
+  @media (max-width: 560px) {
+    .compose {
+      padding-left: max(12px, env(safe-area-inset-left));
+      padding-right: max(12px, env(safe-area-inset-right));
+    }
   }
 
   .compose[data-keyboard-lifted="true"] {
@@ -12144,6 +14052,20 @@
   .composeEditorShell,
   .composeInner {
     max-width: none;
+  }
+
+  /* Single-row compose rail; shrink-friendly on small panes (min-width 0) so
+     wide pill floors from the global `.composeTools > *` rules don’t force
+     clipping — use horizontal scroll only as a last resort. */
+  .composeTools {
+    gap: 8px;
+  }
+
+  .composeTools > .composeBotControl,
+  .composeTools > .modeControl,
+  .composeTools > .composeModelControl {
+    flex: 0 1 auto;
+    min-width: 0;
   }
 
   .compose textarea {
@@ -12350,7 +14272,8 @@
 
   /* Match Bots / Memories: edge-to-edge drawer on phone. */
   .panelSettings,
-  .panelImages {
+  .panelImages,
+  .panelOpinions {
     left: env(safe-area-inset-left);
     right: env(safe-area-inset-right);
     width: auto;
@@ -13098,5 +15021,30 @@
     background: color-mix(in srgb, var(--bg) 72%, transparent) !important;
     color: var(--fg-muted) !important;
     border-color: color-mix(in srgb, var(--fg) 22%, transparent) !important;
+  }
+}
+
+/* ≤560px: last in cascade — tight LOCAL track, intrinsic-width glyphs (no
+   flex-grow), smaller spacer; pairs with min-width:0 from the ≤720 mobile block. */
+@media (max-width: 560px) {
+  .composeTools {
+    gap: 6px;
+  }
+
+  .composeTools .modeToggleTrack {
+    width: 72px;
+  }
+
+  .composeTools .modeThumb {
+    width: 56px;
+  }
+
+  .composeTools .modeThumbOnline {
+    transform: translateX(12px);
+  }
+
+  .composeTools > .composeUtilityActions {
+    flex: 0 0 auto;
+    margin-left: clamp(6px, 2vw, 12px);
   }
 }

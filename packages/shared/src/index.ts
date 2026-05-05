@@ -25,6 +25,20 @@ export {
 } from "./botProfile.js";
 
 export {
+  PRISM_TOOL_END,
+  PRISM_TOOL_START,
+  assistantContentHasPrismToolFraming,
+  hydrateAssistantMessageParts,
+  parseAssistantPrismTools,
+  parseStoredToolPayload,
+  serializeAskQuestionTool,
+  type AskQuestionOption,
+  type AskQuestionPayload,
+  type ParsedAssistantTurn,
+  type StoredAssistantToolPayload,
+} from "./prismTool.js";
+
+export {
   ACCENT_LUMINANCE_MAX_LIGHT,
   ACCENT_LUMINANCE_MAX_LIGHT_YELLOW,
   ACCENT_LIGHTNESS_MAX,
@@ -43,6 +57,8 @@ export {
   relativeLuminance,
   swatchBorderCompensation,
 } from "./color.js";
+
+import type { AskQuestionPayload } from "./prismTool.js";
 
 export type UserRole = "user";
 
@@ -77,6 +93,8 @@ export interface ChatMessage {
   botColor?: string;
   /** Bot's associated glyph identifier (opaque key looked up in the client's glyph registry). */
   botGlyph?: string;
+  /** When this assistant row used AskQuestion (`tool_payload` on the server). */
+  askQuestion?: AskQuestionPayload;
 }
 
 export interface Conversation {
@@ -205,9 +223,22 @@ export interface StarterChatExtras {
   conversationStarters?: string[];
 }
 
+export type OpinionBand = "guarded" | "warming" | "trusting";
+export type OpinionTrend = "up" | "down" | "steady";
+
+export interface SessionOpinion {
+  score: number;
+  band: OpinionBand;
+  trend: OpinionTrend;
+  lastReason: string;
+  recentReasons: string[];
+  updatedAt: string;
+}
+
 export interface ChatResponsePayload extends StarterChatExtras {
   conversation: Conversation;
   assistantMessage: ChatMessage;
+  opinion?: SessionOpinion;
   memoryLearned?: {
     created: Array<{
       id: string;

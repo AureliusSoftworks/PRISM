@@ -1,5 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import { stripBotProfileMetaSuffix } from "@localai/shared";
+import { randomId } from "./security.ts";
+
+const BOT_EXPORT_HASH_PATTERN = /^[a-f0-9]{32}$/i;
 
 /**
  * Build the system-prompt string sent to the model for a selected bot.
@@ -20,8 +23,8 @@ import { stripBotProfileMetaSuffix } from "@localai/shared";
  *   - Structured bot-editor metadata (`<<<PRISM_BOT_META>>>` …), when present,
  *     is stripped before this helper runs so providers never see JSON tails.
  *   - Returns undefined when neither a usable name nor prompt is present,
- *     so the chat pipeline sends no system message at all (the Default
- *     "Always on" bot case).
+ *     so callers pass no bot-owned persona; `buildPromptMessages` still ships
+ *     the Prism tool appendix alone for Default chats.
  */
 export function composeBotSystemPrompt(
   name: string | null | undefined,
@@ -41,6 +44,55 @@ export function composeBotSystemPrompt(
     `respond as ${trimmedName}.`;
   if (!trimmedPrompt) return preamble;
   return `${preamble}\n\n${trimmedPrompt}`;
+}
+
+/** Generates the persistent identity hash stored on each bot row. */
+export function createBotExportHash(): string {
+  return randomId(16);
+}
+
+/**
+ * Normalizes a user-supplied export hash. Accepts only 32-char hex tokens so
+ * imports can't inject arbitrary identifiers into the uniqueness key.
+ */
+export function normalizeBotExportHash(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  if (!BOT_EXPORT_HASH_PATTERN.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+/**
+ * Resolve which export hash a newly-created bot should store.
+ * - `incomingHash` undefined/null => legacy path, generate a fresh hash.
+ * - malformed `incomingHash` => reject as invalid.
+ * - duplicate incoming hash => reject as already present.
+ */
+export function resolveBotExportHashForCreate(options: {
+  incomingHash?: unknown;
+  hasExistingHash: (hash: string) => boolean;
+  createHash?: () => string;
+}): string {
+  const createHash = options.createHash ?? createBotExportHash;
+  const incomingProvided =
+    options.incomingHash !== undefined && options.incomingHash !== null;
+  const normalizedIncoming = normalizeBotExportHash(options.incomingHash);
+  if (incomingProvided && normalizedIncoming === null) {
+    throw new Error("Invalid bot export hash.");
+  }
+  if (normalizedIncoming) {
+    if (options.hasExistingHash(normalizedIncoming)) {
+      throw new Error("This bot is already in your library!");
+    }
+    return normalizedIncoming;
+  }
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = createHash();
+    if (!options.hasExistingHash(candidate)) return candidate;
+  }
+  throw new Error("Could not generate a unique bot export hash.");
 }
 
 /**

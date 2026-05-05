@@ -278,6 +278,8 @@ npm run dev
 - **Expanded bot glyph picker** with hundreds of Lucide-backed glyphs alongside the original inline set
 - **Forkable chats** — branch from any message in a conversation (Sandbox)
 - **Auto-generated chat titles** — first replies trigger a background local `llama3.2` pass that gives saved conversations short sidebar titles.
+- **AskQuestion bot tool** — assistants can optionally end a turn with a Prism `<<<PRISM_TOOL>>>` JSON envelope; the transcript stores clean prose plus structured payload, and the chat surface shows three tappable chips (same visual language as "Talk to me!" starters) until the user sends another message.
+- **Bot portability** — export/import individual bots as Markdown files (profile + settings + bot-scoped memories) from the Bots panel.
 - **Markdown in message bubbles** — assistant and user messages render GitHub-flavored Markdown safely in the thread (`react-markdown` + `remark-gfm`); the compose field is plain text.
 - **Per-chat deletion** — remove individual chats from the sidebar (subtle × that embosses red on hover, click-to-confirm) or from the chat header. **Press-and-hold any × (or the header Delete button) for ~1 s** to clear *every* chat at once: on pointerdown every × immediately glows red and tilts to its own small angle; at the 900 ms threshold the whole row shakes like iOS edit-mode while a centered confirmation modal ("Delete all chats?" · Cancel / Delete all) takes over the decision. Release before the threshold to snap the ×'s back. Messages and exports are purged; generated images and extracted memories are preserved.
 - **OpenAI image generation** (DALL-E 3) with gallery (Sandbox)
@@ -312,6 +314,7 @@ Production mode:
 
 - **API** runs in a secondary console titled *"LocalAI API"* via `node --experimental-strip-types apps/api/src/server.ts` and listens on `0.0.0.0:18787`.
 - **Frontend** is built with Next.js `output: "standalone"` and served by `node .next/standalone/apps/web/server.js` on `0.0.0.0:18788`. `start.bat` also stages `.next/static/` and `public/` into the standalone bundle after each build — without this step the browser would load HTML successfully but all JS/CSS would 404.
+- **Composer `/dev …` shortcuts (web)** — intercepted locally only (`/dev askquestion` forces an AskQuestion chip preview; `/dev help` lists commands). On by default during `npm run dev`; enable in production builds with **`NEXT_PUBLIC_PRISM_DEV_COMMANDS=1`** in `.env.example`.
 
 Session cookies work same-origin because Next's `rewrites()` proxies `/api/*` to `127.0.0.1:18787` server-side. You only need to open **port 18788** on the LAN; port 18787 should stay closed unless pairing native clients.
 
@@ -353,6 +356,30 @@ Prism is built so that the `LOCAL` mode toggle is a real invariant, not a sugges
 - **OpenAI-only features are gated**: image generation calls OpenAI DALL-E, so it is refused server-side (and hidden client-side) whenever the effective mode is LOCAL.
 - **No outbound telemetry**: Next.js anonymous telemetry is disabled via `NEXT_TELEMETRY_DISABLED=1` (set in the web Dockerfile and `.env.example`). If you run `npm run dev` directly on your shell instead of via Docker, export the same variable or run `npx next telemetry disable` once. The API process makes no telemetry calls.
 - **Outbound surface** (exhaustive): Ollama at `OLLAMA_HOST`, Qdrant at `QDRANT_URL`, and — only in ONLINE mode — `api.openai.com`. Any reviewer adding a new `fetch(` to a non-config host needs an explicit mode gate. See `DESIGN.md` for details.
+
+## Knowledge Base (Obsidian)
+
+Prism includes a self-building Obsidian knowledge base in `vault/`. It converts
+repo source files, docs, lessons, and releases into linked notes with MOCs
+(Maps of Content), backlinks, and optional AI summaries + semantic related-links.
+
+Run it:
+
+```bash
+npm run kb
+```
+
+Useful commands:
+
+```bash
+npm run kb:incremental   # Fast refresh for post-commit changes
+npm run kb:augment       # Re-run AI summary + semantic related-link pass only
+npm run kb:install-hook  # Install .git/hooks/post-commit auto-refresh
+```
+
+Open `vault/` in Obsidian to browse the generated graph. If `OLLAMA_HOST` or
+`QDRANT_URL` are missing, the deterministic skeleton still builds and AI
+augmentation is skipped gracefully.
 
 ## Troubleshooting
 
