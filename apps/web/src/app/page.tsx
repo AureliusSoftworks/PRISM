@@ -859,7 +859,7 @@ function formatBotHeroSentence(value: string): string {
   );
 }
 
-function botHeroPreview(text: string | null | undefined, maxChars = 140): string {
+function botHeroPreview(text: string | null | undefined, maxChars = 220): string {
   const raw =
     typeof text === "string" ? stripBotProfileMetaSuffix(text).trim() : "";
   if (!raw) return "";
