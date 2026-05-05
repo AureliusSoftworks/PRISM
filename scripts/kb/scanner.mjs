@@ -13,6 +13,14 @@ const SOURCE_EXTENSIONS = new Set([
 ]);
 
 const TEXT_EXTENSIONS = new Set([".md", ...SOURCE_EXTENSIONS]);
+const GENERATED_DIR_NAMES = new Set([
+  ".next",
+  "DerivedData",
+  "build",
+  "dist",
+  "bin",
+  "obj",
+]);
 
 function toUnixPath(value) {
   return value.split(path.sep).join("/");
@@ -33,6 +41,9 @@ async function walkFiles(rootDir) {
         continue;
       }
       if (entry.isDirectory()) {
+        if (GENERATED_DIR_NAMES.has(entry.name)) {
+          continue;
+        }
         await walk(absolute);
         continue;
       }

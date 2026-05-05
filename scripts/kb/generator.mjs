@@ -486,21 +486,43 @@ export async function generateVault({
     await writeIfChanged(absPath, content);
   }
 
+  const manifestPath = path.join(repoRoot, vaultDir, ".kb-manifest.json");
+  const nextRecords = generated.map((item) => ({
+    id: item.id,
+    sourcePath: item.sourcePath,
+    noteRelPath: toUnixPath(item.noteRelPath),
+    title: item.title,
+    type: item.type,
+    domain: item.domain,
+    hash: item.hash,
+    embeddingText: item.embeddingText,
+  }));
+
+  let previousUpdatedAt = null;
+  let previousRecordsJson = null;
+  try {
+    const previousManifestRaw = await readFile(manifestPath, "utf8");
+    const previousManifest = JSON.parse(previousManifestRaw);
+    if (typeof previousManifest.updatedAt === "string") {
+      previousUpdatedAt = previousManifest.updatedAt;
+    }
+    if (Array.isArray(previousManifest.records)) {
+      previousRecordsJson = JSON.stringify(previousManifest.records);
+    }
+  } catch {
+    // No previous manifest yet or invalid JSON.
+  }
+
+  const nextRecordsJson = JSON.stringify(nextRecords);
+  const recordsChanged = previousRecordsJson !== nextRecordsJson;
   const manifest = {
-    updatedAt: new Date().toISOString(),
-    records: generated.map((item) => ({
-      id: item.id,
-      sourcePath: item.sourcePath,
-      noteRelPath: toUnixPath(item.noteRelPath),
-      title: item.title,
-      type: item.type,
-      domain: item.domain,
-      hash: item.hash,
-      embeddingText: item.embeddingText,
-    })),
+    updatedAt:
+      recordsChanged || !previousUpdatedAt
+        ? new Date().toISOString()
+        : previousUpdatedAt,
+    records: nextRecords,
   };
 
-  const manifestPath = path.join(repoRoot, vaultDir, ".kb-manifest.json");
   await writeIfChanged(manifestPath, JSON.stringify(manifest, null, 2));
 
   return {
