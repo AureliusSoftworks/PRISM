@@ -91,6 +91,8 @@ const INFER_STARTER_MAX_TOKENS = 420;
 const INFER_TITLE_TEMPERATURE = 0.2;
 const INFER_TITLE_MAX_TOKENS = 32;
 const INFER_TITLE_MAX_CHARS = 60;
+const TITLE_REFRESH_MESSAGE_LIMIT = 12;
+const TITLE_REFRESH_MESSAGE_MAX_CHARS = 1200;
 const STARTER_FALLBACK_STOP_WORDS = new Set([
   "about",
   "there",
@@ -292,11 +294,71 @@ export function parseTitleResponse(raw: string): string | null {
   }
 }
 
+function extractLatestStarterQuestion(assistantOpening: string): string | null {
+  const normalized = assistantOpening.replace(/\s+/g, " ").trim();
+  if (!normalized.includes("?")) return null;
+  const questionMatches = normalized.match(/[^?]*\?/g) ?? [];
+  let question = questionMatches.at(-1)?.trim() ?? "";
+  const lastSentenceBoundary = Math.max(
+    question.lastIndexOf(". "),
+    question.lastIndexOf("! ")
+  );
+  if (lastSentenceBoundary >= 0) {
+    question = question.slice(lastSentenceBoundary + 2).trim();
+  }
+  return question.length > 0 ? question : null;
+}
+
+function cleanStarterQuestionAlternative(value: string): string {
+  return value
+    .replace(/^[\s"'“”‘’`*_#:-]+/, "")
+    .replace(/[\s"'“”‘’`*_#.!?:;-]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractStarterQuestionAlternatives(question: string): string[] {
+  let core = question.replace(/\?+$/, "").trim();
+  const ifOrWhetherIndex = core.search(/\b(?:if|whether)\b/i);
+  if (ifOrWhetherIndex >= 0) {
+    core = core.slice(ifOrWhetherIndex).replace(/^(?:if|whether)\s+/i, "");
+  }
+  core = core
+    .replace(/^i(?:'m| am)\s+thinking\s+of\s+/i, "")
+    .replace(/^it(?:'s| is)\s+/i, "")
+    .replace(/^.*\b(?:between|from)\s+/i, "")
+    .trim();
+  const alternatives = core
+    .split(/\s+(?:or|versus|vs\.?)\s+/i)
+    .map(cleanStarterQuestionAlternative)
+    .filter((part) => part.length >= 2 && part.length <= 64);
+  return alternatives.length >= 2 ? [...new Set(alternatives)].slice(0, 3) : [];
+}
+
 function fallbackConversationStarters(
   assistantOpening: string,
   personaLabel: string | undefined
 ): string[] {
   const label = personaLabel?.trim() || "Prism";
+  const question = extractLatestStarterQuestion(assistantOpening);
+  if (question) {
+    const alternatives = extractStarterQuestionAlternatives(question);
+    if (alternatives.length >= 2) {
+      const replies = [...alternatives];
+      const fallbackReplies = ["Neither sounds right.", "I'm not sure.", "Give me another clue."];
+      for (const reply of fallbackReplies) {
+        if (replies.length >= 4) break;
+        replies.push(reply);
+      }
+      return replies.slice(0, 4);
+    }
+    return [
+      "I'm not sure yet.",
+      "A small specific detail.",
+      "I need another clue.",
+      "Surprise me with your guess.",
+    ];
+  }
   const words = assistantOpening
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
@@ -325,6 +387,7 @@ async function inferConversationStarters(
       ? `${assistantOpening.trim().slice(0, 3200)}…`
       : assistantOpening.trim();
   if (!opener) return [];
+  const question = extractLatestStarterQuestion(opener);
 
   const inferOverrides: GenerateOptions = {
     ...baseOverrides,
@@ -346,10 +409,14 @@ async function inferConversationStarters(
         "---",
         opener,
         "---",
+        `Question the user should answer: ${question ? `"${question}"` : "(no direct question detected)"}.`,
         'Respond with compact JSON exactly in this shape: {"suggestions":["...","...","...","..."]}',
         "Include exactly four strings.",
         "Each string is something the USER might send next (short clause or sentence; max ~18 words).",
-        "Cover four meaningfully different directions (e.g. practical, playful, reflective, clarification).",
+        "If the assistant asked a direct question, every string MUST be a plausible direct answer to that exact question.",
+        "For either/or questions, include the concrete choices as chips, plus uncertainty/none-of-these when useful.",
+        "Do not ask a different follow-up question or steer to a new topic while a direct question is pending.",
+        "If there is no direct question, cover four meaningfully different continuations (e.g. practical, playful, reflective, clarification).",
         "Strings must be safe single-line UTF-8; no numbering or prefixes inside strings.",
       ].join("\n"),
     },
@@ -419,6 +486,146 @@ async function inferConversationTitle(
   } catch {
     return null;
   }
+}
+
+type TitleRefreshMessage = {
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+};
+
+function trimTitleContext(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length > TITLE_REFRESH_MESSAGE_MAX_CHARS
+    ? `${trimmed.slice(0, TITLE_REFRESH_MESSAGE_MAX_CHARS).trimEnd()}...`
+    : trimmed;
+}
+
+function formatTitleRefreshTranscript(messages: TitleRefreshMessage[]): string {
+  return messages
+    .map((message) => {
+      const speaker = message.role === "user" ? "User" : "Assistant";
+      return `${speaker}: ${trimTitleContext(message.content)}`;
+    })
+    .filter((line) => line.trim().length > 0)
+    .join("\n\n");
+}
+
+async function inferRefreshedConversationTitle(
+  provider: LlmProvider,
+  messages: TitleRefreshMessage[],
+  currentTitle: string,
+  personaLabel: string | null
+): Promise<string | null> {
+  const transcript = formatTitleRefreshTranscript(messages);
+  if (!transcript) return null;
+
+  const inferOverrides: GenerateOptions = {
+    temperature: INFER_TITLE_TEMPERATURE,
+    maxTokens: INFER_TITLE_MAX_TOKENS,
+  };
+  const label = personaLabel?.trim() || "Prism";
+  const promptMessages: ProviderMessage[] = [
+    {
+      role: "system",
+      content:
+        "You update chat titles for a conversation sidebar. Reply with JSON only — no prose, no markdown outside JSON.",
+    },
+    {
+      role: "user",
+      content: [
+        `Assistant persona label: "${label}".`,
+        `Current sidebar title: "${currentTitle}".`,
+        "Recent conversation transcript:",
+        "---",
+        transcript,
+        "---",
+        'Respond with compact JSON exactly in this shape: {"title":"..."}',
+        "The title is what the user sees after leaving the chat, so make it reflect the conversation's current main topic.",
+        "Bias strongly toward five content words or fewer.",
+        "Prefer a stable topic label over a momentary last-message detail.",
+        "Use plain text only: no quotes, numbering, emoji, trailing period, markdown, or subtitle punctuation.",
+      ].join("\n"),
+    },
+  ];
+
+  try {
+    return parseTitleResponse(await provider.generateResponse(promptMessages, inferOverrides));
+  } catch {
+    return null;
+  }
+}
+
+export async function refreshConversationTitle(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string
+): Promise<{ id: string; title: string; updatedAt: string } | null> {
+  const conversation = db
+    .prepare(
+      `SELECT c.id, c.title, c.incognito, c.updated_at,
+              (SELECT b.name
+                 FROM messages m
+                 LEFT JOIN bots b ON b.id = m.bot_id
+                WHERE m.conversation_id = c.id
+                  AND m.user_id = c.user_id
+                  AND m.role = 'assistant'
+                ORDER BY m.created_at DESC
+                LIMIT 1) AS last_bot_name
+         FROM conversations c
+        WHERE c.id = ? AND c.user_id = ?`
+    )
+    .get(conversationId, userId) as
+    | {
+        id: string;
+        title: string;
+        incognito: number;
+        updated_at: string;
+        last_bot_name: string | null;
+      }
+    | undefined;
+  if (!conversation || conversation.incognito === 1) {
+    return null;
+  }
+
+  const recentMessages = (
+    db
+      .prepare(
+        `SELECT role, content, created_at
+           FROM messages
+          WHERE conversation_id = ?
+            AND user_id = ?
+            AND role IN ('user', 'assistant')
+          ORDER BY created_at DESC
+          LIMIT ?`
+      )
+      .all(conversationId, userId, TITLE_REFRESH_MESSAGE_LIMIT) as TitleRefreshMessage[]
+  ).reverse();
+  if (!recentMessages.some((message) => message.role === "assistant")) {
+    return null;
+  }
+
+  const title = await inferRefreshedConversationTitle(
+    getAuxiliaryProvider(),
+    recentMessages,
+    conversation.title,
+    conversation.last_bot_name
+  );
+  if (!title || title === conversation.title) {
+    return {
+      id: conversation.id,
+      title: conversation.title,
+      updatedAt: conversation.updated_at,
+    };
+  }
+
+  db.prepare("UPDATE conversations SET title = ? WHERE id = ? AND user_id = ?")
+    .run(title, conversationId, userId);
+  return {
+    id: conversation.id,
+    title,
+    updatedAt: conversation.updated_at,
+  };
 }
 
 export interface UserChatSettings {

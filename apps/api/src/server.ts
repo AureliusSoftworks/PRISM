@@ -14,7 +14,7 @@ import {
 import { buildHealthResponse } from "./health.ts";
 import { consumePairingCode, createPairingCode } from "./pairing.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
-import { processChatMessage } from "./chat.ts";
+import { processChatMessage, refreshConversationTitle } from "./chat.ts";
 import {
   createDevSeedMemories,
   deleteMemoryById,
@@ -666,6 +666,14 @@ function buildRoutes(): RouteDefinition[] {
           messages,
         },
         ...(opinion ? { opinion } : {}),
+      });
+    }),
+    route("POST", "/api/conversations/:id/title", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversation = await refreshConversationTitle(db, userId, ctx.params.id);
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
       });
     }),
     route("DELETE", "/api/conversations/:id", async (ctx) => {

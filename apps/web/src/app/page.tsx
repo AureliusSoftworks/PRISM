@@ -8440,6 +8440,11 @@ function HomeContent(): React.JSX.Element {
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
   const selectedIdRef = useRef<string | null>(null);
   const detailIdRef = useRef<string | null>(null);
+  const titleRefreshSelectionRef = useRef<{ id: string | null; incognito: boolean }>({
+    id: null,
+    incognito: false,
+  });
+  const titleRefreshInFlightRef = useRef<Set<string>>(new Set());
   const memoryTransitionRunRef = useRef(0);
   const [modelRevealMessageId, setModelRevealMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -10196,11 +10201,38 @@ function HomeContent(): React.JSX.Element {
     setError(null);
   }, [view]);
 
+  useEffect(() => {
+    const activeConversationId = view === "hub" ? null : selectedId;
+    const previous = titleRefreshSelectionRef.current;
+    if (previous.id && previous.id !== activeConversationId && !previous.incognito) {
+      void refreshConversationTitleAfterLeave(previous.id);
+    }
+    titleRefreshSelectionRef.current = {
+      id: activeConversationId,
+      incognito: detail?.incognito === true,
+    };
+  }, [selectedId, detail?.incognito, view]);
+
   async function refreshAll() { await Promise.all([refreshConversations(), refreshSettings(), refreshMemories(), refreshBots(), refreshImages(), refreshModels()]); }
   async function refreshConversations(): Promise<ConversationSummary[]> {
     const d = await api<{ conversations: ConversationSummary[] }>("/api/conversations");
     const next = d.conversations.filter(c => !c.incognito);
     setConversations(next);
+    const currentId = detailIdRef.current;
+    if (currentId) {
+      const currentSummary = next.find((conversation) => conversation.id === currentId);
+      if (currentSummary) {
+        setDetail((current) =>
+          current?.id === currentId && current.title !== currentSummary.title
+            ? {
+                ...current,
+                title: currentSummary.title,
+                updatedAt: currentSummary.updatedAt,
+              }
+            : current
+        );
+      }
+    }
     return next;
   }
   async function refreshConversation(id: string): Promise<void> {
@@ -10231,6 +10263,35 @@ function HomeContent(): React.JSX.Element {
       await refreshBotMemories(nextPickedBotId);
     } else {
       setBotMemories([]);
+    }
+  }
+  async function refreshConversationTitleAfterLeave(conversationId: string): Promise<void> {
+    if (titleRefreshInFlightRef.current.has(conversationId)) return;
+    titleRefreshInFlightRef.current.add(conversationId);
+    try {
+      const d = await api<{
+        conversation: { id: string; title: string; updatedAt: string } | null;
+      }>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/title`,
+        { method: "POST", body: "{}" }
+      );
+      const refreshed = d.conversation;
+      if (!refreshed) return;
+      setConversations((list) =>
+        list.map((conversation) =>
+          conversation.id === refreshed.id
+            ? {
+                ...conversation,
+                title: refreshed.title,
+                updatedAt: refreshed.updatedAt,
+              }
+            : conversation
+        )
+      );
+    } catch {
+      // Title refresh is background polish; opening/switching chats should never fail because of it.
+    } finally {
+      titleRefreshInFlightRef.current.delete(conversationId);
     }
   }
   async function refreshSettings() {

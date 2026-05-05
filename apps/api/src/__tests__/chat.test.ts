@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   parseTitleResponse,
   processChatMessage,
+  refreshConversationTitle,
   sanitizeConversationTitle,
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
@@ -256,6 +257,10 @@ describe("processChatMessage starter prompts", () => {
     const inferBody = bodies[1];
     assert.equal(inferBody?.messages?.[0]?.role, "system");
     assert.match(inferBody?.messages?.[1]?.content ?? "", /Respond with compact JSON/);
+    assert.match(
+      inferBody?.messages?.[1]?.content ?? "",
+      /direct answer to that exact question/
+    );
     await flushBackgroundTitleJobs();
     assert.equal(fetchCount, 3);
   });
@@ -426,7 +431,7 @@ describe("processChatMessage starter prompts", () => {
     );
   });
 
-  it("falls back to local starter chips when inference returns non-json", async () => {
+  it("falls back to answer-shaped starter chips when inference returns non-json", async () => {
     const db = createChatTestDb();
     let fetchCount = 0;
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -466,8 +471,61 @@ describe("processChatMessage starter prompts", () => {
       }
     );
 
-    assert.equal(result.conversationStarters?.length, 4);
-    assert.match(result.conversationStarters?.[1] ?? "", /Henry/);
+    assert.deepEqual(result.conversationStarters, [
+      "I'm not sure yet.",
+      "A small specific detail.",
+      "I need another clue.",
+      "Surprise me with your guess.",
+    ]);
+  });
+
+  it("falls back to question-relevant starter chips for specific opener questions", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                "I've been trying to recall that quaint little café on your last visit to Paris — can you tell me if I'm thinking of Chez Marie or Café des Deux Moulins?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: "These are not JSON suggestions.",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "Chez Marie",
+      "Café des Deux Moulins",
+      "Neither sounds right.",
+      "I'm not sure.",
+    ]);
   });
 
   it("strips quote wrappers from starter opener replies", async () => {
@@ -1260,6 +1318,113 @@ describe("processChatMessage auto-generated titles", () => {
       .get() as { n: number };
     assert.equal(conversationCount.n, 0);
     assert.equal(chatCalls, 1);
+  });
+});
+
+describe("refreshConversationTitle", () => {
+  it("updates an existing conversation title from recent messages without changing activity time", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+      };
+      assert.match(body.messages?.at(-1)?.content ?? "", /Recent conversation transcript/);
+      return new Response(
+        JSON.stringify({ message: { content: '{"title":"Moon Garden Supplies"}' } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "conversation-1",
+      "user-1",
+      "Garden Plan",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:10.000Z"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    insertMessage.run(
+      "message-1",
+      "conversation-1",
+      "user-1",
+      "user",
+      "Let's plan a garden.",
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "message-2",
+      "conversation-1",
+      "user-1",
+      "assistant",
+      "Start with soil and light.",
+      "2026-01-01T00:00:02.000Z"
+    );
+    insertMessage.run(
+      "message-3",
+      "conversation-1",
+      "user-1",
+      "user",
+      "Actually this is for moon garden supplies.",
+      "2026-01-01T00:00:09.000Z"
+    );
+    insertMessage.run(
+      "message-4",
+      "conversation-1",
+      "user-1",
+      "assistant",
+      "Moon garden supplies means white blooms, night-fragrant herbs, and pale stones.",
+      "2026-01-01T00:00:10.000Z"
+    );
+
+    const result = await refreshConversationTitle(db, "user-1", "conversation-1");
+
+    assert.equal(result?.title, "Moon Garden Supplies");
+    const row = db
+      .prepare("SELECT title, updated_at FROM conversations WHERE id = ?")
+      .get("conversation-1") as { title: string; updated_at: string };
+    assert.equal(row.title, "Moon Garden Supplies");
+    assert.equal(row.updated_at, "2026-01-01T00:00:10.000Z");
+  });
+
+  it("does not title conversations without an assistant reply", async () => {
+    const db = createChatTestDb();
+    let titleCalls = 0;
+    globalThis.fetch = (async () => {
+      titleCalls += 1;
+      return new Response(
+        JSON.stringify({ message: { content: '{"title":"Should Not Happen"}' } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "conversation-1",
+      "user-1",
+      "Draft",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      "message-1",
+      "conversation-1",
+      "user-1",
+      "user",
+      "No answer yet.",
+      "2026-01-01T00:00:01.000Z"
+    );
+
+    const result = await refreshConversationTitle(db, "user-1", "conversation-1");
+
+    assert.equal(result, null);
+    assert.equal(titleCalls, 0);
   });
 });
 
