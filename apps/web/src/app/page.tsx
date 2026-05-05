@@ -2,6 +2,7 @@
 
 import {
   Suspense,
+  cloneElement,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -7473,14 +7474,15 @@ function GlyphLibrary({ size = 88 }: GlyphProps): React.JSX.Element {
 }
 
 function GlyphSlate({ size = 88 }: GlyphProps): React.JSX.Element {
-  // Document-with-folded-corner silhouette housing three text lines and
-  // a blinking-cursor caret. Each PRISM letter gets exactly one element
-  // so the tile reads as a refracted "page in progress":
-  //   P → folded top-right corner crease
-  //   R → first (longest) text line
-  //   I → second text line
-  //   S → third text line
-  //   M → vertical cursor caret hanging at the end of the last line
+  // Quill-and-inkwell silhouette: a feathered quill rising from a small
+  // bottle of ink. Each PRISM letter maps to exactly one element so the
+  // tile reads as a refracted "writing instrument" and stays visually
+  // distinct from the notebook-and-flow motif used by GlyphPseudo:
+  //   P → inkwell rim / opening curve
+  //   R → ink waterline inside the well
+  //   I → quill shaft (rachis)
+  //   S → feather barbs sweeping along the shaft
+  //   M → ink droplet hovering above the rim (fresh dip cue)
   return (
     <svg
       width={size}
@@ -7491,23 +7493,23 @@ function GlyphSlate({ size = 88 }: GlyphProps): React.JSX.Element {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      {/* Page outline (neutral, like the prism body in GlyphSandbox) */}
+      {/* Inkwell body (neutral container, like the prism body in GlyphSandbox) */}
       <path
-        d="M11 6 H30 L37 13 V42 H11 Z"
+        d="M11 42 L13 32 H25 L27 42 Z"
         stroke="currentColor"
         strokeWidth={2.5}
         opacity="0.45"
       />
-      {/* Folded corner crease (P) */}
-      <path d="M30 6 V13 H37" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
-      {/* Text line 1 — longest (R) */}
-      <path d="M16 20 H32" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
-      {/* Text line 2 — medium (I) */}
-      <path d="M16 26 H29" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
-      {/* Text line 3 — shortest (S) */}
-      <path d="M16 32 H24" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
-      {/* Cursor caret at end of last line (M) */}
-      <path d="M27 30 V35" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+      {/* Inkwell rim / opening (P) */}
+      <path d="M13 32 Q19 34 25 32" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      {/* Ink waterline inside the well (R) */}
+      <path d="M14 37 H24" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      {/* Quill shaft / rachis (I) */}
+      <path d="M20 31 L39 10" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      {/* Feather barbs sweeping along the shaft (S) */}
+      <path d="M37 11 Q 22 14 24 26" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      {/* Ink droplet hovering above the rim (M) */}
+      <circle cx="16" cy="29" r="1.4" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
     </svg>
   );
 }
@@ -7540,6 +7542,40 @@ function GlyphPseudo({ size = 88 }: GlyphProps): React.JSX.Element {
       <path d="M19 31 H29" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
       {/* Control-flow branch marker */}
       <path d="M15 31 V36 H22" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
+function GlyphBrowser({ size = 88 }: GlyphProps): React.JSX.Element {
+  // Browser window + globe motif so the tile reads as web navigation
+  // rather than a generic document or app launcher.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Browser chrome */}
+      <path
+        d="M7 10 H41 V38 H7 Z"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        opacity="0.45"
+      />
+      <path d="M7 16 H41" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      <circle cx="11.5" cy="13" r="1.3" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      <circle cx="16.5" cy="13" r="1.3" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      <path d="M21 13 H37" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      {/* Globe inside viewport */}
+      <circle cx="24" cy="28" r="8" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+      <path d="M16 28 H32" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      <path d="M24 20 V36" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      <path d="M19 24 C22 26 26 26 29 24" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      <path d="M19 32 C22 30 26 30 29 32" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
     </svg>
   );
 }
@@ -8491,6 +8527,10 @@ function HomeContent(): React.JSX.Element {
   /** Memories / Edit bot / Export / Delete overflow — mirrors ☰ toggle styling on mobile. */
   const [chatOverflowMenuOpen, setChatOverflowMenuOpen] = useState(false);
   const chatOverflowMenuRef = useRef<HTMLDivElement>(null);
+  // Wrench toggle anchor — focus returns here on Escape / outside-click /
+  // collapse so keyboard users land on the control they just opened.
+  const chatOverflowGearButtonRef = useRef<HTMLButtonElement>(null);
+  const chatOverflowMenuOpenPrevRef = useRef(chatOverflowMenuOpen);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [devTogglesOpen, setDevTogglesOpen] = useState(false);
   const [devToolsBusy, setDevToolsBusy] = useState(false);
@@ -8860,6 +8900,22 @@ function HomeContent(): React.JSX.Element {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [chatOverflowMenuOpen]);
+
+  // When the chat-tools accordion collapses, hand focus back to the wrench so
+  // keyboard users (Escape, outside-click, action click) don't get stranded
+  // inside an inert subtree. Skip on mount + when the menu opens.
+  useEffect(() => {
+    const wasOpen = chatOverflowMenuOpenPrevRef.current;
+    chatOverflowMenuOpenPrevRef.current = chatOverflowMenuOpen;
+    if (!wasOpen || chatOverflowMenuOpen) return;
+    const wrench = chatOverflowGearButtonRef.current;
+    if (!wrench) return;
+    // Only restore focus if it was inside the accordion subtree — otherwise we'd
+    // yank focus from wherever the user explicitly moved it (e.g. an opened panel).
+    const accordionRoot = chatOverflowMenuRef.current;
+    const active = document.activeElement;
+    if (accordionRoot?.contains(active)) wrench.focus();
   }, [chatOverflowMenuOpen]);
 
   const beginSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
@@ -14554,7 +14610,7 @@ function HomeContent(): React.JSX.Element {
   if (!user) return (
     <main className={`${styles.authLayout} ${themeClass}`}>
       <div className={`${styles.card} ${styles.authCard}`}>
-        <div className={styles.brandLockup}>
+        <div className={`${styles.brandLockup} ${styles.authBrandLockup}`}>
           {/* Static icon artwork wrapped in a dedicated halo shell. The shell's
               pseudo-elements own the animated prismatic glows so the icon
               itself stays crisp while the color motion happens behind it.
@@ -14579,48 +14635,56 @@ function HomeContent(): React.JSX.Element {
               className={styles.brandIconLight}
             />
           </div>
-          <PrismWordmark className={styles.brandWordmark} />
-        </div>
-        <p className={styles.muted}>Local-first AI playground. ChatGPT Gov fidelity, FL Studio creativity.</p>
-        <p className={styles.muted} data-testid="auth-app-version">
-          Prism <strong>{PRISM_APP_VERSION}</strong>
-        </p>
-        <div className={styles.authControls}>
-          <div className={styles.authToggle}>
-            <a
-              href="?mode=register"
-              className={authMode === "register" ? styles.selected : ""}
-              onClick={() => setError(null)}
-            >
-              Register
-            </a>
-            <a
-              href="?mode=login"
-              className={authMode === "login" ? styles.selected : ""}
-              onClick={() => setError(null)}
-            >
-              Login
-            </a>
+          <div className={styles.authBrandTextBlock}>
+            <div className={styles.authBrandWordmarkRow}>
+              <PrismWordmark className={styles.brandWordmark} />
+              <span className={styles.authVersionChip} data-testid="auth-app-version">
+                {PRISM_APP_VERSION}
+              </span>
+            </div>
+            <p className={`${styles.muted} ${styles.authTagline}`}>
+              Private by default. Creative by design.
+            </p>
           </div>
-          <button
-            type="button"
-            className={styles.themeToggleButton}
-            onClick={() => void cycleThemeMode()}
-            aria-label={
-              effectiveThemeMode === "system"
-                ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-            }
-            data-title={
-              effectiveThemeMode === "system"
-                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-            }
-          >
-            <ThemeGlyph mode={effectiveThemeMode} />
-          </button>
         </div>
-        <h2 className={styles.authHeading}>{authMode === "register" ? "Create your account" : "Welcome back"}</h2>
+        <div className={styles.authFormHeader}>
+          <h2 className={styles.authHeading}>{authMode === "register" ? "Create your account" : "Welcome back"}</h2>
+          <div className={styles.authControls}>
+            <div className={styles.authToggle}>
+              <a
+                href="?mode=register"
+                className={authMode === "register" ? styles.selected : ""}
+                onClick={() => setError(null)}
+              >
+                Register
+              </a>
+              <a
+                href="?mode=login"
+                className={authMode === "login" ? styles.selected : ""}
+                onClick={() => setError(null)}
+              >
+                Login
+              </a>
+            </div>
+            <button
+              type="button"
+              className={styles.themeToggleButton}
+              onClick={() => void cycleThemeMode()}
+              aria-label={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+              }
+              data-title={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+              }
+            >
+              <ThemeGlyph mode={effectiveThemeMode} />
+            </button>
+          </div>
+        </div>
         <form onSubmit={submitAuth} className={styles.form}>
           {authMode === "register" && <input required value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Display name" />}
           <input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" />
@@ -15236,10 +15300,104 @@ function HomeContent(): React.JSX.Element {
     };
 
     if (!isMobileGear) {
-      // Desktop: surface the chat actions directly in the chat header so
-      // there's no extra click to reach Memories / Edit bot / Opinions / Export / Delete.
+      // Desktop: wrench glyph at the right edge mirrors the mobile pattern, but
+      // expands the action pills horizontally leftward like an accordion instead
+      // of dropping a vertical popout. Buttons fade in with a per-index stagger
+      // (Memories first → Delete last) so the destructive action settles in
+      // farthest from the cursor at open time.
+      const accordionId = "chat-header-actions-accordion";
+      const accordionCollapsed = !chatOverflowMenuOpen;
+      // React 19 supports `inert` natively; `tabIndex={-1}` belt-and-suspenders
+      // keeps collapsed buttons unreachable on older browsers / a11y stacks.
+      const collapsedTabIndex = accordionCollapsed ? -1 : 0;
+      const renderAccordionButton = (
+        index: number,
+        node: React.ReactElement<React.ButtonHTMLAttributes<HTMLButtonElement>>,
+      ): React.ReactElement => {
+        const existingStyle = node.props.style ?? {};
+        // CSS reads `--accordion-index` to compute the per-button stagger delay.
+        // Cast lets us attach a CSS custom property without TS rejecting the key.
+        const styleWithIndex = {
+          ...existingStyle,
+          "--accordion-index": index,
+        } as React.CSSProperties;
+        return cloneElement(node, {
+          style: styleWithIndex,
+          tabIndex: collapsedTabIndex,
+        });
+      };
+      const accordionButtons: React.ReactElement<
+        React.ButtonHTMLAttributes<HTMLButtonElement>
+      >[] = [];
+      accordionButtons.push(
+        <button
+          key="memories"
+          type="button"
+          className={styles.chatHeaderAction}
+          disabled={headerActionsDisabled || !canMemoryActions}
+          onClick={handleMemories}
+          title={activeBot ? "Bot memories" : "Default Prism memories"}
+        >
+          <span className={styles.chatHeaderActionText}>Memories</span>
+        </button>,
+      );
+      accordionButtons.push(
+        <button
+          key="opinions"
+          type="button"
+          className={styles.chatHeaderAction}
+          disabled={headerActionsDisabled}
+          onClick={handleOpinions}
+          title="Opinions"
+        >
+          <span className={styles.chatHeaderActionText}>Opinions</span>
+        </button>,
+      );
+      if (canBotActions) {
+        accordionButtons.push(
+          <button
+            key="edit-bot"
+            type="button"
+            className={styles.chatHeaderAction}
+            disabled={headerActionsDisabled}
+            onClick={handleEditBot}
+            title="Edit bot"
+          >
+            <span className={styles.chatHeaderActionText}>Edit bot</span>
+          </button>,
+        );
+      }
+      accordionButtons.push(
+        <button
+          key="export"
+          type="button"
+          className={styles.chatHeaderAction}
+          disabled={headerActionsDisabled || !canExport}
+          onClick={handleExport}
+          title={exportTitle}
+        >
+          <span className={styles.chatHeaderActionText}>{exportButtonText}</span>
+        </button>,
+      );
+      accordionButtons.push(
+        <button
+          key="delete"
+          type="button"
+          className={`${styles.chatHeaderAction} ${
+            deleteArmed ? styles.chatHeaderActionDanger : ""
+          }`}
+          disabled={headerActionsDisabled || !canDelete}
+          data-delete-affordance="true"
+          aria-label={deleteLabel}
+          title={deleteLabel}
+          onClick={handleDelete}
+        >
+          <span className={styles.chatHeaderActionText}>{deleteButtonText}</span>
+        </button>,
+      );
       return (
         <div
+          ref={chatOverflowMenuRef}
           className={`${styles.chatHeaderActions} ${
             gearHidden ? styles.chatHeaderActionsHidden : ""
           } ${
@@ -15249,56 +15407,42 @@ function HomeContent(): React.JSX.Element {
           aria-disabled={headerActionsDisabled}
         >
           {renderMemoryToasts()}
-          <button
-            type="button"
-            className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled || !canMemoryActions}
-            onClick={handleMemories}
-            title={activeBot ? "Bot memories" : "Default Prism memories"}
-          >
-            <span className={styles.chatHeaderActionText}>Memories</span>
-          </button>
-          <button
-            type="button"
-            className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled}
-            onClick={handleOpinions}
-            title="Opinions"
-          >
-            <span className={styles.chatHeaderActionText}>Opinions</span>
-          </button>
-          {canBotActions && (
-            <button
-              type="button"
-              className={styles.chatHeaderAction}
-              disabled={headerActionsDisabled}
-              onClick={handleEditBot}
-              title="Edit bot"
-            >
-              <span className={styles.chatHeaderActionText}>Edit bot</span>
-            </button>
-          )}
-          <button
-            type="button"
-            className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled || !canExport}
-            onClick={handleExport}
-            title={exportTitle}
-          >
-            <span className={styles.chatHeaderActionText}>{exportButtonText}</span>
-          </button>
-          <button
-            type="button"
-            className={`${styles.chatHeaderAction} ${
-              deleteArmed ? styles.chatHeaderActionDanger : ""
+          <div
+            id={accordionId}
+            className={`${styles.chatHeaderActionsAccordion} ${
+              chatOverflowMenuOpen ? styles.chatHeaderActionsAccordionOpen : ""
             }`}
-            disabled={headerActionsDisabled || !canDelete}
-            data-delete-affordance="true"
-            aria-label={deleteLabel}
-            title={deleteLabel}
-            onClick={handleDelete}
+            aria-hidden={accordionCollapsed}
+            // `inert` removes the entire subtree from focus + AT trees while
+            // collapsed, so screen readers don't announce hidden controls.
+            inert={accordionCollapsed || undefined}
           >
-            <span className={styles.chatHeaderActionText}>{deleteButtonText}</span>
+            <div
+              className={styles.chatHeaderActionsRow}
+              role="group"
+              aria-label="Conversation actions"
+            >
+              {accordionButtons.map((node, index) =>
+                renderAccordionButton(index, node),
+              )}
+            </div>
+          </div>
+          <button
+            ref={chatOverflowGearButtonRef}
+            type="button"
+            className={styles.chatGearButton}
+            aria-expanded={chatOverflowMenuOpen}
+            aria-haspopup="true"
+            aria-controls={accordionId}
+            aria-label={
+              chatOverflowMenuOpen
+                ? "Hide conversation tools"
+                : "Show conversation tools"
+            }
+            title="Conversation tools"
+            onClick={() => setChatOverflowMenuOpen(open => !open)}
+          >
+            <WrenchGlyph />
           </button>
         </div>
       );
@@ -17767,6 +17911,20 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.hubTileLabel}>Pseudo</div>
             <div className={styles.hubTileTagline}>
               Half sketch, half system. A place for almost-code.
+            </div>
+          </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Web Browser mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphBrowser size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Web Browser</div>
+            <div className={styles.hubTileTagline}>
+              Simple browsing, plus optional bot screen viewing.
             </div>
           </button>
         </div>

@@ -329,6 +329,26 @@
   gap: 10px;
 }
 
+/* Pairs the form heading with the auth-mode controls on a single row so
+   "Create your account" sits left, segmented toggle + theme button sit
+   right. Wraps on narrow widths so the layout never clips. */
+.authFormHeader {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.authFormHeader .authHeading {
+  margin: 0;
+}
+
+.authFormHeader .authControls {
+  margin-top: 0;
+}
+
 /* Brand lockup: static rainbow-prism icon + per-letter color wordmark.
    The icon itself stays still; the motion happens in two heavily-blurred
    conic-gradient halos BEHIND it. The halos rotate in opposite directions at
@@ -339,6 +359,25 @@
   align-items: center;
   gap: 14px;
   margin: 0 0 6px;
+}
+
+.authBrandLockup {
+  align-items: flex-start;
+}
+
+.authBrandTextBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.authBrandWordmarkRow {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 10px;
 }
 
 .brandIconShell {
@@ -595,6 +634,36 @@
     drop-shadow(0 0 24px rgba(47, 211, 227, 0.15));
 }
 
+.authVersionChip {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  margin-top: 1px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent-ink) 12%, var(--bg-surface));
+  color: color-mix(in srgb, var(--fg) 92%, var(--fg-muted));
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.035em;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.authTagline {
+  margin: 2px 0 0;
+  align-self: stretch;
+  color: color-mix(in srgb, var(--fg-muted) 88%, var(--accent-ink) 12%);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: right;
+}
+
 /* Light theme brand lockup: swap the boxed JPG for the bare triangle,
    kill the animated halos, and repaint the wordmark in solid black so
    the whole lockup reads as a calm, high-contrast mark on the white
@@ -688,6 +757,85 @@
   font-weight: 600;
   color: var(--fg);
   letter-spacing: -0.01em;
+}
+
+/* Narrow-viewport scaling for the auth card. The wordmark + version chip
+   together overflow the card on phones; shrink the whole brand lockup
+   and let the form header stack so nothing clips. */
+@media (max-width: 480px) {
+  .authLayout {
+    padding: 16px;
+  }
+
+  .authCard {
+    padding: 22px 20px;
+  }
+
+  .authBrandLockup {
+    gap: 10px;
+  }
+
+  .authBrandLockup .brandIconShell {
+    width: 44px;
+    height: 44px;
+  }
+
+  .authBrandLockup .brandIcon {
+    width: 44px;
+    height: 44px;
+    border-radius: 11px;
+  }
+
+  .authBrandLockup .brandIconLight {
+    width: 24px;
+    height: 24px;
+  }
+
+  .authBrandLockup .brandWordmark {
+    height: 24px;
+  }
+
+  .authVersionChip {
+    font-size: 10.5px;
+    padding: 0 6px;
+    letter-spacing: 0.025em;
+  }
+
+  .authTagline {
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+  }
+
+  .authFormHeader {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .authFormHeader .authControls {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 360px) {
+  .authBrandLockup .brandIconShell {
+    width: 40px;
+    height: 40px;
+  }
+
+  .authBrandLockup .brandIcon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .authBrandLockup .brandWordmark {
+    height: 20px;
+  }
+
+  .authTagline {
+    font-size: 9px;
+  }
 }
 
 .form {
@@ -13332,6 +13480,13 @@
   height: 18px;
   flex-shrink: 0;
   stroke-width: 1.65;
+  transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatGearGlyph {
+    transition: none;
+  }
 }
 
 .chatGearAnchor {
@@ -13346,17 +13501,19 @@
   pointer-events: none;
 }
 
-/* Inline desktop chat-header buttons — replaces the wrench popout while
-   the viewport is wide enough. Inherits the bot's normalized accent from
-   `--accent-ink` / `--accent-soft` (set by `botAccentStyle` on the chat pane
-   ancestor), matching the prior MEMORIES badge look. */
+/* Desktop chat-header tools cluster — wraps memory toasts, the collapsible
+   action accordion, and the wrench glyph that opens it. On mobile this same
+   slot becomes the fixed wrench anchor (see `.chatGearAnchor`).
+   Inherits the bot's normalized accent from `--accent-ink` / `--accent-soft`
+   (set by `botAccentStyle` on the chat pane ancestor), matching the prior
+   MEMORIES badge look. */
 .chatHeaderActions {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-left: auto;
   flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   transition: opacity 0.18s ease;
 }
@@ -13368,6 +13525,39 @@
 
 .chatHeaderActionsDisabled {
   opacity: 0.52;
+}
+
+/* Accordion shell — collapses to width 0 from the right edge so the inner
+   button row appears to slide leftward out of the wrench. The actual reveal
+   stagger lives on each button (`--accordion-index`) so the visible left-to-
+   right order stays familiar (Memories first, Delete last) while the
+   ergonomically-dangerous Delete settles in last. */
+.chatHeaderActionsAccordion {
+  --accordion-max-width: 540px;
+  --accordion-duration: 320ms;
+  --accordion-easing: cubic-bezier(0.32, 0.72, 0, 1);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  max-width: 0;
+  transition: max-width var(--accordion-duration) var(--accordion-easing);
+}
+
+.chatHeaderActionsAccordionOpen {
+  max-width: var(--accordion-max-width);
+}
+
+/* Inner row — holds the five action buttons. Right-justified so the rightmost
+   pill is flush with the wrench when the accordion is open. */
+.chatHeaderActionsRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding-left: 6px;
+  padding-right: 6px;
+  white-space: nowrap;
 }
 
 .chatHeaderAction {
@@ -13389,7 +13579,26 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    opacity 180ms var(--accordion-easing, ease) var(--accordion-stagger-delay, 0ms);
+}
+
+/* Per-button stagger — Memories (index 0) fades in first, Delete (index 4)
+   last, while the accordion container slides out leftward. */
+.chatHeaderActionsAccordion .chatHeaderAction {
+  --accordion-stagger-step: 55ms;
+  --accordion-stagger-delay: calc(var(--accordion-index, 0) * var(--accordion-stagger-step));
+  opacity: 0;
+  transform: translateX(8px);
+  transition:
+    transform 220ms var(--accordion-easing, ease) var(--accordion-stagger-delay),
+    opacity 220ms var(--accordion-easing, ease) var(--accordion-stagger-delay);
+}
+
+.chatHeaderActionsAccordionOpen .chatHeaderAction {
+  opacity: 1;
+  transform: none;
 }
 
 .chatHeaderActionText {
@@ -13397,38 +13606,38 @@
   -webkit-text-fill-color: currentColor;
 }
 
-.chatHeaderActions > .chatHeaderAction:nth-of-type(1) {
+.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(1) {
   background: color-mix(in srgb, var(--accent) 100%, transparent);
   color: #050505;
 }
 
-.chatHeaderActions > .chatHeaderAction:nth-of-type(2) {
+.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(2) {
   background: color-mix(in srgb, var(--accent) 75%, transparent);
   color: #050505;
 }
 
-.chatHeaderActions > .chatHeaderAction:nth-of-type(2) .chatHeaderActionText {
+.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(2) .chatHeaderActionText {
   opacity: 1;
 }
 
-.chatHeaderActions > .chatHeaderAction:nth-of-type(3) {
+.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(3) {
   background: color-mix(in srgb, var(--accent) 50%, transparent);
   color: #050505;
 }
 
-.chatHeaderActions > .chatHeaderAction:nth-of-type(3) .chatHeaderActionText {
+.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(3) .chatHeaderActionText {
   opacity: 1;
 }
 
-.chatHeaderActions > .chatHeaderAction:nth-of-type(4) {
+.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(4) {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-.chatHeaderActions > .chatHeaderAction:nth-of-type(4) .chatHeaderActionText {
+.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(4) .chatHeaderActionText {
   opacity: 1;
 }
 
-.chatHeaderActions > .chatHeaderAction:nth-of-type(5) {
+.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(5) {
   background: transparent;
 }
 
@@ -13438,16 +13647,27 @@
   text-shadow: 0 1px 1px color-mix(in srgb, var(--bg-surface) 72%, transparent);
 }
 
-.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(1),
-.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(2),
-.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(3) {
+.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(1),
+.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(2),
+.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(3) {
   color: #050505;
 }
 
-.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(4),
-.themeLight .chatHeaderActions > .chatHeaderAction:nth-of-type(5) {
+.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(4),
+.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(5) {
   color: color-mix(in srgb, var(--accent-ink) 78%, #17130f 22%);
   border-color: color-mix(in srgb, var(--accent-ink) 66%, var(--line-strong));
+}
+
+/* Reduced-motion: skip the accordion slide + per-button stagger so the panel
+   appears/disappears instantly. */
+@media (prefers-reduced-motion: reduce) {
+  .chatHeaderActionsAccordion {
+    transition: none;
+  }
+  .chatHeaderActionsAccordion .chatHeaderAction {
+    transition: none;
+  }
 }
 
 .themeLight .chatHeaderAction:disabled {
@@ -13505,7 +13725,8 @@
   cursor: pointer;
   font: inherit;
   box-shadow: var(--shadow-sm);
-  transition: color 0.18s ease, opacity 0.2s ease, border-color 0.15s ease, background 0.15s ease;
+  touch-action: manipulation;
+  transition: color 0.18s ease, opacity 0.2s ease, border-color 0.15s ease, background 0.15s ease, transform 0.18s ease;
 }
 
 .chatGearButton:hover {
@@ -13516,6 +13737,17 @@
 .chatGearButton:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Open state — wrench reads as the live toggle owning the accordion. */
+.chatGearButton[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--accent-ink) 40%, var(--line-strong));
+  color: var(--accent-ink);
+}
+
+.chatGearButton[aria-expanded="true"] .chatGearGlyph {
+  transform: rotate(-18deg);
 }
 
 .chatOverflowMenu {
