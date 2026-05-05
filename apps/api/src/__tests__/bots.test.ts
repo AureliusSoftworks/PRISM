@@ -6,10 +6,13 @@ import {
   serializeStoredBotPrompt,
 } from "@localai/shared";
 import {
+  createBotExportHash,
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
   deleteBots,
+  normalizeBotExportHash,
+  resolveBotExportHashForCreate,
 } from "../bots.ts";
 
 /**
@@ -83,6 +86,49 @@ describe("composeBotSystemPrompt", () => {
     const prompt = composeBotSystemPrompt("DJ K-Razor", "");
     assert.ok(prompt);
     assert.match(prompt!, /You are DJ K-Razor\./);
+  });
+});
+
+describe("bot export hash helpers", () => {
+  it("creates 32-char hex hashes", () => {
+    const hash = createBotExportHash();
+    assert.match(hash, /^[a-f0-9]{32}$/i);
+  });
+
+  it("normalizes valid hashes and rejects invalid values", () => {
+    assert.equal(
+      normalizeBotExportHash("  AABBCCDDEEFF00112233445566778899  "),
+      "aabbccddeeff00112233445566778899"
+    );
+    assert.equal(normalizeBotExportHash("short"), null);
+    assert.equal(normalizeBotExportHash(42), null);
+  });
+
+  it("keeps a provided valid hash when not already present", () => {
+    const resolved = resolveBotExportHashForCreate({
+      incomingHash: "aabbccddeeff00112233445566778899",
+      hasExistingHash: () => false,
+    });
+    assert.equal(resolved, "aabbccddeeff00112233445566778899");
+  });
+
+  it("rejects a duplicate imported hash", () => {
+    assert.throws(
+      () =>
+        resolveBotExportHashForCreate({
+          incomingHash: "aabbccddeeff00112233445566778899",
+          hasExistingHash: () => true,
+        }),
+      /already in your library/i
+    );
+  });
+
+  it("generates a fresh hash when legacy payload has no hash", () => {
+    const resolved = resolveBotExportHashForCreate({
+      hasExistingHash: () => false,
+      createHash: () => "0123456789abcdef0123456789abcdef",
+    });
+    assert.equal(resolved, "0123456789abcdef0123456789abcdef");
   });
 });
 

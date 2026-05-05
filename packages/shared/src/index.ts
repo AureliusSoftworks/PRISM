@@ -22,7 +22,7 @@ export {
   type BotPurposeProfile,
   type BotVoicePreset,
   type BotWorldviewProfile,
-} from "./botProfile";
+} from "./botProfile.js";
 
 export {
   PRISM_TOOL_END,
@@ -36,7 +36,7 @@ export {
   type AskQuestionPayload,
   type ParsedAssistantTurn,
   type StoredAssistantToolPayload,
-} from "./prismTool";
+} from "./prismTool.js";
 
 export {
   ACCENT_LUMINANCE_MAX_LIGHT,
@@ -56,9 +56,9 @@ export {
   pickReadableText,
   relativeLuminance,
   swatchBorderCompensation,
-} from "./color";
+} from "./color.js";
 
-import type { AskQuestionPayload } from "./prismTool";
+import type { AskQuestionPayload } from "./prismTool.js";
 
 export type UserRole = "user";
 
@@ -223,9 +223,22 @@ export interface StarterChatExtras {
   conversationStarters?: string[];
 }
 
+export type OpinionBand = "guarded" | "warming" | "trusting";
+export type OpinionTrend = "up" | "down" | "steady";
+
+export interface SessionOpinion {
+  score: number;
+  band: OpinionBand;
+  trend: OpinionTrend;
+  lastReason: string;
+  recentReasons: string[];
+  updatedAt: string;
+}
+
 export interface ChatResponsePayload extends StarterChatExtras {
   conversation: Conversation;
   assistantMessage: ChatMessage;
+  opinion?: SessionOpinion;
   memoryLearned?: {
     created: Array<{
       id: string;

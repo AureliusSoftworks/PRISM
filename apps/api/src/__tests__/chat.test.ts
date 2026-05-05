@@ -12,6 +12,9 @@ import { fallbackEmbedding } from "../providers.ts";
 
 const originalFetch = globalThis.fetch;
 
+/** 32 bytes for AES-256-GCM used by memory encryption in tests. */
+const CHAT_TEST_USER_KEY = Buffer.alloc(32, 7);
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
@@ -67,6 +70,19 @@ function createChatTestDb(): DatabaseSync {
       conversation_id TEXT,
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE session_opinions (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      bot_id TEXT,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'warming',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, bot_scope_key)
     );
   `);
   return db;
@@ -191,7 +207,7 @@ describe("processChatMessage starter prompts", () => {
       db,
       "user-1",
       "",
-      Buffer.from("test-key"),
+      CHAT_TEST_USER_KEY,
       {
         preferredProvider: "local",
         autoMemory: false,
@@ -205,7 +221,7 @@ describe("processChatMessage starter prompts", () => {
     );
 
     const { conversation, conversationStarters } = result;
-    assert.equal(conversation.title, "Storm Bot starter");
+    assert.match(conversation.title, /^Surreal Weather/i);
     assert.equal(conversation.messages.length, 1);
     assert.equal(conversation.messages[0]?.role, "assistant");
     assert.equal(
@@ -246,7 +262,7 @@ describe("processChatMessage starter prompts", () => {
 
   it("injects recent memories into starter opener prompts for personalization", async () => {
     const db = createChatTestDb();
-    const userKey = Buffer.from("test-key");
+    const userKey = CHAT_TEST_USER_KEY;
     await persistMemoryCandidates(
       db,
       "user-1",
@@ -323,7 +339,8 @@ describe("processChatMessage starter prompts", () => {
     );
 
     const starterBody = bodies[0];
-    assert.match(starterBody?.messages?.[1]?.content ?? "", /Ask exactly ONE direct question/i);
+    const starterUserInstruction = starterBody?.messages?.filter((m) => m.role === "user").pop();
+    assert.match(starterUserInstruction?.content ?? "", /Ask exactly ONE direct question/i);
     const memoryBlock = starterBody?.messages?.find((msg) =>
       msg.content.startsWith("User memory hints:\n")
     );
@@ -333,7 +350,7 @@ describe("processChatMessage starter prompts", () => {
 
   it("rewrites generic starter openers into memory-anchored questions", async () => {
     const db = createChatTestDb();
-    const userKey = Buffer.from("test-key");
+    const userKey = CHAT_TEST_USER_KEY;
     await persistMemoryCandidates(
       db,
       "user-1",
@@ -438,7 +455,7 @@ describe("processChatMessage starter prompts", () => {
       db,
       "user-1",
       "",
-      Buffer.from("test-key"),
+      CHAT_TEST_USER_KEY,
       {
         preferredProvider: "local",
         autoMemory: false,
@@ -484,7 +501,7 @@ describe("processChatMessage starter prompts", () => {
       db,
       "user-1",
       "",
-      Buffer.from("test-key"),
+      CHAT_TEST_USER_KEY,
       {
         preferredProvider: "local",
         autoMemory: false,
@@ -498,6 +515,131 @@ describe("processChatMessage starter prompts", () => {
     assert.equal(
       result.conversation.messages[0]?.content,
       "Hello, I'm glad you're here. Can you tell me about the last decision you made when you felt it might have been less than ideal?"
+    );
+  });
+
+  it("strips nested blockquote and escaped quote wrappers from starter opener replies", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: '>> \\"“What feels surreal for you tonight?”\\"',
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["What should I notice about surreal?","Ask me a playful question, Ethan.","Give me one concrete next step.","Surprise me with another angle."]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Ethan",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(
+      result.conversation.messages[0]?.content,
+      "What feels surreal for you tonight?"
+    );
+  });
+
+  it("keeps memory-rewrite fallback unquoted when opener arrives wrapped", async () => {
+    const db = createChatTestDb();
+    const userKey = CHAT_TEST_USER_KEY;
+    await persistMemoryCandidates(
+      db,
+      "user-1",
+      "memory-conv-3",
+      null,
+      [{ text: "The user prefers reflective evening check-ins.", confidence: 0.96 }],
+      userKey,
+      { sourceMessageIds: ["memory-source-3"] }
+    );
+
+    let providerCallCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        prompt?: string;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      providerCallCount += 1;
+      if (providerCallCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: '> \\"What\'s on your mind today?\\"',
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (providerCallCount === 2) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                '{"suggestions":["Keep going","Ask a playful one","Give me a concrete step","New angle please"]}',
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: '{"title":"Starter"}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        starterPrompt: true,
+        starterPromptLabel: "Ethan",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(
+      result.conversation.messages[0]?.content,
+      "Given that you prefer reflective evening check-ins, what feels most important to explore right now?"
     );
   });
 
@@ -527,7 +669,7 @@ describe("processChatMessage starter prompts", () => {
       db,
       "user-1",
       "Keep this out of history.",
-      Buffer.from("test-key"),
+      CHAT_TEST_USER_KEY,
       {
         preferredProvider: "openai",
         autoMemory: true,
@@ -616,7 +758,7 @@ describe("processChatMessage AskQuestion tool", () => {
       db,
       "user-1",
       "Which way?",
-      Buffer.from("test-key"),
+      CHAT_TEST_USER_KEY,
       {
         preferredProvider: "local",
         autoMemory: false,
@@ -654,7 +796,7 @@ describe("processChatMessage AskQuestion tool", () => {
       db,
       "user-1",
       "Please ask me a multiple-choice question.",
-      Buffer.from("test-key"),
+      CHAT_TEST_USER_KEY,
       {
         preferredProvider: "local",
         autoMemory: false,
@@ -671,13 +813,254 @@ describe("processChatMessage AskQuestion tool", () => {
       lastAssistant?.askQuestion?.options.map((opt) => opt.id),
       ["a", "b", "c"]
     );
-    assert.equal(lastAssistant?.askQuestion?.options[0]?.label, "🟢 Yes");
+    assert.equal(lastAssistant?.askQuestion?.options[0]?.label, "Yes");
 
     const row = db.prepare(
       "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
     ).get("assistant") as { tool_payload: string | null };
     assert.notEqual(row.tool_payload, null);
     assert.equal(JSON.parse(String(row.tool_payload)).name, "AskQuestion");
+  });
+
+  it("backfills AskQuestion when assistant prose signals a missing chip block", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "If Squidward had to pick a musical instrument for a week, which one would he MOST likely choose?",
+              "ONE block below!",
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Please give me a mini IQ quiz — bikini bottom style!",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const latestAssistant = result.conversation.messages
+      .filter((m) => m.role === "assistant")
+      .pop();
+    assert.equal(latestAssistant?.askQuestion?.name, "AskQuestion");
+    assert.equal(latestAssistant?.askQuestion?.options.length, 3);
+
+    const row = db.prepare(
+      "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
+    ).get("assistant") as { tool_payload: string | null };
+    assert.notEqual(row.tool_payload, null);
+  });
+
+  it("strips duplicate prompt and bridge prose from assistant bubble", async () => {
+    const db = createChatTestDb();
+    const askPayload = {
+      v: 1 as const,
+      name: "AskQuestion" as const,
+      prompt: "Which route feels right?",
+      options: [
+        { id: "a", label: "🟢 Sail north" },
+        { id: "b", label: "🟡 Hold position" },
+        { id: "c", label: "🔴 Turn back" },
+      ],
+    };
+    const prismTail =
+      `\n<<<PRISM_TOOL>>>\n${JSON.stringify(askPayload)}\n<<<END_PRISM_TOOL>>>`;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content:
+              `Context that should stay.\n\nQuestion: Which route feels right?\nPlease choose one option below.\n${prismTail}`,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Give me options.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "Context that should stay.");
+    assert.equal(lastAssistant?.askQuestion?.prompt, "Which route feels right?");
+  });
+
+  it("strips duplicate option lists in multiline and single-line formats", async () => {
+    const db = createChatTestDb();
+    const askPayload = {
+      v: 1 as const,
+      name: "AskQuestion" as const,
+      prompt: "Choose your navigation mode.",
+      options: [
+        { id: "a", label: "🟢 Sail north" },
+        { id: "b", label: "🟡 Hold position" },
+        { id: "c", label: "🔴 Turn back" },
+      ],
+    };
+    const prismTail =
+      `\n<<<PRISM_TOOL>>>\n${JSON.stringify(askPayload)}\n<<<END_PRISM_TOOL>>>`;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "Keep this context line.",
+              "A) 🟢 Sail north",
+              "B) 🟡 Hold position",
+              "C) 🔴 Turn back",
+              "A) 🟢 Sail north B) 🟡 Hold position C) 🔴 Turn back",
+              "🟢 Sail north | 🟡 Hold position | 🔴 Turn back",
+              "",
+              prismTail,
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Give me choices.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "Keep this context line.");
+  });
+
+  it("refines AskQuestion chip heading from chooser prose when JSON prompt is substantive", async () => {
+    const db = createChatTestDb();
+    const askPayload = {
+      v: 1 as const,
+      name: "AskQuestion" as const,
+      prompt: "What is the optimal ratio of strawberry jam to whipped cream on a classic shortcake?",
+      options: [
+        { id: "a", label: "🟢 3:1" },
+        { id: "b", label: "🟡 2:1" },
+        { id: "c", label: "🔴 1:1" },
+      ],
+    };
+    const prismTail =
+      `\n<<<PRISM_TOOL>>>\n${JSON.stringify(askPayload)}\n<<<END_PRISM_TOOL>>>`;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "Here's your random question:",
+              "What is the optimal ratio of strawberry jam to whipped cream on a classic shortcake?",
+              "A) 3:1 ratio",
+              "B) 2:1 ratio",
+              "C) 1:1 ratio",
+              "D) It's a matter of personal preference, and we can't decide without more data!",
+              "Which option do you choose?",
+              prismTail,
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Ask a multiple-choice question.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.askQuestion?.prompt, "Which option do you choose?");
+    assert.match(lastAssistant?.content ?? "", /optimal ratio/i);
+    assert.match(lastAssistant?.content ?? "", /shortcake/i);
+    const dLine = lastAssistant?.content.includes("D)") ?? false;
+    assert.equal(dLine, false);
+  });
+
+  it("strips markdown and emoji variants of duplicate AskQuestion lines", async () => {
+    const db = createChatTestDb();
+    const askPayload = {
+      v: 1 as const,
+      name: "AskQuestion" as const,
+      prompt: "Which route feels right?",
+      options: [
+        { id: "a", label: "🟢 Sail north" },
+        { id: "b", label: "🟡 Hold position" },
+        { id: "c", label: "🔴 Turn back" },
+      ],
+    };
+    const prismTail =
+      `\n<<<PRISM_TOOL>>>\n${JSON.stringify(askPayload)}\n<<<END_PRISM_TOOL>>>`;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "Helpful context remains.",
+              "## **Which route feels right?!**",
+              "- **A)** 🟢 *Sail north*",
+              "- **B)** 🟡 *Hold position*",
+              "- **C)** 🔴 *Turn back*",
+              "Tap an option below.",
+              prismTail,
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Ask with chips.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "Helpful context remains.");
   });
 });
 
@@ -1048,5 +1431,63 @@ describe("processChatMessage conversational memory cues", () => {
     assert.equal(rows[0]?.bot_id, "bot-1");
     assert.equal(result.memoryLearned?.retracted[0]?.text, "You prefer coffee.");
     assert.equal(result.memoryLearned?.created[0]?.text, "You prefer matcha.");
+  });
+
+  it("returns a session opinion payload and keeps it conversation-scoped", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    installChatFetchStub("Understood.");
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "Thanks for helping me think this through.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+    assert.ok(first.opinion);
+    assert.equal(first.opinion?.trend, "up");
+    assert.match(first.opinion?.lastReason ?? "", /considerate|positive/i);
+
+    const second = await processChatMessage(
+      db,
+      "user-1",
+      "do it now",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      },
+      first.conversation.id
+    );
+    assert.ok(second.opinion);
+    assert.equal(second.opinion?.trend, "down");
+    assert.notEqual(second.opinion?.score, first.opinion?.score);
+
+    const freshConversation = await processChatMessage(
+      db,
+      "user-1",
+      "Thank you again.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+    assert.ok(freshConversation.opinion);
+    assert.equal(freshConversation.opinion?.score, 53);
+    assert.notEqual(freshConversation.conversation.id, first.conversation.id);
   });
 });

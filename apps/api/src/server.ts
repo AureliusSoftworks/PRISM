@@ -29,6 +29,8 @@ import {
   deleteAllBots,
   deleteBot,
   deleteBots,
+  normalizeBotExportHash,
+  resolveBotExportHashForCreate,
 } from "./bots.ts";
 import {
   normalizeOllamaHostForStatusCheck,
@@ -598,6 +600,57 @@ function buildRoutes(): RouteDefinition[] {
           ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
         };
       });
+      const opinionRow = db
+        .prepare(
+          `SELECT score, band, trend, last_reason, recent_reasons, updated_at
+           FROM session_opinions
+           WHERE user_id = ? AND conversation_id = ? AND bot_scope_key = ?
+           LIMIT 1`
+        )
+        .get(
+          userId,
+          conversationId,
+          conversation.bot_id ?? "__default__"
+        ) as
+        | {
+            score: number;
+            band: string;
+            trend: string;
+            last_reason: string;
+            recent_reasons: string;
+            updated_at: string;
+          }
+        | undefined;
+      const opinion = opinionRow
+        ? {
+            score: Math.round(opinionRow.score),
+            band:
+              opinionRow.band === "guarded" ||
+              opinionRow.band === "warming" ||
+              opinionRow.band === "trusting"
+                ? opinionRow.band
+                : "warming",
+            trend:
+              opinionRow.trend === "up" ||
+              opinionRow.trend === "down" ||
+              opinionRow.trend === "steady"
+                ? opinionRow.trend
+                : "steady",
+            lastReason: opinionRow.last_reason || "No opinion shift yet.",
+            recentReasons: (() => {
+              try {
+                const parsed = JSON.parse(opinionRow.recent_reasons) as unknown;
+                if (!Array.isArray(parsed)) return [];
+                return parsed
+                  .filter((item): item is string => typeof item === "string")
+                  .slice(0, 4);
+              } catch {
+                return [];
+              }
+            })(),
+            updatedAt: opinionRow.updated_at,
+          }
+        : undefined;
       json(ctx.res, 200, {
         ok: true,
         conversation: {
@@ -612,6 +665,7 @@ function buildRoutes(): RouteDefinition[] {
           updatedAt: conversation.updated_at,
           messages,
         },
+        ...(opinion ? { opinion } : {}),
       });
     }),
     route("DELETE", "/api/conversations/:id", async (ctx) => {
@@ -792,10 +846,11 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
-      const { conversation, conversationStarters, memoryLearned } = result;
+      const { conversation, conversationStarters, memoryLearned, opinion } = result;
       json(ctx.res, 200, {
         ok: true,
         conversation,
+        ...(opinion ? { opinion } : {}),
         ...(memoryLearned ? { memoryLearned } : {}),
         ...(conversationStarters ? { conversationStarters } : {}),
       });
@@ -1225,6 +1280,15 @@ function buildRoutes(): RouteDefinition[] {
       const deleteProtected = body.deleteProtected === true ? 1 : 0;
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
       const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 2048;
+      const exportHash = resolveBotExportHashForCreate({
+        incomingHash: body.exportHash,
+        hasExistingHash: (hash) => {
+          const existing = db
+            .prepare("SELECT id FROM bots WHERE user_id = ? AND export_hash = ?")
+            .get(userId, hash) as { id?: string } | undefined;
+          return Boolean(existing?.id);
+        },
+      });
       // Accept any non-empty string for color (CSS parses the value at render
       // time). Native HTML5 color inputs always emit "#RRGGBB".
       const color =
@@ -1238,18 +1302,19 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.glyph === "string" && body.glyph.trim().length > 0
           ? body.glyph.trim()
           : null;
-      const chatEnabled = 1;
+      const chatEnabled = body.chatEnabled === false ? 0 : 1;
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
-      ).run(botId, userId, name, systemPrompt, model, localModel, onlineModel, onlineEnabled, deleteProtected, temperature, maxTokens, color, glyph, chatEnabled, now, now);
+        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(botId, userId, name, systemPrompt, exportHash, model, localModel, onlineModel, onlineEnabled, deleteProtected, temperature, maxTokens, color, glyph, chatEnabled, now, now);
       json(ctx.res, 201, {
         ok: true,
         bot: {
           id: botId,
           name,
           systemPrompt,
+          export_hash: exportHash,
           model,
           local_model: localModel,
           online_model: onlineModel,
@@ -1266,7 +1331,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -1299,6 +1364,10 @@ function buildRoutes(): RouteDefinition[] {
         fields.push("delete_protected = ?");
         values.push(body.deleteProtected ? 1 : 0);
       }
+      if (typeof body.chatEnabled === "boolean") {
+        fields.push("chat_enabled = ?");
+        values.push(body.chatEnabled ? 1 : 0);
+      }
       if (typeof body.temperature === "number") { fields.push("temperature = ?"); values.push(body.temperature); }
       if (typeof body.maxTokens === "number") { fields.push("max_tokens = ?"); values.push(body.maxTokens); }
       // Color update semantics: non-empty string updates, explicit null clears,
@@ -1318,6 +1387,24 @@ function buildRoutes(): RouteDefinition[] {
       } else if (body.glyph === null) {
         fields.push("glyph = ?");
         values.push(null);
+      }
+      if (body.exportHash !== undefined) {
+        const normalizedExportHash = normalizeBotExportHash(body.exportHash);
+        if (!normalizedExportHash) {
+          throw new Error("Invalid bot export hash.");
+        }
+        const duplicate = db
+          .prepare(
+            "SELECT id FROM bots WHERE user_id = ? AND export_hash = ? AND id != ?"
+          )
+          .get(userId, normalizedExportHash, botId) as
+          | { id?: string }
+          | undefined;
+        if (duplicate?.id) {
+          throw new Error("This bot is already in your library!");
+        }
+        fields.push("export_hash = ?");
+        values.push(normalizedExportHash);
       }
       if (fields.length > 0) {
         fields.push("updated_at = ?");

@@ -109,6 +109,44 @@ describe("parseAssistantPrismTools", () => {
     });
   });
 
+  it("accepts loose AskQuestion payload variants from different models", () => {
+    const inner = JSON.stringify({
+      v: "1",
+      name: "askquestion",
+      question: "Choose one path",
+      options: ["First", "Second", "Third"],
+    });
+    const raw = `P.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent, "P.");
+    assert.deepEqual(out.askQuestion, {
+      v: 1,
+      name: "AskQuestion",
+      prompt: "Choose one path",
+      options: [
+        { id: "a", label: "First" },
+        { id: "b", label: "Second" },
+        { id: "c", label: "Third" },
+      ],
+    });
+  });
+
+  it("accepts option text fields when labels are missing", () => {
+    const inner = JSON.stringify({
+      name: "AskQuestion",
+      prompt: "Pick a mode",
+      options: [{ text: "Fast" }, { text: "Balanced" }, { text: "Deep" }],
+    });
+    const raw = `P.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent, "P.");
+    assert.deepEqual(out.askQuestion?.options, [
+      { id: "a", label: "Fast" },
+      { id: "b", label: "Balanced" },
+      { id: "c", label: "Deep" },
+    ]);
+  });
+
   it("prefers the last complete block when several opens appear", () => {
     const first = serializeAskQuestionTool({
       ...validAskJson(),

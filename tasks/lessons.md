@@ -4,6 +4,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-05-04 · [UX]
+**Trigger**: Header action gradient request was misread as text-and-background gradients instead of a simple background transparency fade, then later needed text-opacity tuning for transitional contrast.
+**Lesson**: When the user asks for an opaque-to-transparent button treatment, apply transparency to the background layer first. Keep borders solid. Only adjust text opacity/color when the user explicitly calls out contrast in the transitional opacity bands.
+**Applies to**: `apps/web/src/app/page.module.css` chat header action buttons and similar pill/button styling.
+
 ### 2026-05-02 · [workflow]
 **Trigger**: A memory-pipeline fix was tested against a stale API dev process, causing the app to appear unchanged after code edits.
 **Lesson**: After changing API/backend behavior, especially memory extraction, inference, chat, or server routes, proactively restart the API dev server before asking for browser retests. If port 18787 is held by a stale Node process, clear that process and start `npm run dev -w apps/api` cleanly.

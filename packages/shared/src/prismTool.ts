@@ -56,15 +56,35 @@ function stripMarkdownFences(blob: string): string {
 function normalizeAskQuestionEnvelope(parsed: unknown): AskQuestionPayload | undefined {
   if (!parsed || typeof parsed !== "object") return undefined;
   const row = parsed as Record<string, unknown>;
-  if (row.v !== 1 || row.name !== "AskQuestion") return undefined;
-  if (typeof row.prompt !== "string" || !row.prompt.trim()) return undefined;
+  const parsedVersion =
+    typeof row.v === "number"
+      ? row.v
+      : typeof row.v === "string"
+        ? Number(row.v.trim())
+        : Number.NaN;
+  if (!Number.isNaN(parsedVersion) && parsedVersion !== 1) return undefined;
+
+  const rawName = typeof row.name === "string" ? row.name.trim().toLowerCase() : "";
+  if (rawName && rawName !== "askquestion") return undefined;
+
+  const prompt = [
+    row.prompt,
+    row.question,
+    row.title,
+  ].find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
+  if (!prompt) return undefined;
   if (!Array.isArray(row.options)) return undefined;
 
   const labels = row.options
     .map((item) => {
+      if (typeof item === "string") return item.trim();
       if (!item || typeof item !== "object") return "";
       const opt = item as Record<string, unknown>;
-      return typeof opt.label === "string" ? opt.label.trim() : "";
+      if (typeof opt.label === "string") return opt.label.trim();
+      if (typeof opt.text === "string") return opt.text.trim();
+      if (typeof opt.title === "string") return opt.title.trim();
+      if (typeof opt.value === "string") return opt.value.trim();
+      return "";
     })
     .filter((label) => label.length > 0);
 
@@ -74,7 +94,7 @@ function normalizeAskQuestionEnvelope(parsed: unknown): AskQuestionPayload | und
   return {
     v: 1,
     name: "AskQuestion",
-    prompt: row.prompt.trim(),
+    prompt,
     options: [
       { id: "a", label: labels[0]! },
       { id: "b", label: labels[1]! },

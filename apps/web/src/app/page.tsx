@@ -12,6 +12,7 @@ import {
   forwardRef,
   useSyncExternalStore,
 } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -126,6 +127,10 @@ const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
+const DEV_TOOLS_BUTTON_DEFAULT_X = 14;
+const DEV_TOOLS_BUTTON_DEFAULT_Y = 76;
+const DEV_TOOLS_BUTTON_SIZE = 44;
+const DEV_TOOLS_BUTTON_DRAG_SUPPRESS_CLICK_PX = 4;
 const RANDOM_NUDGE_STOP_WORDS = new Set([
   "about",
   "there",
@@ -142,6 +147,8 @@ const MOBILE_SIDEBAR_SWIPE_OPEN_PX = 56;
 const MOBILE_SIDEBAR_SWIPE_VERTICAL_CANCEL_PX = 44;
 const MOBILE_SIDEBAR_SWIPE_DIRECTION_RATIO = 1.25;
 const DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT = 0.45;
+/** When set in localStorage, Import bot shows the paste-JSON path; otherwise the file picker opens immediately. */
+const PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY = "prism_dev_bot_import_paste";
 const MEMORY_RATIO_EMPTY_SIZE = 42;
 // MIN_SIZE is the floor for any non-empty memory bubble. It must be large
 // enough to comfortably fit the bot glyph (currently 40px) plus breathing
@@ -158,6 +165,10 @@ type DevToolsPanelDragState = {
   pointerId: number;
   offsetX: number;
   offsetY: number;
+};
+type DevToolsButtonDragState = DevToolsPanelDragState & {
+  startClientX: number;
+  startClientY: number;
 };
 type SidebarEdgeSwipeState = {
   touchId: number;
@@ -488,10 +499,30 @@ const PICKER_BREAKPOINT_SCALE_EXPONENT = 1.2;
 const PICKER_BREAKPOINT_SCALE_MIN = 0.45;
 const PICKER_BREAKPOINT_SCALE_MAX = 2.5;
 const PICKER_MOBILE_BREAKPOINT = 720;
-const SIDEBAR_DRAWER_BREAKPOINT = 1080;
 const DESKTOP_SIDEBAR_WIDTH = 280;
 const DESKTOP_MESSAGES_PADDING_X = 40;
-const MOBILE_MESSAGES_PADDING_X = 28;
+/** Sidebar drawer (single-column shell) through this width. */
+const SIDEBAR_DRAWER_BREAKPOINT = 1080;
+/**
+ * Phone-only shell: fixed ☰ + floating wrench + compact header. Wider than
+ * this (up to `PICKER_MOBILE_BREAKPOINT`) uses the › sidebar handle + looser
+ * gutters — see `page.module.css` letterbox rules.
+ */
+const PHONE_MENU_BREAKPOINT = 560;
+const MOBILE_LETTERBOX_MIN_WIDTH = PHONE_MENU_BREAKPOINT + 1;
+
+/** Total L+R messages/compose horizontal padding for empty-state picker math. */
+function mobileMessagesHorizontalPaddingTotal(viewportWidth: number): number {
+  if (viewportWidth > PICKER_MOBILE_BREAKPOINT) {
+    return DESKTOP_MESSAGES_PADDING_X;
+  }
+  if (viewportWidth >= MOBILE_LETTERBOX_MIN_WIDTH) {
+    /* `--chat-inline-gutter` ≈ 20px each side (561–720px band). */
+    return 40;
+  }
+  /* Phone `--chat-inline-gutter` ≈ 60px each side (≤560px). */
+  return 120;
+}
 const PICKER_SIDE_GUTTER = 48;
 const PICKER_NAMED_FLAT_MOBILE_COUNT = 5;
 const PICKER_NAMED_FLAT_DESKTOP_COUNT = 8;
@@ -541,7 +572,7 @@ function pickerAvailableWidth(viewportWidth: number): number {
     ? viewportWidth
     : Math.max(PICKER_MIN_AVAILABLE_WIDTH, viewportWidth - DESKTOP_SIDEBAR_WIDTH);
   const messagesPadding = isMobile
-    ? MOBILE_MESSAGES_PADDING_X
+    ? mobileMessagesHorizontalPaddingTotal(viewportWidth)
     : DESKTOP_MESSAGES_PADDING_X;
   const availableWidth = chatPaneWidth - messagesPadding - PICKER_SIDE_GUTTER;
 
@@ -1545,7 +1576,7 @@ function rowBorderMixPercent(
 
 type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
-type PanelView = null | "settings" | "bots" | "images" | "memories";
+type PanelView = null | "settings" | "bots" | "images" | "memories" | "opinions";
 type MemoryPanelScope = "bot" | "default" | "session" | "all";
 type ClientAccessState = "checking" | "allowed" | "blocked";
 const AUTO_TITLE_REFRESH_DELAYS_MS = [1500, 4000, 8000] as const;
@@ -1613,20 +1644,27 @@ function resolveAssistantAskQuestion(msg: Message): NonNullable<Message["askQues
     Array.isArray(direct.options) &&
     direct.options.length === 3
   ) {
-    return direct;
+    return refineAskQuestionPayloadFromDisplayClient(msg.content, direct);
   }
   const parsed = parseAssistantPrismTools(msg.content);
   if (
     parsed.askQuestion?.name === "AskQuestion" &&
     parsed.askQuestion.options.length === 3
   ) {
-    return parsed.askQuestion;
+    return refineAskQuestionPayloadFromDisplayClient(msg.content, parsed.askQuestion);
   }
   return undefined;
 }
 
 const ASKQUESTION_INTENT_PATTERN =
-  /\b(ask\s+me\s+(?:a|another)\s+question|quiz\s+me|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
+  /\b(ask\s+me\s+(?:a|another)\s+question|quiz(?:\s+me)?|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
+/** Keep in sync with AskQuestion UX: treat this distance as “parked at bottom.” */
+const ASKQUESTION_BOTTOM_THRESHOLD_PX = 24;
+const ASKQUESTION_FALLBACK_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: "a", label: "Yes" },
+  { id: "b", label: "Maybe / need context" },
+  { id: "c", label: "No" },
+];
 
 function messageRequestedAskQuestion(content: string): boolean {
   return ASKQUESTION_INTENT_PATTERN.test(content);
@@ -1642,6 +1680,226 @@ function normalizeAskQuestionText(text: string): string {
     .trim();
 }
 
+function normalizeAskQuestionComparisonText(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "")
+    .replace(/[“”"']/g, "")
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[^\p{L}\p{N}\s\-?:]/gu, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+\?/g, "?")
+    .trim()
+    .toLowerCase();
+}
+
+function lineLooksLikeChooserPromptLineClient(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  if (/^question\s*[:\-]/i.test(t)) return false;
+  if (/^#+\s/.test(t)) return false;
+  const n = normalizeAskQuestionComparisonText(t);
+  if (!n) return false;
+  if (
+    /\bwhich (?:option|one|answer) do you choose\b/.test(n) ||
+    /\bwhich (?:option|one) (?:would you|will you) (?:pick|choose)\b/.test(n) ||
+    /\bwhat(?:'s| is) your (?:pick|choice)\b/.test(n)
+  ) {
+    return true;
+  }
+  if (
+    /\bpick (?:one|an option)\b/.test(n) ||
+    /\bchoose (?:one|an option|from (?:the )?options)\b/.test(n) ||
+    /\bselect (?:one|an option)\b/.test(n) ||
+    /\btap (?:an )?option\b/.test(n)
+  ) {
+    return /\?/.test(t);
+  }
+  if (/\?/.test(t) && t.length <= 56 && /\b(which|pick|choose|select)\b/i.test(t)) {
+    if (
+      /\b(ratio|shortcake|explain|describe|why|how much|how many|optimal|calculate|define)\b/i.test(
+        n
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function refineAskQuestionPayloadFromDisplayClient(
+  displayContent: string,
+  ask: NonNullable<Message["askQuestion"]>
+): NonNullable<Message["askQuestion"]> {
+  const lines = displayContent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  let chooserFromProse: string | undefined;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]!;
+    if (!lineLooksLikeChooserPromptLineClient(line)) continue;
+    const cleaned = normalizeAskQuestionText(
+      line.replace(
+        /^(?:question|prompt|askquestion|ask question|q|heading|title)\s*[:\-]\s*/i,
+        ""
+      )
+    );
+    if (cleaned.length > 0) {
+      chooserFromProse = cleaned;
+      break;
+    }
+  }
+
+  if (!chooserFromProse) return ask;
+
+  const jsonPromptLooksSubstantive =
+    ask.prompt.includes("?") &&
+    (ask.prompt.length > 72 || !lineLooksLikeChooserPromptLineClient(ask.prompt));
+
+  if (
+    jsonPromptLooksSubstantive ||
+    normalizeAskQuestionComparisonText(ask.prompt) !==
+      normalizeAskQuestionComparisonText(chooserFromProse)
+  ) {
+    return { ...ask, prompt: chooserFromProse };
+  }
+  return ask;
+}
+
+function stripAskQuestionFallbackDuplicates(
+  content: string,
+  askQuestion: NonNullable<Message["askQuestion"]>
+): string {
+  const promptNorm = normalizeAskQuestionComparisonText(askQuestion.prompt);
+  const optionNorms = new Set(
+    askQuestion.options
+      .map((option) => normalizeAskQuestionComparisonText(option.label))
+      .filter((value) => value.length > 0)
+  );
+  const bridgeLinePatterns: RegExp[] = [
+    /\bwhich option do you choose\b/i,
+    /\bwhich one do you choose\b/i,
+    /\bwhich answer do you choose\b/i,
+    /\bchoose one\b/i,
+    /\bchoose an option\b/i,
+    /\bpick one\b/i,
+    /\bselect one\b/i,
+    /\btap (?:an )?option\b/i,
+    /\bclick (?:an )?option\b/i,
+    /\breply with [abc123]\b/i,
+    /\brespond with [abc123]\b/i,
+  ];
+  const optionLeadRegex = /^(?:[-*•]\s*)?(?:option|choice|answer)?\s*(?:[A-Da-d1-4])[)\].:-]\s*/i;
+
+  const compactedLines: string[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const norm = normalizeAskQuestionComparisonText(line);
+    if (!norm) {
+      const previous = compactedLines[compactedLines.length - 1];
+      if (previous?.trim().length === 0) continue;
+      compactedLines.push(line);
+      continue;
+    }
+    if (norm === promptNorm) continue;
+    if (bridgeLinePatterns.some((pattern) => pattern.test(norm))) continue;
+    if (optionNorms.has(norm)) continue;
+    const lineForEnum = line.replace(/\*\*/g, "");
+    const normalizedWithoutMarker = normalizeAskQuestionComparisonText(
+      lineForEnum.replace(optionLeadRegex, "")
+    );
+    if (normalizedWithoutMarker && optionNorms.has(normalizedWithoutMarker)) continue;
+
+    const extraEnum = /^(?:[>*-]\s*)?(?:option\s+)?(?:[DEFdef]|[4-9]|[1-9]\d)[)\].:-]/;
+    if (extraEnum.test(line.trim())) {
+      const strippedNorm = normalizeAskQuestionComparisonText(
+        lineForEnum.replace(optionLeadRegex, "")
+      );
+      if (strippedNorm.length > 0 && !optionNorms.has(strippedNorm)) {
+        continue;
+      }
+    }
+
+    compactedLines.push(line);
+  }
+  return compactedLines.join("\n").trim();
+}
+
+function extractInlineEnumeratedAskQuestionOptions(content: string): string[] {
+  const markerRegex = /(?:^|[\s(])(?:option|choice|answer)?\s*([A-Da-d1-4])[)\].:-]\s*/g;
+  const markerMatches: Array<{ order: number; markerStart: number; textStart: number }> = [];
+
+  let match: RegExpExecArray | null;
+  while ((match = markerRegex.exec(content)) !== null) {
+    const rawMarker = match[1];
+    if (!rawMarker) continue;
+    const normalizedMarker = rawMarker.toUpperCase();
+    const order =
+      normalizedMarker === "A"
+        ? 1
+        : normalizedMarker === "B"
+          ? 2
+          : normalizedMarker === "C"
+            ? 3
+            : normalizedMarker === "D"
+              ? 4
+              : normalizedMarker === "1"
+                ? 1
+                : normalizedMarker === "2"
+                  ? 2
+                  : normalizedMarker === "3"
+                    ? 3
+                    : normalizedMarker === "4"
+                      ? 4
+                      : -1;
+    if (order < 1) continue;
+
+    const startsPrimarySeries = order === 1;
+    if (markerMatches.length === 0 && !startsPrimarySeries) continue;
+    const previous = markerMatches[markerMatches.length - 1];
+    if (previous && order <= previous.order) continue;
+
+    markerMatches.push({
+      order,
+      markerStart: match.index,
+      textStart: markerRegex.lastIndex,
+    });
+    if (order === 4) break;
+  }
+
+  if (markerMatches.length < 3) return [];
+
+  const options: string[] = [];
+  for (let i = 0; i < markerMatches.length && options.length < 3; i += 1) {
+    const current = markerMatches[i]!;
+    const next = markerMatches[i + 1];
+    const rawSegment = content.slice(current.textStart, next?.markerStart ?? content.length);
+    const cleaned = normalizeAskQuestionText(rawSegment.replace(/\s+/g, " "));
+    if (!cleaned) continue;
+    options.push(cleaned);
+  }
+
+  return options.length >= 3 ? options.slice(0, 3) : [];
+}
+
+function assistantLikelyIntendedAskQuestionClient(content: string): boolean {
+  const text = content.trim();
+  if (!text) return false;
+  if (extractDynamicAskQuestion(text)) return true;
+  return (
+    /\bone block below\b/i.test(text) ||
+    /\b(?:choose|pick|select)\s+(?:one|an?\s+option)\b/i.test(text) ||
+    /\btap (?:an )?option\b/i.test(text) ||
+    /\bmultiple[-\s]?choice\b/i.test(text) ||
+    /\breply with [abc123]\b/i.test(text) ||
+    /\brespond with [abc123]\b/i.test(text)
+  );
+}
+
 function extractDynamicAskQuestion(content: string): NonNullable<Message["askQuestion"]> | undefined {
   const lines = content
     .split(/\r?\n/)
@@ -1649,23 +1907,54 @@ function extractDynamicAskQuestion(content: string): NonNullable<Message["askQue
     .filter((line) => line.length > 0);
   if (lines.length === 0) return undefined;
 
-  const questionIndex = lines.findIndex((line) => line.includes("?"));
-  if (questionIndex < 0) return undefined;
-  const prompt = normalizeAskQuestionText(lines[questionIndex] ?? "");
+  const optionLead = /^(?:[-*•]\s*)?(?:[A-Da-d1-4])[)\].:-]\s*(.+)$/;
+  function indexOfFirstPrimaryOption(): number {
+    const withMarker = /^(?:[-*•]\s*)?([A-Da-d1-4])[)\].:-]\s*.+$/;
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = lines[i]!.match(withMarker);
+      if (!m?.[1]) continue;
+      const marker = m[1]!.toUpperCase();
+      if (marker === "A" || m[1] === "1") return i;
+    }
+    return lines.findIndex((line) => optionLead.test(line));
+  }
 
-  const optionRegex = /^(?:[-*]\s*)?(?:[A-Da-d1-4])[)\].:-]\s*(.+)$/;
+  const firstOptionIdx = indexOfFirstPrimaryOption();
+  if (firstOptionIdx < 0) return undefined;
+
+  let chooserIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lineLooksLikeChooserPromptLineClient(lines[i]!)) {
+      chooserIdx = i;
+      break;
+    }
+  }
+
   const options: string[] = [];
-  for (let i = questionIndex + 1; i < lines.length; i += 1) {
+  const scanEnd = chooserIdx >= 0 ? chooserIdx : lines.length;
+  for (let i = firstOptionIdx; i < scanEnd; i += 1) {
     const line = lines[i]!;
-    if (line.includes("?") && options.length > 0) break;
-    const match = line.match(optionRegex);
+    const match = line.match(optionLead);
     if (!match?.[1]) continue;
     const cleaned = normalizeAskQuestionText(match[1]);
     if (cleaned.length === 0) continue;
     options.push(cleaned);
     if (options.length === 3) break;
   }
-  if (!prompt || options.length < 3) return undefined;
+  if (options.length < 3) {
+    const inlineOptions = extractInlineEnumeratedAskQuestionOptions(content);
+    if (inlineOptions.length >= 3) {
+      options.splice(0, options.length, ...inlineOptions);
+    }
+  }
+  if (options.length < 3) return undefined;
+
+  let chooserText = "";
+  if (chooserIdx >= 0) {
+    chooserText = normalizeAskQuestionText(lines[chooserIdx] ?? "");
+  }
+  const prompt =
+    chooserText.length > 0 ? chooserText : "Which option fits best?";
 
   return {
     v: 1,
@@ -1719,24 +2008,30 @@ function applyExplicitAskQuestionFallback(
       break;
     }
   }
-  if (!previousUser || !messageRequestedAskQuestion(previousUser.content)) {
+  const userExplicitRequest =
+    previousUser !== undefined &&
+    messageRequestedAskQuestion(previousUser.content);
+  const assistantCueRequest = assistantLikelyIntendedAskQuestionClient(last.content);
+  if (!userExplicitRequest && !assistantCueRequest) {
     return conversation;
   }
 
   const dynamic = extractDynamicAskQuestion(last.content);
+  let fallbackAskQuestion: NonNullable<Message["askQuestion"]> = {
+    v: 1,
+    name: "AskQuestion",
+    prompt:
+      dynamic?.prompt ?? coerceAskQuestionPromptFromAssistant(last.content),
+    options: dynamic?.options ?? [...ASKQUESTION_FALLBACK_OPTIONS],
+  };
+  fallbackAskQuestion = refineAskQuestionPayloadFromDisplayClient(
+    last.content,
+    fallbackAskQuestion
+  );
   const patchedLast: Message = {
     ...last,
-    askQuestion: {
-      v: 1,
-      name: "AskQuestion",
-      prompt:
-        dynamic?.prompt ?? coerceAskQuestionPromptFromAssistant(last.content),
-      options: dynamic?.options ?? [
-        { id: "a", label: "Yes" },
-        { id: "b", label: "Maybe / need context" },
-        { id: "c", label: "No" },
-      ],
-    },
+    content: stripAskQuestionFallbackDuplicates(last.content, fallbackAskQuestion),
+    askQuestion: fallbackAskQuestion,
   };
   return {
     ...conversation,
@@ -1811,6 +2106,22 @@ function pickGeneratingLabel(displayName: string, salt: string): string {
   const idx = hashToUnsignedInt(salt) % GENERATING_PHRASE_BUILDERS.length;
   return GENERATING_PHRASE_BUILDERS[idx](displayName);
 }
+
+function opinionBandTitle(band: SessionOpinion["band"]): string {
+  if (band === "trusting") return "Trusting";
+  if (band === "guarded") return "Guarded";
+  return "Warming";
+}
+
+function opinionBandDescription(band: SessionOpinion["band"]): string {
+  if (band === "trusting") {
+    return "The bot currently feels safe and collaborative with you.";
+  }
+  if (band === "guarded") {
+    return "The bot is being careful right now and needs gentler signals.";
+  }
+  return "The bot is open and warming as the conversation continues.";
+}
 interface ConversationDetail {
   id: string;
   title: string;
@@ -1831,12 +2142,21 @@ interface ConversationDetail {
 interface ChatPostEnvelope {
   conversation: ConversationDetail;
   conversationStarters?: string[];
+  opinion?: SessionOpinion;
   memoryLearned?: {
     created?: MemoryEventPayload[];
     retracted?: MemoryEventPayload[];
     rejected?: MemoryRejectedEventPayload[];
     maxConfidence?: number;
   };
+}
+interface SessionOpinion {
+  score: number;
+  band: "guarded" | "warming" | "trusting";
+  trend: "up" | "down" | "steady";
+  lastReason: string;
+  recentReasons: string[];
+  updatedAt: string;
 }
 interface UserSettings {
   theme: Theme;
@@ -1941,6 +2261,7 @@ interface Bot {
   id: string;
   name: string;
   system_prompt: string;
+  export_hash?: string | null;
   model: string | null;
   local_model: string | null;
   online_model: string | null;
@@ -1963,6 +2284,7 @@ interface BotExportMemory {
 
 interface BotExportPayloadV1 {
   schema: "prism-bot-export-v1";
+  botHash?: string;
   bot: {
     name: string;
     color?: string | null;
@@ -1979,6 +2301,35 @@ interface BotExportPayloadV1 {
   systemPrompt?: string;
   memories?: BotExportMemory[];
   exportedAt?: string;
+}
+
+/** Max UTF-8 size for pasted or file-read bot export text before JSON parse. */
+const BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES = 512 * 1024;
+
+function botImportUtf8ByteLength(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
+function stripOptionalLeadingUtf8Bom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+function normalizeImportedBotHash(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return /^[a-f0-9]{32}$/.test(trimmed) ? trimmed : null;
+}
+
+function createClientBotExportHash(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  // Browser crypto should always exist here; this fallback is defensive only.
+  return `${Math.random().toString(16).slice(2)}${Math.random().toString(16).slice(2)}`
+    .slice(0, 32)
+    .padEnd(32, "0");
 }
 
 const BOT_COLOR_SORT_GRAYSCALE_SATURATION_MAX = 6;
@@ -3347,6 +3698,28 @@ function IconKey(): React.JSX.Element {
       <path d="M10.5 12.5L20 3" />
       <path d="M16 7l3 3" />
       <path d="M18 5l2 2" />
+    </svg>
+  );
+}
+
+function IconUpload(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M12 18V6" />
+      <path d="M7.5 10.5L12 6l4.5 4.5" />
+      <path d="M5 20h14" />
+    </svg>
+  );
+}
+
+function IconTrash(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M4 7h16" />
+      <path d="M9 7V5a1.8 1.8 0 0 1 1.8-1.8h2.4A1.8 1.8 0 0 1 15 5v2" />
+      <path d="M7 7l.8 12.2a2 2 0 0 0 2 1.8h4.4a2 2 0 0 0 2-1.8L17 7" />
+      <path d="M10 11.2v5.8" />
+      <path d="M14 11.2v5.8" />
     </svg>
   );
 }
@@ -5350,6 +5723,104 @@ function BotGlyphPicker({ value, onChange }: BotGlyphPickerProps): React.JSX.Ele
   );
 }
 
+const COMPOSE_MENU_VIEWPORT_PAD_PX = 12;
+const COMPOSE_MENU_MAX_WIDTH_PX = 360;
+/** Minimum popover width when the trigger is very narrow (matches CSS floors). */
+const COMPOSE_MENU_BOT_MIN_WIDTH_PX = 260;
+const COMPOSE_MENU_MODEL_MIN_WIDTH_PX = 300;
+const COMPOSE_MENU_PORTAL_Z_INDEX_BOT = 2500;
+/** Slightly above bot menu so both open pickers stack predictably over the rail. */
+const COMPOSE_MENU_PORTAL_Z_INDEX_MODEL = 2600;
+const COMPOSE_MENU_PORTAL_THEME_VARS = [
+  "--bg",
+  "--bg-surface",
+  "--bg-deep",
+  "--bg-hover",
+  "--bg-active",
+  "--fg",
+  "--fg-muted",
+  "--fg-subtle",
+  "--line",
+  "--line-strong",
+  "--accent",
+  "--accent-ink",
+  "--accent-text",
+  "--accent-soft",
+  "--accent-glow",
+  "--shadow-sm",
+] as const;
+
+/**
+ * Fixed coordinates for an upward-opening compose popover. Menus are
+ * portaled to `document.body` so they are not clipped by
+ * `.composeTools { overflow-y: hidden }` (horizontal scroll rail).
+ */
+function computeComposeMenuFixedStyle(
+  trigger: HTMLButtonElement,
+  floorMinWidth: number,
+  portalZIndex: number
+): React.CSSProperties {
+  const rect = trigger.getBoundingClientRect();
+  const vw = globalThis.window.innerWidth;
+  const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
+  const maxW = Math.min(COMPOSE_MENU_MAX_WIDTH_PX, vw - pad * 2);
+  const minWidth = Math.min(Math.max(rect.width, floorMinWidth), maxW);
+  const left = Math.max(pad, Math.min(rect.left, vw - minWidth - pad));
+  const bottom = globalThis.window.innerHeight - rect.top + 6;
+  const themeVars: Record<string, string> = {};
+  const computedStyle = globalThis.window.getComputedStyle(trigger);
+  for (const varName of COMPOSE_MENU_PORTAL_THEME_VARS) {
+    const value = computedStyle.getPropertyValue(varName).trim();
+    if (value) {
+      themeVars[varName] = value;
+    }
+  }
+  return {
+    position: "fixed",
+    left,
+    bottom,
+    minWidth,
+    maxWidth: maxW,
+    zIndex: portalZIndex,
+    ...themeVars,
+  } as React.CSSProperties;
+}
+
+function useComposeMenuPortalStyle(
+  menuOpen: boolean,
+  triggerRef: React.RefObject<HTMLButtonElement | null>,
+  floorMinWidth: number,
+  portalZIndex: number = COMPOSE_MENU_PORTAL_Z_INDEX_BOT
+): React.CSSProperties | undefined {
+  const [fixedStyle, setFixedStyle] = useState<
+    React.CSSProperties | undefined
+  >(undefined);
+
+  useLayoutEffect(() => {
+    if (!menuOpen || !triggerRef.current) {
+      setFixedStyle(undefined);
+      return;
+    }
+    const update = (): void => {
+      const el = triggerRef.current;
+      if (!el) return;
+      setFixedStyle(
+        computeComposeMenuFixedStyle(el, floorMinWidth, portalZIndex)
+      );
+    };
+    update();
+    const w = globalThis.window;
+    w.addEventListener("resize", update);
+    w.addEventListener("scroll", update, true);
+    return () => {
+      w.removeEventListener("resize", update);
+      w.removeEventListener("scroll", update, true);
+    };
+  }, [menuOpen, floorMinWidth, portalZIndex, triggerRef]);
+
+  return menuOpen ? fixedStyle : undefined;
+}
+
 // ── Composer bot picker (custom dropdown) ────────────────────────────
 // Replaces the native <select> in the composer rail so each option can
 // render with its bot's glyph + tinted background. The native <select>
@@ -5366,9 +5837,9 @@ function BotGlyphPicker({ value, onChange }: BotGlyphPickerProps): React.JSX.Ele
 //     bot's color. The surrounding pill also picks up a soft tint via
 //     `data-bot-selected` so the control reads as "this bot is active".
 //
-// Popover is absolutely positioned above the trigger (compose sits at
-// the bottom of the screen; opening downward would clip against the
-// viewport floor). Closes on outside click, on Escape, on selection,
+// Popover is portaled to document.body with fixed coordinates above the
+// trigger so it clears `.composeTools { overflow-y: hidden }` (the rail
+// scrolls horizontally). Closes on outside click, on Escape, on selection,
 // and automatically if the trigger becomes disabled mid-open.
 //
 // Accessibility:
@@ -5476,6 +5947,11 @@ function ComposerBotPicker({
     return bestBotId;
   }, [filtersEnabled, hueFilterCenter, visibleBots]);
   const menuOpen = open && !disabled;
+  const menuPortalStyle = useComposeMenuPortalStyle(
+    menuOpen,
+    triggerRef,
+    COMPOSE_MENU_BOT_MIN_WIDTH_PX
+  );
 
   const randomizeHueOnOpen = useCallback(() => {
     if (!filtersEnabled || !onHueChange || !hueLensAvailable) {
@@ -5612,11 +6088,15 @@ function ComposerBotPicker({
           </svg>
         </span>
       </button>
-      {menuOpen && (
-        <div
-          ref={menuRef}
-          className={styles.composeBotMenu}
-        >
+      {menuOpen &&
+        menuPortalStyle &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className={styles.composeBotMenu}
+            style={menuPortalStyle}
+          >
           {showFilterControls && (
             <div className={styles.composeBotFilters}>
               <div className={styles.composeBotSearchRow}>
@@ -5744,8 +6224,9 @@ function ComposerBotPicker({
               );
             })}
           </div>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -5781,6 +6262,12 @@ function ComposerModelPicker({
       ? "Auto"
       : selectedModel?.label ?? value;
   const menuOpen = open && !disabled;
+  const menuPortalStyle = useComposeMenuPortalStyle(
+    menuOpen,
+    triggerRef,
+    COMPOSE_MENU_MODEL_MIN_WIDTH_PX,
+    COMPOSE_MENU_PORTAL_Z_INDEX_MODEL
+  );
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -5860,11 +6347,15 @@ function ComposerModelPicker({
           </svg>
         </span>
       </button>
-      {menuOpen && (
-        <div
-          ref={menuRef}
-          className={`${styles.composeBotMenu} ${styles.composeModelMenu}`}
-        >
+      {menuOpen &&
+        menuPortalStyle &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className={`${styles.composeBotMenu} ${styles.composeModelMenu}`}
+            style={menuPortalStyle}
+          >
           <div
             className={styles.composeBotListbox}
             role="listbox"
@@ -5914,8 +6405,9 @@ function ComposerModelPicker({
               );
             })}
           </div>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -7888,6 +8380,7 @@ function HomeContent(): React.JSX.Element {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
+  const [sessionOpinion, setSessionOpinion] = useState<SessionOpinion | null>(null);
   const [draft, setDraft] = useState("");
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
   const composerHistoryIndexRef = useRef<number | null>(null);
@@ -7896,7 +8389,6 @@ function HomeContent(): React.JSX.Element {
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
-  /** Server “Talk to me!” inferred prompts; Prism AskQuestion uses the same rail via getComposerChipRail(). */
   const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
     conversationId: string;
     prompts: string[];
@@ -7996,6 +8488,7 @@ function HomeContent(): React.JSX.Element {
   const [chatOverflowMenuOpen, setChatOverflowMenuOpen] = useState(false);
   const chatOverflowMenuRef = useRef<HTMLDivElement>(null);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [devTogglesOpen, setDevTogglesOpen] = useState(false);
   const [devToolsBusy, setDevToolsBusy] = useState(false);
   const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
   const [devToolsBotQuantity, setDevToolsBotQuantity] =
@@ -8010,12 +8503,22 @@ function HomeContent(): React.JSX.Element {
       x: DEV_TOOLS_PANEL_DEFAULT_X,
       y: DEV_TOOLS_PANEL_DEFAULT_Y,
     });
+  const [devToolsButtonPosition, setDevToolsButtonPosition] =
+    useState<DevToolsPanelPosition>({
+      x: DEV_TOOLS_BUTTON_DEFAULT_X,
+      y: DEV_TOOLS_BUTTON_DEFAULT_Y,
+    });
   const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
   const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
+  const devToolsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const devToolsButtonDragRef = useRef<DevToolsButtonDragState | null>(null);
+  const devToolsButtonHasCustomPositionRef = useRef(false);
+  const devToolsButtonSuppressClickRef = useRef(false);
   const resolvedDevToolsBotQuantity =
     devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
   const closeDevTools = useCallback(() => {
     setDevToolsOpen(false);
+    setDevTogglesOpen(false);
     setDevToolsMessage(null);
   }, []);
 
@@ -8233,6 +8736,42 @@ function HomeContent(): React.JSX.Element {
   const emptyStateSearchRef = useRef<HTMLDivElement | null>(null);
   const draftComposerRef = useRef<ComposerInputHandle | null>(null);
   const botImportInputRef = useRef<HTMLInputElement | null>(null);
+  type ImportBotModalPhase = "closed" | "choose" | "paste";
+  const [importBotModalPhase, setImportBotModalPhase] = useState<ImportBotModalPhase>("closed");
+  const [importBotPasteText, setImportBotPasteText] = useState("");
+  const [importBotPasteError, setImportBotPasteError] = useState<string | null>(null);
+  const [importBotPasteBusy, setImportBotPasteBusy] = useState(false);
+  const [devToolsBotImportPasteEnabled, setDevToolsBotImportPasteEnabledState] = useState(false);
+  const persistDevToolsBotImportPaste = useCallback((next: boolean) => {
+    setDevToolsBotImportPasteEnabledState(next);
+    if (typeof window === "undefined") return;
+    try {
+      if (next) {
+        window.localStorage.setItem(PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY, "1");
+      } else {
+        window.localStorage.removeItem(PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY);
+      }
+    } catch {
+      // private mode / quota — preference just won't survive reload
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      setDevToolsBotImportPasteEnabledState(
+        window.localStorage.getItem(PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY) === "1"
+      );
+    } catch {
+      setDevToolsBotImportPasteEnabledState(false);
+    }
+  }, []);
+  /** Confirms delete-bot from the Bots panel header (alertdialog, not window.confirm). */
+  const [panelBotDeleteConfirm, setPanelBotDeleteConfirm] = useState<{
+    id: string;
+    name: string;
+    hadUnsavedChanges: boolean;
+  } | null>(null);
+  const prePanelBotDeleteModalFocusRef = useRef<HTMLElement | null>(null);
   const emptyStateSearchOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Theme preference used before a user has logged in (or when the user
   // explicitly logs out). Seeded from localStorage so the auth screen
@@ -8320,7 +8859,7 @@ function HomeContent(): React.JSX.Element {
   }, [chatOverflowMenuOpen]);
 
   const beginSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
-    if (viewportWidth > PICKER_MOBILE_BREAKPOINT) return;
+    if (!sidebarDrawerMode) return;
     if (sidebarOpen || panel !== null) return;
     if (event.touches.length !== 1) return;
 
@@ -8332,7 +8871,7 @@ function HomeContent(): React.JSX.Element {
       startX: touch.clientX,
       startY: touch.clientY,
     };
-  }, [panel, sidebarOpen, viewportWidth]);
+  }, [panel, sidebarDrawerMode, sidebarOpen]);
 
   const continueSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
     const swipe = sidebarEdgeSwipeRef.current;
@@ -8421,6 +8960,83 @@ function HomeContent(): React.JSX.Element {
       // Safe no-op for environments without pointer capture support.
     }
   }, []);
+  const startDevToolsButtonDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    const button = devToolsButtonRef.current;
+    if (!button) return;
+
+    const rect = button.getBoundingClientRect();
+    devToolsButtonDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+    };
+    devToolsButtonSuppressClickRef.current = false;
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is missing in some test environments.
+    }
+  }, []);
+  const dragDevToolsButton = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const dragState = devToolsButtonDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    const button = devToolsButtonRef.current;
+    if (!button) return;
+
+    const dragDistance = Math.hypot(
+      event.clientX - dragState.startClientX,
+      event.clientY - dragState.startClientY
+    );
+    if (dragDistance >= DEV_TOOLS_BUTTON_DRAG_SUPPRESS_CLICK_PX) {
+      devToolsButtonSuppressClickRef.current = true;
+      devToolsButtonHasCustomPositionRef.current = true;
+    }
+
+    const rect = button.getBoundingClientRect();
+    const next = clampDevToolsPanelPosition(
+      event.clientX - dragState.offsetX,
+      event.clientY - dragState.offsetY,
+      rect.width,
+      rect.height,
+      window.innerWidth,
+      window.innerHeight
+    );
+    button.style.left = `${next.x}px`;
+    button.style.top = `${next.y}px`;
+    setDevToolsButtonPosition(next);
+    event.preventDefault();
+  }, []);
+  const endDevToolsButtonDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const dragState = devToolsButtonDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    devToolsButtonDragRef.current = null;
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Safe no-op for environments without pointer capture support.
+    }
+  }, []);
+  const closeImportBotModal = useCallback(() => {
+    setImportBotModalPhase("closed");
+    setImportBotPasteText("");
+    setImportBotPasteError(null);
+    setImportBotPasteBusy(false);
+  }, []);
+  useEffect(() => {
+    if (importBotModalPhase === "closed") return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeImportBotModal();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [importBotModalPhase, closeImportBotModal]);
   // Shared close helper for the right-hand panels. Also resets panel-specific
   // transient UI so reopening a panel doesn't resurrect stale state.
   const resetPanelTransientState = useCallback(() => {
@@ -8431,6 +9047,7 @@ function HomeContent(): React.JSX.Element {
     setChangePasswordNew("");
     setChangePasswordConfirm("");
     setEditingBotId(null);
+    closeImportBotModal();
     if (botLibraryCloseTimerRef.current) {
       clearTimeout(botLibraryCloseTimerRef.current);
       botLibraryCloseTimerRef.current = null;
@@ -8445,7 +9062,8 @@ function HomeContent(): React.JSX.Element {
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     setBotLibraryExpanded(false);
     setBotPanelLibraryEnabled(true);
-  }, []);
+    setPanelBotDeleteConfirm(null);
+  }, [closeImportBotModal]);
 
   const closePanel = useCallback(() => {
     if (!panel || panelClosing) return;
@@ -8552,7 +9170,65 @@ function HomeContent(): React.JSX.Element {
     if (!panelNode) return;
     panelNode.style.left = `${devToolsPanelPosition.x}px`;
     panelNode.style.top = `${devToolsPanelPosition.y}px`;
+    panelNode.style.setProperty("--dev-tools-panel-left", `${devToolsPanelPosition.x}px`);
+    panelNode.style.setProperty("--dev-tools-panel-top", `${devToolsPanelPosition.y}px`);
   }, [devToolsPanelPosition]);
+
+  useEffect(() => {
+    if (!devToolsOpen) return;
+    const panelNode = devToolsPanelRef.current;
+    if (!panelNode || typeof ResizeObserver === "undefined") return;
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setDevToolsPanelPosition((position) => {
+        const next = clampDevToolsPanelPosition(
+          position.x,
+          position.y,
+          width,
+          height,
+          viewportWidth,
+          viewportHeight
+        );
+        return next.x === position.x && next.y === position.y ? position : next;
+      });
+    });
+
+    resizeObserver.observe(panelNode);
+    return () => resizeObserver.disconnect();
+  }, [devToolsOpen, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    const buttonNode = devToolsButtonRef.current;
+    const rect = buttonNode?.getBoundingClientRect();
+    const buttonWidth = rect?.width ?? DEV_TOOLS_BUTTON_SIZE;
+    const buttonHeight = rect?.height ?? DEV_TOOLS_BUTTON_SIZE;
+
+    setDevToolsButtonPosition((position) => {
+      const anchoredPosition = devToolsButtonHasCustomPositionRef.current
+        ? position
+        : {
+            x: viewportWidth - buttonWidth - DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+            y: viewportHeight - buttonHeight - DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+          };
+      const next = clampDevToolsPanelPosition(
+        anchoredPosition.x,
+        anchoredPosition.y,
+        buttonWidth,
+        buttonHeight,
+        viewportWidth,
+        viewportHeight
+      );
+      return next.x === position.x && next.y === position.y ? position : next;
+    });
+  }, [viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    const buttonNode = devToolsButtonRef.current;
+    if (!buttonNode) return;
+    buttonNode.style.left = `${devToolsButtonPosition.x}px`;
+    buttonNode.style.top = `${devToolsButtonPosition.y}px`;
+  }, [devToolsButtonPosition]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -8880,16 +9556,18 @@ function HomeContent(): React.JSX.Element {
     color: string | null;
   } | null>(() => {
     if (!detail) return null;
+    const withPrivatePrefix = (name: string): string =>
+      detail.incognito ? `Private ${name}` : name;
     if (activeBot) {
       return {
-        name: activeBot.name,
+        name: withPrivatePrefix(activeBot.name),
         glyph: isBotGlyphName(activeBot.glyph) ? activeBot.glyph : DEFAULT_BOT_GLYPH,
         color: activeBot.color,
       };
     }
     if (defaultConversationUsesPrismIdentity) {
       return {
-        name: DEFAULT_ASSISTANT_NAME,
+        name: withPrivatePrefix(DEFAULT_ASSISTANT_NAME),
         glyph: "triangle",
         color: null,
       };
@@ -8903,7 +9581,7 @@ function HomeContent(): React.JSX.Element {
       );
     if (lastAssistantWithBot?.botName) {
       return {
-        name: lastAssistantWithBot.botName,
+        name: withPrivatePrefix(lastAssistantWithBot.botName),
         glyph: isBotGlyphName(lastAssistantWithBot.botGlyph)
           ? lastAssistantWithBot.botGlyph
           : DEFAULT_BOT_GLYPH,
@@ -8911,11 +9589,18 @@ function HomeContent(): React.JSX.Element {
       };
     }
     return {
-      name: detail.incognito ? "Private" : "Default",
+      name: detail.incognito ? withPrivatePrefix(DEFAULT_ASSISTANT_NAME) : "Default",
       glyph: "triangle",
       color: null,
     };
   }, [detail, activeBot, defaultConversationUsesPrismIdentity]);
+  const headerConversationTitle = useMemo(() => {
+    const conversationTitle = detail?.title?.trim() || "New conversation";
+    return `|    ${conversationTitle}`;
+  }, [detail?.title]);
+  const shouldShowHeaderConversationTitle = Boolean(
+    detail && detail.messages.length > 0
+  );
 
   // The sidebar is a place to leave the current chat, not mirror it.
   // Keep the active conversation persisted in `conversations`, but hide
@@ -9048,7 +9733,10 @@ function HomeContent(): React.JSX.Element {
     // the bottom of the list resolves to fully transparent fill and
     // the top peaks at a calm 45% color band.
     const baseIntensity = Math.max(0, Math.min(1, 1 - rowTopInViewport / glowFalloffPx));
-    const intensity = baseIntensity * 0.45;
+    // Light mode should keep the top rows calmer (less dark/tinted) so
+    // the first visible groups don't overpower the sidebar. Dark mode
+    // keeps the original stronger depth envelope.
+    const intensity = baseIntensity * (resolvedTheme === "light" ? 0.32 : 0.45);
     const baseFill = intensity * 60;
     const innerGlow = intensity * 90;
     const outerGlow = intensity * 40;
@@ -9064,11 +9752,13 @@ function HomeContent(): React.JSX.Element {
     const sunYPct = (sunYInRow / rowHeightPx) * 100;
     const counterYInRow = 320 - rowTopInViewport;
     const counterYPct = (counterYInRow / rowHeightPx) * 100;
-    // Smooth black-to-white text transition matched to the same fill
-    // intensity curve. baseIntensity = 1 at the very top (text is
-    // near-black) and = 0 once the row is past the falloff distance
-    // (text is white), with a continuous gray ramp between.
-    const textChannel = Math.round(255 - baseIntensity * 244);
+    // Theme-aware text ramp matched to the fill intensity curve:
+    // - Light mode: top/new rows are darker fills, so text should start
+    //   light and taper darker as fill intensity drops.
+    // - Dark mode: keep the existing near-black -> white ramp.
+    const textChannel = resolvedTheme === "light"
+      ? Math.round(42 + baseIntensity * 206)
+      : Math.round(255 - baseIntensity * 244);
     const textChannelHex = textChannel.toString(16).padStart(2, "0");
     const rowText = `#${textChannelHex}${textChannelHex}${textChannelHex}`;
     return {
@@ -9081,7 +9771,7 @@ function HomeContent(): React.JSX.Element {
       "--row-counter-y": `${counterYPct.toFixed(1)}%`,
       "--row-text-color": rowText,
     } as React.CSSProperties;
-  }, [conversationListScrollTop]);
+  }, [conversationListScrollTop, resolvedTheme]);
 
   const panelColorHarmonyActive = bots.length >= BOT_PANEL_COLOR_HARMONY_MIN_BOTS;
   const sortedPanelBots = useMemo(
@@ -9501,6 +10191,7 @@ function HomeContent(): React.JSX.Element {
     if (view !== "sandbox") return;
     setSelectedId(null);
     setDetail(null);
+    setSessionOpinion(null);
     setSelectedBotId(null);
     setError(null);
   }, [view]);
@@ -9514,10 +10205,11 @@ function HomeContent(): React.JSX.Element {
   }
   async function refreshConversation(id: string): Promise<void> {
     clearConversationUnread(id);
-    const d = await api<{ conversation: ConversationDetail }>(
+    const d = await api<{ conversation: ConversationDetail; opinion?: SessionOpinion }>(
       `/api/conversations/${id}`
     );
     setDetail(applyExplicitAskQuestionFallback(d.conversation));
+    setSessionOpinion(d.opinion ?? null);
     setSelectedId(id);
     // Sync the composer's bot dropdown to match whoever was last active
     // in the chat we're switching into. Without this, picking a chat
@@ -9677,6 +10369,7 @@ function HomeContent(): React.JSX.Element {
     setUser(null);
     setConversations([]);
     setDetail(null);
+    setSessionOpinion(null);
     setMemories([]);
     setBotMemories([]);
     setSettings(null);
@@ -9703,6 +10396,7 @@ function HomeContent(): React.JSX.Element {
       setUser(null);
       setConversations([]);
       setDetail(null);
+      setSessionOpinion(null);
       setMemories([]);
       setSettings(null);
       setModelCatalog(null);
@@ -9776,7 +10470,7 @@ function HomeContent(): React.JSX.Element {
     //      Prism Default). Never substitute selectedBotId here — `??` treats
     //      null like "missing", which wrongly hijacks Default threads with
     //      whichever bot tile was clicked last elsewhere in the sidebar.
-    //   3. Pending / no saved row yet: detail.botId (optimistic) then
+  //   3. Pending / no saved row yet: detail.botId (optimistic) then
     //      selectedBotId from the picker.
     //   4. null — explicit Default for new chat or override.
     const chatBotId: string | null =
@@ -9785,9 +10479,9 @@ function HomeContent(): React.JSX.Element {
         : detail?.id !== undefined && detail.id !== "pending"
           ? detail.botId
           : (detail?.botId ?? selectedBotId ?? null);
-    // Private chats do not override the provider; they only change the
-    // persistence/memory path.
-    const providerForSend = settings?.preferredProvider;
+  // Private chats are local-only by design.
+  const providerForSend =
+    privateForSend ? "local" : settings?.preferredProvider;
     const modelChoice = providerForSend
       ? visibleBotCustomizerModelChoice(
           settings,
@@ -9868,6 +10562,7 @@ function HomeContent(): React.JSX.Element {
         pushMemoryToasts(d.memoryLearned);
         const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
         setDetail(patchedConversation);
+        setSessionOpinion(d.opinion ?? null);
         editedConversation = patchedConversation;
       } else {
         setPendingReplyConversationId(selectedId);
@@ -9894,6 +10589,7 @@ function HomeContent(): React.JSX.Element {
         pushMemoryToasts(d.memoryLearned);
         const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
         setDetail(patchedConversation);
+        setSessionOpinion(d.opinion ?? null);
         editedConversation = patchedConversation;
       }
       setEditingMessageId(null);
@@ -10120,6 +10816,7 @@ function HomeContent(): React.JSX.Element {
         : selectedIdRef.current === null && detailIdRef.current === "pending";
       if (stillViewingRequest) {
         setDetail(applyExplicitAskQuestionFallback(d.conversation));
+        setSessionOpinion(d.opinion ?? null);
         setSelectedId(d.conversation.id);
         setUnreadConversationIds(previous => {
           if (!previous.has(d.conversation.id)) return previous;
@@ -10243,6 +10940,8 @@ function HomeContent(): React.JSX.Element {
   type ComposerChip = {
     id: string;
     label: string;
+    /** Secondary line (e.g. AskQuestion “Other” affordance). */
+    sublabel?: string;
     action: "send" | "other";
     sendValue?: string;
   };
@@ -10308,12 +11007,15 @@ function HomeContent(): React.JSX.Element {
     if (qa) {
       const optionChips = qa.options.map((option, index) => {
         const cleaned = stripEmojiFromAskQuestionLabel(option.label);
+        const sendValue = cleaned.trim();
         const fallback = `Option ${index + 1}`;
         return {
           id: option.id,
           label: cleaned || fallback,
           action: "send" as const,
-          sendValue: cleaned || fallback,
+          // Preserve the authored option text on send so model behavior stays
+          // consistent with the AskQuestion payload across providers/models.
+          sendValue: sendValue || cleaned || fallback,
         };
       });
       return {
@@ -10323,6 +11025,7 @@ function HomeContent(): React.JSX.Element {
           {
             id: "other",
             label: "Other",
+            sublabel: "(Explain in chat...)",
             action: "other",
           },
         ],
@@ -10353,11 +11056,15 @@ function HomeContent(): React.JSX.Element {
   function renderComposerChipRail(): React.ReactNode {
     const rail = getComposerChipRail();
     if (!rail) return null;
+    const railClassName =
+      rail.kind === "askquestion"
+        ? `${styles.conversationStarterRail} ${styles.askQuestionRail}`
+        : styles.conversationStarterRail;
     return (
       <div
         role="group"
         aria-label="Suggested replies"
-        className={styles.conversationStarterRail}
+        className={railClassName}
       >
         {rail.heading ? (
           <p className={styles.conversationStarterChipHeading}>{rail.heading}</p>
@@ -10367,10 +11074,25 @@ function HomeContent(): React.JSX.Element {
             key={`${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
             type="button"
             disabled={pendingReply}
-            className={styles.conversationStarterChip}
+            className={`${styles.conversationStarterChip} ${
+              chip.action === "other" ? styles.conversationStarterChipOther : ""
+            }`}
+            data-chip-kind={chip.action}
+            aria-label={
+              chip.action === "other"
+                ? "Other — explain in chat"
+                : `Suggested reply: ${chip.sendValue ?? chip.label}`
+            }
             onClick={() => handleComposerChipPick(chip)}
           >
-            {chip.label}
+            {chip.sublabel ? (
+              <span className={styles.conversationStarterChipStack}>
+                <span className={styles.conversationStarterChipPrimary}>{chip.label}</span>
+                <span className={styles.conversationStarterChipSub}>{chip.sublabel}</span>
+              </span>
+            ) : (
+              chip.label
+            )}
           </button>
         ))}
       </div>
@@ -10417,7 +11139,9 @@ function HomeContent(): React.JSX.Element {
         .map((opt) => `${opt.id}:${opt.label}`)
         .join("|")}`
     : null;
-  const composerHiddenByAskQuestion = pendingAskQuestion !== undefined && !askQuestionComposerRevealed;
+  const composerHiddenByAskQuestion =
+    pendingAskQuestion !== undefined &&
+    !askQuestionComposerRevealed;
 
   useEffect(() => {
     if (pendingAskQuestionKey) {
@@ -10426,6 +11150,36 @@ function HomeContent(): React.JSX.Element {
     }
     setAskQuestionComposerRevealed(false);
   }, [pendingAskQuestionKey]);
+
+  useEffect(() => {
+    if (!pendingAskQuestionKey) return;
+    if (askQuestionComposerRevealed) return;
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const run = (): void => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (dist > ASKQUESTION_BOTTOM_THRESHOLD_PX) return;
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      messagesEndRef.current?.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: "end",
+      });
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(run);
+    });
+  }, [
+    pendingAskQuestionKey,
+    askQuestionComposerRevealed,
+  ]);
+
+  function handleMessagesPaneScroll(event: React.UIEvent<HTMLDivElement>): void {
+    const _unused = event;
+  }
+
+  const askQuestionTailSpaceActive =
+    pendingAskQuestion !== undefined &&
+    !askQuestionComposerRevealed;
 
   function resetComposerHistoryCursor(): void {
     composerHistoryIndexRef.current = null;
@@ -11056,6 +11810,27 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     const trimmedName = bot.name.trim() || "Unnamed bot";
+    let exportHash = normalizeImportedBotHash(bot.export_hash);
+    if (!exportHash) {
+      const generatedHash = createClientBotExportHash();
+      try {
+        await api(`/api/bots/${encodeURIComponent(bot.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ exportHash: generatedHash }),
+        });
+        exportHash = generatedHash;
+        setBots((list) =>
+          list.map((candidate) =>
+            candidate.id === bot.id
+              ? { ...candidate, export_hash: generatedHash }
+              : candidate
+          )
+        );
+      } catch {
+        // Keep export working even if this bot cannot be patched (e.g. stale/public row).
+        exportHash = generatedHash;
+      }
+    }
     const profile = parseStoredBotPrompt(bot.system_prompt).fields;
     const visiblePrompt = stripBotProfileMetaSuffix(bot.system_prompt).trim();
     const memoryResult = await api<{
@@ -11080,6 +11855,7 @@ function HomeContent(): React.JSX.Element {
       }));
     const exportPayload = {
       schema: "prism-bot-export-v1",
+      botHash: exportHash ?? undefined,
       bot: {
         name: trimmedName,
         color: bot.color ?? null,
@@ -11097,22 +11873,12 @@ function HomeContent(): React.JSX.Element {
       memories,
       exportedAt: new Date().toISOString(),
     };
-    const markdown = [
-      `# Bot Export · ${trimmedName}`,
-      "",
-      "This file can be used to re-create this bot in another Prism setup.",
-      "",
-      "## Import Data",
-      "```json",
-      JSON.stringify(exportPayload, null, 2),
-      "```",
-      "",
-    ].join("\n");
-    const blob = new Blob([markdown], { type: "text/markdown" });
+    const json = `${JSON.stringify(exportPayload, null, 2)}\n`;
+    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `bot-${slugifyFileToken(trimmedName)}.md`;
+    a.download = `bot-${slugifyFileToken(trimmedName)}.bot`;
     a.click();
     URL.revokeObjectURL(url);
     setPanelNotice(
@@ -11122,13 +11888,34 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  async function importBotFromFile(file: File): Promise<void> {
+  async function importBotFromExportRawText(raw: string): Promise<void> {
     setPanelError(null);
     setPanelNotice(null);
-    const raw = await file.text();
-    const parsed = JSON.parse(extractBotExportJson(raw)) as Partial<BotExportPayloadV1>;
+    const normalized = stripOptionalLeadingUtf8Bom(raw);
+    if (botImportUtf8ByteLength(normalized) > BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES) {
+      throw new Error(
+        `That export is too large to import here (max ${Math.round(BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES / 1024)} KB).`
+      );
+    }
+    let parsedUnknown: unknown;
+    try {
+      parsedUnknown = JSON.parse(extractBotExportJson(normalized));
+    } catch {
+      throw new Error("Could not read JSON — check braces, quotes, and trailing commas.");
+    }
+    if (typeof parsedUnknown !== "object" || parsedUnknown === null || Array.isArray(parsedUnknown)) {
+      throw new Error("Bot import must be a single JSON object (not a list or bare value).");
+    }
+    const parsed = parsedUnknown as Partial<BotExportPayloadV1>;
     if (parsed.schema !== "prism-bot-export-v1" || !parsed.bot?.name) {
       throw new Error("Invalid bot export file.");
+    }
+    const importedBotHash = normalizeImportedBotHash(parsed.botHash);
+    if (
+      importedBotHash &&
+      bots.some((candidate) => normalizeImportedBotHash(candidate.export_hash) === importedBotHash)
+    ) {
+      throw new Error("This bot is already in your library!");
     }
     const importedName = parsed.bot.name.trim();
     if (!importedName) {
@@ -11136,14 +11923,20 @@ function HomeContent(): React.JSX.Element {
     }
 
     const fallbackProfile = blankBotProfile();
-    const profile =
-      parsed.profile && typeof parsed.profile === "object"
-        ? parsed.profile
-        : fallbackProfile;
-    const systemPrompt =
-      typeof parsed.systemPrompt === "string" && parsed.systemPrompt.trim().length > 0
-        ? parsed.systemPrompt
-        : serializeStoredBotPrompt(profile, importedName);
+    const hasStructuredProfile =
+      parsed.profile !== null
+      && typeof parsed.profile === "object"
+      && !Array.isArray(parsed.profile);
+    const profile = hasStructuredProfile
+      ? parseStoredBotPrompt(
+        serializeStoredBotPrompt(parsed.profile as BotProfileFields, importedName)
+      ).fields
+      : fallbackProfile;
+    const importedVisiblePrompt =
+      typeof parsed.systemPrompt === "string" ? parsed.systemPrompt.trim() : "";
+    const systemPrompt = hasStructuredProfile
+      ? serializeStoredBotPrompt(profile, importedName)
+      : importedVisiblePrompt || serializeStoredBotPrompt(profile, importedName);
 
     const created = await api<{ bot?: { id?: string } }>("/api/bots", {
       method: "POST",
@@ -11153,6 +11946,7 @@ function HomeContent(): React.JSX.Element {
         localModel: parsed.bot.localModel ?? "",
         onlineModel: parsed.bot.onlineModel ?? "",
         onlineEnabled: parsed.bot.onlineEnabled !== false,
+        chatEnabled: parsed.bot.chatEnabled !== false,
         deleteProtected: parsed.bot.deleteProtected === true,
         temperature:
           typeof parsed.bot.temperature === "number"
@@ -11168,6 +11962,7 @@ function HomeContent(): React.JSX.Element {
         glyph: typeof parsed.bot.glyph === "string" && parsed.bot.glyph.trim().length > 0
           ? parsed.bot.glyph.trim()
           : null,
+        exportHash: importedBotHash,
       }),
     });
     const createdBotId = created.bot?.id;
@@ -11201,12 +11996,23 @@ function HomeContent(): React.JSX.Element {
     }
 
     await refreshBots();
+    await refreshMemories();
+    await refreshBotMemories(createdBotId);
     setSelectedBotId(createdBotId);
     setPanelNotice(
       restored > 0
         ? `${importedName} imported with ${restored} memories.`
         : `${importedName} imported.`
     );
+  }
+
+  async function importBotFromFile(file: File): Promise<void> {
+    const lower = file.name.trim().toLowerCase();
+    if (!lower.endsWith(".bot")) {
+      throw new Error("Only .bot files can be imported from disk.");
+    }
+    const raw = await file.text();
+    await importBotFromExportRawText(raw);
   }
 
   async function handleBotImportFileSelection(
@@ -11222,9 +12028,39 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function openBotImportPicker(): void {
+  function openImportBotModal(): void {
     setPanelError(null);
-    botImportInputRef.current?.click();
+    setImportBotPasteError(null);
+    setImportBotPasteText("");
+    setImportBotPasteBusy(false);
+    if (!devToolsBotImportPasteEnabled) {
+      setImportBotModalPhase("closed");
+      queueMicrotask(() => {
+        botImportInputRef.current?.click();
+      });
+      return;
+    }
+    setImportBotModalPhase("choose");
+  }
+
+  function handleImportBotChooseUpload(): void {
+    closeImportBotModal();
+    queueMicrotask(() => {
+      botImportInputRef.current?.click();
+    });
+  }
+
+  async function handleConfirmImportBotPaste(): Promise<void> {
+    setImportBotPasteError(null);
+    setImportBotPasteBusy(true);
+    try {
+      await importBotFromExportRawText(importBotPasteText);
+      closeImportBotModal();
+    } catch (err) {
+      setImportBotPasteError(err instanceof Error ? err.message : "Bot import failed.");
+    } finally {
+      setImportBotPasteBusy(false);
+    }
   }
 
   const resetEmptyStateBotSelection = useCallback(() => {
@@ -11716,17 +12552,55 @@ function HomeContent(): React.JSX.Element {
     return () => document.removeEventListener("keydown", handleKey);
   }, [isDeleteAllActive, disarmDelete]);
 
+  // Single-bot delete from the Bots panel header uses its own modal; if any
+  // sidebar/header delete affordance arms, drop the header modal so only one
+  // confirm surface is active.
+  useEffect(() => {
+    if (!pendingDeleteKey) return;
+    setPanelBotDeleteConfirm(null);
+  }, [pendingDeleteKey]);
+
+  const isPanelBotDeleteModalOpen = panelBotDeleteConfirm !== null;
+  useEffect(() => {
+    if (!isPanelBotDeleteModalOpen) {
+      const prev = prePanelBotDeleteModalFocusRef.current;
+      prePanelBotDeleteModalFocusRef.current = null;
+      if (prev && typeof prev.focus === "function" && document.contains(prev)) {
+        queueMicrotask(() => {
+          try { prev.focus({ preventScroll: true }); } catch { /* ignore */ }
+        });
+      }
+      return;
+    }
+    const active = document.activeElement;
+    prePanelBotDeleteModalFocusRef.current =
+      active instanceof HTMLElement ? active : null;
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setPanelBotDeleteConfirm(null);
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isPanelBotDeleteModalOpen]);
+
   useEffect(() => {
     if (!devToolsOpen) return;
     function handleKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.stopPropagation();
+        if (devTogglesOpen) {
+          setDevTogglesOpen(false);
+          return;
+        }
         closeDevTools();
       }
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [devToolsOpen, closeDevTools]);
+  }, [devToolsOpen, devTogglesOpen, closeDevTools]);
 
   // Clicking anywhere outside the delete / confirm affordance should disarm it.
   // This prevents the confirm pill from lingering in an awkward in-between
@@ -11823,10 +12697,12 @@ function HomeContent(): React.JSX.Element {
     const previousConversations = conversations;
     const previousSelectedId = selectedId;
     const previousDetail = detail;
+    const previousSessionOpinion = sessionOpinion;
     setConversations(list => list.filter(c => c.id !== id));
     if (selectedId === id) {
       setSelectedId(null);
       setDetail(null);
+      setSessionOpinion(null);
     }
     try {
       await api(`/api/conversations/${id}`, { method: "DELETE" });
@@ -11837,6 +12713,7 @@ function HomeContent(): React.JSX.Element {
       setConversations(previousConversations);
       setSelectedId(previousSelectedId);
       setDetail(previousDetail);
+      setSessionOpinion(previousSessionOpinion);
       setError(err instanceof Error ? err.message : "Delete failed.");
     }
   }
@@ -11847,6 +12724,7 @@ function HomeContent(): React.JSX.Element {
     const previousConversations = conversations;
     const previousSelectedId = selectedId;
     const previousDetail = detail;
+    const previousSessionOpinion = sessionOpinion;
     const previousUnreadIds = unreadConversationIds;
     const previousUnreadOrder = unreadConversationOrder;
     const previousExpandedGroupKey = expandedConversationGroupKey;
@@ -11878,6 +12756,7 @@ function HomeContent(): React.JSX.Element {
     if (selectedGroupKey === group.key) {
       setSelectedId(null);
       setDetail(null);
+      setSessionOpinion(null);
     }
 
     try {
@@ -11889,6 +12768,7 @@ function HomeContent(): React.JSX.Element {
       setConversations(previousConversations);
       setSelectedId(previousSelectedId);
       setDetail(previousDetail);
+      setSessionOpinion(previousSessionOpinion);
       setUnreadConversationIds(previousUnreadIds);
       setUnreadConversationOrder(previousUnreadOrder);
       setExpandedConversationGroupKey(previousExpandedGroupKey);
@@ -11906,11 +12786,13 @@ function HomeContent(): React.JSX.Element {
     const previousConversations = conversations;
     const previousSelectedId = selectedId;
     const previousDetail = detail;
+    const previousSessionOpinion = sessionOpinion;
     // Nothing to clear — short-circuit rather than fire a no-op request.
     if (previousConversations.length === 0) return;
     setConversations([]);
     setSelectedId(null);
     setDetail(null);
+    setSessionOpinion(null);
     try {
       await api("/api/conversations", { method: "DELETE" });
       await refreshConversations();
@@ -11918,6 +12800,7 @@ function HomeContent(): React.JSX.Element {
       setConversations(previousConversations);
       setSelectedId(previousSelectedId);
       setDetail(previousDetail);
+      setSessionOpinion(previousSessionOpinion);
       setError(err instanceof Error ? err.message : "Delete all failed.");
     }
   }
@@ -13689,52 +14572,61 @@ function HomeContent(): React.JSX.Element {
     </main>
   );
 
-  // ── Sidebar × delete button ─────────────────────────────────────────
-  // Shared renderer used by both the Chat-mode and Sandbox-mode sidebars
-  // so the hold-to-delete-all gesture and the two-stage single-chat
-  // confirm stay in lockstep. Visually the button only ever expresses
-  // four states itself: idle (muted × glyph), hover (embossed red),
-  // holding (immediate glow + static tilt driven by nth-child), and
-  // armed-single (the inline "Are you sure? ✓" pill). The armed-all
-  // state is NOT rendered on the button — it surfaces as a centered
-  // alertdialog modal instead. The list-level `data-delete-holding` /
-  // `data-delete-armed-all` attributes are what turn the siblings into
-  // ambient participants (glow, tilt, jiggle).
+  // ── Sidebar row delete button ───────────────────────────────────────
+  // Immediate single-chat delete (per user request) with a clearer trash
+  // icon affordance. Group rows still keep their explicit confirm pill.
   const renderChatDeleteButton = (c: ConversationSummary) => {
-    const isArmedSingle = pendingDeleteKey === c.id;
-
-    const className = [
-      styles.conversationDelete,
-      isArmedSingle ? styles.conversationDeleteArmed : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
     return (
       <button
         type="button"
-        className={className}
+        className={styles.conversationDelete}
         data-delete-affordance="true"
-        aria-label={
-          isArmedSingle
-            ? `Confirm delete ${c.title}`
-            : `Delete ${c.title}`
-        }
-        title={isArmedSingle ? undefined : "Delete chat"}
+        aria-label={`Delete ${c.title}`}
+        title="Delete chat"
         onClick={(e) => {
           e.stopPropagation();
-          if (isArmedSingle) {
-            void deleteConversation(c.id);
-          } else {
-            armDelete(c.id);
-          }
+          void deleteConversation(c.id);
         }}
       >
-        {isArmedSingle && (
-          <span className={styles.conversationDeletePrompt}>Are you sure?</span>
-        )}
         <span className={styles.conversationDeleteGlyph}>
-          {isArmedSingle ? "✓" : "×"}
+          ×
+        </span>
+      </button>
+    );
+  };
+
+  const renderConversationDeleteAllButton = (): React.JSX.Element => {
+    const isHoldingDeleteAll = holdingKey === DELETE_ALL_KEY;
+    return (
+      <button
+        type="button"
+        className={styles.conversationDeleteAllButton}
+        data-delete-affordance="true"
+        data-holding={isHoldingDeleteAll ? "true" : undefined}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+          } catch {
+            // Pointer capture is missing in some test environments.
+          }
+          startHoldDelete(DELETE_ALL_KEY);
+        }}
+        onPointerUp={cancelHoldDelete}
+        onPointerCancel={cancelHoldDelete}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (holdCompletedRef.current) {
+            holdCompletedRef.current = false;
+            return;
+          }
+          armDelete(DELETE_ALL_KEY);
+        }}
+        aria-label="Delete all chats"
+        title="Delete all chats"
+      >
+        <span className={styles.conversationDeleteAllButtonGlyph}>
+          <IconTrash />
         </span>
       </button>
     );
@@ -13844,7 +14736,7 @@ function HomeContent(): React.JSX.Element {
           <span className={styles.conversationDeletePrompt}>Are you sure?</span>
         )}
         <span className={styles.conversationDeleteGlyph}>
-          {isArmedSingle ? "✓" : "×"}
+          {isArmedSingle ? "✓" : <IconTrash />}
         </span>
       </button>
     );
@@ -13864,6 +14756,7 @@ function HomeContent(): React.JSX.Element {
         <div
           className={styles.conversationRow}
           data-unread={group.unread ? "true" : undefined}
+          data-group-neutral={group.color ? undefined : "true"}
           style={conversationGroupStyle(group, headerGlowIndex)}
         >
           <button
@@ -13874,6 +14767,14 @@ function HomeContent(): React.JSX.Element {
             aria-controls={nestedListId}
             onClick={() => {
               disarmDelete();
+              // Keep the canvas bot selection in sync with the group tile so
+              // users can open a bot group and immediately start a new chat
+              // with that bot without leaving the sidebar.
+              if (group.botId) {
+                commitEmptyStateBotSelection(group.botId);
+              } else {
+                resetEmptyStateToPrismHome();
+              }
               setExpandedConversationGroupKey((prev) =>
                 prev === group.key ? null : group.key
               );
@@ -13906,7 +14807,7 @@ function HomeContent(): React.JSX.Element {
               </span>
             </span>
           </button>
-          {renderConversationGroupDeleteButton(group)}
+          {isExpanded ? renderConversationGroupDeleteButton(group) : null}
         </div>
         <div
           className={[
@@ -14060,6 +14961,66 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  /** Centered alertdialog for deleting the bot currently loaded in the Bots editor. */
+  const renderPanelBotDeleteModal = () => {
+    if (!panelBotDeleteConfirm) return null;
+    const payload = panelBotDeleteConfirm;
+    const unsavedFragment = payload.hadUnsavedChanges
+      ? " You have unsaved edits in this panel that will be discarded."
+      : "";
+    return (
+      <div
+        className={styles.deleteAllModalBackdrop}
+        data-delete-affordance="true"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setPanelBotDeleteConfirm(null);
+        }}
+      >
+        <div
+          className={styles.deleteAllModalPanel}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="delete-bot-panel-title"
+          aria-describedby="delete-bot-panel-desc"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <h2 id="delete-bot-panel-title" className={styles.deleteAllModalTitle}>
+            Delete {payload.name}?
+          </h2>
+          <p id="delete-bot-panel-desc" className={styles.deleteAllModalBody}>
+            This will permanently remove this bot.{unsavedFragment} Chats that used it fall back to Default.
+          </p>
+          <div className={styles.deleteAllModalActions}>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              ref={(node) => {
+                if (node) queueMicrotask(() => {
+                  try { node.focus({ preventScroll: true }); } catch { /* ignore */ }
+                });
+              }}
+              onClick={() => setPanelBotDeleteConfirm(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={styles.deleteAllModalConfirm}
+              disabled={busy}
+              aria-label={`Delete bot ${payload.name}`}
+              onClick={() => {
+                void deleteBot(payload.id);
+                setPanelBotDeleteConfirm(null);
+              }}
+            >
+              Delete bot
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderMemoryToasts = () => {
     if (memoryToasts.length === 0) return null;
     const visible = memoryToasts.slice(0, MEMORY_TOAST_VISIBLE_LIMIT);
@@ -14106,7 +15067,7 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  /** Conversation tools — Memories / Edit bot / Export / Delete.
+  /** Conversation tools — Memories / Edit bot / Opinions / Export / Delete.
    *  Desktop renders inline in the chat header bar.
    *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
   const renderChatOverflowGear = (): React.JSX.Element | null => {
@@ -14119,8 +15080,8 @@ function HomeContent(): React.JSX.Element {
     const selectedBotCanDelete = Boolean(activeBot && activeBot.delete_protected !== 1);
     const canDelete = Boolean((detail && selectedId) || selectedBotCanDelete);
     const headerActionsDisabled =
-      Boolean(detail) && (!detail.hasAssistantReply || pendingReply);
-    const isMobileGear = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
+      detail != null && (!detail.hasAssistantReply || pendingReply);
+    const isMobileGear = viewportWidth <= PHONE_MENU_BREAKPOINT;
 
     const closeMenu = () => setChatOverflowMenuOpen(false);
 
@@ -14136,6 +15097,10 @@ function HomeContent(): React.JSX.Element {
       closeMenu();
       openActiveBotCustomizer();
     };
+    const handleOpinions = () => {
+      closeMenu();
+      openRightPanel("opinions");
+    };
     const handleExport = () => {
       closeMenu();
       if (detail && selectedId) {
@@ -14150,7 +15115,7 @@ function HomeContent(): React.JSX.Element {
       detail && selectedId
         ? "Export chat as Markdown"
         : activeBot
-          ? "Export bot profile as Markdown"
+          ? "Export bot profile as .bot (JSON)"
           : "Export";
     const exportButtonText =
       detail && selectedId ? "Export chat" : activeBot ? "Export bot" : "Export";
@@ -14211,8 +15176,8 @@ function HomeContent(): React.JSX.Element {
     };
 
     if (!isMobileGear) {
-      // Desktop: surface the four actions directly in the chat header so
-      // there's no extra click to reach Memories / Edit bot / Export / Delete.
+      // Desktop: surface the chat actions directly in the chat header so
+      // there's no extra click to reach Memories / Edit bot / Opinions / Export / Delete.
       return (
         <div
           className={`${styles.chatHeaderActions} ${
@@ -14231,7 +15196,16 @@ function HomeContent(): React.JSX.Element {
             onClick={handleMemories}
             title={activeBot ? "Bot memories" : "Default Prism memories"}
           >
-            Memories
+            <span className={styles.chatHeaderActionText}>Memories</span>
+          </button>
+          <button
+            type="button"
+            className={styles.chatHeaderAction}
+            disabled={headerActionsDisabled}
+            onClick={handleOpinions}
+            title="Opinions"
+          >
+            <span className={styles.chatHeaderActionText}>Opinions</span>
           </button>
           {canBotActions && (
             <button
@@ -14241,7 +15215,7 @@ function HomeContent(): React.JSX.Element {
               onClick={handleEditBot}
               title="Edit bot"
             >
-              Edit bot
+              <span className={styles.chatHeaderActionText}>Edit bot</span>
             </button>
           )}
           <button
@@ -14251,7 +15225,7 @@ function HomeContent(): React.JSX.Element {
             onClick={handleExport}
             title={exportTitle}
           >
-            {exportButtonText}
+            <span className={styles.chatHeaderActionText}>{exportButtonText}</span>
           </button>
           <button
             type="button"
@@ -14264,7 +15238,7 @@ function HomeContent(): React.JSX.Element {
             title={deleteLabel}
             onClick={handleDelete}
           >
-            {deleteButtonText}
+            <span className={styles.chatHeaderActionText}>{deleteButtonText}</span>
           </button>
         </div>
       );
@@ -14309,6 +15283,17 @@ function HomeContent(): React.JSX.Element {
               }}
             >
               Memories
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.chatOverflowMenuItem}
+              onClick={(event) => {
+                swallowMenuEvent(event);
+                handleOpinions();
+              }}
+            >
+              Opinions
             </button>
             {canBotActions && (
               <button
@@ -14462,19 +15447,94 @@ function HomeContent(): React.JSX.Element {
 
   const renderDevToolsButton = (): React.JSX.Element | null => {
     if (!DEV_TOOLS_ENABLED) return null;
+    const devToolsButtonStyle: React.CSSProperties & Record<"--dev-tools-button-accent", string> = {
+      left: `${devToolsButtonPosition.x}px`,
+      top: `${devToolsButtonPosition.y}px`,
+      "--dev-tools-button-accent": normalizeAccentForTheme(
+        activeBot?.color ?? PRISM_DEFAULT_ACCENT,
+        resolvedTheme
+      ),
+    };
+
     return (
       <button
+        ref={devToolsButtonRef}
         type="button"
-        className={`${styles.headerIconButton} ${styles.composeUtilityButton} ${styles.devToolsButton}`}
+        className={`${styles.headerIconButton} ${styles.devToolsButton}`}
+        data-dev-tools-default={!activeBot ? "true" : undefined}
+        style={devToolsButtonStyle}
+        onPointerDown={startDevToolsButtonDrag}
+        onPointerMove={dragDevToolsButton}
+        onPointerUp={endDevToolsButtonDrag}
+        onPointerCancel={endDevToolsButtonDrag}
         onClick={() => {
+          if (devToolsButtonSuppressClickRef.current) {
+            devToolsButtonSuppressClickRef.current = false;
+            return;
+          }
           setDevToolsMessage(null);
-          setDevToolsOpen((open) => !open);
+          setDevToolsOpen((open) => {
+            if (open) setDevTogglesOpen(false);
+            return !open;
+          });
         }}
         aria-label="Open developer tools"
         title="Developer tools"
       >
         <IconKey />
       </button>
+    );
+  };
+
+  const renderDevTogglesModal = (): React.JSX.Element | null => {
+    if (!devTogglesOpen) return null;
+    return (
+      <div
+        className={`${styles.deleteAllModalBackdrop} ${styles.devTogglesModalBackdrop}`}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setDevTogglesOpen(false);
+        }}
+      >
+        <div
+          id="dev-toggles-modal"
+          className={styles.deleteAllModalPanel}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dev-toggles-title"
+          aria-describedby="dev-toggles-desc"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <h2 id="dev-toggles-title" className={styles.deleteAllModalTitle}>
+            Dev toggles
+          </h2>
+          <p id="dev-toggles-desc" className={styles.deleteAllModalBody}>
+            Local-only switches for developer workflows.
+          </p>
+          <label className={styles.devTogglesModalOption}>
+            <input
+              type="checkbox"
+              checked={devToolsBotImportPasteEnabled}
+              onChange={(event) => persistDevToolsBotImportPaste(event.currentTarget.checked)}
+            />
+            <span>
+              <strong>Allow paste JSON when importing</strong>
+              <small>
+                Off opens the .bot file picker directly. On adds a paste-from-clipboard
+                import choice.
+              </small>
+            </span>
+          </label>
+          <div className={styles.deleteAllModalActions}>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              onClick={() => setDevTogglesOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -14490,12 +15550,13 @@ function HomeContent(): React.JSX.Element {
         ? memoryPanelBot.name
         : "all bots";
     return (
-      <div
-        ref={devToolsPanelRef}
-        className={styles.devToolsFloatingPanel}
-        role="dialog"
-        aria-labelledby="dev-tools-title"
-      >
+      <>
+        <div
+          ref={devToolsPanelRef}
+          className={styles.devToolsFloatingPanel}
+          role="dialog"
+          aria-labelledby="dev-tools-title"
+        >
         <div
           className={styles.devToolsHeader}
           onPointerDown={startDevToolsPanelDrag}
@@ -14510,6 +15571,23 @@ function HomeContent(): React.JSX.Element {
             ::
           </span>
         </div>
+        <button
+          type="button"
+          className={`${styles.devToolsSection} ${styles.devToolsSectionButton}`}
+          onClick={() => setDevTogglesOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={devTogglesOpen}
+          aria-controls="dev-toggles-modal"
+        >
+          <span className={styles.devToolsSectionTitle}>Bot import</span>
+          <span className={styles.devToolsToggleSummary}>
+            Paste JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
+          </span>
+          <span className={styles.devToolsSectionHint}>
+            Off (default): Import opens the file picker for .bot files only. On: Import shows upload plus paste-from-clipboard.
+          </span>
+        </button>
+
         <div className={styles.devToolsSection}>
           <h3 className={styles.devToolsSectionTitle}>Viewport</h3>
           <p className={styles.devToolsViewportStatus} aria-live="polite">
@@ -14711,12 +15789,14 @@ function HomeContent(): React.JSX.Element {
             Close
           </button>
         </div>
-      </div>
+        </div>
+        {renderDevTogglesModal()}
+      </>
     );
   };
 
-  // ── Shared right-hand panels (Settings / Bots / Images) ─────────────
-  // Both the Chat shell and the Sandbox shell reach these three drawers
+  // ── Shared right-hand panels (Settings / Bots / Images / Opinions) ──
+  // Both the Chat shell and the Sandbox shell reach these drawers
   // via the sidebar footer. Extracted into a single helper so the
   // surfaces stay in lockstep — a fix to the Bots panel shouldn't need
   // to be applied twice, and the shell backdrop click behaviour must
@@ -15057,6 +16137,69 @@ function HomeContent(): React.JSX.Element {
           )}
           </div>
           {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+        </div>
+      )}
+
+      {/* ── Opinions panel ── */}
+      {panel === "opinions" && (
+        <div
+          className={`${styles.panel} ${styles.panelOpinions}`}
+          data-closing={panelClosing ? "true" : undefined}
+        >
+          <div className={styles.panelHeader}>
+            <h3>Opinions</h3>
+            <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
+          </div>
+          <div className={styles.opinionPanelBody}>
+            <p className={styles.opinionPanelIntro}>
+              This meter reflects how this bot currently experiences the conversation.
+            </p>
+            {sessionOpinion ? (
+              <>
+                <div
+                  className={styles.opinionOrbShell}
+                  data-band={sessionOpinion.band}
+                  data-trend={sessionOpinion.trend}
+                  style={
+                    {
+                      "--opinion-score": String(sessionOpinion.score),
+                    } as React.CSSProperties
+                  }
+                >
+                  <span className={styles.opinionOrbRing} aria-hidden="true" />
+                  <span className={styles.opinionOrbRing} aria-hidden="true" />
+                  <span className={styles.opinionOrbRing} aria-hidden="true" />
+                  <div className={styles.opinionOrbCore}>
+                    <strong>{sessionOpinion.score}%</strong>
+                    <small>{opinionBandTitle(sessionOpinion.band)}</small>
+                  </div>
+                </div>
+                <div className={styles.opinionSummary}>
+                  <strong>{opinionBandDescription(sessionOpinion.band)}</strong>
+                  <p>{sessionOpinion.lastReason}</p>
+                  <small>
+                    Last updated{" "}
+                    {new Date(sessionOpinion.updatedAt).toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </small>
+                </div>
+                {sessionOpinion.recentReasons.length > 0 && (
+                  <ul className={styles.opinionReasonList}>
+                    {sessionOpinion.recentReasons.map((reason, index) => (
+                      <li key={`${reason}-${index}`}>{reason}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <div className={styles.opinionEmptyState}>
+                <strong>Opinion meter is warming up</strong>
+                <p>Send a message to generate the first read for this chat.</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -15420,13 +16563,6 @@ function HomeContent(): React.JSX.Element {
         // the inert "Update" button remains visually identical to the
         // inert "Create bot" button — same chrome, different word.
         const primaryLabel = editingBotId ? "Update" : "Create bot";
-        const editingBotDeleteKey = editingBot ? `${BOT_DELETE_KEY_PREFIX}${editingBot.id}` : null;
-        const deleteArmed = Boolean(
-          editingBotDeleteKey && pendingDeleteKey === editingBotDeleteKey
-        );
-        const canDeleteEditingBot = Boolean(
-          editingBot && editingBot.delete_protected !== 1
-        );
 
         // Derive the inline --accent / --accent-text / --accent-ink
         // triad from the currently-picked color so the primary button
@@ -15478,6 +16614,24 @@ function HomeContent(): React.JSX.Element {
             ? "Purpose only"
             : `${completedProfileCategories} profile section${completedProfileCategories === 1 ? "" : "s"} filled`;
 
+        const headerTrashEnabled =
+          !busy &&
+          (!editingBotId || (editingBot && editingBot.delete_protected !== 1));
+        const headerTrashAriaLabel = busy
+          ? "Wait for the current action to finish"
+          : !editingBotId
+            ? "Clear all fields in the new bot form"
+            : editingBot && editingBot.delete_protected === 1
+              ? "Delete bot — protected; turn off delete protection first"
+              : `Delete ${editingBot?.name ?? "bot"}`;
+        const headerTrashTitle = busy
+          ? "Wait for the current action to finish"
+          : !editingBotId
+            ? "Clear the customizer and start a fresh new bot"
+            : editingBot && editingBot.delete_protected === 1
+              ? "Protected bot — toggle delete protection off in the form"
+              : `Delete ${editingBot?.name ?? "bot"}`;
+
         return (
           <div
             className={`${styles.panel} ${styles.panelBots}`}
@@ -15493,28 +16647,55 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.panelHeader}>
               <h3>{!botPanelLibraryEnabled ? "Edit Bot" : "Bots"}</h3>
               <div className={styles.panelHeaderActions}>
-                {botPanelLibraryEnabled && (
-                  <>
-                    <input
-                      ref={botImportInputRef}
-                      type="file"
-                      accept=".md,.json,text/markdown,application/json"
-                      className={styles.panelHiddenFileInput}
-                      onChange={(event) => {
-                        void handleBotImportFileSelection(event);
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className={styles.panelHeaderIconButton}
-                      onClick={openBotImportPicker}
-                      aria-label="Import bot file"
-                      title="Import bot file"
-                    >
-                      ↑
-                    </button>
-                  </>
-                )}
+                <input
+                  ref={botImportInputRef}
+                  type="file"
+                  accept=".bot"
+                  className={styles.panelHiddenFileInput}
+                  onChange={(event) => {
+                    void handleBotImportFileSelection(event);
+                  }}
+                />
+                <button
+                  type="button"
+                  className={styles.panelHeaderIconButton}
+                  onClick={openImportBotModal}
+                  aria-label="Import bot from .bot file"
+                  title="Import a Prism .bot export"
+                >
+                  <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
+                    <IconUpload />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.panelHeaderIconButton} ${styles.panelHeaderDangerTrashButton}`}
+                  data-delete-affordance="true"
+                  disabled={!headerTrashEnabled}
+                  aria-label={headerTrashAriaLabel}
+                  title={headerTrashTitle}
+                  onClick={() => {
+                    if (busy) return;
+                    if (!editingBotId) {
+                      disarmDelete();
+                      setPanelError(null);
+                      setPanelNotice(null);
+                      resetBotForm();
+                      return;
+                    }
+                    if (!editingBot || editingBot.delete_protected === 1) return;
+                    disarmDelete();
+                    setPanelBotDeleteConfirm({
+                      id: editingBot.id,
+                      name: editingBot.name,
+                      hadUnsavedChanges: hasEditChanges,
+                    });
+                  }}
+                >
+                  <span className={styles.panelHeaderDangerTrashGlyph} aria-hidden="true">
+                    <IconTrash />
+                  </span>
+                </button>
                 <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
               </div>
             </div>
@@ -15941,33 +17122,6 @@ function HomeContent(): React.JSX.Element {
               >
                 {primaryLabel}
               </button>
-              {canDeleteEditingBot && editingBotDeleteKey && (
-                <button
-                  type="button"
-                  className={`${styles.botFormDeleteButton} ${deleteArmed ? styles.botFormDeleteButtonArmed : ""}`}
-                  data-delete-affordance="true"
-                  aria-label={
-                    deleteArmed
-                      ? `Confirm delete ${editingBot.name}`
-                      : `Delete ${editingBot.name}`
-                  }
-                  title={
-                    deleteArmed
-                      ? `Confirm delete ${editingBot.name}`
-                      : `Delete ${editingBot.name}`
-                  }
-                  onClick={() => {
-                    if (deleteArmed) {
-                      void deleteBot(editingBot.id);
-                    } else {
-                      armDelete(editingBotDeleteKey);
-                    }
-                  }}
-                  disabled={busy}
-                >
-                  {deleteArmed ? "Are you sure?" : "Delete"}
-                </button>
-              )}
               </form>
             )}
 
@@ -16199,6 +17353,125 @@ function HomeContent(): React.JSX.Element {
                 </div>
               )}
             </section>
+            )}
+            {importBotModalPhase !== "closed" && (
+              <div
+                className={styles.botPreferredModelsModalBackdrop}
+                role="presentation"
+                onClick={() => closeImportBotModal()}
+              >
+                <div
+                  className={styles.botPreferredModelsModal}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="import-bot-modal-title"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <header className={styles.botPreferredModelsModalHeader}>
+                    <div>
+                      <span>{botPanelLibraryEnabled ? "Bot library" : "Edit bot"}</span>
+                      <h4 id="import-bot-modal-title">
+                        {importBotModalPhase === "choose" ? "Import bot" : "Paste JSON"}
+                      </h4>
+                      <p>
+                        {importBotModalPhase === "choose"
+                          ? "Bring in a bot from another Prism setup — from a file or the clipboard."
+                          : "Paste the JSON object from a bot export (markdown exports are OK — fenced blocks are read automatically)."}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => closeImportBotModal()}
+                      aria-label="Close import bot dialog"
+                    >
+                      ×
+                    </button>
+                  </header>
+                  <div className={styles.botPreferredModelsModalBody}>
+                    {importBotModalPhase === "choose" ? (
+                      <>
+                        <button
+                          type="button"
+                          className={styles.importBotModalChoiceButton}
+                          onClick={() => handleImportBotChooseUpload()}
+                        >
+                          <strong>Upload from file</strong>
+                          <small>.bot export from disk</small>
+                        </button>
+                        {devToolsBotImportPasteEnabled ? (
+                          <button
+                            type="button"
+                            className={styles.importBotModalChoiceButton}
+                            onClick={() => {
+                              setImportBotPasteError(null);
+                              setImportBotModalPhase("paste");
+                            }}
+                          >
+                            <strong>Paste JSON</strong>
+                            <small>Paste the export JSON from the clipboard</small>
+                          </button>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <label className={styles.importBotModalPasteLabel} htmlFor="import-bot-paste-json">
+                          Bot export JSON
+                        </label>
+                        <textarea
+                          id="import-bot-paste-json"
+                          className={styles.importBotModalPasteTextarea}
+                          value={importBotPasteText}
+                          onChange={(event) => {
+                            setImportBotPasteText(event.currentTarget.value);
+                            if (importBotPasteError) setImportBotPasteError(null);
+                          }}
+                          spellCheck={false}
+                          autoComplete="off"
+                          rows={10}
+                          placeholder='{"schema":"prism-bot-export-v1", ...}'
+                          aria-invalid={importBotPasteError ? "true" : undefined}
+                          aria-describedby={
+                            importBotPasteError
+                              ? "import-bot-paste-json-hint import-bot-paste-json-error"
+                              : "import-bot-paste-json-hint"
+                          }
+                          disabled={importBotPasteBusy}
+                        />
+                        <p id="import-bot-paste-json-hint" className={styles.muted}>
+                          Max about {Math.round(BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES / 1024)} KB UTF-8. Only data is
+                          parsed — no scripts run.
+                        </p>
+                        {importBotPasteError && (
+                          <p id="import-bot-paste-json-error" className={styles.error} role="alert">
+                            {importBotPasteError}
+                          </p>
+                        )}
+                        <div className={styles.importBotModalPasteActions}>
+                          <button
+                            type="button"
+                            className={styles.deleteAllModalCancel}
+                            onClick={() => {
+                              setImportBotPasteError(null);
+                              setImportBotModalPhase("choose");
+                            }}
+                            disabled={importBotPasteBusy}
+                          >
+                            Back
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.deleteAllModalConfirm}
+                            onClick={() => void handleConfirmImportBotPaste()}
+                            disabled={importBotPasteBusy || importBotPasteText.trim().length === 0}
+                          >
+                            {importBotPasteBusy ? "Importing…" : "Import"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
             {/* Errors from createBot / deleteBot / saveBot used to silently
                 surface in the composer behind the drawer overlay. They now
@@ -16562,20 +17835,14 @@ function HomeContent(): React.JSX.Element {
         {visibleConversations.length > 0 && (
           <div className={styles.conversationHeaderRow}>
             <span className={styles.sectionLabel}>Conversations</span>
-            <button
-              type="button"
-              className={styles.conversationDeleteAllButton}
-              onClick={() => armDelete(DELETE_ALL_KEY)}
-              aria-label="Delete all chats"
-              title="Delete all chats"
-            >
-              ×
-            </button>
+            {renderConversationDeleteAllButton()}
           </div>
         )}
         <ul
           className={styles.conversationList}
           data-private-empty={showPrivateConversationEmptyState ? "true" : undefined}
+          data-delete-holding={holdingKey === DELETE_ALL_KEY ? "true" : undefined}
+          data-delete-armed-all={pendingDeleteKey === DELETE_ALL_KEY ? "true" : undefined}
           onScroll={event => setConversationListScrollTop(event.currentTarget.scrollTop)}
         >
           {renderConversationListContents()}
@@ -16599,8 +17866,9 @@ function HomeContent(): React.JSX.Element {
               type="button"
               className={styles.hubHomeButton}
               onClick={resetChatHeaderToNewChat}
-              aria-label="Back to new chat"
-              title="Back to new chat"
+              data-home-affordance={headerIdentity ? "identity" : "wordmark"}
+              aria-label="Back to Sandbox"
+              title="Back to Sandbox"
             >
               {headerIdentity ? (
                 <span
@@ -16620,15 +17888,22 @@ function HomeContent(): React.JSX.Element {
                   <span className={styles.headerIdentityGlyph} aria-hidden="true">
                     <BotGlyph name={headerIdentity.glyph} size={32} strokeWidth={1.55} />
                   </span>
-                  <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
+                  <span className={styles.headerIdentityCopy}>
+                    <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
+                    <span className={styles.headerIdentityHint}>← Back to sandbox</span>
+                  </span>
                 </span>
               ) : (
                 <PrismWordmark className={styles.hubHomeWordmark} />
               )}
             </button>
-            {viewportWidth <= PICKER_MOBILE_BREAKPOINT ? renderMemoryToasts() : null}
+            {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
-          <h2>{detail?.title ?? "New conversation"}</h2>
+          {shouldShowHeaderConversationTitle ? (
+            <h2 className={styles.chatHeaderTitle}>{headerConversationTitle}</h2>
+          ) : (
+            <h2 className={styles.chatHeaderTitlePlaceholder} aria-hidden="true" />
+          )}
           {renderChatOverflowGear()}
         </header>
 
@@ -16641,9 +17916,10 @@ function HomeContent(): React.JSX.Element {
           <div
             className={`${styles.messages} ${
               !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
-            }`}
+            } ${askQuestionTailSpaceActive ? styles.messagesAskQuestionTailSpace : ""}`}
             ref={messagesScrollRef}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
+            onScroll={handleMessagesPaneScroll}
           >
             {!detail && !pendingReplyVisible && (() => {
             // Chat-mode empty state:
@@ -16750,6 +18026,21 @@ function HomeContent(): React.JSX.Element {
               : heroBot?.name?.trim()
                 ? `Start conversation with ${heroBot.name.trim()}`
                 : "Start conversation";
+            const heroRecentConversations =
+              !pendingIncognito && heroBot?.id
+                ? conversations
+                    .filter((conversation) => !conversation.incognito && conversation.botId === heroBot.id)
+                    .sort(
+                      (a, b) =>
+                        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+                    )
+                    .slice(0, 8)
+                : [];
+            const shouldShowHeroNudge =
+              !heroStartDisabled &&
+              !emptyStateSearchActive &&
+              !suppressHeroCopy &&
+              !pendingReply;
             return (
               <div
                 className={emptyStateClassName}
@@ -16760,10 +18051,13 @@ function HomeContent(): React.JSX.Element {
                     starter prompt — the bot opens the conversation with its
                     own first message. Disabled mid-draft so accidental clicks
                     don't drop the user's typed text. */}
-                {!suppressHeroCopy && (
+                {!suppressHeroCopy && emptyStateSearchActive ? (
                   <button
                     type="button"
-                    className={styles.emptyStateIconButton}
+                    className={[
+                      styles.emptyStateIconButton,
+                      shouldShowHeroNudge ? styles.emptyStateIconButtonNudge : "",
+                    ].filter(Boolean).join(" ")}
                     data-bot-talk-hero="true"
                     onClick={handleHeroStartConversation}
                     disabled={heroStartDisabled}
@@ -16772,13 +18066,62 @@ function HomeContent(): React.JSX.Element {
                   >
                     {renderHero()}
                   </button>
-                )}
-                {!suppressHeroCopy && <div className={styles.emptyStateTitle}>{title}</div>}
-                {emptyStateSearchActive ? (
-                  renderEmptyStateBotSearch()
-                ) : suppressHeroCopy ? null : (
-                  <p className={styles.emptyStateHint}>{hint}</p>
-                )}
+                ) : null}
+                {emptyStateSearchActive ? renderEmptyStateBotSearch() : null}
+                {!emptyStateSearchActive && (!suppressHeroCopy || heroRecentConversations.length > 0) ? (
+                  <div
+                    className={styles.emptyStateInfoBand}
+                    data-empty-state-band-emphasis={heroBot ? "bot" : "default"}
+                  >
+                    {!suppressHeroCopy ? (
+                      <div className={styles.emptyStateInfoBandRow}>
+                        <button
+                          type="button"
+                          className={[
+                            styles.emptyStateIconButton,
+                            shouldShowHeroNudge ? styles.emptyStateIconButtonNudge : "",
+                          ].filter(Boolean).join(" ")}
+                          data-bot-talk-hero="true"
+                          onClick={handleHeroStartConversation}
+                          disabled={heroStartDisabled}
+                          title={heroStartTitle}
+                          aria-label={heroStartAriaLabel}
+                        >
+                          {renderHero()}
+                        </button>
+                        <div className={styles.emptyStateHeader}>
+                          <div className={styles.emptyStateTitle}>{title}</div>
+                          <p className={styles.emptyStateHint}>{hint}</p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {heroRecentConversations.length > 0 ? (
+                      <div className={styles.emptyStateRecentRailWrap}>
+                        <p className={styles.emptyStateRecentRailLabel}>
+                          Recent with {heroBot?.name?.trim() ?? "this bot"}
+                        </p>
+                        <div className={styles.emptyStateRecentRail} role="list" aria-label="Recent chats with selected bot">
+                          {heroRecentConversations.map((conversation) => (
+                            <button
+                              key={conversation.id}
+                              type="button"
+                              role="listitem"
+                              className={styles.emptyStateRecentChip}
+                              onClick={() => {
+                                clearConversationUnread(conversation.id);
+                                void refreshConversation(conversation.id);
+                              }}
+                              title={conversation.title}
+                              aria-label={`Open recent chat: ${conversation.title}`}
+                            >
+                              {conversation.title}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {/* Chat-mode start-of-conversation bot picker. Absent in
                     private chats (the "stripped down further" spec),
                     absent when the user has no bots yet. Clicking any
@@ -17079,6 +18422,7 @@ function HomeContent(): React.JSX.Element {
               msg.role === "user" && threadConversationAccentInk
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
                 : undefined;
+            const privateUserRoleHeader = detail?.incognito === true && msg.role === "user";
             const mobileFocusAccentStyle =
               contextFocusedMessageId === msg.id
                 ? ({
@@ -17108,6 +18452,7 @@ function HomeContent(): React.JSX.Element {
                 data-mobile-context={mobileContextMenu ? "true" : undefined}
                 data-message-id={msg.id}
                 data-message-edge={messageEdge}
+                data-private-user-role-header={privateUserRoleHeader ? "true" : undefined}
                 onContextMenuCapture={event => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -17281,15 +18626,14 @@ function HomeContent(): React.JSX.Element {
              Privacy stays conversation-level (sidebar "Private chat"
              button at chat start). If the open chat is private
              (detail.incognito) or a brand-new chat is armed as private
-             (pendingIncognito), the bot control is disabled — the starter
-             bot is locked for the private session — but the provider toggle
-             remains usable. */}
+             (pendingIncognito), provider is forced to Local and the
+             provider toggle is disabled. */}
           {(() => {
             const isLocal = settings?.preferredProvider === "local";
             const chatLocked =
               detail?.incognito === true || pendingIncognito;
-            const displayLocal = isLocal;
-            const providerDisabled = !settings;
+            const displayLocal = chatLocked ? true : isLocal;
+            const providerDisabled = !settings || chatLocked;
             // Bot-dropdown value resolves in priority order:
             //   1. chatBotOverride (string | null) — post-detail dropdown
             //      pick; the pending mid-thread switch.
@@ -17328,13 +18672,10 @@ function HomeContent(): React.JSX.Element {
             // onto a different bot.
             const botDisabled =
               !settings ||
-              chatLocked ||
               pendingReply ||
               !detail ||
               bots.length === 0;
-            const botTitle = chatLocked
-              ? "Private chats keep their starter bot and do not save memories."
-              : !detail
+            const botTitle = !detail
                 ? "Send your first message to change bots mid-thread."
                 : pendingReply
                   ? "Wait for the current reply before switching bots."
@@ -17391,14 +18732,18 @@ function HomeContent(): React.JSX.Element {
                       void switchProvider(isLocal ? "openai" : "local");
                     }}
                     aria-label={
-                      displayLocal
+                      chatLocked
+                        ? "Response mode: Local. Private chats are offline-only."
+                        : displayLocal
                         ? "Response mode: Local. Click to switch to Online."
                         : "Response mode: Online. Click to switch to Local."
                     }
                     aria-pressed={!displayLocal}
                     aria-disabled={providerDisabled}
                     title={
-                      displayLocal
+                      chatLocked
+                        ? "Private chats are offline-only."
+                        : displayLocal
                         ? "Switch to Online"
                         : "Switch to Local"
                     }
@@ -17466,6 +18811,7 @@ function HomeContent(): React.JSX.Element {
 
       {renderSharedPanels()}
       {renderDeleteAllModal()}
+      {renderPanelBotDeleteModal()}
       {renderDevToolsPanel()}
       {touchPreview && (
         <TouchPreviewBalloon
@@ -17573,20 +18919,14 @@ function HomeContent(): React.JSX.Element {
         {visibleConversations.length > 0 && (
           <div className={styles.conversationHeaderRow}>
             <span className={styles.sectionLabel}>Conversations</span>
-            <button
-              type="button"
-              className={styles.conversationDeleteAllButton}
-              onClick={() => armDelete(DELETE_ALL_KEY)}
-              aria-label="Delete all chats"
-              title="Delete all chats"
-            >
-              ×
-            </button>
+            {renderConversationDeleteAllButton()}
           </div>
         )}
         <ul
           className={styles.conversationList}
           data-private-empty={showPrivateConversationEmptyState ? "true" : undefined}
+          data-delete-holding={holdingKey === DELETE_ALL_KEY ? "true" : undefined}
+          data-delete-armed-all={pendingDeleteKey === DELETE_ALL_KEY ? "true" : undefined}
           onScroll={event => setConversationListScrollTop(event.currentTarget.scrollTop)}
         >
           {renderConversationListContents()}
@@ -17611,8 +18951,9 @@ function HomeContent(): React.JSX.Element {
               type="button"
               className={styles.hubHomeButton}
               onClick={resetChatHeaderToNewChat}
-              aria-label="Back to new chat"
-              title="Back to new chat"
+              data-home-affordance={headerIdentity ? "identity" : "wordmark"}
+              aria-label="Back to Sandbox"
+              title="Back to Sandbox"
             >
               {headerIdentity ? (
                 <span
@@ -17632,15 +18973,22 @@ function HomeContent(): React.JSX.Element {
                   <span className={styles.headerIdentityGlyph} aria-hidden="true">
                     <BotGlyph name={headerIdentity.glyph} size={32} strokeWidth={1.55} />
                   </span>
-                  <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
+                  <span className={styles.headerIdentityCopy}>
+                    <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
+                    <span className={styles.headerIdentityHint}>← Back to sandbox</span>
+                  </span>
                 </span>
               ) : (
                 <PrismWordmark className={styles.hubHomeWordmark} />
               )}
             </button>
-            {viewportWidth <= PICKER_MOBILE_BREAKPOINT ? renderMemoryToasts() : null}
+            {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
-          <h2>{detail?.title ?? "New conversation"}</h2>
+          {shouldShowHeaderConversationTitle ? (
+            <h2 className={styles.chatHeaderTitle}>{headerConversationTitle}</h2>
+          ) : (
+            <h2 className={styles.chatHeaderTitlePlaceholder} aria-hidden="true" />
+          )}
           {renderChatOverflowGear()}
         </header>
 
@@ -17653,9 +19001,10 @@ function HomeContent(): React.JSX.Element {
           <div
             className={`${styles.messages} ${
               !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
-            }`}
+            } ${askQuestionTailSpaceActive ? styles.messagesAskQuestionTailSpace : ""}`}
             ref={messagesScrollRef}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
+            onScroll={handleMessagesPaneScroll}
           >
             {!detail && !pendingReplyVisible && (() => {
             // Sandbox empty state — mirrors the Chat-mode empty state so
@@ -17766,6 +19115,21 @@ function HomeContent(): React.JSX.Element {
               : heroBot?.name?.trim()
                 ? `Start conversation with ${heroBot.name.trim()}`
                 : "Start conversation";
+            const heroRecentConversations =
+              !pendingIncognito && heroBot?.id
+                ? conversations
+                    .filter((conversation) => !conversation.incognito && conversation.botId === heroBot.id)
+                    .sort(
+                      (a, b) =>
+                        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+                    )
+                    .slice(0, 8)
+                : [];
+            const shouldShowHeroNudge =
+              !heroStartDisabled &&
+              !emptyStateSearchActive &&
+              !suppressHeroCopy &&
+              !pendingReply;
             return (
               <div
                 className={emptyStateClassName}
@@ -17776,10 +19140,13 @@ function HomeContent(): React.JSX.Element {
                     starter prompt — the bot opens the conversation with its
                     own first message. Disabled mid-draft so accidental clicks
                     don't drop the user's typed text. */}
-                {!suppressHeroCopy && (
+                {!suppressHeroCopy && emptyStateSearchActive ? (
                   <button
                     type="button"
-                    className={styles.emptyStateIconButton}
+                    className={[
+                      styles.emptyStateIconButton,
+                      shouldShowHeroNudge ? styles.emptyStateIconButtonNudge : "",
+                    ].filter(Boolean).join(" ")}
                     data-bot-talk-hero="true"
                     onClick={handleHeroStartConversation}
                     disabled={heroStartDisabled}
@@ -17788,13 +19155,62 @@ function HomeContent(): React.JSX.Element {
                   >
                     {renderHero()}
                   </button>
-                )}
-                {!suppressHeroCopy && <div className={styles.emptyStateTitle}>{title}</div>}
-                {emptyStateSearchActive ? (
-                  renderEmptyStateBotSearch()
-                ) : suppressHeroCopy ? null : (
-                  <p className={styles.emptyStateHint}>{hint}</p>
-                )}
+                ) : null}
+                {emptyStateSearchActive ? renderEmptyStateBotSearch() : null}
+                {!emptyStateSearchActive && (!suppressHeroCopy || heroRecentConversations.length > 0) ? (
+                  <div
+                    className={styles.emptyStateInfoBand}
+                    data-empty-state-band-emphasis={heroBot ? "bot" : "default"}
+                  >
+                    {!suppressHeroCopy ? (
+                      <div className={styles.emptyStateInfoBandRow}>
+                        <button
+                          type="button"
+                          className={[
+                            styles.emptyStateIconButton,
+                            shouldShowHeroNudge ? styles.emptyStateIconButtonNudge : "",
+                          ].filter(Boolean).join(" ")}
+                          data-bot-talk-hero="true"
+                          onClick={handleHeroStartConversation}
+                          disabled={heroStartDisabled}
+                          title={heroStartTitle}
+                          aria-label={heroStartAriaLabel}
+                        >
+                          {renderHero()}
+                        </button>
+                        <div className={styles.emptyStateHeader}>
+                          <div className={styles.emptyStateTitle}>{title}</div>
+                          <p className={styles.emptyStateHint}>{hint}</p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {heroRecentConversations.length > 0 ? (
+                      <div className={styles.emptyStateRecentRailWrap}>
+                        <p className={styles.emptyStateRecentRailLabel}>
+                          Recent with {heroBot?.name?.trim() ?? "this bot"}
+                        </p>
+                        <div className={styles.emptyStateRecentRail} role="list" aria-label="Recent chats with selected bot">
+                          {heroRecentConversations.map((conversation) => (
+                            <button
+                              key={conversation.id}
+                              type="button"
+                              role="listitem"
+                              className={styles.emptyStateRecentChip}
+                              onClick={() => {
+                                clearConversationUnread(conversation.id);
+                                void refreshConversation(conversation.id);
+                              }}
+                              title={conversation.title}
+                              aria-label={`Open recent chat: ${conversation.title}`}
+                            >
+                              {conversation.title}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {!pendingIncognito && pickerBots.length > 0 && (() => {
                   // Same geometry math as the Chat-mode picker: mobile
                   // stays square, desktop goes widescreen, and density
@@ -18085,6 +19501,7 @@ function HomeContent(): React.JSX.Element {
               msg.role === "user" && threadConversationAccentInk
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
                 : undefined;
+            const privateUserRoleHeader = detail?.incognito === true && msg.role === "user";
             const mobileFocusAccentStyle =
               contextFocusedMessageId === msg.id
                 ? ({
@@ -18114,6 +19531,7 @@ function HomeContent(): React.JSX.Element {
                 data-mobile-context={mobileContextMenu ? "true" : undefined}
                 data-message-id={msg.id}
                 data-message-edge={messageEdge}
+                data-private-user-role-header={privateUserRoleHeader ? "true" : undefined}
                 onContextMenuCapture={event => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -18272,7 +19690,7 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.composeTools}>
             {(() => {
               const botHasCommenced = !!detail && detail.messages.length > 0;
-              const botDisabled = privateChatActive || !detail;
+              const botDisabled = !detail;
               return (
                 <>
                   {/* Pre-chat (!detail): dropdown is disabled so the tile
@@ -18285,15 +19703,13 @@ function HomeContent(): React.JSX.Element {
                       by changing this dropdown. */}
                   {bots.length > 0 && (
                     <ComposerBotPicker
-                      value={privateChatActive ? "" : selectedBotId ?? ""}
+                      value={selectedBotId ?? ""}
                       onChange={next => setSelectedBotId(next || null)}
                       bots={botHasCommenced ? bots : filteredBots}
                       resolvedTheme={resolvedTheme}
                       disabled={botDisabled}
                       title={
-                        privateChatActive
-                          ? "Private chats always run as the Default persona."
-                          : !detail
+                        !detail
                             ? "Pick a bot from the grid above to start the chat. You can swap here between sends once it begins."
                             : undefined
                       }
@@ -18316,8 +19732,10 @@ function HomeContent(): React.JSX.Element {
               );
             })()}
             {(() => {
+              const privateLocked = privateChatActive;
               const isLocal = settings?.preferredProvider === "local";
-              const providerDisabled = !settings;
+              const displayLocal = privateLocked ? true : isLocal;
+              const providerDisabled = !settings || privateLocked;
               return (
                 <div className={`${styles.modeControl} ${providerDisabled ? styles.modeControlLocked : ""}`}>
                   <button
@@ -18328,14 +19746,18 @@ function HomeContent(): React.JSX.Element {
                       void switchProvider(isLocal ? "openai" : "local");
                     }}
                     aria-label={
-                      isLocal
+                      privateLocked
+                        ? "Response mode: Local. Private chats are offline-only."
+                        : displayLocal
                         ? "Response mode: Local. Click to switch to Online."
                         : "Response mode: Online. Click to switch to Local."
                     }
-                    aria-pressed={!isLocal}
+                    aria-pressed={!displayLocal}
                     aria-disabled={providerDisabled}
                     title={
-                      isLocal
+                      privateLocked
+                        ? "Private chats are offline-only."
+                        : displayLocal
                         ? "Switch to Online"
                         : "Switch to Local"
                     }
@@ -18343,17 +19765,17 @@ function HomeContent(): React.JSX.Element {
                   >
                     <span
                       className={`${styles.modeThumb} ${
-                        isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
+                        displayLocal ? styles.modeThumbLocal : styles.modeThumbOnline
                       }`}
                     >
                       <span
                         className={`${styles.providerDot} ${
-                          isLocal ? styles.providerDotLocal : styles.providerDotOnline
+                          displayLocal ? styles.providerDotLocal : styles.providerDotOnline
                         }`}
                         aria-hidden="true"
                       />
                       <span className={styles.modeThumbLabel}>
-                        {isLocal ? "LOCAL" : "ONLINE"}
+                        {displayLocal ? "LOCAL" : "ONLINE"}
                       </span>
                     </span>
                   </button>
@@ -18421,6 +19843,7 @@ function HomeContent(): React.JSX.Element {
 
       {renderSharedPanels()}
       {renderDeleteAllModal()}
+      {renderPanelBotDeleteModal()}
       {renderDevToolsPanel()}
       {touchPreview && (
         <TouchPreviewBalloon
