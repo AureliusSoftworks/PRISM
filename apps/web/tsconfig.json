@@ -20,7 +20,9 @@
     ],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@localai/shared": ["../../packages/shared/src/index.ts"],
+      "@localai/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": [
