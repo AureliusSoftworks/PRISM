@@ -13373,8 +13373,8 @@
   appearance: none;
   -webkit-appearance: none;
   background: var(--accent);
-  color: #f1df63;
-  border: 1px solid #f1df63;
+  color: var(--accent-ink);
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 72%, var(--line-strong));
   border-radius: 999px;
   height: 30px;
   padding: 0 14px;
