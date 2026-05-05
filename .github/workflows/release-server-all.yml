@@ -101,6 +101,7 @@ jobs:
           tar \
             --exclude=.git \
             --exclude=node_modules \
+            --exclude=release-artifacts \
             --exclude=apps/web/.next \
             --exclude=apps/api/data \
             -czf "release-artifacts/server/prism-server-v${RELEASE_VERSION}-bundle.tar.gz" \
