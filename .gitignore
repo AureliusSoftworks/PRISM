@@ -23,6 +23,11 @@ apps/api/data/
 vault/.obsidian/workspace.json
 vault/.obsidian/workspace-mobile.json
 scripts/kb/.cache/
+vault/**/DerivedData/
+vault/02-apps/**/.next/
+vault/02-apps/**/build/
+vault/02-apps/server-windows/**/bin/
+vault/02-apps/server-windows/**/obj/
 
 # Apple signing and distribution secrets
 *.p12
