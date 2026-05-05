@@ -5,6 +5,7 @@
   "scripts": {
     "predev": "npm --prefix ../../packages/shared run build",
     "prebuild": "npm --prefix ../../packages/shared run build",
+    "pretypecheck": "npm --prefix ../../packages/shared run build",
     "dev": "next dev -p 18788",
     "build": "next build",
     "start": "PORT=18788 node .next/standalone/apps/web/server.js",
