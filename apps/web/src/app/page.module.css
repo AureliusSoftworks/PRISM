@@ -4777,7 +4777,8 @@
   overflow-y: hidden;
   padding: 2px 2px 4px;
   scroll-snap-type: x proximity;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   mask-image: linear-gradient(
     to right,
     transparent,
@@ -4799,12 +4800,9 @@
 }
 
 .emptyStateRecentRail::-webkit-scrollbar {
-  height: 7px;
-}
-
-.emptyStateRecentRail::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--line) 70%, var(--accent-ink, var(--fg)) 30%);
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .emptyStateRecentChip {
