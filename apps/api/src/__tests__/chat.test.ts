@@ -85,6 +85,20 @@ function createChatTestDb(): DatabaseSync {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, conversation_id, bot_scope_key)
     );
+    CREATE TABLE bot_opinions (
+      user_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      bot_id TEXT,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'open',
+      boundary_level TEXT NOT NULL DEFAULT 'none',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      repair_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, bot_scope_key)
+    );
   `);
   return db;
 }
@@ -1654,5 +1668,87 @@ describe("processChatMessage conversational memory cues", () => {
     assert.ok(freshConversation.opinion);
     assert.equal(freshConversation.opinion?.score, 53);
     assert.notEqual(freshConversation.conversation.id, first.conversation.id);
+  });
+
+  it("keeps long-term bot opinions scoped per bot", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Understood.");
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "shut up and do it now",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+    const second = await processChatMessage(
+      db,
+      "user-1",
+      "Thank you for helping.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-2",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.ok(first.botOpinion);
+    assert.ok(second.botOpinion);
+    assert.equal(first.botOpinion?.trend, "down");
+    assert.equal(second.botOpinion?.trend, "up");
+    const rows = db
+      .prepare("SELECT bot_scope_key, score FROM bot_opinions ORDER BY bot_scope_key")
+      .all() as Array<{ bot_scope_key: string; score: number }>;
+    assert.deepEqual(rows.map((row) => row.bot_scope_key), ["bot-1", "bot-2"]);
+    assert.notEqual(rows[0]?.score, rows[1]?.score);
+  });
+
+  it("lets explicit repair recover a strained bot opinion", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Understood.");
+
+    const harsh = await processChatMessage(
+      db,
+      "user-1",
+      "you are useless, do it now",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+    const repaired = await processChatMessage(
+      db,
+      "user-1",
+      "Sorry, that was rude. Let me rephrase.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      },
+      harsh.conversation.id
+    );
+
+    assert.ok(harsh.botOpinion);
+    assert.ok(repaired.botOpinion);
+    assert.equal(repaired.botOpinion?.trend, "up");
+    assert.ok((repaired.botOpinion?.score ?? 0) > (harsh.botOpinion?.score ?? 0));
+    assert.equal(repaired.botOpinion?.repairCount, 1);
+    assert.match(repaired.botOpinion?.lastReason ?? "", /repair/i);
   });
 });

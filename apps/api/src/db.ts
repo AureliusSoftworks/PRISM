@@ -18,6 +18,8 @@ export interface DbUserRecord {
   providerLocked: number;
   autoMemory: number;
   autoSwitchModel: number;
+  preferredLocalModel: string | null;
+  preferredOnlineModel: string | null;
   secondaryOllamaHost: string | null;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
@@ -72,6 +74,8 @@ export function createDatabase(): DatabaseSync {
       auto_memory INTEGER NOT NULL DEFAULT 1,
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
+      preferred_local_model TEXT,
+      preferred_online_model TEXT,
       secondary_ollama_host TEXT,
       openai_key_ciphertext TEXT,
       openai_key_iv TEXT,
@@ -209,6 +213,21 @@ export function createDatabase(): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS bot_opinions (
+      user_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      bot_id TEXT,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'open',
+      boundary_level TEXT NOT NULL DEFAULT 'none',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      repair_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, bot_scope_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
   const userColumns = db
     .prepare("PRAGMA table_info(users)")
@@ -228,6 +247,18 @@ export function createDatabase(): DatabaseSync {
   const hasSecondaryOllamaHost = userColumns.some((column) => column.name === "secondary_ollama_host");
   if (!hasSecondaryOllamaHost) {
     db.exec("ALTER TABLE users ADD COLUMN secondary_ollama_host TEXT;");
+  }
+  const hasPreferredLocalModel = userColumns.some(
+    (column) => column.name === "preferred_local_model"
+  );
+  if (!hasPreferredLocalModel) {
+    db.exec("ALTER TABLE users ADD COLUMN preferred_local_model TEXT;");
+  }
+  const hasPreferredOnlineModel = userColumns.some(
+    (column) => column.name === "preferred_online_model"
+  );
+  if (!hasPreferredOnlineModel) {
+    db.exec("ALTER TABLE users ADD COLUMN preferred_online_model TEXT;");
   }
   db.exec(`
     UPDATE users
@@ -380,6 +411,9 @@ export function createDatabase(): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_session_opinions_user_bot ON session_opinions (user_id, bot_id);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_bot_opinions_user_bot ON bot_opinions (user_id, bot_id);"
   );
 
   return db;

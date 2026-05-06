@@ -235,10 +235,25 @@ export interface SessionOpinion {
   updatedAt: string;
 }
 
+export type BotOpinionBand = "wounded" | "careful" | "open" | "bonded";
+export type BotOpinionBoundaryLevel = "none" | "gentle" | "firm";
+
+export interface BotOpinion {
+  score: number;
+  band: BotOpinionBand;
+  boundaryLevel: BotOpinionBoundaryLevel;
+  trend: OpinionTrend;
+  lastReason: string;
+  recentReasons: string[];
+  repairCount: number;
+  updatedAt: string;
+}
+
 export interface ChatResponsePayload extends StarterChatExtras {
   conversation: Conversation;
   assistantMessage: ChatMessage;
   opinion?: SessionOpinion;
+  botOpinion?: BotOpinion;
   memoryLearned?: {
     created: Array<{
       id: string;

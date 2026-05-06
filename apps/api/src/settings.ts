@@ -34,6 +34,8 @@ export interface CurrentSettings {
   providerLocked: number;
   autoMemory: number;
   hiddenBotModelIds: string;
+  preferredLocalModel: string | null;
+  preferredOnlineModel: string | null;
   secondaryOllamaHost: string | null;
   primaryOllamaHost: string;
 }
@@ -45,6 +47,8 @@ export interface NextSettings {
   providerLocked: number;
   autoMemory: number;
   hiddenBotModelIds: string[];
+  preferredLocalModel: string | null;
+  preferredOnlineModel: string | null;
   secondaryOllamaHost: string | null;
   /**
    * Intent for the OpenAI API key:
@@ -173,6 +177,13 @@ function readHiddenBotModelIds(value: unknown, fallback: string): string[] {
   ));
 }
 
+function readPreferredModel(value: unknown, fallback: string | null): string | null {
+  if (value === undefined) return fallback;
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 /**
  * Defensively strip shell/.env decoration that users commonly paste into the
  * Settings API-key field when copying from a `.env` line or quoted example.
@@ -237,6 +248,14 @@ export function resolveNextSettings(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
   );
+  const preferredLocalModel = readPreferredModel(
+    body.preferredLocalModel,
+    current.preferredLocalModel
+  );
+  const preferredOnlineModel = readPreferredModel(
+    body.preferredOnlineModel,
+    current.preferredOnlineModel
+  );
   const normalizedSecondaryOllamaHost = normalizeSecondaryOllamaHostInput(
     body.secondaryOllamaHost,
     current.primaryOllamaHost
@@ -269,6 +288,8 @@ export function resolveNextSettings(
     providerLocked,
     autoMemory,
     hiddenBotModelIds,
+    preferredLocalModel,
+    preferredOnlineModel,
     secondaryOllamaHost,
     openAiKeyIntent,
   };

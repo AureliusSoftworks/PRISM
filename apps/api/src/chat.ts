@@ -31,6 +31,9 @@ import {
 } from "./memory-summarizer.ts";
 import type {
   AskQuestionPayload,
+  BotOpinion,
+  BotOpinionBand,
+  BotOpinionBoundaryLevel,
   ChatMessage,
   ChatMode,
   Conversation,
@@ -53,6 +56,7 @@ export interface ProcessChatMessageResult {
   conversation: Conversation;
   conversationStarters?: string[];
   opinion?: SessionOpinion;
+  botOpinion?: BotOpinion;
   memoryLearned?: {
     created: Array<{
       id: string;
@@ -132,11 +136,32 @@ const NEGATIVE_PHRASES = [
   "hate this",
 ];
 const BRUSQUE_PHRASES = ["do it", "just do it", "whatever", "hurry up", "now"];
+const REPAIR_PHRASES = [
+  "sorry",
+  "i apologize",
+  "my bad",
+  "that was rude",
+  "i was harsh",
+  "let me rephrase",
+  "i'll slow down",
+  "i will slow down",
+];
 
 type OpinionEvaluation = {
   delta: number;
   reason: string;
   trend: OpinionTrend;
+};
+
+type BotOpinionRow = {
+  score: number;
+  band: string;
+  boundary_level: string;
+  trend: string;
+  last_reason: string;
+  recent_reasons: string;
+  repair_count: number;
+  updated_at: string;
 };
 
 function clampOpinionScore(score: number): number {
@@ -231,6 +256,70 @@ function buildOpinion(
     lastReason,
     recentReasons,
     updatedAt,
+  };
+}
+
+function botOpinionBandFromScore(score: number): BotOpinionBand {
+  if (score >= 78) return "bonded";
+  if (score >= 52) return "open";
+  if (score >= 28) return "careful";
+  return "wounded";
+}
+
+function botOpinionBoundaryFromScore(score: number): BotOpinionBoundaryLevel {
+  if (score <= 22) return "firm";
+  if (score <= 42) return "gentle";
+  return "none";
+}
+
+function normalizeBotOpinionBand(value: string): BotOpinionBand {
+  if (value === "wounded" || value === "careful" || value === "open" || value === "bonded") {
+    return value;
+  }
+  return "open";
+}
+
+function normalizeBotOpinionBoundary(value: string): BotOpinionBoundaryLevel {
+  if (value === "none" || value === "gentle" || value === "firm") return value;
+  return "none";
+}
+
+function hasRepairSignal(normalized: string): boolean {
+  return countPhraseHits(normalized, REPAIR_PHRASES) > 0;
+}
+
+function evaluateBotOpinionTurn(message: string, existing?: BotOpinion | null): OpinionEvaluation & { repair: boolean } {
+  const normalized = normalizeOpinionText(message);
+  const repair = hasRepairSignal(normalized);
+  const sessionEvaluation = evaluateUserTurnOpinion(message);
+  let delta = Math.max(-5, Math.min(4, Math.round(sessionEvaluation.delta * 0.45)));
+  if (repair) {
+    // Repair should matter most when trust is low, without instantly erasing the pattern.
+    delta += existing && existing.score < 52 ? 7 : 4;
+  }
+  if (delta > 0) {
+    return {
+      delta,
+      repair,
+      trend: "up",
+      reason: repair
+        ? "The user offered repair, which helped rebuild trust."
+        : "The user treated the bot with care and collaboration.",
+    };
+  }
+  if (delta < 0) {
+    return {
+      delta,
+      repair,
+      trend: "down",
+      reason: "The interaction added friction to this bot relationship.",
+    };
+  }
+  return {
+    delta: 0,
+    repair,
+    trend: "steady",
+    reason: "No long-term relationship shift this turn.",
   };
 }
 
@@ -1581,6 +1670,151 @@ function parseRecentOpinionReasons(serialized: string): string[] {
   }
 }
 
+function buildBotOpinion(
+  score: number,
+  trend: OpinionTrend,
+  lastReason: string,
+  recentReasons: string[],
+  repairCount: number,
+  updatedAt: string
+): BotOpinion {
+  const clampedScore = Math.round(clampOpinionScore(score));
+  return {
+    score: clampedScore,
+    band: botOpinionBandFromScore(clampedScore),
+    boundaryLevel: botOpinionBoundaryFromScore(clampedScore),
+    trend,
+    lastReason,
+    recentReasons,
+    repairCount,
+    updatedAt,
+  };
+}
+
+function botOpinionFromRow(row: BotOpinionRow): BotOpinion {
+  const score = Math.round(clampOpinionScore(row.score));
+  const trend: OpinionTrend =
+    row.trend === "up" || row.trend === "down" || row.trend === "steady"
+      ? row.trend
+      : "steady";
+  return {
+    score,
+    band: normalizeBotOpinionBand(row.band) || botOpinionBandFromScore(score),
+    boundaryLevel: normalizeBotOpinionBoundary(row.boundary_level),
+    trend,
+    lastReason: row.last_reason || "No long-term relationship shift yet.",
+    recentReasons: parseRecentOpinionReasons(row.recent_reasons),
+    repairCount: Math.max(0, Math.round(row.repair_count ?? 0)),
+    updatedAt: row.updated_at,
+  };
+}
+
+export function readBotOpinion(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null | undefined
+): BotOpinion | null {
+  const row = db
+    .prepare(
+      `SELECT score, band, boundary_level, trend, last_reason, recent_reasons, repair_count, updated_at
+       FROM bot_opinions
+       WHERE user_id = ? AND bot_scope_key = ?`
+    )
+    .get(userId, opinionScopeKey(botId)) as BotOpinionRow | undefined;
+  return row ? botOpinionFromRow(row) : null;
+}
+
+export function upsertBotOpinion(args: {
+  db: DatabaseSync;
+  userId: string;
+  botId: string | null | undefined;
+  score: number;
+  trend: OpinionTrend;
+  lastReason: string;
+  recentReasons: string[];
+  repairCount: number;
+  updatedAt: string;
+}): BotOpinion {
+  const { db, userId, botId, score, trend, lastReason, recentReasons, repairCount, updatedAt } = args;
+  const opinion = buildBotOpinion(score, trend, lastReason, recentReasons, repairCount, updatedAt);
+  db.prepare(
+    `INSERT INTO bot_opinions (
+      user_id, bot_scope_key, bot_id, score, band, boundary_level, trend, last_reason, recent_reasons, repair_count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, bot_scope_key) DO UPDATE SET
+      bot_id = excluded.bot_id,
+      score = excluded.score,
+      band = excluded.band,
+      boundary_level = excluded.boundary_level,
+      trend = excluded.trend,
+      last_reason = excluded.last_reason,
+      recent_reasons = excluded.recent_reasons,
+      repair_count = excluded.repair_count,
+      updated_at = excluded.updated_at`
+  ).run(
+    userId,
+    opinionScopeKey(botId),
+    botId ?? null,
+    opinion.score,
+    opinion.band,
+    opinion.boundaryLevel,
+    opinion.trend,
+    opinion.lastReason,
+    JSON.stringify(opinion.recentReasons.slice(0, OPINION_REASON_LIMIT)),
+    opinion.repairCount,
+    opinion.updatedAt
+  );
+  return opinion;
+}
+
+function upsertBotOpinionFromTurn(args: {
+  db: DatabaseSync;
+  userId: string;
+  botId: string | null | undefined;
+  message: string;
+  updatedAt: string;
+}): BotOpinion {
+  const { db, userId, botId, message, updatedAt } = args;
+  const existing = readBotOpinion(db, userId, botId);
+  const evaluation = evaluateBotOpinionTurn(message, existing);
+  const previousScore = existing?.score ?? OPINION_SCORE_BASELINE;
+  const score = clampOpinionScore(previousScore + evaluation.delta);
+  const reasons = [
+    evaluation.reason,
+    ...(existing?.recentReasons ?? []),
+  ].slice(0, OPINION_REASON_LIMIT);
+  return upsertBotOpinion({
+    db,
+    userId,
+    botId,
+    score,
+    trend: evaluation.trend,
+    lastReason: evaluation.reason,
+    recentReasons: reasons,
+    repairCount: (existing?.repairCount ?? 0) + (evaluation.repair ? 1 : 0),
+    updatedAt,
+  });
+}
+
+function botOpinionPromptContext(opinion: BotOpinion | null): string | null {
+  if (!opinion || opinion.boundaryLevel === "none") return null;
+  if (opinion.boundaryLevel === "firm") {
+    return [
+      "Long-term relationship context for this bot:",
+      `- State: ${opinion.band}; score ${opinion.score}/100.`,
+      "- The bot may set a calm, firm boundary if the user is harsh or dismissive.",
+      "- The bot should still help and should explicitly allow repair when the user softens or apologizes.",
+      "- Do not shame the user, diagnose them, or refuse access.",
+    ].join("\n");
+  }
+  return [
+    "Long-term relationship context for this bot:",
+    `- State: ${opinion.band}; score ${opinion.score}/100.`,
+    "- The bot may gently ask for clearer or warmer wording if the exchange becomes harsh.",
+    "- Keep helping; treat repair attempts as meaningful.",
+  ].join("\n");
+}
+
 function readSessionOpinion(
   db: DatabaseSync,
   userId: string,
@@ -1672,6 +1906,7 @@ function upsertSessionOpinion(args: {
  */
 function buildPromptMessages(args: {
   botSystemPrompt?: string;
+  botOpinion?: BotOpinion | null;
   threadSummary?: string | null;
   memoryLines: string[];
   chatHistory: ChatMessage[];
@@ -1680,12 +1915,16 @@ function buildPromptMessages(args: {
 }): ProviderMessage[] {
   const promptMessages: ProviderMessage[] = [];
   const trimmedBot = args.botSystemPrompt?.trim();
+  const relationshipContext = botOpinionPromptContext(args.botOpinion ?? null);
   const toolsBlock =
     trimmedBot &&
     trimmedBot.length > 0
       ? `${trimmedBot}\n\n${PRISM_ASSISTANT_TOOLS_APPENDIX}`
       : PRISM_ASSISTANT_TOOLS_APPENDIX;
   promptMessages.push({ role: "system", content: toolsBlock });
+  if (relationshipContext) {
+    promptMessages.push({ role: "system", content: relationshipContext });
+  }
   if (args.askQuestionMode === "explicit") {
     promptMessages.push({
       role: "system",
@@ -1864,6 +2103,7 @@ export async function processChatMessage(
       : "off";
     const promptMessages = buildPromptMessages({
       botSystemPrompt: settings.botSystemPrompt,
+      botOpinion: null,
       threadSummary: null,
       memoryLines: [],
       chatHistory: history,
@@ -2064,8 +2304,10 @@ export async function processChatMessage(
     }
   }
 
+  const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
   const promptMessages = buildPromptMessages({
     botSystemPrompt: settings.botSystemPrompt,
+    botOpinion: existingBotOpinion,
     threadSummary,
     memoryLines,
     chatHistory: history,
@@ -2167,6 +2409,15 @@ export async function processChatMessage(
         db,
         userId,
         conversationId: activeConversationId,
+        botId: activeBotId,
+        message,
+        updatedAt: assistantCreatedAt,
+      });
+  const botOpinion = isStarterPrompt
+    ? readBotOpinion(db, userId, activeBotId)
+    : upsertBotOpinionFromTurn({
+        db,
+        userId,
         botId: activeBotId,
         message,
         updatedAt: assistantCreatedAt,
@@ -2470,6 +2721,7 @@ export async function processChatMessage(
   return {
     conversation: conversationPersisted,
     opinion,
+    ...(botOpinion ? { botOpinion } : {}),
     ...(memoryLearned ? { memoryLearned } : {}),
     ...(conversationStartersPersisted
       ? { conversationStarters: conversationStartersPersisted }

@@ -68,6 +68,7 @@ const HEADER_DELETE_KEY = "__header__";
 const DELETE_ALL_KEY = "__delete_all__";
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
+const CONVERSATION_GROUP_ORDER_STORAGE_KEY = "prism_conversation_group_order";
 
 // Namespace bot-delete keys so they can share the same single "armed" state
 // slot used for conversation deletion without id collisions.
@@ -132,6 +133,131 @@ const DEV_TOOLS_BUTTON_DEFAULT_X = 14;
 const DEV_TOOLS_BUTTON_DEFAULT_Y = 76;
 const DEV_TOOLS_BUTTON_SIZE = 44;
 const DEV_TOOLS_BUTTON_DRAG_SUPPRESS_CLICK_PX = 4;
+const DEV_TOOLS_CONNECTION_PRESETS = [
+  {
+    id: "careful",
+    label: "Careful",
+    score: 24,
+    trend: "down",
+    reason: "Developer Tools set a guarded connection state.",
+    recentReasons: [
+      "The tone felt abrupt, so trust pulled back.",
+      "Small negative shift from terse wording.",
+    ],
+  },
+  {
+    id: "warming",
+    label: "Warming",
+    score: 48,
+    trend: "steady",
+    reason: "Developer Tools set a neutral warming connection state.",
+    recentReasons: [
+      "No opinion shift this turn.",
+      "Small positive shift from conversational tone.",
+    ],
+  },
+  {
+    id: "settled",
+    label: "Settled",
+    score: 82,
+    trend: "up",
+    reason: "Developer Tools set a settled collaborative connection state.",
+    recentReasons: [
+      "The tone felt considerate and collaborative.",
+      "Small positive shift from conversational tone.",
+    ],
+  },
+  {
+    id: "warming-down",
+    label: "Warming · down",
+    score: 48,
+    trend: "down",
+    reason: "Small negative shift from terse wording.",
+    recentReasons: [
+      "Small negative shift from terse wording.",
+      "No opinion shift this turn.",
+    ],
+  },
+  {
+    id: "warming-up",
+    label: "Warming · up",
+    score: 56,
+    trend: "up",
+    reason: "Small positive shift from conversational tone.",
+    recentReasons: [
+      "Small positive shift from conversational tone.",
+      "No opinion shift this turn.",
+    ],
+  },
+] as const;
+const DEV_TOOLS_BOT_OPINION_PRESETS = [
+  {
+    id: "bonded",
+    label: "Bonded",
+    score: 88,
+    trend: "up",
+    repairCount: 3,
+    reason: "Developer Tools set a bonded long-term bot relationship.",
+    recentReasons: [
+      "The user treated the bot with care and collaboration.",
+      "The user offered repair, which helped rebuild trust.",
+    ],
+  },
+  {
+    id: "open",
+    label: "Open",
+    score: 64,
+    trend: "steady",
+    repairCount: 1,
+    reason: "Developer Tools set an open long-term bot relationship.",
+    recentReasons: ["No long-term relationship shift this turn."],
+  },
+  {
+    id: "careful",
+    label: "Careful",
+    score: 38,
+    trend: "down",
+    repairCount: 0,
+    reason: "Developer Tools set a careful long-term bot relationship.",
+    recentReasons: ["The interaction added friction to this bot relationship."],
+  },
+  {
+    id: "wounded",
+    label: "Wounded",
+    score: 12,
+    trend: "down",
+    repairCount: 0,
+    reason: "Developer Tools set a wounded long-term bot relationship.",
+    recentReasons: [
+      "The interaction added friction to this bot relationship.",
+      "The tone felt abrupt, so trust pulled back.",
+    ],
+  },
+  {
+    id: "repairing",
+    label: "Repairing",
+    score: 44,
+    trend: "up",
+    repairCount: 4,
+    reason: "The user offered repair, which helped rebuild trust.",
+    recentReasons: [
+      "The user offered repair, which helped rebuild trust.",
+      "The interaction added friction to this bot relationship.",
+    ],
+  },
+  {
+    id: "volatile",
+    label: "Volatile",
+    score: 50,
+    trend: "steady",
+    repairCount: 2,
+    reason: "Developer Tools set a mixed long-term bot relationship.",
+    recentReasons: [
+      "The user treated the bot with care and collaboration.",
+      "The interaction added friction to this bot relationship.",
+    ],
+  },
+] as const;
 const RANDOM_NUDGE_STOP_WORDS = new Set([
   "about",
   "there",
@@ -161,6 +287,8 @@ const MEMORY_RATIO_MEDIUM_MAX_SIZE = 116;
 const MEMORY_RATIO_LARGE_MAX_SIZE = 184;
 type DevToolsBotQuantity = number | "";
 type DevToolsMemorySeedSource = "direct" | "inferred" | "compiled";
+type DevToolsConnectionPreset = (typeof DEV_TOOLS_CONNECTION_PRESETS)[number];
+type DevToolsBotOpinionPreset = (typeof DEV_TOOLS_BOT_OPINION_PRESETS)[number];
 type DevToolsPanelPosition = { x: number; y: number };
 type DevToolsPanelDragState = {
   pointerId: number;
@@ -1575,6 +1703,14 @@ function rowBorderMixPercent(
   return Math.round(eased * 100);
 }
 
+function selectedRowTextColor(
+  rowAccent: string,
+  resolvedTheme: "light" | "dark"
+): string {
+  const selectedFill = mixHex(rowAccent, THEME_SURFACE_BG[resolvedTheme], 0.72);
+  return ensureContrast(rowAccent, selectedFill, 4.5);
+}
+
 type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images" | "memories" | "opinions";
@@ -1617,6 +1753,7 @@ interface ConversationGroupSummary {
 type SidebarConversationItem =
   | { kind: "conversation"; conversation: ConversationSummary }
   | { kind: "group"; group: ConversationGroupSummary };
+type ConversationGroupDropPosition = "before" | "after";
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -2109,19 +2246,90 @@ function pickGeneratingLabel(displayName: string, salt: string): string {
 }
 
 function opinionBandTitle(band: SessionOpinion["band"]): string {
-  if (band === "trusting") return "Trusting";
-  if (band === "guarded") return "Guarded";
+  if (band === "trusting") return "Settled";
+  if (band === "guarded") return "Careful";
   return "Warming";
 }
 
 function opinionBandDescription(band: SessionOpinion["band"]): string {
   if (band === "trusting") {
-    return "The bot currently feels safe and collaborative with you.";
+    return "The conversation feels steady, safe, and collaborative.";
   }
   if (band === "guarded") {
-    return "The bot is being careful right now and needs gentler signals.";
+    return "The conversation is asking for a little more care right now.";
   }
-  return "The bot is open and warming as the conversation continues.";
+  return "The conversation is open and still finding its rhythm.";
+}
+
+function opinionTrendLabel(trend: SessionOpinion["trend"]): string {
+  if (trend === "up") return "Softening";
+  if (trend === "down") return "Needs warmth";
+  return "Stable";
+}
+
+function opinionTrendDescription(trend: SessionOpinion["trend"]): string {
+  if (trend === "up") {
+    return "The latest turn helped the exchange feel more collaborative.";
+  }
+  if (trend === "down") {
+    return "The latest turn made the exchange feel a touch more careful.";
+  }
+  return "Nothing needs fixing; the tone is holding steady.";
+}
+
+function opinionNextStep(trend: SessionOpinion["trend"]): string {
+  if (trend === "up") {
+    return "Keep giving context and asking clearly; that rhythm is working.";
+  }
+  if (trend === "down") {
+    return "A little warmth or extra context will help the exchange feel steadier.";
+  }
+  return "Nothing needs fixing; continue naturally.";
+}
+
+function opinionScoreCaption(score: number): string {
+  if (score >= 68) return "High ease";
+  if (score <= 34) return "Low ease";
+  return "Middle ease";
+}
+
+function visibleOpinionReasons(opinion: SessionOpinion): string[] {
+  const normalizedLastReason = opinion.lastReason.trim().toLowerCase();
+  const reasons = opinion.recentReasons.filter(reason => {
+    const normalizedReason = reason.trim().toLowerCase();
+    return normalizedReason.length > 0 && normalizedReason !== normalizedLastReason;
+  });
+  return reasons.slice(0, 3);
+}
+
+function botOpinionBandTitle(band: BotOpinion["band"]): string {
+  if (band === "bonded") return "Bonded";
+  if (band === "wounded") return "Wounded";
+  if (band === "careful") return "Careful";
+  return "Open";
+}
+
+function botOpinionBandDescription(opinion: BotOpinion): string {
+  if (opinion.band === "bonded") {
+    return "This bot relationship feels deeply safe and collaborative.";
+  }
+  if (opinion.band === "wounded") {
+    return "This bot relationship needs repair and slower, more respectful exchanges.";
+  }
+  if (opinion.band === "careful") {
+    return "This bot is still willing to help, but the relationship is moving carefully.";
+  }
+  return "This bot relationship feels open and workable.";
+}
+
+function botOpinionRepairGuidance(opinion: BotOpinion): string {
+  if (opinion.boundaryLevel === "firm") {
+    return "Repair helps most here: slow down, clarify intent, or acknowledge rough wording.";
+  }
+  if (opinion.boundaryLevel === "gentle") {
+    return "Warmth, context, and clear requests will help this bot relax again.";
+  }
+  return "Keep treating this bot with curiosity and care.";
 }
 interface ConversationDetail {
   id: string;
@@ -2144,6 +2352,7 @@ interface ChatPostEnvelope {
   conversation: ConversationDetail;
   conversationStarters?: string[];
   opinion?: SessionOpinion;
+  botOpinion?: BotOpinion;
   memoryLearned?: {
     created?: MemoryEventPayload[];
     retracted?: MemoryEventPayload[];
@@ -2157,6 +2366,16 @@ interface SessionOpinion {
   trend: "up" | "down" | "steady";
   lastReason: string;
   recentReasons: string[];
+  updatedAt: string;
+}
+interface BotOpinion {
+  score: number;
+  band: "wounded" | "careful" | "open" | "bonded";
+  boundaryLevel: "none" | "gentle" | "firm";
+  trend: "up" | "down" | "steady";
+  lastReason: string;
+  recentReasons: string[];
+  repairCount: number;
   updatedAt: string;
 }
 interface UserSettings {
@@ -3419,7 +3638,11 @@ function resolveRowColor(
 }
 
 function conversationGroupKey(c: ConversationSummary): string {
-  return c.botId ? `bot:${c.botId}` : "default";
+  // Group rows by the same "active identity" users see in sidebar tinting:
+  // - after at least one assistant reply, follow the last speaking bot
+  // - before first reply, fall back to the conversation's locked starter bot
+  const effectiveBotId = c.hasAssistantReply ? c.lastBotId : c.botId;
+  return effectiveBotId ? `bot:${effectiveBotId}` : "default";
 }
 
 /** Mirror of `conversationGroupKey` for cases where only the bot id is in
@@ -3447,6 +3670,53 @@ function conversationGroupNestedListId(key: string): string {
 
 function conversationGroupHeaderButtonId(key: string): string {
   return `conversation-group-toggle-${conversationGroupDomSafeSlug(key)}`;
+}
+
+function conversationGroupOrderStorageKey(userId: string): string {
+  return `${CONVERSATION_GROUP_ORDER_STORAGE_KEY}:${userId}`;
+}
+
+function loadConversationGroupOrder(userId: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(conversationGroupOrderStorageKey(userId));
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((key): key is string => typeof key === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistConversationGroupOrder(userId: string, order: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      conversationGroupOrderStorageKey(userId),
+      JSON.stringify(order)
+    );
+  } catch {
+    // Non-fatal: drag ordering still works for the current page session.
+  }
+}
+
+function reorderConversationGroupKeys(
+  currentOrder: string[],
+  draggedKey: string,
+  targetKey: string,
+  position: ConversationGroupDropPosition
+): string[] {
+  if (draggedKey === targetKey) return currentOrder;
+  const withoutDragged = currentOrder.filter((key) => key !== draggedKey);
+  const targetIndex = withoutDragged.indexOf(targetKey);
+  if (targetIndex === -1) return currentOrder;
+  const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
+  return [
+    ...withoutDragged.slice(0, insertIndex),
+    draggedKey,
+    ...withoutDragged.slice(insertIndex),
+  ];
 }
 
 function buildConversationGroupSummary(
@@ -7589,6 +7859,7 @@ interface MessageBodyProps {
 /** Imperative focus for plain textarea vs TipTap WYSIWYG compose field. */
 interface ComposerInputHandle {
   focus: (options?: FocusOptions) => void;
+  blur: () => void;
 }
 
 interface ComposerInputProps {
@@ -7701,6 +7972,7 @@ function MessageBody({ content, assistantStripPrismToolTail }: MessageBodyProps)
 
 interface DesktopMarkdownComposerHandle {
   focus: (options?: FocusOptions) => void;
+  blur: () => void;
 }
 
 interface DesktopMarkdownComposerProps {
@@ -7847,6 +8119,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             editor?.commands.focus();
           }
         },
+        blur: () => {
+          const dom = editor?.view.dom as HTMLElement | undefined;
+          dom?.blur();
+        },
       }),
       [editor]
     );
@@ -7943,6 +8219,13 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           wysiwygRef.current?.focus(options);
         } else {
           textareaRef.current?.focus(options);
+        }
+      },
+      blur: () => {
+        if (enabled) {
+          wysiwygRef.current?.blur();
+        } else {
+          textareaRef.current?.blur();
         }
       },
     }),
@@ -8416,6 +8699,7 @@ function HomeContent(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [sessionOpinion, setSessionOpinion] = useState<SessionOpinion | null>(null);
+  const [botOpinion, setBotOpinion] = useState<BotOpinion | null>(null);
   const [draft, setDraft] = useState("");
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
   const composerHistoryIndexRef = useRef<number | null>(null);
@@ -8472,9 +8756,20 @@ function HomeContent(): React.JSX.Element {
   const [expandedConversationGroupKey, setExpandedConversationGroupKey] = useState<
     string | null
   >(null);
+  const [conversationGroupOrder, setConversationGroupOrder] = useState<string[]>([]);
+  const [draggingConversationGroupKey, setDraggingConversationGroupKey] = useState<
+    string | null
+  >(null);
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
   const selectedIdRef = useRef<string | null>(null);
   const detailIdRef = useRef<string | null>(null);
+  const conversationGroupPointerDragRef = useRef<{
+    key: string;
+    pointerId: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
+  const suppressConversationGroupClickRef = useRef(false);
   const titleRefreshSelectionRef = useRef<{ id: string | null; incognito: boolean }>({
     id: null,
     incognito: false,
@@ -9661,10 +9956,16 @@ function HomeContent(): React.JSX.Element {
   const shouldShowHeaderConversationTitle = Boolean(
     detail && detail.messages.length > 0
   );
+  // While the desktop wrench accordion is unfurled, collapse the conversation
+  // title so the action pills stay on one line instead of wrapping below.
+  // Mobile uses a fixed wrench + vertical popout, so the title is unaffected.
+  const headerTitleCollapsedForAccordion =
+    chatOverflowMenuOpen && viewportWidth > PHONE_MENU_BREAKPOINT;
 
-  // The sidebar is a place to leave the current chat, not mirror it.
-  // Keep the active conversation persisted in `conversations`, but hide
-  // its row until the user starts another chat or opens a different one.
+  // The sidebar is primarily a place to leave the current chat, but grouped
+  // histories need the active row as a stable "you are here" marker. Keep
+  // saved non-private chats in the grouping input, then hide only lone active
+  // rows when rendering the final sidebar list.
   // Private rows are filtered here as a client-side guard for older API
   // payloads or pre-ephemeral rows that should never reach the sidebar UI.
   const visibleConversations = useMemo(
@@ -9674,7 +9975,7 @@ function HomeContent(): React.JSX.Element {
         unreadConversationOrder.map((conversationId, index) => [conversationId, index])
       );
       return conversations
-        .filter(c => !c.incognito && c.id !== selectedId)
+        .filter(c => !c.incognito)
         .slice()
         .sort((a, b) => {
           const aOrder = order.get(a.id);
@@ -9685,7 +9986,7 @@ function HomeContent(): React.JSX.Element {
           return 0;
         });
     },
-    [conversations, privateChatActive, selectedId, unreadConversationOrder]
+    [conversations, privateChatActive, unreadConversationOrder]
   );
   const conversationGroups = useMemo(
     () => buildConversationGroups(visibleConversations, bots, unreadConversationIds),
@@ -9695,9 +9996,13 @@ function HomeContent(): React.JSX.Element {
     () => new Map(conversationGroups.map((group) => [group.key, group])),
     [conversationGroups]
   );
+  const availableConversationGroupKeys = useMemo(
+    () => conversationGroups.map((group) => group.key),
+    [conversationGroups]
+  );
   const sidebarConversationItems = useMemo<SidebarConversationItem[]>(() => {
     const renderedGroupKeys = new Set<string>();
-    return visibleConversations.flatMap((conversation): SidebarConversationItem[] => {
+    const baseItems = visibleConversations.flatMap((conversation): SidebarConversationItem[] => {
       const key = conversationGroupKey(conversation);
       const group = conversationGroupsByKey.get(key);
       if (group && group.count > 1) {
@@ -9705,9 +10010,49 @@ function HomeContent(): React.JSX.Element {
         renderedGroupKeys.add(key);
         return [{ kind: "group", group }];
       }
+      if (conversation.id === selectedId) return [];
       return [{ kind: "conversation", conversation }];
     });
-  }, [conversationGroupsByKey, visibleConversations]);
+    const orderIndex = new Map(
+      conversationGroupOrder.map((groupKey, index) => [groupKey, index])
+    );
+    const orderedGroups = baseItems
+      .filter((item): item is { kind: "group"; group: ConversationGroupSummary } =>
+        item.kind === "group"
+      )
+      .map((item, baseIndex) => ({ item, baseIndex }))
+      .sort((a, b) => {
+        const aOrder = orderIndex.get(a.item.group.key);
+        const bOrder = orderIndex.get(b.item.group.key);
+        if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder;
+        if (aOrder !== undefined) return -1;
+        if (bOrder !== undefined) return 1;
+        return a.baseIndex - b.baseIndex;
+      })
+      .map(({ item }) => item);
+    let nextGroupIndex = 0;
+    return baseItems.map((item) =>
+      item.kind === "group" ? orderedGroups[nextGroupIndex++] ?? item : item
+    );
+  }, [conversationGroupOrder, conversationGroupsByKey, selectedId, visibleConversations]);
+
+  useEffect(() => {
+    if (!user) {
+      setConversationGroupOrder([]);
+      return;
+    }
+    setConversationGroupOrder(loadConversationGroupOrder(user.id));
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    setConversationGroupOrder((previous) => {
+      const next = previous.filter((key) => conversationGroupsByKey.has(key));
+      if (next.length === previous.length) return previous;
+      persistConversationGroupOrder(user.id, next);
+      return next;
+    });
+  }, [conversationGroupsByKey, user]);
 
   useEffect(() => {
     if (
@@ -9781,6 +10126,46 @@ function HomeContent(): React.JSX.Element {
         : previous
     );
   }, []);
+
+  const clearConversationGroupDragState = useCallback(() => {
+    conversationGroupPointerDragRef.current = null;
+    setDraggingConversationGroupKey(null);
+  }, []);
+
+  const abortConversationGroupPointerDrag = useCallback(() => {
+    conversationGroupPointerDragRef.current = null;
+    suppressConversationGroupClickRef.current = false;
+    setDraggingConversationGroupKey(null);
+  }, []);
+
+  const moveConversationGroup = useCallback((
+    draggedKey: string,
+    targetKey: string,
+    position: ConversationGroupDropPosition
+  ) => {
+    if (!user || draggedKey === targetKey) return;
+    setConversationGroupOrder((previous) => {
+      const knownKeys = new Set(availableConversationGroupKeys);
+      const normalizedOrder = [
+        ...previous.filter((key) => knownKeys.has(key)),
+        ...availableConversationGroupKeys.filter((key) => !previous.includes(key)),
+      ];
+      const next = reorderConversationGroupKeys(
+        normalizedOrder,
+        draggedKey,
+        targetKey,
+        position
+      );
+      if (
+        next.length === previous.length &&
+        next.every((key, index) => key === previous[index])
+      ) {
+        return previous;
+      }
+      persistConversationGroupOrder(user.id, next);
+      return next;
+    });
+  }, [availableConversationGroupKeys, user]);
 
   const conversationRowGlowStyle = useCallback((index: number): React.CSSProperties => {
     const estimatedRowStridePx = 42;
@@ -10252,6 +10637,7 @@ function HomeContent(): React.JSX.Element {
     setSelectedId(null);
     setDetail(null);
     setSessionOpinion(null);
+    setBotOpinion(null);
     setSelectedBotId(null);
     setError(null);
   }, [view]);
@@ -10292,11 +10678,12 @@ function HomeContent(): React.JSX.Element {
   }
   async function refreshConversation(id: string): Promise<void> {
     clearConversationUnread(id);
-    const d = await api<{ conversation: ConversationDetail; opinion?: SessionOpinion }>(
+    const d = await api<{ conversation: ConversationDetail; opinion?: SessionOpinion; botOpinion?: BotOpinion }>(
       `/api/conversations/${id}`
     );
     setDetail(applyExplicitAskQuestionFallback(d.conversation));
     setSessionOpinion(d.opinion ?? null);
+    setBotOpinion(d.botOpinion ?? null);
     setSelectedId(id);
     // Sync the composer's bot dropdown to match whoever was last active
     // in the chat we're switching into. Without this, picking a chat
@@ -10486,6 +10873,7 @@ function HomeContent(): React.JSX.Element {
     setConversations([]);
     setDetail(null);
     setSessionOpinion(null);
+    setBotOpinion(null);
     setMemories([]);
     setBotMemories([]);
     setSettings(null);
@@ -10513,6 +10901,7 @@ function HomeContent(): React.JSX.Element {
       setConversations([]);
       setDetail(null);
       setSessionOpinion(null);
+      setBotOpinion(null);
       setMemories([]);
       setSettings(null);
       setModelCatalog(null);
@@ -10679,6 +11068,7 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
         setDetail(patchedConversation);
         setSessionOpinion(d.opinion ?? null);
+        setBotOpinion(d.botOpinion ?? null);
         editedConversation = patchedConversation;
       } else {
         setPendingReplyConversationId(selectedId);
@@ -10706,6 +11096,7 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
         setDetail(patchedConversation);
         setSessionOpinion(d.opinion ?? null);
+        setBotOpinion(d.botOpinion ?? null);
         editedConversation = patchedConversation;
       }
       setEditingMessageId(null);
@@ -10835,7 +11226,12 @@ function HomeContent(): React.JSX.Element {
     }
     if ((!trimmed && !isStarterPrompt) || pendingReply) return;
     if (editingMessageId && !isStarterPrompt) {
-      requestMessageEdit(editingMessageId, trimmed);
+      const editMessageId = editingMessageId;
+      setDraft("");
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+      draftComposerRef.current?.blur();
+      requestMessageEdit(editMessageId, trimmed);
       return;
     }
     // Any typed/chosen follow-up supersedes the starter quick-replies row.
@@ -10933,6 +11329,7 @@ function HomeContent(): React.JSX.Element {
       if (stillViewingRequest) {
         setDetail(applyExplicitAskQuestionFallback(d.conversation));
         setSessionOpinion(d.opinion ?? null);
+        setBotOpinion(d.botOpinion ?? null);
         setSelectedId(d.conversation.id);
         setUnreadConversationIds(previous => {
           if (!previous.has(d.conversation.id)) return previous;
@@ -11076,6 +11473,22 @@ function HomeContent(): React.JSX.Element {
     } as React.FormEvent<HTMLFormElement>;
     void sendMessage(syntheticSubmit, { draftOverride: chip.sendValue ?? chip.label });
   }
+
+function resendUserMessage(msg: Message): void {
+  if (msg.role !== "user") return;
+  const resendText = msg.content.trim();
+  if (resendText.length === 0) return;
+  closeMessageContextOverlay();
+  // Force normal send mode if an edit draft was active.
+  setEditingMessageId(null);
+  setEditingOriginalText("");
+  const syntheticSubmit = {
+    preventDefault: () => {
+      /* no-op — used so sendMessage can share the submit pathway */
+    },
+  } as React.FormEvent<HTMLFormElement>;
+  void sendMessage(syntheticSubmit, { draftOverride: resendText });
+}
 
   function randomChatNudgeFromContext(): string {
     const activeBotId =
@@ -12529,6 +12942,96 @@ function HomeContent(): React.JSX.Element {
     setPendingDeleteKey(null);
   }, []);
 
+  const beginConversationGroupPointerDrag = useCallback((
+    event: React.PointerEvent<HTMLElement>,
+    groupKey: string
+  ) => {
+    if (event.button !== 0) return;
+    if (conversationGroupPointerDragRef.current || draggingConversationGroupKey) return;
+    conversationGroupPointerDragRef.current = {
+      key: groupKey,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      active: false,
+    };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is unavailable in some browser/test environments.
+    }
+  }, [draggingConversationGroupKey]);
+
+  const updateConversationGroupPointerDrag = useCallback((
+    event: React.PointerEvent<HTMLElement>
+  ) => {
+    const drag = conversationGroupPointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.active) {
+      if (Math.abs(deltaY) < 6) return;
+      drag.active = true;
+      disarmDelete();
+      setExpandedConversationGroupKey((previous) =>
+        previous === drag.key ? null : previous
+      );
+      setDraggingConversationGroupKey(drag.key);
+      suppressConversationGroupClickRef.current = true;
+    }
+
+    event.preventDefault();
+    const hoveredGroup = document
+      .elementsFromPoint(event.clientX, event.clientY)
+      .map((element) =>
+        element instanceof HTMLElement
+          ? element.closest<HTMLElement>("[data-conversation-group-key]")
+          : null
+      )
+      .find((element) => element && element.dataset.conversationGroupKey !== drag.key);
+    const targetKey = hoveredGroup?.dataset.conversationGroupKey;
+    if (!hoveredGroup || !targetKey) return;
+    const rect = hoveredGroup.getBoundingClientRect();
+    const position: ConversationGroupDropPosition =
+      event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+    moveConversationGroup(drag.key, targetKey, position);
+  }, [disarmDelete, moveConversationGroup]);
+
+  const endConversationGroupPointerDrag = useCallback((
+    event: React.PointerEvent<HTMLElement>
+  ) => {
+    const drag = conversationGroupPointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const wasActive = drag.active;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Non-fatal: capture may already be released.
+    }
+    clearConversationGroupDragState();
+    if (wasActive) {
+      event.preventDefault();
+      window.setTimeout(() => {
+        suppressConversationGroupClickRef.current = false;
+      }, 0);
+    }
+  }, [clearConversationGroupDragState]);
+
+  useEffect(() => {
+    if (!draggingConversationGroupKey) return;
+    const handleViewportLeave = (event: MouseEvent) => {
+      if (event.relatedTarget !== null) return;
+      abortConversationGroupPointerDrag();
+    };
+    const handleWindowBlur = () => {
+      abortConversationGroupPointerDrag();
+    };
+    document.documentElement.addEventListener("mouseleave", handleViewportLeave);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      document.documentElement.removeEventListener("mouseleave", handleViewportLeave);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [abortConversationGroupPointerDrag, draggingConversationGroupKey]);
+
   const armDelete = useCallback((key: string) => {
     if (pendingDeleteTimerRef.current) {
       clearTimeout(pendingDeleteTimerRef.current);
@@ -12814,11 +13317,13 @@ function HomeContent(): React.JSX.Element {
     const previousSelectedId = selectedId;
     const previousDetail = detail;
     const previousSessionOpinion = sessionOpinion;
+    const previousBotOpinion = botOpinion;
     setConversations(list => list.filter(c => c.id !== id));
     if (selectedId === id) {
       setSelectedId(null);
       setDetail(null);
       setSessionOpinion(null);
+      setBotOpinion(null);
     }
     try {
       await api(`/api/conversations/${id}`, { method: "DELETE" });
@@ -12830,6 +13335,7 @@ function HomeContent(): React.JSX.Element {
       setSelectedId(previousSelectedId);
       setDetail(previousDetail);
       setSessionOpinion(previousSessionOpinion);
+      setBotOpinion(previousBotOpinion);
       setError(err instanceof Error ? err.message : "Delete failed.");
     }
   }
@@ -12841,6 +13347,7 @@ function HomeContent(): React.JSX.Element {
     const previousSelectedId = selectedId;
     const previousDetail = detail;
     const previousSessionOpinion = sessionOpinion;
+    const previousBotOpinion = botOpinion;
     const previousUnreadIds = unreadConversationIds;
     const previousUnreadOrder = unreadConversationOrder;
     const previousExpandedGroupKey = expandedConversationGroupKey;
@@ -12873,6 +13380,7 @@ function HomeContent(): React.JSX.Element {
       setSelectedId(null);
       setDetail(null);
       setSessionOpinion(null);
+      setBotOpinion(null);
     }
 
     try {
@@ -12885,6 +13393,7 @@ function HomeContent(): React.JSX.Element {
       setSelectedId(previousSelectedId);
       setDetail(previousDetail);
       setSessionOpinion(previousSessionOpinion);
+      setBotOpinion(previousBotOpinion);
       setUnreadConversationIds(previousUnreadIds);
       setUnreadConversationOrder(previousUnreadOrder);
       setExpandedConversationGroupKey(previousExpandedGroupKey);
@@ -12903,12 +13412,14 @@ function HomeContent(): React.JSX.Element {
     const previousSelectedId = selectedId;
     const previousDetail = detail;
     const previousSessionOpinion = sessionOpinion;
+    const previousBotOpinion = botOpinion;
     // Nothing to clear — short-circuit rather than fire a no-op request.
     if (previousConversations.length === 0) return;
     setConversations([]);
     setSelectedId(null);
     setDetail(null);
     setSessionOpinion(null);
+    setBotOpinion(null);
     try {
       await api("/api/conversations", { method: "DELETE" });
       await refreshConversations();
@@ -12917,6 +13428,7 @@ function HomeContent(): React.JSX.Element {
       setSelectedId(previousSelectedId);
       setDetail(previousDetail);
       setSessionOpinion(previousSessionOpinion);
+      setBotOpinion(previousBotOpinion);
       setError(err instanceof Error ? err.message : "Delete all failed.");
     }
   }
@@ -13216,6 +13728,80 @@ function HomeContent(): React.JSX.Element {
       try { await refreshConversations(); } catch { /* best-effort refresh */ }
       setDevToolsMessage(
         err instanceof Error ? err.message : "Add seed chats failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  async function devToolsSetConnectionPreset(preset: DevToolsConnectionPreset) {
+    const conversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (!conversationId || conversationId === "pending") {
+      setDevToolsMessage("Open a saved chat first to test Connection states.");
+      return;
+    }
+
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    try {
+      const result = await api<{ opinion?: SessionOpinion }>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/dev-connection`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            score: preset.score,
+            trend: preset.trend,
+            lastReason: preset.reason,
+            recentReasons: preset.recentReasons,
+          }),
+        }
+      );
+      if (result.opinion) {
+        setSessionOpinion(result.opinion);
+      } else {
+        await refreshConversation(conversationId);
+      }
+      openRightPanel("opinions");
+      setDevToolsMessage(`Connection set to ${preset.label}.`);
+    } catch (err) {
+      try { await refreshConversation(conversationId); } catch { /* best-effort refresh */ }
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Set Connection state failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  async function devToolsSetBotOpinionPreset(preset: DevToolsBotOpinionPreset) {
+    const targetBotId = detail?.botId ?? selectedBotId ?? activeBot?.id ?? null;
+    const routeBotId = targetBotId ? encodeURIComponent(targetBotId) : "_default";
+
+    setDevToolsMessage(null);
+    setDevToolsBusy(true);
+    try {
+      const result = await api<{ botOpinion?: BotOpinion }>(
+        `/api/bots/${routeBotId}/dev-opinion`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            score: preset.score,
+            trend: preset.trend,
+            lastReason: preset.reason,
+            recentReasons: preset.recentReasons,
+            repairCount: preset.repairCount,
+          }),
+        }
+      );
+      if (result.botOpinion) {
+        setBotOpinion(result.botOpinion);
+      }
+      openRightPanel("opinions");
+      setDevToolsMessage(`Bot opinion set to ${preset.label}.`);
+    } catch (err) {
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Set bot opinion state failed."
       );
     } finally {
       setDevToolsBusy(false);
@@ -14528,6 +15114,13 @@ function HomeContent(): React.JSX.Element {
               >
                 Edit
               </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => resendUserMessage(msg)}
+              >
+                Resend
+              </button>
             </>
           )}
           {showFork && !isUser && (
@@ -14772,6 +15365,7 @@ function HomeContent(): React.JSX.Element {
         ? {
             "--row-color": rowAccent,
             "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
+            "--row-selected-text-color": selectedRowTextColor(rowAccent, resolvedTheme),
           }
         : {}),
     } as React.CSSProperties;
@@ -14807,12 +15401,17 @@ function HomeContent(): React.JSX.Element {
           .join(" ")}
         data-private={c.incognito ? "true" : undefined}
         data-unread={isUnread ? "true" : undefined}
+        data-current={isSelected ? "true" : undefined}
         style={conversationRowStyle(c, index)}
       >
         <button
           type="button"
           className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
+          disabled={isSelected}
+          aria-current={isSelected ? "page" : undefined}
+          title={isSelected ? "Current chat" : undefined}
           onClick={() => {
+            if (isSelected) return;
             disarmDelete();
             clearConversationUnread(c.id);
             void refreshConversation(c.id);
@@ -14871,12 +15470,19 @@ function HomeContent(): React.JSX.Element {
     headerGlowIndex: number
   ): React.JSX.Element => {
     const isExpanded = expandedConversationGroupKey === group.key;
+    const hasActiveConversation = selectedId !== null;
     const nestedListId = conversationGroupNestedListId(group.key);
     const headerButtonId = conversationGroupHeaderButtonId(group.key);
     const groupNameLabelId = `${headerButtonId}-name`;
+    const isDragging = draggingConversationGroupKey === group.key;
 
     return (
-      <li key={group.key} className={styles.conversationGroupAccordionItem}>
+      <li
+        key={group.key}
+        className={styles.conversationGroupAccordionItem}
+        data-conversation-group-key={group.key}
+        data-dragging={isDragging ? "true" : undefined}
+      >
         <div
           className={styles.conversationRow}
           data-unread={group.unread ? "true" : undefined}
@@ -14889,15 +15495,27 @@ function HomeContent(): React.JSX.Element {
             id={headerButtonId}
             aria-expanded={isExpanded}
             aria-controls={nestedListId}
+            onPointerDown={(event) =>
+              beginConversationGroupPointerDrag(event, group.key)
+            }
+            onPointerMove={updateConversationGroupPointerDrag}
+            onPointerUp={endConversationGroupPointerDrag}
+            onPointerCancel={endConversationGroupPointerDrag}
             onClick={() => {
+              if (suppressConversationGroupClickRef.current) {
+                suppressConversationGroupClickRef.current = false;
+                return;
+              }
               disarmDelete();
-              // Keep the canvas bot selection in sync with the group tile so
-              // users can open a bot group and immediately start a new chat
-              // with that bot without leaving the sidebar.
-              if (group.botId) {
-                commitEmptyStateBotSelection(group.botId);
-              } else {
-                resetEmptyStateToPrismHome();
+              // Only sync sidebar group selection into shell accent when
+              // no conversation is currently active. While a chat is open,
+              // group toggles should be navigation-only and not restyle the shell.
+              if (!hasActiveConversation) {
+                if (group.botId) {
+                  commitEmptyStateBotSelection(group.botId);
+                } else {
+                  resetEmptyStateToPrismHome();
+                }
               }
               setExpandedConversationGroupKey((prev) =>
                 prev === group.key ? null : group.key
@@ -15312,14 +15930,17 @@ function HomeContent(): React.JSX.Element {
       const collapsedTabIndex = accordionCollapsed ? -1 : 0;
       const renderAccordionButton = (
         index: number,
+        totalCount: number,
         node: React.ReactElement<React.ButtonHTMLAttributes<HTMLButtonElement>>,
       ): React.ReactElement => {
         const existingStyle = node.props.style ?? {};
-        // CSS reads `--accordion-index` to compute the per-button stagger delay.
+        // CSS reads `--accordion-index` + `--accordion-count` to compute the
+        // per-button stagger delay for both open and close directions.
         // Cast lets us attach a CSS custom property without TS rejecting the key.
         const styleWithIndex = {
           ...existingStyle,
           "--accordion-index": index,
+          "--accordion-count": totalCount,
         } as React.CSSProperties;
         return cloneElement(node, {
           style: styleWithIndex,
@@ -15348,9 +15969,9 @@ function HomeContent(): React.JSX.Element {
           className={styles.chatHeaderAction}
           disabled={headerActionsDisabled}
           onClick={handleOpinions}
-          title="Opinions"
+          title="Conversation tone"
         >
-          <span className={styles.chatHeaderActionText}>Opinions</span>
+          <span className={styles.chatHeaderActionText}>Tone</span>
         </button>,
       );
       if (canBotActions) {
@@ -15407,43 +16028,45 @@ function HomeContent(): React.JSX.Element {
           aria-disabled={headerActionsDisabled}
         >
           {renderMemoryToasts()}
-          <div
-            id={accordionId}
-            className={`${styles.chatHeaderActionsAccordion} ${
-              chatOverflowMenuOpen ? styles.chatHeaderActionsAccordionOpen : ""
-            }`}
-            aria-hidden={accordionCollapsed}
-            // `inert` removes the entire subtree from focus + AT trees while
-            // collapsed, so screen readers don't announce hidden controls.
-            inert={accordionCollapsed || undefined}
-          >
+          <div className={styles.chatHeaderGearAnchor}>
             <div
-              className={styles.chatHeaderActionsRow}
-              role="group"
-              aria-label="Conversation actions"
+              id={accordionId}
+              className={`${styles.chatHeaderActionsAccordion} ${
+                chatOverflowMenuOpen ? styles.chatHeaderActionsAccordionOpen : ""
+              }`}
+              aria-hidden={accordionCollapsed}
+              // `inert` removes the entire subtree from focus + AT trees while
+              // collapsed, so screen readers don't announce hidden controls.
+              inert={accordionCollapsed || undefined}
             >
-              {accordionButtons.map((node, index) =>
-                renderAccordionButton(index, node),
-              )}
+              <div
+                className={styles.chatHeaderActionsRow}
+                role="group"
+                aria-label="Conversation actions"
+              >
+                {accordionButtons.map((node, index) =>
+                  renderAccordionButton(index, accordionButtons.length, node),
+                )}
+              </div>
             </div>
+            <button
+              ref={chatOverflowGearButtonRef}
+              type="button"
+              className={styles.chatGearButton}
+              aria-expanded={chatOverflowMenuOpen}
+              aria-haspopup="true"
+              aria-controls={accordionId}
+              aria-label={
+                chatOverflowMenuOpen
+                  ? "Hide conversation tools"
+                  : "Show conversation tools"
+              }
+              title="Conversation tools"
+              onClick={() => setChatOverflowMenuOpen(open => !open)}
+            >
+              <WrenchGlyph />
+            </button>
           </div>
-          <button
-            ref={chatOverflowGearButtonRef}
-            type="button"
-            className={styles.chatGearButton}
-            aria-expanded={chatOverflowMenuOpen}
-            aria-haspopup="true"
-            aria-controls={accordionId}
-            aria-label={
-              chatOverflowMenuOpen
-                ? "Hide conversation tools"
-                : "Show conversation tools"
-            }
-            title="Conversation tools"
-            onClick={() => setChatOverflowMenuOpen(open => !open)}
-          >
-            <WrenchGlyph />
-          </button>
         </div>
       );
     }
@@ -15497,7 +16120,7 @@ function HomeContent(): React.JSX.Element {
                 handleOpinions();
               }}
             >
-              Opinions
+              Tone
             </button>
             {canBotActions && (
               <button
@@ -15753,6 +16376,9 @@ function HomeContent(): React.JSX.Element {
       memoryPanelScope === "bot" && memoryPanelBot
         ? memoryPanelBot.name
         : "all bots";
+    const devToolsHasSavedConversation = Boolean(
+      (detail?.id && detail.id !== "pending") || (selectedId && selectedId !== "pending")
+    );
     return (
       <>
         <div
@@ -15775,25 +16401,37 @@ function HomeContent(): React.JSX.Element {
             ::
           </span>
         </div>
-        <button
-          type="button"
-          className={`${styles.devToolsSection} ${styles.devToolsSectionButton}`}
-          onClick={() => setDevTogglesOpen(true)}
-          aria-haspopup="dialog"
-          aria-expanded={devTogglesOpen}
-          aria-controls="dev-toggles-modal"
-        >
-          <span className={styles.devToolsSectionTitle}>Bot import</span>
-          <span className={styles.devToolsToggleSummary}>
-            Paste JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
-          </span>
-          <span className={styles.devToolsSectionHint}>
+        <details className={styles.devToolsSection}>
+          <summary className={styles.devToolsSectionSummary}>
+            <span className={styles.devToolsSectionTitle}>Bot import</span>
+            <span className={styles.devToolsToggleSummary}>
+              Paste JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
+            </span>
+          </summary>
+          <p className={styles.devToolsSectionHint}>
             Off (default): Import opens the file picker for .bot files only. On: Import shows upload plus paste-from-clipboard.
-          </span>
-        </button>
+          </p>
+          <div className={styles.devToolsActions}>
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() => setDevTogglesOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={devTogglesOpen}
+              aria-controls="dev-toggles-modal"
+            >
+              Open bot import toggles
+            </button>
+          </div>
+        </details>
 
-        <div className={styles.devToolsSection}>
-          <h3 className={styles.devToolsSectionTitle}>Viewport</h3>
+        <details className={styles.devToolsSection}>
+          <summary className={styles.devToolsSectionSummary}>
+            <span className={styles.devToolsSectionTitle}>Viewport</span>
+            <span className={styles.devToolsToggleSummary}>
+              <strong>{viewportWidth}px</strong> × <strong>{viewportHeight}px</strong>
+            </span>
+          </summary>
           <p className={styles.devToolsViewportStatus} aria-live="polite">
             <span>
               Width <strong>{viewportWidth}px</strong>
@@ -15802,10 +16440,15 @@ function HomeContent(): React.JSX.Element {
               Height <strong>{viewportHeight}px</strong>
             </span>
           </p>
-        </div>
+        </details>
 
-        <div className={styles.devToolsSection}>
-          <h3 className={styles.devToolsSectionTitle}>Seed data</h3>
+        <details className={styles.devToolsSection}>
+          <summary className={styles.devToolsSectionSummary}>
+            <span className={styles.devToolsSectionTitle}>Seed data</span>
+            <span className={styles.devToolsToggleSummary}>
+              Bots <strong>{bots.length}</strong> · chats <strong>{visibleConversations.length}</strong>
+            </span>
+          </summary>
           <p className={styles.devToolsSectionHint}>
             Bots: <strong>{bots.length}</strong> | Sidebar chats:{" "}
             <strong>{visibleConversations.length}</strong>
@@ -15895,7 +16538,69 @@ function HomeContent(): React.JSX.Element {
               Delete all bots
             </button>
           </div>
-        </div>
+        </details>
+
+        <details className={styles.devToolsSection}>
+          <summary className={styles.devToolsSectionSummary}>
+            <span className={styles.devToolsSectionTitle}>Connection</span>
+            <span className={styles.devToolsToggleSummary}>
+              {devToolsHasSavedConversation
+                ? sessionOpinion
+                  ? `${opinionBandTitle(sessionOpinion.band)} · ${sessionOpinion.score}%`
+                  : "No read yet"
+                : "No saved chat"}
+              {botOpinion ? ` | ${botOpinionBandTitle(botOpinion.band)} · ${botOpinion.score}%` : ""}
+            </span>
+          </summary>
+          <p className={styles.devToolsSectionHint}>
+            Current chat:{" "}
+            <strong>
+              {devToolsHasSavedConversation
+                ? sessionOpinion
+                  ? `${opinionBandTitle(sessionOpinion.band)} · ${sessionOpinion.score}% · ${opinionTrendLabel(sessionOpinion.trend)}`
+                  : "No Connection read yet"
+                : "Open a saved chat first"}
+            </strong>
+          </p>
+          <p className={styles.devToolsSectionHint}>
+            Sets the selected chat Connection state and opens the panel for quick visual checks.
+          </p>
+          <div
+            className={styles.devToolsConnectionRail}
+            aria-label="Connection panel presets"
+          >
+            {DEV_TOOLS_CONNECTION_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className={styles.devToolsPresetButton}
+                onClick={() => void devToolsSetConnectionPreset(preset)}
+                disabled={devToolsBusy || !devToolsHasSavedConversation}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <p className={styles.devToolsSectionHint}>
+            Bot opinion extremes force the long-term relationship state for the active bot or Default Prism.
+          </p>
+          <div
+            className={styles.devToolsConnectionRail}
+            aria-label="Bot opinion presets"
+          >
+            {DEV_TOOLS_BOT_OPINION_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className={styles.devToolsPresetButton}
+                onClick={() => void devToolsSetBotOpinionPreset(preset)}
+                disabled={devToolsBusy}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </details>
 
         {devToolsMemoryPanelOpen && (
           <div className={styles.devToolsSection}>
@@ -16348,62 +17053,108 @@ function HomeContent(): React.JSX.Element {
       {panel === "opinions" && (
         <div
           className={`${styles.panel} ${styles.panelOpinions}`}
+          data-band={sessionOpinion?.band}
+          data-trend={sessionOpinion?.trend}
           data-closing={panelClosing ? "true" : undefined}
         >
           <div className={styles.panelHeader}>
-            <h3>Opinions</h3>
+            <h3>Connection</h3>
             <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
           </div>
           <div className={styles.opinionPanelBody}>
             <p className={styles.opinionPanelIntro}>
-              This meter reflects how this bot currently experiences the conversation.
+              A soft read on how this exchange feels right now. It is context, not a grade.
             </p>
             {sessionOpinion ? (
-              <>
-                <div
-                  className={styles.opinionOrbShell}
-                  data-band={sessionOpinion.band}
-                  data-trend={sessionOpinion.trend}
-                  style={
-                    {
-                      "--opinion-score": String(sessionOpinion.score),
-                    } as React.CSSProperties
-                  }
-                >
-                  <span className={styles.opinionOrbRing} aria-hidden="true" />
-                  <span className={styles.opinionOrbRing} aria-hidden="true" />
-                  <span className={styles.opinionOrbRing} aria-hidden="true" />
-                  <div className={styles.opinionOrbCore}>
-                    <strong>{sessionOpinion.score}%</strong>
-                    <small>{opinionBandTitle(sessionOpinion.band)}</small>
-                  </div>
-                </div>
-                <div className={styles.opinionSummary}>
-                  <strong>{opinionBandDescription(sessionOpinion.band)}</strong>
-                  <p>{sessionOpinion.lastReason}</p>
-                  <small>
-                    Last updated{" "}
-                    {new Date(sessionOpinion.updatedAt).toLocaleTimeString([], {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                  </small>
-                </div>
-                {sessionOpinion.recentReasons.length > 0 && (
-                  <ul className={styles.opinionReasonList}>
-                    {sessionOpinion.recentReasons.map((reason, index) => (
-                      <li key={`${reason}-${index}`}>{reason}</li>
-                    ))}
-                  </ul>
-                )}
-              </>
+              (() => {
+                const recentReasons = visibleOpinionReasons(sessionOpinion);
+                return (
+                  <>
+                    <section className={styles.opinionStateCard} aria-label="Current connection tone">
+                      <div
+                        className={styles.opinionOrbShell}
+                        data-band={sessionOpinion.band}
+                        data-trend={sessionOpinion.trend}
+                        style={
+                          {
+                            "--opinion-score": `${sessionOpinion.score}%`,
+                          } as React.CSSProperties
+                        }
+                        aria-label={`${opinionBandTitle(sessionOpinion.band)} connection, ${sessionOpinion.score} percent`}
+                      >
+                        <span className={styles.opinionOrbRing} aria-hidden="true" />
+                        <span className={styles.opinionOrbRing} aria-hidden="true" />
+                        <span className={styles.opinionOrbRing} aria-hidden="true" />
+                        <div className={styles.opinionOrbCore}>
+                          <strong>{opinionBandTitle(sessionOpinion.band)}</strong>
+                          <small>{sessionOpinion.score}% · {opinionScoreCaption(sessionOpinion.score)}</small>
+                        </div>
+                      </div>
+                      <div className={styles.opinionStateText}>
+                        <span className={styles.opinionEyebrow}>Current feel</span>
+                        <strong>{opinionBandDescription(sessionOpinion.band)}</strong>
+                        <p>{opinionTrendDescription(sessionOpinion.trend)}</p>
+                      </div>
+                    </section>
+                    {botOpinion && (
+                      <section
+                        className={styles.botOpinionCard}
+                        data-band={botOpinion.band}
+                        data-boundary={botOpinion.boundaryLevel}
+                        aria-label="Long-term relationship with this bot"
+                      >
+                        <div className={styles.opinionSummaryHeader}>
+                          <span>With this bot</span>
+                          <strong data-trend={botOpinion.trend}>
+                            {botOpinionBandTitle(botOpinion.band)} · {botOpinion.score}%
+                          </strong>
+                        </div>
+                        <p>{botOpinionBandDescription(botOpinion)}</p>
+                        <small>{botOpinion.lastReason}</small>
+                        <div className={styles.opinionGuidance}>
+                          <span>Repair path</span>
+                          <p>{botOpinionRepairGuidance(botOpinion)}</p>
+                        </div>
+                      </section>
+                    )}
+                    <section className={styles.opinionSummary} aria-label="Latest tone shift">
+                      <div className={styles.opinionSummaryHeader}>
+                        <span>What changed?</span>
+                        <strong data-trend={sessionOpinion.trend}>{opinionTrendLabel(sessionOpinion.trend)}</strong>
+                      </div>
+                      <p>{sessionOpinion.lastReason}</p>
+                      <small>
+                        Last updated{" "}
+                        {new Date(sessionOpinion.updatedAt).toLocaleTimeString([], {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </small>
+                    </section>
+                    <section className={styles.opinionGuidance} aria-label="What helps next">
+                      <span>What helps next?</span>
+                      <p>{opinionNextStep(sessionOpinion.trend)}</p>
+                    </section>
+                    {recentReasons.length > 0 && (
+                      <section className={styles.opinionRecentSection} aria-label="Recent tone shifts">
+                        <span className={styles.opinionEyebrow}>Recent shifts</span>
+                        <ul className={styles.opinionReasonList}>
+                          {recentReasons.map((reason, index) => (
+                            <li key={`${reason}-${index}`}>{reason}</li>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+                  </>
+                );
+              })()
             ) : (
               <div className={styles.opinionEmptyState}>
-                <strong>Opinion meter is warming up</strong>
-                <p>Send a message to generate the first read for this chat.</p>
+                <strong>Connection read is warming up</strong>
+                <p>Send a message to generate the first tone read for this chat.</p>
               </div>
             )}
-          </div>
+                  </div>
         </div>
       )}
 
@@ -17947,7 +18698,12 @@ function HomeContent(): React.JSX.Element {
             <ThemeGlyph mode={effectiveThemeMode} />
           </button>
           {renderDevToolsButton()}
-          <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
+          <div className={styles.hubUtilityActions}>
+            <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
+            <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
+            <button type="button" onClick={() => openRightPanel("images")}>Images</button>
+            <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
+          </div>
         </div>
       </div>
       {renderSharedPanels()}
@@ -18118,9 +18874,24 @@ function HomeContent(): React.JSX.Element {
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
           {shouldShowHeaderConversationTitle ? (
-            <h2 className={styles.chatHeaderTitle}>{headerConversationTitle}</h2>
+            <h2
+              className={`${styles.chatHeaderTitle} ${
+                headerTitleCollapsedForAccordion
+                  ? styles.chatHeaderTitleCollapsed
+                  : ""
+              }`}
+            >
+              {headerConversationTitle}
+            </h2>
           ) : (
-            <h2 className={styles.chatHeaderTitlePlaceholder} aria-hidden="true" />
+            <h2
+              className={`${styles.chatHeaderTitlePlaceholder} ${
+                headerTitleCollapsedForAccordion
+                  ? styles.chatHeaderTitlePlaceholderCollapsed
+                  : ""
+              }`}
+              aria-hidden="true"
+            />
           )}
           {renderChatOverflowGear()}
         </header>
@@ -19004,7 +19775,7 @@ function HomeContent(): React.JSX.Element {
           })()}
           {!composerHiddenByAskQuestion && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
-              <span>Editing message. Save creates a new fork and sends the revised text.</span>
+              <span>Editing message. Save sends the revised text.</span>
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}
@@ -19203,9 +19974,24 @@ function HomeContent(): React.JSX.Element {
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
           {shouldShowHeaderConversationTitle ? (
-            <h2 className={styles.chatHeaderTitle}>{headerConversationTitle}</h2>
+            <h2
+              className={`${styles.chatHeaderTitle} ${
+                headerTitleCollapsedForAccordion
+                  ? styles.chatHeaderTitleCollapsed
+                  : ""
+              }`}
+            >
+              {headerConversationTitle}
+            </h2>
           ) : (
-            <h2 className={styles.chatHeaderTitlePlaceholder} aria-hidden="true" />
+            <h2
+              className={`${styles.chatHeaderTitlePlaceholder} ${
+                headerTitleCollapsedForAccordion
+                  ? styles.chatHeaderTitlePlaceholderCollapsed
+                  : ""
+              }`}
+              aria-hidden="true"
+            />
           )}
           {renderChatOverflowGear()}
         </header>
@@ -20036,7 +20822,7 @@ function HomeContent(): React.JSX.Element {
           </div>
           {!composerHiddenByAskQuestion && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
-              <span>Editing message. Save creates a new fork and sends the revised text.</span>
+              <span>Editing message. Save sends the revised text.</span>
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}

@@ -23,6 +23,8 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     providerLocked: 0,
     autoMemory: 1,
     hiddenBotModelIds: "[]",
+    preferredLocalModel: null,
+    preferredOnlineModel: null,
     secondaryOllamaHost: null,
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
@@ -154,6 +156,46 @@ describe("resolveNextSettings — hiddenBotModelIds", () => {
       resolveNextSettings({ hiddenBotModelIds: "nope" }, current).hiddenBotModelIds,
       ["gpt-3.5-turbo"]
     );
+  });
+});
+
+describe("resolveNextSettings — preferred auto models", () => {
+  it("stores trimmed values for local + online model hints", () => {
+    const next = resolveNextSettings(
+      { preferredLocalModel: " llama3.2 ", preferredOnlineModel: " gpt-4o-mini " },
+      baseline()
+    );
+    assert.equal(next.preferredLocalModel, "llama3.2");
+    assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
+  });
+
+  it("clears each preference independently with empty string", () => {
+    const current = baseline({
+      preferredLocalModel: "llama3.2",
+      preferredOnlineModel: "gpt-4o-mini",
+    });
+    const next = resolveNextSettings(
+      { preferredLocalModel: "", preferredOnlineModel: " " },
+      current
+    );
+    assert.equal(next.preferredLocalModel, null);
+    assert.equal(next.preferredOnlineModel, null);
+  });
+
+  it("keeps existing values when invalid types are sent", () => {
+    const current = baseline({
+      preferredLocalModel: "llama3.2",
+      preferredOnlineModel: "gpt-4o-mini",
+    });
+    const next = resolveNextSettings(
+      {
+        preferredLocalModel: 42 as unknown as string,
+        preferredOnlineModel: true as unknown as string,
+      },
+      current
+    );
+    assert.equal(next.preferredLocalModel, "llama3.2");
+    assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
   });
 });
 

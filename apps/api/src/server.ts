@@ -14,7 +14,7 @@ import {
 import { buildHealthResponse } from "./health.ts";
 import { consumePairingCode, createPairingCode } from "./pairing.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
-import { processChatMessage, refreshConversationTitle } from "./chat.ts";
+import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
 import {
   createDevSeedMemories,
   deleteMemoryById,
@@ -51,7 +51,15 @@ import {
   purgeExpiredImages
 } from "./image-retention.ts";
 import { deleteVectorsForUser } from "./qdrant.ts";
-import { hydrateAssistantMessageParts, type ChatMessage } from "@localai/shared";
+import {
+  hydrateAssistantMessageParts,
+  type ChatMessage,
+  type BotOpinion,
+  type BotOpinionBoundaryLevel,
+  type OpinionBand,
+  type OpinionTrend,
+  type SessionOpinion,
+} from "@localai/shared";
 
 const config = getAppConfig();
 const db = createDatabase();
@@ -76,6 +84,8 @@ interface UserDbRow {
   auto_memory: number;
   auto_switch_model: number;
   hidden_bot_model_ids: string;
+  preferred_local_model: string | null;
+  preferred_online_model: string | null;
   secondary_ollama_host: string | null;
   openai_key_ciphertext: string | null;
   openai_key_iv: string | null;
@@ -179,7 +189,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, hidden_bot_model_ids, secondary_ollama_host, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, hidden_bot_model_ids, preferred_local_model, preferred_online_model, secondary_ollama_host, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -239,6 +249,31 @@ function readOptionalString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function clampConnectionScore(value: number): number {
+  if (!Number.isFinite(value)) return 50;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function connectionBandFromScore(score: number): OpinionBand {
+  if (score >= 68) return "trusting";
+  if (score <= 34) return "guarded";
+  return "warming";
+}
+
+function readConnectionTrend(value: unknown): OpinionTrend {
+  return value === "up" || value === "down" || value === "steady" ? value : "steady";
+}
+
+function readConnectionReasons(value: unknown, fallback: string): string[] {
+  const reasons = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+  const cleaned = [fallback, ...reasons]
+    .map((reason) => reason.trim())
+    .filter((reason) => reason.length > 0);
+  return Array.from(new Set(cleaned)).slice(0, 4);
 }
 
 function parseSourceMessageIds(raw: string | null | undefined): string[] {
@@ -651,6 +686,7 @@ function buildRoutes(): RouteDefinition[] {
             updatedAt: opinionRow.updated_at,
           }
         : undefined;
+      const botOpinion = readBotOpinion(db, userId, conversation.bot_id ?? null);
       json(ctx.res, 200, {
         ok: true,
         conversation: {
@@ -666,6 +702,7 @@ function buildRoutes(): RouteDefinition[] {
           messages,
         },
         ...(opinion ? { opinion } : {}),
+        ...(botOpinion ? { botOpinion } : {}),
       });
     }),
     route("POST", "/api/conversations/:id/title", async (ctx) => {
@@ -705,6 +742,93 @@ function buildRoutes(): RouteDefinition[] {
       }
       const created = createDevSeedConversations(db, userId, count);
       json(ctx.res, 200, { ok: true, created });
+    }),
+    route("POST", "/api/conversations/:id/dev-connection", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversation = db
+        .prepare("SELECT id, bot_id FROM conversations WHERE id = ? AND user_id = ?")
+        .get(ctx.params.id, userId) as { id: string; bot_id: string | null } | undefined;
+      if (!conversation) {
+        throw new Error("Conversation not found.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const score = clampConnectionScore(Number(body.score));
+      const band = connectionBandFromScore(score);
+      const trend = readConnectionTrend(body.trend);
+      const lastReason =
+        readOptionalString(body.lastReason) ?? "Developer Tools set the connection state.";
+      const recentReasons = readConnectionReasons(body.recentReasons, lastReason);
+      const updatedAt = new Date().toISOString();
+      const botScopeKey = conversation.bot_id ?? "__default__";
+
+      db.prepare(
+        `INSERT INTO session_opinions (
+          user_id, conversation_id, bot_scope_key, bot_id, score, band, trend, last_reason, recent_reasons, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, conversation_id, bot_scope_key) DO UPDATE SET
+          bot_id = excluded.bot_id,
+          score = excluded.score,
+          band = excluded.band,
+          trend = excluded.trend,
+          last_reason = excluded.last_reason,
+          recent_reasons = excluded.recent_reasons,
+          updated_at = excluded.updated_at`
+      ).run(
+        userId,
+        conversation.id,
+        botScopeKey,
+        conversation.bot_id ?? null,
+        score,
+        band,
+        trend,
+        lastReason,
+        JSON.stringify(recentReasons),
+        updatedAt
+      );
+
+      const opinion: SessionOpinion = {
+        score,
+        band,
+        trend,
+        lastReason,
+        recentReasons,
+        updatedAt,
+      };
+      json(ctx.res, 200, { ok: true, opinion });
+    }),
+    route("POST", "/api/bots/:id/dev-opinion", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const requestedBotId = ctx.params.id === "_default" ? null : ctx.params.id;
+      if (requestedBotId) {
+        const bot = db
+          .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
+          .get(requestedBotId, userId) as { id?: string } | undefined;
+        if (!bot?.id) {
+          throw new Error("Bot not found.");
+        }
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const score = clampConnectionScore(Number(body.score));
+      const trend = readConnectionTrend(body.trend);
+      const lastReason =
+        readOptionalString(body.lastReason) ?? "Developer Tools set the bot opinion state.";
+      const recentReasons = readConnectionReasons(body.recentReasons, lastReason);
+      const repairCount =
+        typeof body.repairCount === "number" && Number.isFinite(body.repairCount)
+          ? Math.max(0, Math.round(body.repairCount))
+          : 0;
+      const botOpinion = upsertBotOpinion({
+        db,
+        userId,
+        botId: requestedBotId,
+        score,
+        trend,
+        lastReason,
+        recentReasons,
+        repairCount,
+        updatedAt: new Date().toISOString(),
+      });
+      json(ctx.res, 200, { ok: true, botOpinion });
     }),
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -812,7 +936,11 @@ function buildRoutes(): RouteDefinition[] {
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
         explicitModelOverride: botForcesLocalProvider ? null : explicitModelOverride,
-        botPreferredModel,
+        botPreferredModel:
+          botPreferredModel ??
+          (effectiveProvider === "local"
+            ? readOptionalString(user.preferred_local_model)
+            : readOptionalString(user.preferred_online_model)),
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
       });
@@ -854,11 +982,12 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
-      const { conversation, conversationStarters, memoryLearned, opinion } = result;
+      const { conversation, conversationStarters, memoryLearned, opinion, botOpinion } = result;
       json(ctx.res, 200, {
         ok: true,
         conversation,
         ...(opinion ? { opinion } : {}),
+        ...(botOpinion ? { botOpinion } : {}),
         ...(memoryLearned ? { memoryLearned } : {}),
         ...(conversationStarters ? { conversationStarters } : {}),
       });
@@ -1126,6 +1255,8 @@ function buildRoutes(): RouteDefinition[] {
           providerLocked: Boolean(user.provider_locked),
           autoMemory: Boolean(user.auto_memory),
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+          preferredLocalModel: user.preferred_local_model ?? "",
+          preferredOnlineModel: user.preferred_online_model ?? "",
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
@@ -1167,6 +1298,8 @@ function buildRoutes(): RouteDefinition[] {
         providerLocked: user.provider_locked,
         autoMemory: user.auto_memory,
         hiddenBotModelIds: user.hidden_bot_model_ids,
+        preferredLocalModel: user.preferred_local_model,
+        preferredOnlineModel: user.preferred_online_model,
         secondaryOllamaHost: user.secondary_ollama_host,
         primaryOllamaHost: config.ollamaHost,
       });
@@ -1192,7 +1325,8 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(`
         UPDATE users
         SET theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, hidden_bot_model_ids = ?,
-            secondary_ollama_host = ?, openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
+            preferred_local_model = ?, preferred_online_model = ?, secondary_ollama_host = ?,
+            openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
         WHERE id = ?
       `).run(
         next.theme,
@@ -1200,6 +1334,8 @@ function buildRoutes(): RouteDefinition[] {
         next.providerLocked,
         next.autoMemory,
         JSON.stringify(next.hiddenBotModelIds),
+        next.preferredLocalModel,
+        next.preferredOnlineModel,
         next.secondaryOllamaHost,
         openAiCipher,
         openAiIv,

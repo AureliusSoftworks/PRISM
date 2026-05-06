@@ -1125,10 +1125,17 @@
 .hubFooter {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   border-top: 1px solid var(--line);
   padding-top: 14px;
+}
+
+.hubUtilityActions {
+  display: grid;
+  grid-template-columns: repeat(4, max-content);
+  gap: 8px;
+  margin-left: auto;
 }
 
 .hubFooter button:not(.themeToggleButton) {
@@ -1144,6 +1151,10 @@
   font-size: 12px;
   font-weight: 500;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.hubUtilityActions button {
+  min-width: 78px;
 }
 
 .hubFooter button:not(.themeToggleButton):hover {
@@ -1424,6 +1435,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
   overflow: hidden;
   background: var(--bg-surface);
 }
@@ -1908,6 +1920,7 @@
   list-style: none;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
   display: grid;
   gap: 3px;
   align-content: start;
@@ -2009,6 +2022,10 @@
   color: var(--row-text-color);
 }
 
+.conversationTitleButton:disabled {
+  cursor: default;
+}
+
 .conversationTitleButton.selected {
   background: var(--bg-active);
   color: var(--fg);
@@ -2059,7 +2076,12 @@
       var(--row-color, var(--accent)) var(--row-depth-glow-outer),
       transparent
     );
-  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.15s;
 }
 
 .conversationGroupTile:hover {
@@ -2087,6 +2109,43 @@
   display: flex;
   flex-direction: column;
   gap: 0;
+  position: relative;
+  transition: transform 0.15s ease;
+}
+
+.conversationGroupAccordionItem .conversationGroupTile {
+  cursor: grab;
+  touch-action: none;
+}
+
+.conversationGroupAccordionItem .conversationGroupTile:active,
+.conversationGroupAccordionItem[data-dragging="true"] .conversationGroupTile {
+  cursor: grabbing;
+}
+
+.conversationGroupAccordionItem[data-dragging="true"] {
+  z-index: 3;
+}
+
+.conversationGroupAccordionItem[data-dragging="true"] .conversationGroupTile {
+  transform: scale(1.015);
+  border-color: color-mix(in srgb, var(--row-color, var(--accent)) 68%, #ffffff 32%);
+  box-shadow:
+    inset 0 5px 9px -6px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 8px 18px -12px rgba(0, 0, 0, 0.8),
+    0 0 18px -10px color-mix(in srgb, var(--row-color, var(--accent)) 80%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversationGroupAccordionItem,
+  .conversationGroupTile {
+    transition: none;
+  }
+
+  .conversationGroupAccordionItem[data-dragging="true"] .conversationGroupTile {
+    transform: none;
+  }
 }
 
 .conversationGroupCollapse {
@@ -2371,7 +2430,7 @@
       color-mix(in srgb, #000 var(--row-depth-shade, 0%), transparent)
     );
   border-color: var(--fg);
-  color: var(--row-text-color);
+  color: var(--row-selected-text-color, var(--row-text-color));
 }
 
 .conversationRow[data-unread="true"] .conversationTitleButton {
@@ -2392,6 +2451,25 @@
   background: var(--row-color, var(--accent));
   transform: translateY(-50%);
   box-shadow: 0 0 10px color-mix(in srgb, var(--row-color, var(--accent)) 68%, transparent);
+}
+
+.conversationRow[data-current="true"] .conversationTitleButton {
+  padding-right: 26px;
+}
+
+.conversationRow[data-current="true"] .conversationTitleButton::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--row-selected-text-color, var(--fg));
+  transform: translateY(-50%);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--row-color, var(--accent)) 22%, transparent),
+    0 0 10px color-mix(in srgb, var(--row-color, var(--accent)) 62%, transparent);
 }
 
 /* Sidebar marker for private chats. The row gets data-private="true"
@@ -2692,6 +2770,7 @@
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 6px;
+  flex-shrink: 0;
   border-top: 1px solid var(--line);
   padding-top: 12px;
 }
@@ -2966,6 +3045,7 @@
   overflow: auto;
   resize: both;
   display: grid;
+  align-content: start;
   gap: 10px;
   padding: 22px 22px 18px;
   border: 1px solid color-mix(in srgb, var(--line) 78%, var(--danger) 22%);
@@ -3003,13 +3083,74 @@
 }
 
 .devToolsSection {
+  display: block;
+  padding: 4px 7px;
+  margin-top: 5px;
+  border: 1px dashed color-mix(in srgb, var(--line-strong) 60%, var(--danger) 40%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, var(--danger) 8%);
+}
+
+.devToolsSection[open] {
   display: grid;
   gap: 8px;
   padding: 14px 14px 12px;
   margin-top: 10px;
-  border: 1px dashed color-mix(in srgb, var(--line-strong) 60%, var(--danger) 40%);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--bg-surface) 92%, var(--danger) 8%);
+  background: color-mix(in srgb, var(--bg-surface) 88%, var(--danger) 12%);
+}
+
+.devToolsSectionSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.devToolsSectionSummary::-webkit-details-marker {
+  display: none;
+}
+
+.devToolsSectionSummary::after {
+  content: "+";
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 1;
+  transition:
+    background 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsSection[open] > .devToolsSectionSummary::after {
+  content: "−";
+  transform: rotate(180deg);
+}
+
+.devToolsSectionSummary:hover,
+.devToolsSectionSummary:focus-visible {
+  outline: none;
+}
+
+.devToolsSectionSummary:hover::after,
+.devToolsSectionSummary:focus-visible::after {
+  border-color: var(--line-strong);
+  color: var(--fg);
 }
 
 .devToolsSectionButton {
@@ -3037,9 +3178,10 @@
 
 .devToolsSectionTitle {
   margin: 0;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
+  line-height: 1.1;
   text-transform: uppercase;
   color: var(--fg-muted);
 }
@@ -3056,8 +3198,14 @@
 }
 
 .devToolsToggleSummary {
-  font-size: 12px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.1;
   color: var(--fg-muted);
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .devToolsToggleSummary strong {
@@ -3179,6 +3327,12 @@
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.devToolsConnectionRail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .devToolsPresetButton {
@@ -3353,6 +3507,10 @@
     resize: vertical;
   }
 
+  .devToolsConnectionRail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .devToolsAction {
     flex: 1 1 160px;
   }
@@ -3400,15 +3558,45 @@
   text-align: left;
   font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
   text-shadow: 0 1px 0 color-mix(in srgb, var(--bg) 68%, transparent);
+  /* Coordinated with the chat-tools accordion so the title fade out matches
+     the wrench expansion timing — see `.chatHeaderActionsAccordion`. */
+  transition:
+    max-width 320ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 200ms ease,
+    flex-basis 320ms cubic-bezier(0.32, 0.72, 0, 1),
+    margin 320ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .chatHeader h2.chatHeaderTitle {
   white-space: pre;
 }
 
+/* Applied alongside `.chatHeaderTitle` when the desktop wrench accordion is
+   open — frees the row width so the action pills stay on a single line.
+   Higher specificity than `.chatHeader h2` so flex/max-width overrides win. */
+.chatHeader h2.chatHeaderTitleCollapsed,
+.chatHeader h2.chatHeaderTitlePlaceholderCollapsed {
+  flex: 0 0 0;
+  max-width: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .chatHeaderTitlePlaceholder {
   flex: 1;
   min-width: 0;
+  transition:
+    max-width 320ms cubic-bezier(0.32, 0.72, 0, 1),
+    flex-basis 320ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatHeaderTitle,
+  .chatHeaderTitlePlaceholder {
+    transition: none;
+  }
 }
 
 .headerActions {
@@ -8736,6 +8924,7 @@
   --opinion-hue: 196deg;
   --opinion-sat: 74%;
   --opinion-light: 62%;
+  --opinion-score: 50%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -8744,9 +8933,27 @@
   margin-bottom: 6px;
 }
 
+.panelOpinions[data-band="guarded"] {
+  --opinion-hue: 344deg;
+  --opinion-sat: 74%;
+  --opinion-light: 61%;
+}
+
+.panelOpinions[data-band="warming"] {
+  --opinion-hue: 210deg;
+  --opinion-sat: 75%;
+  --opinion-light: 63%;
+}
+
+.panelOpinions[data-band="trusting"] {
+  --opinion-hue: 145deg;
+  --opinion-sat: 60%;
+  --opinion-light: 58%;
+}
+
 .opinionPanelBody {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   align-content: start;
   overflow-y: auto;
   padding-right: 2px;
@@ -8759,16 +8966,39 @@
   line-height: 1.45;
 }
 
+.opinionStateCard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 50% 8%,
+      hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.14),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--bg) 91%, var(--fg) 9%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
 .opinionOrbShell {
-  --orb-size: min(220px, 70vw);
+  --orb-size: min(184px, 62vw);
   width: var(--orb-size);
   height: var(--orb-size);
-  margin: 8px auto 4px;
+  margin: 2px auto 0;
   position: relative;
   display: grid;
   place-items: center;
   border-radius: 999px;
   isolation: isolate;
+  background:
+    conic-gradient(
+      from -90deg,
+      hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.34) var(--opinion-score),
+      transparent 0
+    );
+  box-shadow: 0 0 44px hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.08);
 }
 
 .opinionOrbShell[data-band="guarded"] {
@@ -8791,14 +9021,14 @@
 
 .opinionOrbRing {
   position: absolute;
-  inset: 0;
+  inset: 7px;
   border-radius: inherit;
   border: 1px solid
-    hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) + 8%) / 0.34);
+    hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) + 8%) / 0.24);
   box-shadow:
-    0 0 38px hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.2),
-    inset 0 0 22px hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.14);
-  animation: opinionOrbBreath 4.6s ease-in-out infinite;
+    0 0 28px hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.14),
+    inset 0 0 18px hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.1);
+  animation: opinionOrbBreath 5.6s ease-in-out infinite;
   transform-origin: center;
 }
 
@@ -8826,13 +9056,14 @@
 }
 
 .opinionOrbCore {
-  width: 54%;
-  height: 54%;
+  width: 64%;
+  height: 64%;
   border-radius: 999px;
   display: grid;
   place-items: center;
   text-align: center;
-  gap: 2px;
+  align-content: center;
+  gap: 5px;
   color: var(--fg);
   background:
     radial-gradient(
@@ -8842,40 +9073,146 @@
     ),
     radial-gradient(
       circle at 64% 68%,
-      hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) - 8%) / 0.75),
-      hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) - 18%) / 0.35)
+      hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) - 6%) / 0.7),
+      hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) - 18%) / 0.28)
     );
-  border: 1px solid hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) + 10%) / 0.45);
+  border: 1px solid hsl(var(--opinion-hue) var(--opinion-sat) calc(var(--opinion-light) + 10%) / 0.38);
   box-shadow:
-    0 10px 30px hsl(var(--opinion-hue) var(--opinion-sat) 34% / 0.35),
+    0 14px 34px hsl(var(--opinion-hue) var(--opinion-sat) 34% / 0.22),
     inset 0 1px 0 rgb(255 255 255 / 0.28);
 }
 
 .opinionOrbCore strong {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.015em;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.32);
 }
 
 .opinionOrbCore small {
-  font-size: 11px;
-  color: color-mix(in srgb, var(--fg-muted) 70%, var(--fg) 30%);
+  font-size: 10.25px;
+  color: color-mix(in srgb, var(--fg) 82%, #ffffff 18%);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.045em;
+  line-height: 1.2;
+  text-shadow: 0 1px 7px rgb(0 0 0 / 0.34);
+  white-space: nowrap;
 }
 
-.opinionSummary {
+.opinionStateText,
+.opinionSummary,
+.opinionGuidance,
+.opinionRecentSection {
   display: grid;
-  gap: 5px;
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
+  gap: 7px;
 }
 
-.opinionSummary strong {
-  font-size: 13px;
+.opinionStateText {
+  text-align: center;
+}
+
+.opinionStateText strong {
+  font-size: 13.5px;
   line-height: 1.4;
+}
+
+.opinionStateText p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.opinionEyebrow,
+.opinionSummaryHeader span,
+.opinionGuidance span {
+  color: color-mix(in srgb, var(--fg-muted) 86%, var(--fg) 14%);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.opinionSummary,
+.opinionGuidance {
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--bg) 88%, var(--fg) 12%);
+}
+
+.botOpinionCard {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.12),
+      transparent 64%
+    ),
+    color-mix(in srgb, var(--bg) 88%, var(--fg) 12%);
+}
+
+.botOpinionCard[data-band="wounded"] {
+  --opinion-hue: 344deg;
+  --opinion-sat: 74%;
+  --opinion-light: 61%;
+}
+
+.botOpinionCard[data-band="careful"] {
+  --opinion-hue: 34deg;
+  --opinion-sat: 76%;
+  --opinion-light: 62%;
+}
+
+.botOpinionCard[data-band="open"] {
+  --opinion-hue: 210deg;
+  --opinion-sat: 75%;
+  --opinion-light: 63%;
+}
+
+.botOpinionCard[data-band="bonded"] {
+  --opinion-hue: 145deg;
+  --opinion-sat: 60%;
+  --opinion-light: 58%;
+}
+
+.botOpinionCard p,
+.botOpinionCard small {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.botOpinionCard > small {
+  font-size: 12px;
+}
+
+.opinionSummaryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.opinionSummaryHeader strong {
+  border: 1px solid hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.24);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: color-mix(in srgb, var(--fg) 90%, hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light)) 10%);
+  background: hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.1);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.opinionSummaryHeader strong[data-trend="down"] {
+  border-color: hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.32);
+  background: hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.14);
 }
 
 .opinionSummary p {
@@ -8889,6 +9226,23 @@
   font-size: 11px;
 }
 
+.opinionGuidance {
+  background:
+    linear-gradient(
+      135deg,
+      hsl(var(--opinion-hue) var(--opinion-sat) var(--opinion-light) / 0.12),
+      transparent 62%
+    ),
+    color-mix(in srgb, var(--bg) 89%, var(--fg) 11%);
+}
+
+.opinionGuidance p {
+  margin: 0;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .opinionReasonList {
   list-style: none;
   margin: 0;
@@ -8899,11 +9253,12 @@
 
 .opinionReasonList li {
   border-radius: 10px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg) 82%, var(--fg) 18%);
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  background: color-mix(in srgb, var(--bg) 84%, var(--fg) 16%);
   padding: 8px 10px;
   font-size: 12px;
   color: var(--fg-muted);
+  line-height: 1.35;
 }
 
 .opinionEmptyState {
@@ -13527,21 +13882,57 @@
   opacity: 0.52;
 }
 
+/* Wrench anchor — relative wrapper that owns the absolutely-positioned
+   accordion. Holding the accordion out of normal flex flow keeps the chat
+   header at a constant height when the pills slide out (no wrap to a new
+   row, no jumping content below). */
+.chatHeaderGearAnchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 /* Accordion shell — collapses to width 0 from the right edge so the inner
-   button row appears to slide leftward out of the wrench. The actual reveal
-   stagger lives on each button (`--accordion-index`) so the visible left-to-
-   right order stays familiar (Memories first, Delete last) while the
-   ergonomically-dangerous Delete settles in last. */
+   button row appears to slide leftward out of the wrench. Absolutely
+   positioned so it floats over the (collapsed) title area instead of
+   pushing layout. The actual reveal stagger lives on each button
+   (`--accordion-index`) so the visible left-to-right order stays familiar
+   (Memories first, Delete last) while the ergonomically-dangerous Delete
+   settles in last. */
 .chatHeaderActionsAccordion {
   --accordion-max-width: 540px;
   --accordion-duration: 320ms;
   --accordion-easing: cubic-bezier(0.32, 0.72, 0, 1);
+  position: absolute;
+  top: 50%;
+  /* Sit immediately to the left of the wrench (`.chatHeaderGearAnchor` is
+     wrench-width). 6px gap matches the chat-header tools cluster gap. */
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   overflow: hidden;
   max-width: 0;
+  /* Solid panel that matches the chat header strip so the bot identity and
+     "Back to sandbox" hint behind the accordion are cleanly obscured when
+     the pills slide out far enough to overlap them. A short left-edge fade
+     lets the panel slip in over the identity rather than crash-cut. */
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    var(--bg-surface) 14px,
+    var(--bg-surface) 100%
+  );
+  /* Vertical padding gives the panel breathing room above/below the 30px
+     pills so it reads as a deliberate slab rather than a tight strip. */
+  padding-block: 10px;
+  /* Inner padding is on the row, not here — the fade edge needs to sit flush
+     against the accordion's left boundary so the gradient does the visual
+     work of softening it. */
   transition: max-width var(--accordion-duration) var(--accordion-easing);
+  z-index: 5;
 }
 
 .chatHeaderActionsAccordionOpen {
@@ -13555,7 +13946,9 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  padding-left: 6px;
+  /* Left padding sits just past the accordion's 14px left-edge fade so the
+     leftmost pill (Memories) lands on solid background, not the gradient. */
+  padding-left: 18px;
   padding-right: 6px;
   white-space: nowrap;
 }
@@ -13597,6 +13990,12 @@
 }
 
 .chatHeaderActionsAccordionOpen .chatHeaderAction {
+  /* Open from the wrench side first (rightmost action), while keeping the
+     existing close/refurl direction untouched on the base rule above. */
+  --accordion-stagger-delay: calc(
+    (var(--accordion-count, 5) - 1 - var(--accordion-index, 0)) *
+      var(--accordion-stagger-step)
+  );
   opacity: 1;
   transform: none;
 }
