@@ -9,6 +9,16 @@ of ChatGPT Gov's security posture and FL Studio's systems-minded creative
 permission: every account is its own sealed sandbox for AI testing across
 local and online providers.
 
+## Experience Principle: User-Player Parity
+
+Prism should not split people into "users" (utility) versus "players"
+(experience). Every feature should satisfy both.
+
+- **Practical value:** clarity, control, and reliability for real tasks
+- **Experiential value:** delight, engagement, and emotional comfort in use
+
+A design is incomplete if it serves only one side.
+
 ## Stack
 
 - **Frontend:** Next.js (standalone output for Docker)

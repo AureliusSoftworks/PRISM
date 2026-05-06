@@ -22,6 +22,8 @@ apps/api/data/
 .githooks/
 vault/.obsidian/workspace.json
 vault/.obsidian/workspace-mobile.json
+vault/.obsidian/graph.json
+vault/Untitled.canvas
 scripts/kb/.cache/
 vault/**/DerivedData/
 vault/02-apps/**/.next/
