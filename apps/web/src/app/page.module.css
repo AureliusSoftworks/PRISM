@@ -4648,6 +4648,27 @@
   margin: 0;
 }
 
+.chatSessionSummaryBubble {
+  margin: 6px auto 4px;
+  max-width: min(780px, 92%);
+  padding: 12px 14px;
+  border-radius: 16px;
+  text-align: center;
+  color: var(--fg);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 80%, transparent),
+      color-mix(in srgb, var(--bg) 84%, transparent)
+    );
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  box-shadow:
+    0 10px 22px color-mix(in srgb, #000000 18%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+  font-size: 0.9rem;
+  line-height: 1.42;
+}
+
 @media (min-width: 980px) {
   .emptyStateInfoBandRow {
     grid-template-columns: auto minmax(0, 1fr);
@@ -6666,6 +6687,23 @@
   animation-delay: 0.3s;
 }
 
+.summarySpinnerWheel {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(
+    in srgb,
+    var(--typing-accent, var(--fg-muted)) 34%,
+    transparent
+  );
+  border-top-color: color-mix(
+    in srgb,
+    var(--typing-accent, var(--fg-muted)) 92%,
+    var(--fg-muted)
+  );
+  animation: summarySpinnerSpin 0.9s linear infinite;
+}
+
 @keyframes typingPulse {
   0%, 60%, 100% {
     opacity: 0.3;
@@ -6674,6 +6712,15 @@
   30% {
     opacity: 1;
     transform: translateY(-2px);
+  }
+}
+
+@keyframes summarySpinnerSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 

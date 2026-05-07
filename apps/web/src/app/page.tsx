@@ -1728,6 +1728,7 @@ interface ConversationSummary {
   id: string;
   title: string;
   updatedAt: string;
+  mode?: "chat" | "sandbox";
   /** Bot locked to this chat when it was first created; `null` = default grayscale persona. */
   botId: string | null;
   /** Private chat flag — drives the sidebar privacy marker and, when opened, the grayscale-shell override. */
@@ -2334,6 +2335,7 @@ function botOpinionRepairGuidance(opinion: BotOpinion): string {
 interface ConversationDetail {
   id: string;
   title: string;
+  mode?: "chat" | "sandbox";
   /** Bot locked to this conversation at start. Null = PRISM Default / no custom bot. */
   botId: string | null;
   /** Private chat flag — saved chats read it from storage; private sessions receive it from the ephemeral API response. */
@@ -2351,6 +2353,14 @@ interface ConversationDetail {
 interface ChatPostEnvelope {
   conversation: ConversationDetail;
   conversationStarters?: string[];
+  summaryCompaction?: {
+    mode: "chat" | "sandbox";
+    triggered: boolean;
+    inProgress: boolean;
+    reason: "milestone" | "mode_exit" | "manual";
+    latestSummary?: string;
+    latestSummaryAt?: string;
+  };
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
   memoryLearned?: {
@@ -2391,6 +2401,16 @@ interface UserSettings {
 interface PairingCode {
   code: string;
   expiresAt: string;
+}
+interface SummaryCompactionDebug {
+  mode: "chat" | "sandbox";
+  conversationId: string;
+  inProgress: boolean;
+  latestSummary: string | null;
+  latestSummaryAt: string | null;
+  summaryCount: number;
+  totalMessages: number;
+  messagesSinceLastCompaction: number;
 }
 interface UserMemory {
   id: string;
@@ -8672,10 +8692,32 @@ function HomeContent(): React.JSX.Element {
     viewParam === "chat" ? "chat"
       : viewParam === "sandbox" ? "sandbox"
         : "hub";
+  const triggerModeExitCompaction = useCallback((sourceView: View) => {
+    if (sourceView !== "chat" && sourceView !== "sandbox") return;
+    const activeConversationId =
+      detailIdRef.current && detailIdRef.current !== "pending"
+        ? detailIdRef.current
+        : selectedIdRef.current;
+    if (!activeConversationId) return;
+    void api(
+      `/api/conversations/${encodeURIComponent(activeConversationId)}/summarization-debug`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run",
+          mode: sourceView,
+          reason: "mode_exit",
+        }),
+      }
+    ).catch(() => {});
+  }, []);
   const navigateToView = useCallback((next: View) => {
+    if (next !== view) {
+      triggerModeExitCompaction(view);
+    }
     const href = next === "hub" ? "/" : `/?view=${next}`;
     router.replace(href);
-  }, [router]);
+  }, [router, view, triggerModeExitCompaction]);
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [displayName, setDisplayName] = useState("");
   const [user, setUser] = useState<SessionUser | null>(null);
   const [clientAccessState, setClientAccessState] = useState<ClientAccessState>(
@@ -8745,6 +8787,10 @@ function HomeContent(): React.JSX.Element {
   const memoryPhysicsFrameRef = useRef<number | null>(null);
   const [memoryPhysicsActive, setMemoryPhysicsActive] = useState(false);
   const [pendingReply, setPendingReply] = useState(false);
+  const [pendingReplyStartMessageCount, setPendingReplyStartMessageCount] = useState(0);
+  const [sandboxSummaryBusy, setSandboxSummaryBusy] = useState(false);
+  const [chatStartupSummary, setChatStartupSummary] = useState<string | null>(null);
+  const [summaryDebug, setSummaryDebug] = useState<SummaryCompactionDebug | null>(null);
   const [pendingReplyConversationId, setPendingReplyConversationId] =
     useState<string | null>(null);
   const [pendingReplyIsNewConversation, setPendingReplyIsNewConversation] =
@@ -10071,6 +10117,10 @@ function HomeContent(): React.JSX.Element {
       (pendingReplyConversationId !== null && detail?.id === pendingReplyConversationId) ||
       (pendingReplyIsNewConversation && detail?.id === "pending")
     );
+  const latestMessageRole =
+    detail && detail.messages.length > 0
+      ? detail.messages[detail.messages.length - 1]?.role
+      : null;
 
   const typingIndicatorNode = useMemo(() => {
     if (!pendingReplyVisible) return null;
@@ -10110,6 +10160,28 @@ function HomeContent(): React.JSX.Element {
     headerIdentity?.name,
     detail?.messages.length,
     pendingReplyConversationId,
+    selectedComposeBotAccent,
+  ]);
+  const sandboxSummaryIndicatorNode = useMemo(() => {
+    if (!sandboxSummaryBusy || view !== "sandbox" || pendingReplyVisible) return null;
+    const style = selectedComposeBotAccent
+      ? ({ ["--typing-accent" as string]: selectedComposeBotAccent } as React.CSSProperties)
+      : undefined;
+    return (
+      <div
+        className={styles.typingIndicator}
+        style={style}
+        role="status"
+        aria-live="polite"
+        aria-label="Summarizing conversation context."
+      >
+        <span className={styles.summarySpinnerWheel} aria-hidden="true" />
+      </div>
+    );
+  }, [
+    sandboxSummaryBusy,
+    view,
+    pendingReplyVisible,
     selectedComposeBotAccent,
   ]);
 
@@ -10581,6 +10653,10 @@ function HomeContent(): React.JSX.Element {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (!user) return; void refreshAll(); }, [user]);
   useEffect(() => {
+    if (!devToolsOpen) return;
+    void refreshSummaryDebug(view === "chat" ? "chat" : "sandbox");
+  }, [devToolsOpen, view, detail?.id, detail?.messages.length, selectedId]);
+  useEffect(() => {
     return () => {
       if (botLibraryCloseTimerRef.current) {
         clearTimeout(botLibraryCloseTimerRef.current);
@@ -10599,6 +10675,16 @@ function HomeContent(): React.JSX.Element {
     detail?.messages.length,
     pendingReplyVisible,
   ]);
+  useEffect(() => {
+    if (!pendingReply) return;
+    if (!detail || latestMessageRole !== "assistant") return;
+    // Hard-stop typing as soon as a fresh assistant row appears for the
+    // pending turn, even if post-send refresh work is still underway.
+    if (detail.messages.length <= pendingReplyStartMessageCount) return;
+    setPendingReply(false);
+    setPendingReplyConversationId(null);
+    setPendingReplyIsNewConversation(false);
+  }, [pendingReply, detail, latestMessageRole, pendingReplyStartMessageCount]);
 
   useEffect(() => {
     if (viewportWidth > PICKER_MOBILE_BREAKPOINT) {
@@ -10654,6 +10740,46 @@ function HomeContent(): React.JSX.Element {
   }, [view]);
 
   useEffect(() => {
+    if (view !== "chat") return;
+    if (pendingReplyVisible) return;
+    if (detail?.id) return;
+    const latestChatConversation = conversations.find(
+      (conversation) => conversation.mode === "chat" && !conversation.incognito
+    );
+    if (!latestChatConversation?.id) return;
+    void refreshConversation(latestChatConversation.id);
+  }, [view, pendingReplyVisible, detail?.id, conversations]);
+
+  useEffect(() => {
+    if (view !== "chat") {
+      setChatStartupSummary(null);
+      return;
+    }
+    if (detail?.id) {
+      setChatStartupSummary(null);
+      return;
+    }
+    const latestChatConversation = conversations.find(
+      (conversation) => conversation.mode === "chat" && !conversation.incognito
+    );
+    if (!latestChatConversation?.id) {
+      setChatStartupSummary(null);
+      return;
+    }
+    void api<{ summary: string | null }>(
+      `/api/conversations/${encodeURIComponent(latestChatConversation.id)}/summary?mode=chat`
+    )
+      .then((result) => {
+        setChatStartupSummary(result.summary && result.summary.trim().length > 0
+          ? result.summary.trim()
+          : null);
+      })
+      .catch(() => {
+        setChatStartupSummary(null);
+      });
+  }, [view, detail?.id, conversations]);
+
+  useEffect(() => {
     const activeConversationId = view === "hub" ? null : selectedId;
     const previous = titleRefreshSelectionRef.current;
     if (previous.id && previous.id !== activeConversationId && !previous.incognito) {
@@ -10664,6 +10790,29 @@ function HomeContent(): React.JSX.Element {
       incognito: detail?.incognito === true,
     };
   }, [selectedId, detail?.incognito, view]);
+
+  useEffect(() => {
+    const handlePageHide = () => {
+      if (view !== "chat" && view !== "sandbox") return;
+      const activeConversationId =
+        detailIdRef.current && detailIdRef.current !== "pending"
+          ? detailIdRef.current
+          : selectedIdRef.current;
+      if (!activeConversationId) return;
+      const url = `/api/conversations/${encodeURIComponent(
+        activeConversationId
+      )}/summarization-debug?mode=${view}`;
+      const payload = JSON.stringify({ action: "run", mode: view, reason: "mode_exit" });
+      navigator.sendBeacon(
+        url,
+        new Blob([payload], { type: "application/json" })
+      );
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [view]);
 
   async function refreshAll() { await Promise.all([refreshConversations(), refreshSettings(), refreshMemories(), refreshBots(), refreshImages(), refreshModels()]); }
   async function refreshConversations(): Promise<ConversationSummary[]> {
@@ -10818,6 +10967,29 @@ function HomeContent(): React.JSX.Element {
       await refreshBotMemories(memoryPanelBot.id);
     }
   }
+  async function refreshSummaryDebug(modeOverride?: "chat" | "sandbox"): Promise<void> {
+    const conversationId =
+      detailIdRef.current && detailIdRef.current !== "pending"
+        ? detailIdRef.current
+        : selectedIdRef.current;
+    if (!conversationId) {
+      setSummaryDebug(null);
+      return;
+    }
+    const modeForDebug =
+      modeOverride ??
+      (view === "chat" ? "chat" : "sandbox");
+    try {
+      const d = await api<{ debug: SummaryCompactionDebug }>(
+        `/api/conversations/${encodeURIComponent(
+          conversationId
+        )}/summarization-debug?mode=${modeForDebug}`
+      );
+      setSummaryDebug(d.debug);
+    } catch {
+      // Developer-only surface; ignore read failures.
+    }
+  }
   async function refreshBots() { const d = await api<{ bots: Bot[] }>("/api/bots"); setBots(d.bots); }
   async function refreshImages() { const d = await api<{ images: ImageRecord[] }>("/api/images"); setImages(d.images); }
 
@@ -10967,6 +11139,7 @@ function HomeContent(): React.JSX.Element {
     options: {
       starterPrompt?: boolean;
       ephemeralMessages?: Message[];
+      sessionEnding?: boolean;
     } = {}
   ): Record<string, unknown> {
     const isChatMode = view === "chat";
@@ -10989,6 +11162,7 @@ function HomeContent(): React.JSX.Element {
       conversationId: selectedId ?? undefined,
       message,
       ...(options.starterPrompt ? { starterPrompt: true } : {}),
+      ...(options.sessionEnding ? { sessionEnding: true } : {}),
       mode,
       ...(mode === "chat"
         ? {
@@ -11028,10 +11202,12 @@ function HomeContent(): React.JSX.Element {
     if (cutoffIdx < 0) return;
 
     setPendingReply(true);
+    setSandboxSummaryBusy(false);
     setPendingReplyIsNewConversation(false);
     setError(null);
     const previousDetail = detail;
     const rewoundMessages = previousDetail.messages.slice(0, cutoffIdx);
+    setPendingReplyStartMessageCount(rewoundMessages.length);
     const optimisticEditedMessage: Message = {
       id: messageId,
       role: "user",
@@ -11039,6 +11215,11 @@ function HomeContent(): React.JSX.Element {
       createdAt: new Date().toISOString(),
     };
     let editedConversation: ConversationDetail | null = null;
+    const clearPendingReplyVisuals = () => {
+      setPendingReply(false);
+      setPendingReplyConversationId(null);
+      setPendingReplyIsNewConversation(false);
+    };
     try {
       if (previousDetail.incognito) {
         setPendingReplyConversationId(previousDetail.id);
@@ -11060,6 +11241,7 @@ function HomeContent(): React.JSX.Element {
         setSessionOpinion(d.opinion ?? null);
         setBotOpinion(d.botOpinion ?? null);
         editedConversation = patchedConversation;
+        clearPendingReplyVisuals();
       } else {
         setPendingReplyConversationId(selectedId);
         setDetail({
@@ -11088,6 +11270,7 @@ function HomeContent(): React.JSX.Element {
         setSessionOpinion(d.opinion ?? null);
         setBotOpinion(d.botOpinion ?? null);
         editedConversation = patchedConversation;
+        clearPendingReplyVisuals();
       }
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -11109,9 +11292,7 @@ function HomeContent(): React.JSX.Element {
       setDetail(previousDetail);
       setError(err instanceof Error ? err.message : "Message edit failed.");
     } finally {
-      setPendingReply(false);
-      setPendingReplyConversationId(null);
-      setPendingReplyIsNewConversation(false);
+      clearPendingReplyVisuals();
     }
   }
 
@@ -11228,12 +11409,22 @@ function HomeContent(): React.JSX.Element {
     if (!isStarterPrompt) {
       setConversationStarterPrompts(null);
     }
+    if (view === "chat") {
+      setChatStartupSummary(null);
+    }
     const requestConversationId =
       detail?.id && detail.id !== "pending"
         ? detail.id
         : selectedId;
     const requestStartedNewConversation = requestConversationId === null;
+    const baselineMessageCount = detail?.messages.length ?? 0;
+    const clearPendingReplyVisuals = () => {
+      setPendingReply(false);
+      setPendingReplyConversationId(null);
+      setPendingReplyIsNewConversation(false);
+    };
     setPendingReply(true);
+    setPendingReplyStartMessageCount(baselineMessageCount);
     setPendingReplyConversationId(requestConversationId);
     setPendingReplyIsNewConversation(requestStartedNewConversation);
     setError(null);
@@ -11312,6 +11503,13 @@ function HomeContent(): React.JSX.Element {
         ),
       });
       pushMemoryToasts(d.memoryLearned);
+      if (d.summaryCompaction?.mode === "sandbox" && d.summaryCompaction.triggered) {
+        setSandboxSummaryBusy(true);
+        window.setTimeout(() => {
+          setSandboxSummaryBusy(false);
+          void refreshSummaryDebug("sandbox");
+        }, 1300);
+      }
       const stillViewingRequest = requestConversationId
         ? selectedIdRef.current === requestConversationId ||
           detailIdRef.current === requestConversationId
@@ -11332,6 +11530,7 @@ function HomeContent(): React.JSX.Element {
             ? previous.filter(id => id !== d.conversation.id)
             : previous
         );
+        clearPendingReplyVisuals();
       } else if (!d.conversation.incognito) {
         setUnreadConversationIds(previous => {
           const next = new Set(previous);
@@ -11434,9 +11633,7 @@ function HomeContent(): React.JSX.Element {
           : "Send failed. Verify the provider is reachable and try again."
       );
     } finally {
-      setPendingReply(false);
-      setPendingReplyConversationId(null);
-      setPendingReplyIsNewConversation(false);
+      clearPendingReplyVisuals();
     }
   }
 
@@ -11842,7 +12039,7 @@ function resendUserMessage(msg: Message): void {
     // A selected Chat-mode bot should leave the picker surface immediately;
     // the real saved conversation is still created by the first send.
     const draftConversation: ConversationDetail | null =
-      view === "chat" && !privateMode && starterBotId
+      !privateMode && starterBotId
         ? {
             id: "pending",
             title: "New chat",
@@ -13810,6 +14007,68 @@ function resendUserMessage(msg: Message): void {
     }
   }
 
+  async function devToolsRunSummaryNow(modeOverride?: "chat" | "sandbox") {
+    const conversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (!conversationId || conversationId === "pending") {
+      setDevToolsMessage("Open a saved chat first to test summarization.");
+      return;
+    }
+    const modeForSummary =
+      modeOverride ?? (view === "chat" ? "chat" : "sandbox");
+    setDevToolsBusy(true);
+    setDevToolsMessage(null);
+    try {
+      const result = await api<{
+        compacted?: { triggered?: boolean };
+        debug?: SummaryCompactionDebug;
+      }>(`/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`, {
+        method: "POST",
+        body: JSON.stringify({ action: "run", mode: modeForSummary }),
+      });
+      await refreshSummaryDebug(modeForSummary);
+      const triggered = result.compacted?.triggered === true;
+      setDevToolsMessage(
+        triggered
+          ? "Summary compaction run finished."
+          : "Summary call completed, but no summary was produced."
+      );
+    } catch (err) {
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Summary run failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
+  async function devToolsResetSummary(modeOverride?: "chat" | "sandbox") {
+    const conversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (!conversationId || conversationId === "pending") {
+      setDevToolsMessage("Open a saved chat first to reset summarization state.");
+      return;
+    }
+    const modeForSummary =
+      modeOverride ?? (view === "chat" ? "chat" : "sandbox");
+    setDevToolsBusy(true);
+    setDevToolsMessage(null);
+    try {
+      await api(`/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`, {
+        method: "POST",
+        body: JSON.stringify({ action: "reset", mode: modeForSummary }),
+      });
+      await refreshSummaryDebug(modeForSummary);
+      setDevToolsMessage("Summary compaction state reset.");
+    } catch (err) {
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Summary reset failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
   // Distribute random seed memories across every bot the user owns. Used
   // when the Memories panel is showing the All-memories view, so the
   // bubble cluster has something to chew on without having to wire each
@@ -14944,7 +15203,7 @@ function resendUserMessage(msg: Message): void {
         >
           <BotGlyph name="dice" size={16} strokeWidth={1.85} />
         </button>
-        {renderDevToolsButton()}
+        {view !== "chat" ? renderDevToolsButton() : null}
       </div>
     );
   }
@@ -16494,6 +16753,13 @@ function resendUserMessage(msg: Message): void {
     const devToolsHasSavedConversation = Boolean(
       (detail?.id && detail.id !== "pending") || (selectedId && selectedId !== "pending")
     );
+    const devToolsSummaryMode: "chat" | "sandbox" =
+      view === "chat" ? "chat" : "sandbox";
+    const devToolsSummaryPreview = summaryDebug?.latestSummary
+      ? summaryDebug.latestSummary.length > 220
+        ? `${summaryDebug.latestSummary.slice(0, 217)}...`
+        : summaryDebug.latestSummary
+      : null;
     return (
       <>
         <div
@@ -16714,6 +16980,62 @@ function resendUserMessage(msg: Message): void {
                 {preset.label}
               </button>
             ))}
+          </div>
+        </details>
+
+        <details className={styles.devToolsSection}>
+          <summary className={styles.devToolsSectionSummary}>
+            <span className={styles.devToolsSectionTitle}>Summarization</span>
+            <span className={styles.devToolsToggleSummary}>
+              Mode <strong>{devToolsSummaryMode}</strong>
+              {summaryDebug ? (
+                <> · in progress: <strong>{summaryDebug.inProgress ? "yes" : "no"}</strong></>
+              ) : null}
+            </span>
+          </summary>
+          <p className={styles.devToolsSectionHint}>
+            Latest summary time:{" "}
+            <strong>{summaryDebug?.latestSummaryAt ?? "none yet"}</strong>
+          </p>
+          <p className={styles.devToolsSectionHint}>
+            Messages since compaction:{" "}
+            <strong>{summaryDebug?.messagesSinceLastCompaction ?? 0}</strong> · summary count:{" "}
+            <strong>{summaryDebug?.summaryCount ?? 0}</strong>
+          </p>
+          {devToolsSummaryPreview ? (
+            <p className={styles.devToolsSectionHint}>
+              Latest payload: <strong>{devToolsSummaryPreview}</strong>
+            </p>
+          ) : (
+            <p className={styles.devToolsSectionHint}>
+              Latest payload: <strong>none</strong>
+            </p>
+          )}
+          <div className={styles.devToolsActions}>
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() => void devToolsRunSummaryNow(devToolsSummaryMode)}
+              disabled={devToolsBusy || !devToolsHasSavedConversation}
+            >
+              Run summary now
+            </button>
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() => void refreshSummaryDebug(devToolsSummaryMode)}
+              disabled={devToolsBusy || !devToolsHasSavedConversation}
+            >
+              Refresh summary metrics
+            </button>
+            <button
+              type="button"
+              className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+              onClick={() => void devToolsResetSummary(devToolsSummaryMode)}
+              disabled={devToolsBusy || !devToolsHasSavedConversation}
+            >
+              Reset summary state
+            </button>
           </div>
         </details>
 
@@ -18821,6 +19143,7 @@ function resendUserMessage(msg: Message): void {
           </div>
         </div>
       </div>
+      {renderDevToolsButton()}
       {renderSharedPanels()}
       {renderDevToolsPanel()}
     </main>
@@ -19098,6 +19421,11 @@ function resendUserMessage(msg: Message): void {
                           <div className={styles.emptyStateTitle}>{title}</div>
                           <p className={styles.emptyStateHint}>{hint}</p>
                         </div>
+                      </div>
+                    ) : null}
+                    {chatStartupSummary ? (
+                      <div className={styles.chatSessionSummaryBubble} role="status" aria-live="polite">
+                        {chatStartupSummary}
                       </div>
                     ) : null}
                     {heroRecentConversations.length > 0 ? (
@@ -19588,6 +19916,7 @@ function resendUserMessage(msg: Message): void {
             );
           })}
           {typingIndicatorNode}
+          {sandboxSummaryIndicatorNode}
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
           {renderComposerChipRail()}
@@ -19654,6 +19983,7 @@ function resendUserMessage(msg: Message): void {
         {renderBotContextMenu()}
       </section>
 
+      {renderDevToolsButton()}
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
@@ -20515,6 +20845,7 @@ function resendUserMessage(msg: Message): void {
             );
           })}
           {typingIndicatorNode}
+          {sandboxSummaryIndicatorNode}
           {/* Scroll sentinel: kept at the very end so the scroll effect can
               always bring the latest content into view. */}
             <div ref={messagesEndRef} aria-hidden="true" />
