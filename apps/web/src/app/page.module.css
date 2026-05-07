@@ -1384,6 +1384,10 @@
   user-select: none;
 }
 
+.appLayout[data-chat-sidebar-hidden="true"] {
+  grid-template-columns: 1fr;
+}
+
 .appLayout[data-private-active="true"][data-accent-active="true"] {
   background-image:
     radial-gradient(
@@ -6692,6 +6696,12 @@
     0 -8px 24px -22px color-mix(in srgb, var(--accent) 34%, transparent);
 }
 
+.appLayout[data-chat-sidebar-hidden="true"] .compose {
+  border-top-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
 .appLayout[data-private-active="true"] .compose {
   background:
     radial-gradient(
@@ -6792,6 +6802,31 @@
 
 .composeTools > .modeControl {
   flex: 0 0 auto;
+}
+
+.companionComposeHint {
+  flex: 1 1 auto;
+  min-width: 220px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--accent-soft) 24%, var(--bg-surface));
+  display: grid;
+  gap: 2px;
+}
+
+.companionComposeHintTitle {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-ink) 76%, var(--fg));
+}
+
+.companionComposeHintBody {
+  font-size: 12px;
+  color: var(--fg-muted);
+  line-height: 1.35;
 }
 
 /* Compose-only LOCAL rail: wider thumb travel keeps geometry consistent (thumb +
@@ -13829,8 +13864,8 @@
 
 /* Chat overflow (wrench) — visual sibling to ☰ on mobile (fixed top-right). */
 .chatGearGlyph {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   flex-shrink: 0;
   stroke-width: 1.65;
   transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
@@ -13844,6 +13879,9 @@
 
 .chatGearAnchor {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
   margin-left: auto;
   z-index: 860;
@@ -14111,40 +14149,52 @@
 }
 
 .chatGearButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line);
-  background: var(--bg-surface);
-  color: var(--accent-ink);
-  border-radius: 10px;
-  padding: 8px 12px;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 30px !important;
+  height: 30px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--fg-muted);
+  border-radius: 999px !important;
+  box-shadow: none !important;
+  display: inline-grid;
+  place-items: center;
   cursor: pointer;
-  font: inherit;
-  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
   touch-action: manipulation;
-  transition: color 0.18s ease, opacity 0.2s ease, border-color 0.15s ease, background 0.15s ease, transform 0.18s ease;
+  transition: color 0.2s ease, background 0.2s ease, opacity 0.2s ease;
 }
 
 .chatGearButton:hover {
-  background: var(--bg-hover);
-  border-color: var(--line-strong);
+  color: var(--fg);
+  background: transparent !important;
+  border-color: transparent !important;
 }
 
 .chatGearButton:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 /* Open state — wrench reads as the live toggle owning the accordion. */
 .chatGearButton[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface));
-  border-color: color-mix(in srgb, var(--accent-ink) 40%, var(--line-strong));
-  color: var(--accent-ink);
+  color: var(--fg);
 }
 
 .chatGearButton[aria-expanded="true"] .chatGearGlyph {
   transform: rotate(-18deg);
+}
+
+.chatGearButton .headerIconGlyph {
+  width: 18px;
+  height: 18px;
+}
+
+.chatGearAnchor .themeToggleButton .themeToggleGlyph {
+  width: 18px;
+  height: 18px;
 }
 
 .chatOverflowMenu {
@@ -14535,19 +14585,20 @@
     border: 0;
     background: transparent;
     box-shadow: none;
-    padding: 8px 12px;
+    width: 30px !important;
+    height: 30px !important;
+    padding: 0 !important;
   }
 
   .chatGearButton:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 3px var(--accent-glow);
-    background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+    background: transparent !important;
     border-color: transparent;
   }
 
   @media (hover: hover) and (pointer: fine) {
     .chatGearButton:hover:not(:focus-visible) {
-      background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+      background: transparent !important;
       border-color: transparent;
     }
   }

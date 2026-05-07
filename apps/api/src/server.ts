@@ -865,17 +865,33 @@ function buildRoutes(): RouteDefinition[] {
       // Per-request provider override so a fresh sidebar switch takes effect
       // immediately, even if the settings PATCH is still in flight.
       const requestedProvider =
-        body.preferredProvider === "openai" || body.preferredProvider === "local"
+        mode === "sandbox" &&
+        (body.preferredProvider === "openai" || body.preferredProvider === "local")
           ? body.preferredProvider
           : undefined;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
-      // Incognito still needs the selected bot's prompt identity. Memory and
-      // persistence are disabled later via the incognito flags, not by erasing
-      // the bot before prompt composition.
-      const effectiveBotId = botId;
-      const explicitModelOverride = readOptionalString(body.modelOverride);
+      if (incognito) {
+        effectiveProvider = "local";
+      }
+      // Companion Chat 2.0 enforces one persistent persona and no advanced
+      // runtime knobs. Sandbox keeps full control surface.
+      const effectiveBotId = mode === "chat" ? null : botId;
+      const explicitModelOverride =
+        mode === "sandbox" ? readOptionalString(body.modelOverride) : null;
+      if (
+        mode === "chat" &&
+        (
+          body.botId !== undefined ||
+          body.preferredProvider !== undefined ||
+          body.modelOverride !== undefined
+        )
+      ) {
+        console.info(
+          `[chat-contract] Ignored advanced Chat controls for user ${userId} (bot/provider/model).`
+        );
+      }
       const ephemeralMessages = Array.isArray(body.ephemeralMessages)
         ? body.ephemeralMessages as ChatMessage[]
         : undefined;

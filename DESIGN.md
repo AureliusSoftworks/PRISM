@@ -62,6 +62,23 @@ Prompt assembly
 
 When incognito mode is active, no memories are read or written.
 
+## Chat vs Sandbox Contracts
+
+Prism now treats these as hard-separated lanes:
+
+- **Chat (Companion Timeline)**
+  - Single persistent companion persona (no bot/provider/model switching in Chat UI)
+  - Cross-conversation continuity and personal memory recall
+  - Minimal controls by design to keep emotional tone steady and low-friction
+- **Sandbox (Command Center)**
+  - Full runtime controls (bot, provider, model, tooling)
+  - Thread-scoped memory compaction only
+  - Optimized for experimentation and test workflows
+
+Server guardrails enforce this split: advanced runtime knobs sent from Chat are
+ignored, and sandbox thread-compaction summaries are tagged so they cannot be
+reused as companion continuity context.
+
 ## Provider Architecture
 
 ```

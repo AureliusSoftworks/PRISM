@@ -738,6 +738,7 @@ export interface UserChatSettings {
    * The tri-state is what lets a mid-thread bot switch persist to the
    * conversation row without also nuking the bot_id for every legacy
    * caller that forgets to include the field.
+   * Chat Companion 2.0 ignores this knob to enforce a single companion persona.
    */
   botId?: string | null;
   incognito?: boolean;
@@ -2040,6 +2041,84 @@ function shouldSummarizeAtMilestone(totalMessages: number): boolean {
   return totalMessages % 12 === 0;
 }
 
+type ModeRuntimePlan = {
+  skipPersonalFacts: boolean;
+  skipSummarization: boolean;
+  retrievalMode: "none" | "cross_thread" | "thread_only";
+};
+
+function buildModeRuntimePlan(mode: ChatMode, incognitoForTurn: boolean): ModeRuntimePlan {
+  return {
+    skipPersonalFacts: incognitoForTurn,
+    skipSummarization: incognitoForTurn,
+    retrievalMode: incognitoForTurn
+      ? "none"
+      : mode === "sandbox"
+        ? "thread_only"
+        : "cross_thread",
+  };
+}
+
+async function handleCompanionChatTurn(args: {
+  db: DatabaseSync;
+  provider: LlmProvider;
+  userId: string;
+  message: string;
+  userKey: Buffer;
+  activeMemoryBotId: string | null;
+  isStarterPrompt: boolean;
+  retrievalMode: ModeRuntimePlan["retrievalMode"];
+}): Promise<{ threadSummary: string | null; memoryLines: string[] }> {
+  const {
+    db,
+    provider,
+    userId,
+    message,
+    userKey,
+    activeMemoryBotId,
+    isStarterPrompt,
+    retrievalMode,
+  } = args;
+  let memoryLines: string[] = [];
+  if (isStarterPrompt && retrievalMode === "cross_thread") {
+    memoryLines = retrieveRecentMemoriesForStarter(
+      db,
+      userId,
+      userKey,
+      activeMemoryBotId
+    ).map((memory) => memory.text);
+  } else if (!isStarterPrompt) {
+    memoryLines = await retrieveMemoriesWithFallback(
+      db,
+      provider,
+      userId,
+      message,
+      userKey,
+      activeMemoryBotId,
+      true
+    );
+  }
+  return { threadSummary: null, memoryLines };
+}
+
+async function handleSandboxTurn(args: {
+  db: DatabaseSync;
+  userId: string;
+  activeConversationId: string;
+  isStarterPrompt: boolean;
+  retrievalMode: ModeRuntimePlan["retrievalMode"];
+}): Promise<{ threadSummary: string | null; memoryLines: string[] }> {
+  const { db, userId, activeConversationId, isStarterPrompt, retrievalMode } = args;
+  const threadSummary =
+    retrievalMode === "thread_only"
+      ? getLatestThreadSummary(db, userId, activeConversationId)
+      : null;
+  if (isStarterPrompt) {
+    return { threadSummary, memoryLines: [] };
+  }
+  return { threadSummary, memoryLines: [] };
+}
+
 export async function processChatMessage(
   db: DatabaseSync,
   userId: string,
@@ -2061,22 +2140,8 @@ export async function processChatMessage(
   // local/online user setting; Sandbox ignores `incognito` entirely.
   const incognitoForTurn = mode === "chat" && settings.incognito === true;
   const effectiveProvider = settings.preferredProvider;
-  // The memory concerns are deliberately NOT one flag:
-  //   - skipPersonalFacts: don't write to `memories`. True only for
-  //     incognito; bot-scoped memories intentionally grow across Chat
-  //     and Sandbox when auto-memory is enabled.
-  //   - skipSummarization: don't run any summarizer. True only for
-  //     incognito — Sandbox still summarizes, just into a thread-scoped,
-  //     Qdrant-free path.
-  //   - retrievalMode: which thread summary path (if any) feeds this turn.
-  const skipPersonalFacts = incognitoForTurn;
-  const skipSummarization = incognitoForTurn;
-  const retrievalMode: "none" | "cross_thread" | "thread_only" =
-    incognitoForTurn
-      ? "none"
-      : mode === "sandbox"
-        ? "thread_only"
-        : "cross_thread";
+  const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
+  const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
   const activeBotId = settings.botId;
   const activeMemoryBotId =
     typeof activeBotId === "string" && activeBotId.trim().length > 0
@@ -2280,28 +2345,28 @@ export async function processChatMessage(
 
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
-  if (retrievalMode === "thread_only") {
-    threadSummary = getLatestThreadSummary(db, userId, activeConversationId);
-  }
   if (!incognitoForTurn) {
-    if (isStarterPrompt && retrievalMode === "cross_thread") {
-      memoryLines = retrieveRecentMemoriesForStarter(
-        db,
-        userId,
-        userKey,
-        activeMemoryBotId
-      ).map((memory) => memory.text);
-    } else if (!isStarterPrompt) {
-      memoryLines = await retrieveMemoriesWithFallback(
-        db,
-        provider,
-        userId,
-        message,
-        userKey,
-        activeMemoryBotId,
-        retrievalMode === "cross_thread"
-      );
-    }
+    const pipelineResult =
+      mode === "chat"
+        ? await handleCompanionChatTurn({
+            db,
+            provider,
+            userId,
+            message,
+            userKey,
+            activeMemoryBotId,
+            isStarterPrompt,
+            retrievalMode,
+          })
+        : await handleSandboxTurn({
+            db,
+            userId,
+            activeConversationId,
+            isStarterPrompt,
+            retrievalMode,
+          });
+    threadSummary = pipelineResult.threadSummary;
+    memoryLines = pipelineResult.memoryLines;
   }
 
   const existingBotOpinion = readBotOpinion(db, userId, activeBotId);

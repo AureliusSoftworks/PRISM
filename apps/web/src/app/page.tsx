@@ -10452,6 +10452,17 @@ function HomeContent(): React.JSX.Element {
     }
   }, [view, detail, selectedBotId, chatBotOverride, bots]);
 
+  useEffect(() => {
+    if (view !== "chat") return;
+    // Chat is Prism-only: clear any carried bot selection/override state.
+    if (selectedBotId !== null) {
+      setSelectedBotId(null);
+    }
+    if (chatBotOverride !== undefined) {
+      setChatBotOverride(undefined);
+    }
+  }, [view, selectedBotId, chatBotOverride]);
+
   // Empty-state picker (Chat + Sandbox) renders bots in color order so
   // the unfiltered grid trends toward a color-wheel/color-square map.
   // Sorted off `filteredBots` so the lens stays the source of truth for
@@ -10946,14 +10957,11 @@ function HomeContent(): React.JSX.Element {
   // That's the whole point of "play with bot settings and rerun".
   //
   // Mode semantics (kept aligned with the server-side contract):
-  //   - Chat: bot is a conversation-level setting for saved chats. Private
-  //     chats use the same Chat-mode request contract but send prior
-  //     messages back as `ephemeralMessages`, so the server can continue
-  //     the in-memory session without writing rows.
-  //   - Sandbox: regular sends keep the existing per-send bot picker and
-  //     thread-only memory behavior. Private sends intentionally reuse the
-  //     Chat-mode incognito contract so they stay ephemeral/no-memory while
-  //     keeping the selected bot as prompt identity.
+  //   - Chat: strict companion lane (single persona, minimal knobs). We only
+  //     send companion preferences + optional incognito state.
+  //   - Sandbox: full runtime lane (provider/model/bot controls).
+  //   - Private sends intentionally reuse the Chat-mode incognito contract so
+  //     they remain ephemeral/no-memory.
   function buildChatRequestBody(
     message: string,
     options: {
@@ -10965,36 +10973,16 @@ function HomeContent(): React.JSX.Element {
     const privateForSend = detail?.incognito === true || pendingIncognito;
     const mode: "chat" | "sandbox" =
       isChatMode || privateForSend ? "chat" : "sandbox";
-    // Resolve effective bot. Chat-mode priority is:
-    //   1. chatBotOverride (mid-thread dropdown pick; string = specific,
-    //      null = "Default persona"). `undefined` means "no pending
-    //      pick, just use whatever the conversation already resolves
-    //      to", which keeps the send idempotent on bot_id when the
-    //      user hasn't touched the dropdown.
-    //   2. Saved chat: conversation.botId verbatim (INCLUDING null for
-    //      Prism Default). Never substitute selectedBotId here — `??` treats
-    //      null like "missing", which wrongly hijacks Default threads with
-    //      whichever bot tile was clicked last elsewhere in the sidebar.
-  //   3. Pending / no saved row yet: detail.botId (optimistic) then
-    //      selectedBotId from the picker.
-    //   4. null — explicit Default for new chat or override.
-    const chatBotId: string | null =
-      chatBotOverride !== undefined
-        ? chatBotOverride
-        : detail?.id !== undefined && detail.id !== "pending"
-          ? detail.botId
-          : (detail?.botId ?? selectedBotId ?? null);
-  // Private chats are local-only by design.
-  const providerForSend =
-    privateForSend ? "local" : settings?.preferredProvider;
-    const modelChoice = providerForSend
+    const sandboxProviderForSend =
+      privateForSend ? "local" : settings?.preferredProvider;
+    const modelChoice = sandboxProviderForSend
       ? visibleBotCustomizerModelChoice(
           settings,
-          chatModelChoiceByProvider[providerForSend]
+          chatModelChoiceByProvider[sandboxProviderForSend]
         )
       : AUTO_MODEL_CHOICE;
     const modelOverride =
-      modelChoice !== AUTO_MODEL_CHOICE
+      mode === "sandbox" && modelChoice !== AUTO_MODEL_CHOICE
         ? modelChoice
         : undefined;
     return {
@@ -11002,18 +10990,20 @@ function HomeContent(): React.JSX.Element {
       message,
       ...(options.starterPrompt ? { starterPrompt: true } : {}),
       mode,
-      // Chat mode ALWAYS sends botId (string or null) so the server can
-      // persist mid-thread switches. Private sends also send botId, but the
-      // server treats it as prompt identity only: no conversation/message rows,
-      // memory writes, or summaries are created. Regular Sandbox keeps the
-      // legacy "undefined drops the key" behavior since its bot picks never
-      // write back to conversations.bot_id.
-      botId: isChatMode || privateForSend ? chatBotId : (selectedBotId ?? undefined),
+      ...(mode === "chat"
+        ? {
+            companionPreferences: {
+              tone: "grounded",
+              ritual: "daily-check-in",
+            },
+          }
+        : {}),
+      botId: mode === "sandbox" ? (selectedBotId ?? undefined) : undefined,
       ...(mode === "chat" ? { incognito: privateForSend } : {}),
       ...(privateForSend
         ? { ephemeralMessages: options.ephemeralMessages ?? detail?.messages ?? [] }
         : {}),
-      preferredProvider: providerForSend,
+      preferredProvider: mode === "sandbox" ? sandboxProviderForSend : undefined,
       ...(modelOverride ? { modelOverride } : {}),
     };
   }
@@ -11824,6 +11814,18 @@ function resendUserMessage(msg: Message): void {
     viewportWidth <= PICKER_MOBILE_BREAKPOINT && draft.trim().length === 0;
 
   function startFreshConversation(privateMode: boolean) {
+    if (view === "chat") {
+      setConversationStarterPrompts(null);
+      setSelectedId(null);
+      setDetail(null);
+      setSelectedBotId(null);
+      setChatBotOverride(undefined);
+      closeEmptyStateBotSearch();
+      setHueFilterCenter(null);
+      setPendingIncognito(privateMode);
+      setSidebarOpen(false);
+      return;
+    }
     const normalStarterBotId = detail
       ? chatBotOverride !== undefined
         ? chatBotOverride
@@ -15809,11 +15811,13 @@ function resendUserMessage(msg: Message): void {
     );
   };
 
-  /** Conversation tools — Memories / Edit bot / Opinions / Export / Delete.
+  /** Conversation tools — Settings / Memories / Edit bot / Opinions / Export / Delete.
    *  Desktop renders inline in the chat header bar.
    *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
   const renderChatOverflowGear = (): React.JSX.Element | null => {
-    if (!detail && !activeBot) return null;
+    const showSettingsOnly = !detail && !activeBot;
+    const showChatHomeButton = view === "chat";
+    const showChatThemeButton = view === "chat";
     const gearHidden = sidebarOpen || panel !== null;
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
     const canBotActions = Boolean(activeBot);
@@ -15826,6 +15830,15 @@ function resendUserMessage(msg: Message): void {
     const isMobileGear = viewportWidth <= PHONE_MENU_BREAKPOINT;
 
     const closeMenu = () => setChatOverflowMenuOpen(false);
+
+    const handleSettings = () => {
+      closeMenu();
+      openRightPanel("settings");
+    };
+    const handleChatHome = () => {
+      closeMenu();
+      navigateToView("hub");
+    };
 
     const handleMemories = () => {
       closeMenu();
@@ -15952,29 +15965,42 @@ function resendUserMessage(msg: Message): void {
       >[] = [];
       accordionButtons.push(
         <button
-          key="memories"
+          key="settings"
           type="button"
           className={styles.chatHeaderAction}
-          disabled={headerActionsDisabled || !canMemoryActions}
-          onClick={handleMemories}
-          title={activeBot ? "Bot memories" : "Default Prism memories"}
+          onClick={handleSettings}
+          title="Settings"
         >
-          <span className={styles.chatHeaderActionText}>Memories</span>
+          <span className={styles.chatHeaderActionText}>Settings</span>
         </button>,
       );
-      accordionButtons.push(
-        <button
-          key="opinions"
-          type="button"
-          className={styles.chatHeaderAction}
-          disabled={headerActionsDisabled}
-          onClick={handleOpinions}
-          title="Conversation tone"
-        >
-          <span className={styles.chatHeaderActionText}>Tone</span>
-        </button>,
-      );
-      if (canBotActions) {
+      if (!showSettingsOnly) {
+        accordionButtons.push(
+          <button
+            key="memories"
+            type="button"
+            className={styles.chatHeaderAction}
+            disabled={headerActionsDisabled || !canMemoryActions}
+            onClick={handleMemories}
+            title={activeBot ? "Bot memories" : "Default Prism memories"}
+          >
+            <span className={styles.chatHeaderActionText}>Memories</span>
+          </button>,
+        );
+        accordionButtons.push(
+          <button
+            key="opinions"
+            type="button"
+            className={styles.chatHeaderAction}
+            disabled={headerActionsDisabled}
+            onClick={handleOpinions}
+            title="Conversation tone"
+          >
+            <span className={styles.chatHeaderActionText}>Tone</span>
+          </button>,
+        );
+      }
+      if (!showSettingsOnly && canBotActions) {
         accordionButtons.push(
           <button
             key="edit-bot"
@@ -15988,34 +16014,36 @@ function resendUserMessage(msg: Message): void {
           </button>,
         );
       }
-      accordionButtons.push(
-        <button
-          key="export"
-          type="button"
-          className={styles.chatHeaderAction}
-          disabled={headerActionsDisabled || !canExport}
-          onClick={handleExport}
-          title={exportTitle}
-        >
-          <span className={styles.chatHeaderActionText}>{exportButtonText}</span>
-        </button>,
-      );
-      accordionButtons.push(
-        <button
-          key="delete"
-          type="button"
-          className={`${styles.chatHeaderAction} ${
-            deleteArmed ? styles.chatHeaderActionDanger : ""
-          }`}
-          disabled={headerActionsDisabled || !canDelete}
-          data-delete-affordance="true"
-          aria-label={deleteLabel}
-          title={deleteLabel}
-          onClick={handleDelete}
-        >
-          <span className={styles.chatHeaderActionText}>{deleteButtonText}</span>
-        </button>,
-      );
+      if (!showSettingsOnly) {
+        accordionButtons.push(
+          <button
+            key="export"
+            type="button"
+            className={styles.chatHeaderAction}
+            disabled={headerActionsDisabled || !canExport}
+            onClick={handleExport}
+            title={exportTitle}
+          >
+            <span className={styles.chatHeaderActionText}>{exportButtonText}</span>
+          </button>,
+        );
+        accordionButtons.push(
+          <button
+            key="delete"
+            type="button"
+            className={`${styles.chatHeaderAction} ${
+              deleteArmed ? styles.chatHeaderActionDanger : ""
+            }`}
+            disabled={headerActionsDisabled || !canDelete}
+            data-delete-affordance="true"
+            aria-label={deleteLabel}
+            title={deleteLabel}
+            onClick={handleDelete}
+          >
+            <span className={styles.chatHeaderActionText}>{deleteButtonText}</span>
+          </button>,
+        );
+      }
       return (
         <div
           ref={chatOverflowMenuRef}
@@ -16067,6 +16095,36 @@ function resendUserMessage(msg: Message): void {
               <WrenchGlyph />
             </button>
           </div>
+          {showChatThemeButton ? (
+            <button
+              type="button"
+              className={styles.themeToggleButton}
+              onClick={() => void cycleThemeMode()}
+              aria-label={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+              }
+              data-title={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+              }
+            >
+              <ThemeGlyph mode={effectiveThemeMode} />
+            </button>
+          ) : null}
+          {showChatHomeButton ? (
+            <button
+              type="button"
+              className={styles.chatGearButton}
+              aria-label="Back to Hub"
+              title="Back to Hub"
+              onClick={handleChatHome}
+            >
+              <HomeGlyph />
+            </button>
+          ) : null}
         </div>
       );
     }
@@ -16076,53 +16134,69 @@ function resendUserMessage(msg: Message): void {
         ref={chatOverflowMenuRef}
         className={`${styles.chatGearAnchor} ${gearHidden ? styles.chatGearAnchorHidden : ""}`}
       >
-        <button
-          type="button"
-          className={styles.chatGearButton}
-          aria-expanded={chatOverflowMenuOpen}
-          aria-haspopup="menu"
-          aria-label="Conversation tools menu"
-          title="Conversation tools"
-          onPointerDownCapture={swallowMenuPointerDown}
-          onClick={(event) => {
-            swallowMenuEvent(event);
-            setChatOverflowMenuOpen(open => !open);
-          }}
-        >
-          <WrenchGlyph />
-        </button>
-        {chatOverflowMenuOpen && (
-          <div
-            className={styles.chatOverflowMenu}
-            role="menu"
-            aria-label="Conversation tools"
+        <div className={styles.chatHeaderGearAnchor}>
+          <button
+            type="button"
+            className={styles.chatGearButton}
+            aria-expanded={chatOverflowMenuOpen}
+            aria-haspopup="menu"
+            aria-label="Conversation tools menu"
+            title="Conversation tools"
             onPointerDownCapture={swallowMenuPointerDown}
-            onContextMenu={swallowMenuEvent}
+            onClick={(event) => {
+              swallowMenuEvent(event);
+              setChatOverflowMenuOpen(open => !open);
+            }}
           >
+            <WrenchGlyph />
+          </button>
+          {chatOverflowMenuOpen && (
+            <div
+              className={styles.chatOverflowMenu}
+              role="menu"
+              aria-label="Conversation tools"
+              onPointerDownCapture={swallowMenuPointerDown}
+              onContextMenu={swallowMenuEvent}
+            >
             <button
               type="button"
               role="menuitem"
               className={styles.chatOverflowMenuItem}
-              disabled={!canMemoryActions}
               onClick={(event) => {
                 swallowMenuEvent(event);
-                handleMemories();
+                handleSettings();
               }}
             >
-              Memories
+              Settings
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.chatOverflowMenuItem}
-              onClick={(event) => {
-                swallowMenuEvent(event);
-                handleOpinions();
-              }}
-            >
-              Tone
-            </button>
-            {canBotActions && (
+            {!showSettingsOnly && (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.chatOverflowMenuItem}
+                disabled={!canMemoryActions}
+                onClick={(event) => {
+                  swallowMenuEvent(event);
+                  handleMemories();
+                }}
+              >
+                Memories
+              </button>
+            )}
+            {!showSettingsOnly && (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.chatOverflowMenuItem}
+                onClick={(event) => {
+                  swallowMenuEvent(event);
+                  handleOpinions();
+                }}
+              >
+                Tone
+              </button>
+            )}
+            {!showSettingsOnly && canBotActions && (
               <button
                 type="button"
                 role="menuitem"
@@ -16135,36 +16209,77 @@ function resendUserMessage(msg: Message): void {
                 Edit bot
               </button>
             )}
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.chatOverflowMenuItem}
-              disabled={!canExport}
-              onClick={(event) => {
-                swallowMenuEvent(event);
-                handleExport();
-              }}
-              title={exportTitle}
-            >
-              {exportButtonText}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className={`${styles.chatOverflowMenuItem} ${deleteArmed ? styles.chatOverflowMenuItemDanger : ""}`}
-              disabled={!canDelete}
-              data-delete-affordance="true"
-              aria-label={deleteLabel}
-              title={deleteLabel}
-              onClick={(event) => {
-                swallowMenuEvent(event);
-                handleDelete();
-              }}
-            >
-              {deleteButtonText}
-            </button>
-          </div>
-        )}
+            {!showSettingsOnly && (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.chatOverflowMenuItem}
+                disabled={!canExport}
+                onClick={(event) => {
+                  swallowMenuEvent(event);
+                  handleExport();
+                }}
+                title={exportTitle}
+              >
+                {exportButtonText}
+              </button>
+            )}
+            {!showSettingsOnly && (
+              <button
+                type="button"
+                role="menuitem"
+                className={`${styles.chatOverflowMenuItem} ${deleteArmed ? styles.chatOverflowMenuItemDanger : ""}`}
+                disabled={!canDelete}
+                data-delete-affordance="true"
+                aria-label={deleteLabel}
+                title={deleteLabel}
+                onClick={(event) => {
+                  swallowMenuEvent(event);
+                  handleDelete();
+                }}
+              >
+                {deleteButtonText}
+              </button>
+            )}
+            </div>
+          )}
+        </div>
+        {showChatThemeButton ? (
+          <button
+            type="button"
+            className={styles.themeToggleButton}
+            onClick={(event) => {
+              swallowMenuEvent(event);
+              void cycleThemeMode();
+            }}
+            aria-label={
+              effectiveThemeMode === "system"
+                ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+            }
+            data-title={
+              effectiveThemeMode === "system"
+                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+            }
+          >
+            <ThemeGlyph mode={effectiveThemeMode} />
+          </button>
+        ) : null}
+        {showChatHomeButton ? (
+          <button
+            type="button"
+            className={styles.chatGearButton}
+            aria-label="Back to Hub"
+            title="Back to Hub"
+            onClick={(event) => {
+              swallowMenuEvent(event);
+              handleChatHome();
+            }}
+          >
+            <HomeGlyph />
+          </button>
+        ) : null}
       </div>
     );
   };
@@ -18723,6 +18838,7 @@ function resendUserMessage(msg: Message): void {
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
+      data-chat-sidebar-hidden="true"
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onTouchStart={beginSidebarEdgeSwipe}
@@ -18730,106 +18846,6 @@ function resendUserMessage(msg: Message): void {
       onTouchEnd={endSidebarEdgeSwipe}
       onTouchCancel={endSidebarEdgeSwipe}
     >
-      {/* Hide the fixed hamburger whenever a drawer is open on either
-          side — it otherwise pokes through the sidebar profile tile
-          (left) or the panel overlay dimmer (right) at its z-index:201. */}
-      <button
-        type="button"
-        className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
-        onClick={() => {
-          setSidebarOpen(o => !o);
-        }}
-        aria-hidden={sidebarOpen || panel !== null}
-        tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
-      >☰</button>
-      <button
-        type="button"
-        className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
-          panel !== null ? styles.sidebarHandleHidden : ""
-        }`}
-        onClick={() => {
-          setSidebarOpen(o => !o);
-        }}
-        aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
-        aria-pressed={sidebarOpen}
-        title={sidebarOpen ? "Close conversations" : "Open conversations"}
-      >
-        <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
-      </button>
-      {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
-
-      <aside
-        className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
-        aria-hidden={sidebarDrawerMode && !sidebarOpen ? true : undefined}
-        inert={sidebarDrawerMode && !sidebarOpen ? true : undefined}
-      >
-        {renderProfileCard()}
-
-        <div className={styles.newChatGroup}>
-          <button
-            type="button"
-            className={styles.newChatButton}
-            onClick={() => startFreshConversation(false)}
-          >
-            New chat
-          </button>
-          {/* Private chat = chat-mode-only sibling. One click seeds the
-              next send as { incognito: true } and preserves the selected
-              bot as prompt identity. The returned detail stays in memory
-              only; no conversation row or messages are saved. */}
-          <button
-            type="button"
-            className={`${styles.privateChatButton} ${pendingIncognito ? styles.privateChatButtonActive : ""}`}
-            style={privateChatButtonStyle}
-            onClick={() => startFreshConversation(true)}
-            aria-pressed={pendingIncognito}
-            title="Private chat — no saved history or memory"
-          >
-            <span className={styles.privateChatButtonIcon} aria-hidden="true">
-              {/* Stroke-only lock glyph so it inherits currentColor and
-                  stays crisp in both themes without a separate asset. */}
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="4" y="11" width="16" height="9" rx="2" />
-                <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-              </svg>
-            </span>
-            Private chat
-          </button>
-        </div>
-
-        {visibleConversations.length > 0 && (
-          <div className={styles.conversationHeaderRow}>
-            <span className={styles.sectionLabel}>Conversations</span>
-            {renderConversationDeleteAllButton()}
-          </div>
-        )}
-        <ul
-          className={styles.conversationList}
-          data-private-empty={showPrivateConversationEmptyState ? "true" : undefined}
-          data-delete-holding={holdingKey === DELETE_ALL_KEY ? "true" : undefined}
-          data-delete-armed-all={pendingDeleteKey === DELETE_ALL_KEY ? "true" : undefined}
-          onScroll={event => setConversationListScrollTop(event.currentTarget.scrollTop)}
-        >
-          {renderConversationListContents()}
-        </ul>
-
-        <div className={styles.sidebarFooter}>
-          <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
-          <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
-          <button type="button" onClick={() => openRightPanel("images")}>Images</button>
-          <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
-        </div>
-      </aside>
-
       <section
         className={styles.chatPane}
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
@@ -19129,7 +19145,7 @@ function resendUserMessage(msg: Message): void {
                     routes to the PRISM Default persona (botId
                     omitted from the request). To go back to default
                     after arming, tap outside the picker on empty chrome. */}
-                {!pendingIncognito && pickerBots.length > 0 && (() => {
+                {!pendingIncognito && pickerBots.length > 0 && view !== "chat" && (() => {
                   const geom =
                     pickerGeom ?? pickerGeometry(
                       pickerBots.length,
@@ -19602,177 +19618,17 @@ function resendUserMessage(msg: Message): void {
               onInteractionChange={setLensInteracting}
             />
           )}
-          {/* Chat-mode compose carries two knobs now:
-               1. Bot picker — mid-thread override of the conversation's
-                  bot. The dropdown reflects a "pending" pick instantly
-                  (chatBotOverride state), and the shell accent follows it
-                  immediately so the interface feels like that bot is about
-                  to speak. Server persistence still waits for the NEXT
-                  successful send/reply, which is when chat.ts persists the
-                  switch on conversations.bot_id.
-               2. LOCAL/ONLINE provider toggle — swap between local
-                  Ollama and remote ChatGPT without leaving the chat.
-             Privacy stays conversation-level (sidebar "Private chat"
-             button at chat start). If the open chat is private
-             (detail.incognito) or a brand-new chat is armed as private
-             (pendingIncognito), provider is forced to Local and the
-             provider toggle is disabled. */}
-          {(() => {
-            const isLocal = settings?.preferredProvider === "local";
-            const chatLocked =
-              detail?.incognito === true || pendingIncognito;
-            const displayLocal = chatLocked ? true : isLocal;
-            const providerDisabled = !settings || chatLocked;
-            // Bot-dropdown value resolves in priority order:
-            //   1. chatBotOverride (string | null) — post-detail dropdown
-            //      pick; the pending mid-thread switch.
-            //   2. detail.botId — the conversation's persisted bot
-            //      (authoritative once a thread exists; null = Default
-            //      and must NOT fall through to selectedBotId, which
-            //      could be a stale sync value from an earlier chat).
-            //   3. selectedBotId — only when there's NO conversation yet.
-            //      This makes the dropdown trigger mirror whatever the
-            //      user armed via the empty-state tile picker, so
-            //      its color + glyph match the hero icon.
-            //   4. "" — maps to the Default option.
-            const botSelectValue =
-              chatBotOverride !== undefined
-                ? (chatBotOverride ?? "")
-                : detail
-                  ? (detail.botId ?? "")
-                  : (selectedBotId ?? "");
-            // `showName` gates whether the trigger renders the bot's
-            // NAME next to its glyph. Pre-first-message, the glyph +
-            // pill tint communicate "this bot is armed" without
-            // duplicating the name that's already prominent on the
-            // hero title above. Once the conversation has any message
-            // (optimistic user message counts — the name stays visible
-            // through the first reply), the dropdown becomes a full
-            // "[glyph] [name]" identity pill.
-            const botShowName =
-              !!detail && detail.messages.length > 0;
-            const botFiltersEnabled = botShowName;
-            // The dropdown is deliberately gated until the chat is
-            // actually underway. Rationale: the empty-state tile
-            // picker is already the "starter bot" affordance, so
-            // surfacing a second picker that does the same thing just
-            // dilutes the UI. Flipping this dropdown only becomes
-            // meaningful once there's an existing thread to steer
-            // onto a different bot.
-            const botDisabled =
-              !settings ||
-              pendingReply ||
-              !detail ||
-              bots.length === 0;
-            const botTitle = !detail
-                ? "Send your first message to change bots mid-thread."
-                : pendingReply
-                  ? "Wait for the current reply before switching bots."
-                  : bots.length === 0
-                    ? "Default is the only Chat option until you create a custom bot."
-                    : undefined;
-            // Dropdown is disabled pre-detail, so onChange only fires
-            // once the thread exists. Set the override directly; the
-            // server persists the switch after the new bot's reply.
-            const handleBotSelectChange = (value: string) => {
-              setChatBotOverride(value === "" ? null : value);
-            };
-            const modelProvider: Provider = displayLocal ? "local" : "openai";
-            const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-            const visibleModelChoice = visibleBotCustomizerModelChoice(
-              settings,
-              rawModelChoice
-            );
-            const modelOptions = includeSelectedModelOption(
-              availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
-              visibleModelChoice,
-              modelProvider
-            );
-            const modelSelectDisabled =
-              !settings || pendingReply;
-            return (
-              <div className={styles.composeTools}>
-                {bots.length > 0 && (
-                  <ComposerBotPicker
-                    value={botSelectValue}
-                    onChange={handleBotSelectChange}
-                    bots={botFiltersEnabled ? bots : filteredBots}
-                    resolvedTheme={resolvedTheme}
-                    disabled={botDisabled}
-                    title={botTitle}
-                    ariaLabel="Bot for this chat"
-                    showName={botShowName}
-                    enableFilters={botFiltersEnabled}
-                    hueFilterCenter={hueFilterCenter}
-                    onHueChange={setHueFilterCenter}
-                    hueLensAvailable={hueLensAvailable}
-                    hueLensTrackGradient={hueLensTrackGradient}
-                    hueLensTrackSegments={hueLensTrackSegments}
-                  />
-                )}
-                <div
-                  className={`${styles.modeControl} ${providerDisabled ? styles.modeControlLocked : ""}`}
-                >
-                  <button
-                    type="button"
-                    className={`${styles.modeToggleTrack} ${providerDisabled ? styles.modeToggleTrackLocked : ""}`}
-                    onClick={() => {
-                      if (providerDisabled) return;
-                      void switchProvider(isLocal ? "openai" : "local");
-                    }}
-                    aria-label={
-                      chatLocked
-                        ? "Response mode: Local. Private chats are offline-only."
-                        : displayLocal
-                        ? "Response mode: Local. Click to switch to Online."
-                        : "Response mode: Online. Click to switch to Local."
-                    }
-                    aria-pressed={!displayLocal}
-                    aria-disabled={providerDisabled}
-                    title={
-                      chatLocked
-                        ? "Private chats are offline-only."
-                        : displayLocal
-                        ? "Switch to Online"
-                        : "Switch to Local"
-                    }
-                    disabled={providerDisabled}
-                  >
-                    <span
-                      className={`${styles.modeThumb} ${
-                        displayLocal ? styles.modeThumbLocal : styles.modeThumbOnline
-                      }`}
-                    >
-                      <span
-                        className={`${styles.providerDot} ${
-                          displayLocal ? styles.providerDotLocal : styles.providerDotOnline
-                        }`}
-                        aria-hidden="true"
-                      />
-                      <span className={styles.modeThumbLabel}>
-                        {displayLocal ? "LOCAL" : "ONLINE"}
-                      </span>
-                    </span>
-                  </button>
-                </div>
-                <ComposerModelPicker
-                  value={visibleModelChoice}
-                  onChange={(nextChoice) => {
-                    setChatModelChoiceByProvider((previous) => ({
-                      ...previous,
-                      [modelProvider]: nextChoice,
-                    }));
-                  }}
-                  options={modelOptions}
-                  provider={modelProvider}
-                  disabled={modelSelectDisabled}
-                  title={`Model for ${displayLocal ? "LOCAL" : "ONLINE"} replies`}
-                  ariaLabel={`Model for ${displayLocal ? "local" : "online"} replies`}
-                />
-                {renderComposeUtilityActions()}
+          {view !== "chat" ? (
+            <div className={styles.composeTools}>
+              <div className={styles.companionComposeHint} role="note">
+                <span className={styles.companionComposeHintTitle}>Companion timeline</span>
+                <span className={styles.companionComposeHintBody}>
+                  One steady companion. Chat remembers continuity across conversations.
+                </span>
               </div>
-            );
-          })()}
+              {renderComposeUtilityActions()}
+            </div>
+          ) : null}
           {!composerHiddenByAskQuestion && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
               <span>Editing message. Save sends the revised text.</span>

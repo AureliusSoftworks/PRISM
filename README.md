@@ -264,8 +264,8 @@ npm run dev
 - **Dedicated system models** — user-facing chat can use local or OpenAI, but Prism's internal titles, starters, summaries, memory critic, and embeddings always stay local on mandatory Ollama models (`llama3.2` + `nomic-embed-text`).
 - **Native-client web gate** — the hosted web shell requires a paired Prism client access token, so direct browser visits show an app-required screen instead of bypassing the client.
 - **Post-auth Hub** with 5-colour prism-glyph mode tiles:
-  - **Chat** — a calm, stripped-down "personal Prism" surface (sidebar + history + typing + send). The only compose-adjacent control is an **Incognito** pill that doubles as an online/offline toggle: on = this send is local-only and bypasses memory; off = saved provider + normal memory pipeline.
-  - **Sandbox** — the full command-center experience (bots, provider toggle + lock, fork/export, images, advanced settings). No Incognito, no cross-session memory — the thread is its own memory.
+  - **Chat** — a companion timeline: one steady Prism companion, minimal controls, and cross-conversation continuity. Compose stays intentionally simple so you can focus on reflection and momentum.
+  - **Sandbox** — the command center for experimentation (bot switching, provider/model controls, fork/export, images, advanced settings). Built for testing ideas, not relationship continuity.
   - **Story**, **Library**, and other disabled roadmap tiles preview future bot experiences before their shells are built.
   Mode is mirrored to the URL (`?view=chat` / `?view=sandbox`) so refreshes preserve the current surface.
 - **Strict data isolation** — every query is tenant-scoped by `user_id`
@@ -274,6 +274,12 @@ npm run dev
   - Candidate memories pass through an LLM validation critic plus deterministic policy gates before they are saved, so role-confused prompts and malformed model output are cleaned up or skipped instead of becoming durable bubbles.
   - Sandbox gets a silent, thread-scoped **rolling compaction summary** that kicks in when a thread outgrows the 30-message live window. Stored only in SQLite, never indexed into Qdrant, never surfaced in the sidebar — pure context plumbing so long Sandbox threads don't go amnesiac. Nothing ever crosses between threads.
   - Incognito opts out of both paths for the turn and forces the provider to LOCAL.
+
+## When to use Chat vs Sandbox
+
+- **Use Chat when you want continuity** — journaling, long-form personal threads, or a calm "stay with me" companion rhythm.
+- **Use Sandbox when you want control** — testing different bots/models, trying tools, or running structured experiments.
+- **Rule of thumb:** Chat is for relationship continuity; Sandbox is for lab-style iteration.
 - **Customizable chatbots** with a structured profile builder, OCEAN-inspired personality sliders, temperature, model overrides, and optional delete protection for favorite bots (composed into the model system prompt)
 - **Expanded bot glyph picker** with hundreds of Lucide-backed glyphs alongside the original inline set
 - **Forkable chats** — branch from any message in a conversation (Sandbox)

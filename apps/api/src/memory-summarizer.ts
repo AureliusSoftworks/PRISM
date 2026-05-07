@@ -28,6 +28,19 @@ const ROLLING_COMPACT_PROMPT = `You are compacting an ongoing conversation threa
  * instead of rolling off silently.
  */
 const RECENT_WINDOW_SIZE = 30;
+const SUMMARY_KIND_CHAT_FACTS = "chat_facts";
+const SUMMARY_KIND_SANDBOX_THREAD = "sandbox_thread";
+
+function encodeSummary(kind: string, summary: string): string {
+  return `[${kind}] ${summary.trim()}`;
+}
+
+function decodeSummary(payload: string, expectedKind: string): string | null {
+  const prefix = `[${expectedKind}] `;
+  if (!payload.startsWith(prefix)) return null;
+  const decoded = payload.slice(prefix.length).trim();
+  return decoded.length > 0 ? decoded : null;
+}
 
 /**
  * Chat-mode (cross-thread) summarizer. Folds the conversation so far into
@@ -69,7 +82,13 @@ export async function summarizeAndStoreMemories(
 
   db.prepare(
     "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).run(summaryId, userId, conversationId, summary, now);
+  ).run(
+    summaryId,
+    userId,
+    conversationId,
+    encodeSummary(SUMMARY_KIND_CHAT_FACTS, summary),
+    now
+  );
 
   // Optionally persist extracted bullet facts as low-certainty compiled
   // assumptions so the UI can render them alongside direct memories.
@@ -230,12 +249,23 @@ export function getLatestThreadSummary(
   userId: string,
   conversationId: string
 ): string | null {
-  const row = db
+  const rows = db
     .prepare(
-      "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 1"
+      "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 25"
     )
-    .get(userId, conversationId) as { summary?: string } | undefined;
-  return row?.summary ?? null;
+    .all(userId, conversationId) as Array<{ summary?: string }>;
+  for (const row of rows) {
+    if (typeof row.summary !== "string") continue;
+    const chatFact = decodeSummary(row.summary, SUMMARY_KIND_CHAT_FACTS);
+    if (chatFact !== null) {
+      continue;
+    }
+    const decoded = decodeSummary(row.summary, SUMMARY_KIND_SANDBOX_THREAD);
+    if (decoded) return decoded;
+    const legacy = row.summary.trim();
+    if (legacy.length > 0) return legacy;
+  }
+  return null;
 }
 
 export { RECENT_WINDOW_SIZE };

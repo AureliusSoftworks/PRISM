@@ -202,11 +202,42 @@ export interface MemoryValidationEvent {
  */
 export type ChatMode = "chat" | "sandbox";
 
+/**
+ * Companion-only preferences. These are intentionally "feel" controls, not
+ * runtime model knobs, so Chat can stay calm and low-control.
+ */
+export interface ChatCompanionPreferences {
+  /** Optional tone cue for the single companion persona. */
+  tone?: "grounded" | "warm" | "reflective";
+  /** Optional ritual cue used by lightweight Chat check-in UI. */
+  ritual?: "none" | "daily-check-in" | "weekly-reflection";
+}
+
+/**
+ * Advanced runtime controls reserved for Sandbox.
+ *
+ * In Chat mode these knobs are accepted for backwards compatibility but
+ * ignored server-side so the companion contract remains stable.
+ */
+export interface SandboxRuntimeControls {
+  preferredProvider?: "local" | "openai";
+  modelOverride?: string;
+  botId?: string | null;
+}
+
 export interface ChatRequestPayload {
   conversationId?: string;
   message: string;
   starterPrompt?: boolean;
   mode?: ChatMode;
+  /** Companion-only optional preferences (used only when mode === "chat"). */
+  companionPreferences?: ChatCompanionPreferences;
+  /** Advanced controls intended for Sandbox-only routing. */
+  sandboxControls?: SandboxRuntimeControls;
+  /** Back-compat top-level advanced knobs (ignored when mode === "chat"). */
+  preferredProvider?: "local" | "openai";
+  modelOverride?: string;
+  botId?: string | null;
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
    * prompt context only; private turns are never read from or written to
