@@ -18524,19 +18524,6 @@ function resendUserMessage(msg: Message): void {
           <button
             type="button"
             className={styles.hubTile}
-            onClick={() => navigateToView("chat")}
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphChat size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Chat</div>
-            <div className={styles.hubTileTagline}>
-              A calm, personal chat with your AI. Just say hello.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
             onClick={() => navigateToView("sandbox")}
           >
             <div className={styles.hubTileGlyph}>
@@ -18545,6 +18532,19 @@ function resendUserMessage(msg: Message): void {
             <div className={styles.hubTileLabel}>Sandbox</div>
             <div className={styles.hubTileTagline}>
               Full playground: bots, providers, memory, images, and more.
+            </div>
+          </button>
+          <button
+            type="button"
+            className={styles.hubTile}
+            onClick={() => navigateToView("chat")}
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphChat size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Chat</div>
+            <div className={styles.hubTileTagline}>
+              A calm, personal chat with your AI. Just say hello.
             </div>
           </button>
           <button

@@ -8,6 +8,8 @@ DEFAULT_IOS_SIMULATOR_ID="29D05410-1ED7-4282-A174-92A2FDB70FCD"
 IOS_BUNDLE_ID="com.localai.prism-ios"
 IOS_APP_PATH="apps/ios-client/DerivedData/Build/Products/Debug-iphonesimulator/Prism.app"
 IOS_DEVICE_APP_PATH="apps/ios-client/DerivedData/Build/Products/Debug-iphoneos/Prism.app"
+API_PORT="18787"
+WEB_PORT="18788"
 
 MAC_CLIENT_BUNDLE_ID="com.localai.prism-client"
 MAC_CLIENT_APP_PATH="apps/client-mac/DerivedData/Build/Products/Debug/Prism.app"
@@ -165,9 +167,38 @@ run_mac_server() {
   open "$MAC_SERVER_APP_PATH"
 }
 
+free_tcp_port() {
+  local port="$1"
+  local pids
+
+  pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return
+  fi
+
+  echo "Port $port is already in use. Stopping existing process(es): $pids"
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    kill "$pid" 2>/dev/null || true
+  done <<< "$pids"
+
+  sleep 0.5
+
+  pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -n "$pids" ]]; then
+    echo "Force-stopping stubborn process(es) on port $port: $pids"
+    while IFS= read -r pid; do
+      [[ -z "$pid" ]] && continue
+      kill -9 "$pid" 2>/dev/null || true
+    done <<< "$pids"
+  fi
+}
+
 # Foreground long-running dev server; exec replaces the script process so
 # Ctrl+C is delivered straight to `next dev` without a stray bash hop.
 run_web() {
+  free_tcp_port "$API_PORT"
+  free_tcp_port "$WEB_PORT"
   exec npm run dev
 }
 
