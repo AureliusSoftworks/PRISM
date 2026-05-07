@@ -4,6 +4,7 @@ import { randomId } from "./security.ts";
 export interface ConversationSummary {
   id: string;
   title: string;
+  mode: "chat" | "sandbox";
   botId: string | null;
   incognito: boolean;
   lastBotId: string | null;
@@ -40,7 +41,7 @@ export function createDevSeedConversations(
     .all(userId) as Array<{ id: string }>;
 
   const insertConversation = db.prepare(
-    "INSERT INTO conversations (id, user_id, title, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)"
+    "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, 'sandbox', ?, 0, ?, ?)"
   );
   const insertMessage = db.prepare(
     "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -108,7 +109,7 @@ export function listConversationSummaries(
   // the conversation, regardless of the conversation's locked bot_id.
   const rows = db
     .prepare(
-      `SELECT c.id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
+      `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
                    AND m.role = 'assistant'
@@ -129,6 +130,7 @@ export function listConversationSummaries(
     .all(userId) as Array<{
     id: string;
     title: string;
+    conversation_mode: string | null;
     bot_id: string | null;
     incognito: number;
     created_at: string;
@@ -141,6 +143,7 @@ export function listConversationSummaries(
   return rows.map((row) => ({
     id: row.id,
     title: row.title,
+    mode: row.conversation_mode === "chat" ? "chat" : "sandbox",
     botId: row.bot_id ?? null,
     incognito: row.incognito === 1,
     lastBotId: row.last_bot_id ?? null,

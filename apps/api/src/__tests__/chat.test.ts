@@ -27,6 +27,7 @@ function createChatTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
+      conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -1666,8 +1667,9 @@ describe("processChatMessage conversational memory cues", () => {
       }
     );
     assert.ok(freshConversation.opinion);
-    assert.equal(freshConversation.opinion?.score, 53);
-    assert.notEqual(freshConversation.conversation.id, first.conversation.id);
+    assert.equal(freshConversation.conversation.id, first.conversation.id);
+    assert.equal(freshConversation.opinion?.trend, "up");
+    assert.notEqual(freshConversation.opinion?.score, second.opinion?.score);
   });
 
   it("keeps long-term bot opinions scoped per bot", async () => {

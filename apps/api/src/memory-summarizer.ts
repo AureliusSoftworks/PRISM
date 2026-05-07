@@ -4,6 +4,7 @@ import { embedTextLocal, type LlmProvider } from "./providers.ts";
 import { upsertVector, ensureCollection, searchVectors } from "./qdrant.ts";
 import { persistMemoryCandidates } from "./memory.ts";
 import { validateMemoryCandidates } from "./memory-validation.ts";
+import type { ChatMode } from "@localai/shared";
 
 /**
  * Chat-mode summarizer prompt: extracts cross-thread personal facts the
@@ -29,17 +30,87 @@ const ROLLING_COMPACT_PROMPT = `You are compacting an ongoing conversation threa
  */
 const RECENT_WINDOW_SIZE = 30;
 const SUMMARY_KIND_CHAT_FACTS = "chat_facts";
-const SUMMARY_KIND_SANDBOX_THREAD = "sandbox_thread";
+const SUMMARY_KIND_THREAD_COMPACT = "thread_compact";
 
-function encodeSummary(kind: string, summary: string): string {
-  return `[${kind}] ${summary.trim()}`;
+type EncodedSummaryRecord = {
+  v: 1;
+  kind: typeof SUMMARY_KIND_CHAT_FACTS | typeof SUMMARY_KIND_THREAD_COMPACT;
+  summary: string;
+  mode?: ChatMode;
+  reason?: "milestone" | "mode_exit" | "manual";
+  createdAt?: string;
+};
+
+type ThreadSummaryDebug = {
+  mode: ChatMode;
+  conversationId: string;
+  inProgress: boolean;
+  latestSummary: string | null;
+  latestSummaryAt: string | null;
+  summaryCount: number;
+  totalMessages: number;
+  messagesSinceLastCompaction: number;
+};
+
+const threadSummaryInFlight = new Set<string>();
+
+function threadSummaryKey(userId: string, conversationId: string, mode: ChatMode): string {
+  return `${userId}:${conversationId}:${mode}`;
 }
 
-function decodeSummary(payload: string, expectedKind: string): string | null {
-  const prefix = `[${expectedKind}] `;
-  if (!payload.startsWith(prefix)) return null;
-  const decoded = payload.slice(prefix.length).trim();
-  return decoded.length > 0 ? decoded : null;
+function encodeSummaryRecord(record: EncodedSummaryRecord): string {
+  return JSON.stringify(record);
+}
+
+function decodeSummaryRecord(payload: string): EncodedSummaryRecord | null {
+  const raw = payload.trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<EncodedSummaryRecord>;
+    if (
+      parsed.v === 1 &&
+      (parsed.kind === SUMMARY_KIND_CHAT_FACTS || parsed.kind === SUMMARY_KIND_THREAD_COMPACT) &&
+      typeof parsed.summary === "string" &&
+      parsed.summary.trim().length > 0
+    ) {
+      if (parsed.kind === SUMMARY_KIND_THREAD_COMPACT) {
+        const mode = parsed.mode === "chat" ? "chat" : "sandbox";
+        return {
+          v: 1,
+          kind: SUMMARY_KIND_THREAD_COMPACT,
+          mode,
+          summary: parsed.summary.trim(),
+          reason: parsed.reason,
+          createdAt: parsed.createdAt,
+        };
+      }
+      return {
+        v: 1,
+        kind: SUMMARY_KIND_CHAT_FACTS,
+        summary: parsed.summary.trim(),
+        reason: parsed.reason,
+        createdAt: parsed.createdAt,
+      };
+    }
+  } catch {
+    // Legacy text payloads are decoded below.
+  }
+  const legacyChatPrefix = `[${SUMMARY_KIND_CHAT_FACTS}] `;
+  if (raw.startsWith(legacyChatPrefix)) {
+    const summary = raw.slice(legacyChatPrefix.length).trim();
+    return summary
+      ? { v: 1, kind: SUMMARY_KIND_CHAT_FACTS, summary }
+      : null;
+  }
+  const legacySandboxPrefix = "[sandbox_thread] ";
+  if (raw.startsWith(legacySandboxPrefix)) {
+    const summary = raw.slice(legacySandboxPrefix.length).trim();
+    return summary
+      ? { v: 1, kind: SUMMARY_KIND_THREAD_COMPACT, mode: "sandbox", summary }
+      : null;
+  }
+  // Legacy sandbox compaction rows were stored as plain paragraph text.
+  return { v: 1, kind: SUMMARY_KIND_THREAD_COMPACT, mode: "sandbox", summary: raw };
 }
 
 /**
@@ -86,7 +157,14 @@ export async function summarizeAndStoreMemories(
     summaryId,
     userId,
     conversationId,
-    encodeSummary(SUMMARY_KIND_CHAT_FACTS, summary),
+    encodeSummaryRecord({
+      v: 1,
+      kind: SUMMARY_KIND_CHAT_FACTS,
+      summary: summary.trim(),
+      mode: "chat",
+      reason: "milestone",
+      createdAt: now,
+    }),
     now
   );
 
@@ -179,8 +257,17 @@ export async function summarizeThreadCompact(
   db: DatabaseSync,
   auxiliaryProvider: LlmProvider,
   userId: string,
-  conversationId: string
-): Promise<void> {
+  conversationId: string,
+  options?: {
+    mode?: ChatMode;
+    reason?: "milestone" | "mode_exit" | "manual";
+    force?: boolean;
+  }
+): Promise<{ triggered: boolean; latestSummary?: string; latestSummaryAt?: string }> {
+  const mode = options?.mode === "chat" ? "chat" : "sandbox";
+  const reason = options?.reason ?? "milestone";
+  const force = options?.force === true;
+  const key = threadSummaryKey(userId, conversationId, mode);
   const allMessages = db
     .prepare(
       "SELECT role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
@@ -191,51 +278,69 @@ export async function summarizeThreadCompact(
     created_at: string;
   }>;
 
-  // Nothing to compact yet — the whole thread still fits in the live
-  // window, so rolling context is a no-op.
-  if (allMessages.length <= RECENT_WINDOW_SIZE) {
-    return;
+  if (allMessages.length === 0) {
+    return { triggered: false };
   }
 
-  const olderMessages = allMessages.slice(0, -RECENT_WINDOW_SIZE);
-  // Slice length is total - RECENT_WINDOW_SIZE; the guard above already
-  // ensured this is > 0, but we re-check to keep the branch obvious.
+  // Forced runs (manual button + mode-exit) summarize whatever exists so
+  // operators can validate compaction without first crossing the rolling
+  // window threshold.
+  const olderMessages = force
+    ? allMessages
+    : allMessages.slice(0, -RECENT_WINDOW_SIZE);
+  // Non-forced runs still no-op if nothing sits outside the live window.
   if (olderMessages.length === 0) {
-    return;
+    return { triggered: false };
   }
 
-  const priorSummary = db
-    .prepare(
-      "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 1"
-    )
-    .get(userId, conversationId) as { summary: string } | undefined;
-
+  const priorSummary = getLatestThreadSummary(db, userId, conversationId, mode);
   const priorBlock = priorSummary
-    ? `[Prior summary]\n${priorSummary.summary}\n\n`
+    ? `[Prior summary]\n${priorSummary}\n\n`
     : "";
   const messagesBlock = olderMessages
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const compact = await auxiliaryProvider.generateResponse([
-    { role: "system", content: ROLLING_COMPACT_PROMPT },
-    {
-      role: "user",
-      content: `${priorBlock}[Earlier messages to fold in]\n${messagesBlock}`,
-    },
-  ]);
+  if (threadSummaryInFlight.has(key) && !force) {
+    return { triggered: false };
+  }
+  threadSummaryInFlight.add(key);
+  let compact: string;
+  try {
+    compact = await auxiliaryProvider.generateResponse([
+      { role: "system", content: ROLLING_COMPACT_PROMPT },
+      {
+        role: "user",
+        content: `${priorBlock}[Earlier messages to fold in]\n${messagesBlock}`,
+      },
+    ]);
+  } finally {
+    threadSummaryInFlight.delete(key);
+  }
 
   if (!compact || compact.trim().length === 0) {
-    return;
+    return { triggered: false };
   }
 
   const summaryId = randomId(12);
   const now = new Date().toISOString();
   db.prepare(
     "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).run(summaryId, userId, conversationId, compact.trim(), now);
-  // Intentional: no Qdrant write. Thread-scoped summaries must stay
-  // unreachable from cross-thread similarity search.
+  ).run(
+    summaryId,
+    userId,
+    conversationId,
+    encodeSummaryRecord({
+      v: 1,
+      kind: SUMMARY_KIND_THREAD_COMPACT,
+      mode,
+      summary: compact.trim(),
+      reason,
+      createdAt: now,
+    }),
+    now
+  );
+  return { triggered: true, latestSummary: compact.trim(), latestSummaryAt: now };
 }
 
 /**
@@ -247,7 +352,8 @@ export async function summarizeThreadCompact(
 export function getLatestThreadSummary(
   db: DatabaseSync,
   userId: string,
-  conversationId: string
+  conversationId: string,
+  mode: ChatMode = "sandbox"
 ): string | null {
   const rows = db
     .prepare(
@@ -256,16 +362,103 @@ export function getLatestThreadSummary(
     .all(userId, conversationId) as Array<{ summary?: string }>;
   for (const row of rows) {
     if (typeof row.summary !== "string") continue;
-    const chatFact = decodeSummary(row.summary, SUMMARY_KIND_CHAT_FACTS);
-    if (chatFact !== null) {
-      continue;
-    }
-    const decoded = decodeSummary(row.summary, SUMMARY_KIND_SANDBOX_THREAD);
-    if (decoded) return decoded;
-    const legacy = row.summary.trim();
-    if (legacy.length > 0) return legacy;
+    const decoded = decodeSummaryRecord(row.summary);
+    if (!decoded) continue;
+    if (decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) continue;
+    const decodedMode = decoded.mode === "chat" ? "chat" : "sandbox";
+    if (decodedMode !== mode) continue;
+    return decoded.summary;
   }
   return null;
+}
+
+export function clearThreadCompactions(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  mode: ChatMode
+): number {
+  const rows = db
+    .prepare(
+      "SELECT id, summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC"
+    )
+    .all(userId, conversationId) as Array<{ id: string; summary: string }>;
+  const targetIds = rows
+    .filter((row) => {
+      const decoded = decodeSummaryRecord(row.summary);
+      if (!decoded || decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) return false;
+      const decodedMode = decoded.mode === "chat" ? "chat" : "sandbox";
+      return decodedMode === mode;
+    })
+    .map((row) => row.id);
+  if (targetIds.length === 0) return 0;
+  const deleteStatement = db.prepare(
+    "DELETE FROM memory_summaries WHERE id = ? AND user_id = ? AND conversation_id = ?"
+  );
+  let deleted = 0;
+  for (const id of targetIds) {
+    const result = deleteStatement.run(id, userId, conversationId);
+    deleted += Number(result.changes ?? 0);
+  }
+  return deleted;
+}
+
+export function getThreadCompactionDebug(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  mode: ChatMode
+): ThreadSummaryDebug {
+  const rows = db
+    .prepare(
+      "SELECT summary, created_at FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 80"
+    )
+    .all(userId, conversationId) as Array<{ summary: string; created_at: string }>;
+  const matchingRows = rows.filter((row) => {
+    const decoded = decodeSummaryRecord(row.summary);
+    if (!decoded || decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) return false;
+    const decodedMode = decoded.mode === "chat" ? "chat" : "sandbox";
+    return decodedMode === mode;
+  });
+  const latest = matchingRows[0];
+  const latestDecoded = latest ? decodeSummaryRecord(latest.summary) : null;
+  const totalMessages = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND conversation_id = ?"
+      )
+      .get(userId, conversationId) as { n: number }
+  ).n;
+  const messagesSinceLastCompaction = latest
+    ? (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND conversation_id = ? AND created_at > ?"
+          )
+          .get(userId, conversationId, latest.created_at) as { n: number }
+      ).n
+    : totalMessages;
+  return {
+    mode,
+    conversationId,
+    inProgress: threadSummaryInFlight.has(threadSummaryKey(userId, conversationId, mode)),
+    latestSummary:
+      latestDecoded && latestDecoded.kind === SUMMARY_KIND_THREAD_COMPACT
+        ? latestDecoded.summary
+        : null,
+    latestSummaryAt: latest?.created_at ?? null,
+    summaryCount: matchingRows.length,
+    totalMessages,
+    messagesSinceLastCompaction,
+  };
+}
+
+export function isThreadCompactionInProgress(
+  userId: string,
+  conversationId: string,
+  mode: ChatMode
+): boolean {
+  return threadSummaryInFlight.has(threadSummaryKey(userId, conversationId, mode));
 }
 
 export { RECENT_WINDOW_SIZE };

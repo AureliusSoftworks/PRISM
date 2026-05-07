@@ -101,6 +101,8 @@ export interface Conversation {
   id: string;
   userId: string;
   title: string;
+  /** Owning surface for this conversation row. */
+  mode?: ChatMode;
   /**
    * Bot the conversation is locked to. Chosen at chat start (Chat mode
    * empty-state picker or Sandbox bot picker) and frozen for the whole
@@ -244,6 +246,8 @@ export interface ChatRequestPayload {
    * persisted conversation/message storage.
    */
   ephemeralMessages?: ChatMessage[];
+  /** Optional signal to trigger end-of-session rolling compaction. */
+  sessionEnding?: boolean;
 }
 
 /**
@@ -285,6 +289,14 @@ export interface ChatResponsePayload extends StarterChatExtras {
   assistantMessage: ChatMessage;
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
+  summaryCompaction?: {
+    mode: ChatMode;
+    triggered: boolean;
+    inProgress: boolean;
+    reason: "milestone" | "mode_exit" | "manual";
+    latestSummary?: string;
+    latestSummaryAt?: string;
+  };
   memoryLearned?: {
     created: Array<{
       id: string;
@@ -316,4 +328,15 @@ export interface ChatResponsePayload extends StarterChatExtras {
     }>;
     maxConfidence: number;
   };
+}
+
+export interface ConversationSummaryDebug {
+  mode: ChatMode;
+  conversationId: string;
+  inProgress: boolean;
+  latestSummary: string | null;
+  latestSummaryAt: string | null;
+  summaryCount: number;
+  totalMessages: number;
+  messagesSinceLastCompaction: number;
 }

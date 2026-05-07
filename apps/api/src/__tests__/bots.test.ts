@@ -151,6 +151,7 @@ function createTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
+      conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL

@@ -57,6 +57,14 @@ export interface ProcessChatMessageResult {
   conversationStarters?: string[];
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
+  summaryCompaction?: {
+    mode: ChatMode;
+    triggered: boolean;
+    inProgress: boolean;
+    reason: "milestone" | "mode_exit" | "manual";
+    latestSummary?: string;
+    latestSummaryAt?: string;
+  };
   memoryLearned?: {
     created: Array<{
       id: string;
@@ -764,6 +772,7 @@ export interface UserChatSettings {
    * the server can't tell what the client meant.
    */
   mode?: ChatMode;
+  sessionEnding?: boolean;
 }
 
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
@@ -2029,14 +2038,14 @@ async function retrieveMemoriesWithFallback(
 /**
  * Only run the (expensive) background summarization at milestones so it does
  * not monopolize the single-process Ollama instance and block the next turn.
- * Milestones: every 6 messages until 24, then every 12 thereafter.
+ * Milestones: every 10 messages early, then every 12 for longer threads.
  */
 function shouldSummarizeAtMilestone(totalMessages: number): boolean {
-  if (totalMessages < 6) {
+  if (totalMessages < 10) {
     return false;
   }
-  if (totalMessages <= 24) {
-    return totalMessages % 6 === 0;
+  if (totalMessages <= 60) {
+    return totalMessages % 10 === 0;
   }
   return totalMessages % 12 === 0;
 }
@@ -2063,6 +2072,7 @@ async function handleCompanionChatTurn(args: {
   db: DatabaseSync;
   provider: LlmProvider;
   userId: string;
+  activeConversationId: string;
   message: string;
   userKey: Buffer;
   activeMemoryBotId: string | null;
@@ -2073,6 +2083,7 @@ async function handleCompanionChatTurn(args: {
     db,
     provider,
     userId,
+    activeConversationId,
     message,
     userKey,
     activeMemoryBotId,
@@ -2098,7 +2109,11 @@ async function handleCompanionChatTurn(args: {
       true
     );
   }
-  return { threadSummary: null, memoryLines };
+  const threadSummary =
+    retrievalMode === "cross_thread"
+      ? getLatestThreadSummary(db, userId, activeConversationId, "chat")
+      : null;
+  return { threadSummary, memoryLines };
 }
 
 async function handleSandboxTurn(args: {
@@ -2111,7 +2126,7 @@ async function handleSandboxTurn(args: {
   const { db, userId, activeConversationId, isStarterPrompt, retrievalMode } = args;
   const threadSummary =
     retrievalMode === "thread_only"
-      ? getLatestThreadSummary(db, userId, activeConversationId)
+      ? getLatestThreadSummary(db, userId, activeConversationId, "sandbox")
       : null;
   if (isStarterPrompt) {
     return { threadSummary, memoryLines: [] };
@@ -2238,6 +2253,7 @@ export async function processChatMessage(
       id: conversationId ?? randomId(12),
       userId,
       title: privateConversationTitle(nextMessages, message, settings.starterPromptLabel),
+      mode,
       botId: activeBotId ?? null,
       incognito: true,
       lastBotId: activeBotId ?? null,
@@ -2290,16 +2306,45 @@ export async function processChatMessage(
   }
 
   let activeConversationId = conversationId;
+  if (mode === "chat" && !incognitoForTurn) {
+    const latestChatConversation = db
+      .prepare(
+        `SELECT id
+           FROM conversations
+          WHERE user_id = ?
+            AND COALESCE(incognito, 0) = 0
+            AND conversation_mode = 'chat'
+          ORDER BY updated_at DESC
+          LIMIT 1`
+      )
+      .get(userId) as { id?: string } | undefined;
+    if (!activeConversationId) {
+      activeConversationId = latestChatConversation?.id;
+    } else {
+      const requested = db
+        .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+        .get(activeConversationId, userId) as
+        | { id: string; conversation_mode: string | null }
+        | undefined;
+      if (!requested?.id) {
+        throw new Error("Conversation not found for this user.");
+      }
+      if (requested.conversation_mode !== "chat") {
+        activeConversationId = latestChatConversation?.id;
+      }
+    }
+  }
   if (!activeConversationId) {
     activeConversationId = randomId(12);
     db.prepare(
-      "INSERT INTO conversations (id, user_id, title, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
       activeConversationId,
       userId,
       isStarterPrompt
         ? generateStarterConversationTitle(settings.starterPromptLabel)
         : generateConversationTitle(message),
+      mode,
       activeBotId ?? null,
       incognitoForTurn ? 1 : 0,
       now,
@@ -2352,6 +2397,7 @@ export async function processChatMessage(
             db,
             provider,
             userId,
+            activeConversationId,
             message,
             userKey,
             activeMemoryBotId,
@@ -2678,11 +2724,23 @@ export async function processChatMessage(
     }
   }
 
-  // Summarization runs for BOTH modes (just into different sinks):
-  //   - Chat: cross-thread, indexed into Qdrant for similarity recall.
-  //   - Sandbox: thread-scoped rolling compaction, SQLite only, invisible.
-  // Incognito opts out completely.
-  if (!skipSummarization && shouldSummarizeAtMilestone(totalMessages)) {
+  let summaryCompaction: ProcessChatMessageResult["summaryCompaction"];
+  const shouldCompactAtMilestone = !skipSummarization && shouldSummarizeAtMilestone(totalMessages);
+  const shouldCompactAtSessionEnd = !skipSummarization && settings.sessionEnding === true;
+  if (shouldCompactAtMilestone) {
+    summarizeThreadCompact(
+      db,
+      auxiliaryProvider,
+      userId,
+      activeConversationId,
+      { mode, reason: "milestone" }
+    ).catch(() => {});
+    summaryCompaction = {
+      mode,
+      triggered: true,
+      inProgress: true,
+      reason: "milestone",
+    };
     if (mode === "chat" && settings.autoMemory) {
       summarizeAndStoreMemories(
         db,
@@ -2691,17 +2749,24 @@ export async function processChatMessage(
         activeConversationId,
         userKey
       ).catch(() => {});
-    } else if (mode === "sandbox") {
-      // Thread compaction is NOT gated by autoMemory — that setting is a
-      // user-facing knob for the sidebar "Memories" list, which Sandbox
-      // deliberately doesn't touch. Compaction is context plumbing.
-      summarizeThreadCompact(
-        db,
-        auxiliaryProvider,
-        userId,
-        activeConversationId
-      ).catch(() => {});
     }
+  }
+  if (shouldCompactAtSessionEnd) {
+    const compacted = await summarizeThreadCompact(
+      db,
+      auxiliaryProvider,
+      userId,
+      activeConversationId,
+      { mode, reason: "mode_exit", force: true }
+    );
+    summaryCompaction = {
+      mode,
+      triggered: compacted.triggered,
+      inProgress: false,
+      reason: "mode_exit",
+      ...(compacted.latestSummary ? { latestSummary: compacted.latestSummary } : {}),
+      ...(compacted.latestSummaryAt ? { latestSummaryAt: compacted.latestSummaryAt } : {}),
+    };
   }
 
   // Row payload mirrors the GET endpoints' shape — last_bot_* plus
@@ -2716,7 +2781,7 @@ export async function processChatMessage(
   // distinguishes them from "no reply yet" via has_assistant_reply.
   const conversationRow = db
     .prepare(
-      `SELECT c.id, c.user_id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
+      `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
                    AND m.role = 'assistant'
@@ -2736,6 +2801,7 @@ export async function processChatMessage(
     id: string;
     user_id: string;
     title: string;
+    conversation_mode: string | null;
     bot_id: string | null;
     incognito: number;
     last_bot_id: string | null;
@@ -2760,6 +2826,7 @@ export async function processChatMessage(
     id: conversationRow.id,
     userId: conversationRow.user_id,
     title: conversationRow.title,
+    mode: conversationRow.conversation_mode === "chat" ? "chat" : "sandbox",
     botId: conversationRow.bot_id ?? null,
     incognito: conversationRow.incognito === 1,
     lastBotId: conversationRow.last_bot_id ?? null,
@@ -2787,6 +2854,7 @@ export async function processChatMessage(
     conversation: conversationPersisted,
     opinion,
     ...(botOpinion ? { botOpinion } : {}),
+    ...(summaryCompaction ? { summaryCompaction } : {}),
     ...(memoryLearned ? { memoryLearned } : {}),
     ...(conversationStartersPersisted
       ? { conversationStarters: conversationStartersPersisted }

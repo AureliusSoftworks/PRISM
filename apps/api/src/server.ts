@@ -43,6 +43,12 @@ import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routi
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import { generateImage } from "./image-provider.ts";
 import {
+  clearThreadCompactions,
+  getLatestThreadSummary,
+  getThreadCompactionDebug,
+  summarizeThreadCompact,
+} from "./memory-summarizer.ts";
+import {
   INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS,
   getInactiveAccountCutoff
 } from "./account-retention.ts";
@@ -554,7 +560,7 @@ function buildRoutes(): RouteDefinition[] {
       // + composer-dropdown sync the same way.
       const conversation = db
         .prepare(
-          `SELECT c.id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
+          `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
                   (SELECT m.bot_id FROM messages m
                      WHERE m.conversation_id = c.id
                        AND m.role = 'assistant'
@@ -574,6 +580,7 @@ function buildRoutes(): RouteDefinition[] {
         | {
             id: string;
             title: string;
+            conversation_mode: string | null;
             bot_id: string | null;
             incognito: number;
             created_at: string;
@@ -692,6 +699,7 @@ function buildRoutes(): RouteDefinition[] {
         conversation: {
           id: conversation.id,
           title: conversation.title,
+          mode: conversation.conversation_mode === "chat" ? "chat" : "sandbox",
           botId: conversation.bot_id ?? null,
           incognito: conversation.incognito === 1,
           lastBotId: conversation.last_bot_id ?? null,
@@ -711,6 +719,81 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         conversation,
+      });
+    }),
+    route("GET", "/api/conversations/:id/summary", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const mode = ctx.query.get("mode") === "chat" ? "chat" : "sandbox";
+      const owned = db
+        .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+        .get(conversationId, userId) as { id?: string } | undefined;
+      if (!owned?.id) {
+        throw new Error("Conversation not found.");
+      }
+      const debug = getThreadCompactionDebug(db, userId, conversationId, mode);
+      json(ctx.res, 200, {
+        ok: true,
+        summary: getLatestThreadSummary(db, userId, conversationId, mode),
+        latestSummaryAt: debug.latestSummaryAt,
+      });
+    }),
+    route("GET", "/api/conversations/:id/summarization-debug", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const mode = ctx.query.get("mode") === "chat" ? "chat" : "sandbox";
+      const owned = db
+        .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+        .get(conversationId, userId) as { id?: string } | undefined;
+      if (!owned?.id) {
+        throw new Error("Conversation not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        debug: getThreadCompactionDebug(db, userId, conversationId, mode),
+      });
+    }),
+    route("POST", "/api/conversations/:id/summarization-debug", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const body = ctx.body as Record<string, unknown>;
+      const mode =
+        body.mode === "chat" || ctx.query.get("mode") === "chat"
+          ? "chat"
+          : "sandbox";
+      const action = body.action === "reset" ? "reset" : "run";
+      const reason =
+        body.reason === "mode_exit"
+          ? "mode_exit"
+          : body.reason === "milestone"
+            ? "milestone"
+            : "manual";
+      const owned = db
+        .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+        .get(conversationId, userId) as { id?: string } | undefined;
+      if (!owned?.id) {
+        throw new Error("Conversation not found.");
+      }
+      if (action === "reset") {
+        const deleted = clearThreadCompactions(db, userId, conversationId, mode);
+        json(ctx.res, 200, {
+          ok: true,
+          deleted,
+          debug: getThreadCompactionDebug(db, userId, conversationId, mode),
+        });
+        return;
+      }
+      const compacted = await summarizeThreadCompact(
+        db,
+        getAuxiliaryProvider(),
+        userId,
+        conversationId,
+        { mode, reason, force: true }
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        compacted,
+        debug: getThreadCompactionDebug(db, userId, conversationId, mode),
       });
     }),
     route("DELETE", "/api/conversations/:id", async (ctx) => {
@@ -837,6 +920,7 @@ function buildRoutes(): RouteDefinition[] {
       const message = starterPrompt ? "" : readString(body.message, "message");
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
+      const sessionEnding = body.sessionEnding === true;
       // Three-valued parse so the server can distinguish:
       //   - absent key           → leave conversation's bot alone
       //   - explicit null        → switch to Default persona (no bot)
@@ -987,6 +1071,7 @@ function buildRoutes(): RouteDefinition[] {
             botSystemPrompt,
             botOverrides,
             mode,
+            sessionEnding,
           },
           conversationId
         );
@@ -998,12 +1083,20 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
-      const { conversation, conversationStarters, memoryLearned, opinion, botOpinion } = result;
+      const {
+        conversation,
+        conversationStarters,
+        memoryLearned,
+        opinion,
+        botOpinion,
+        summaryCompaction,
+      } = result;
       json(ctx.res, 200, {
         ok: true,
         conversation,
         ...(opinion ? { opinion } : {}),
         ...(botOpinion ? { botOpinion } : {}),
+        ...(summaryCompaction ? { summaryCompaction } : {}),
         ...(memoryLearned ? { memoryLearned } : {}),
         ...(conversationStarters ? { conversationStarters } : {}),
       });

@@ -146,7 +146,7 @@ describe("summarizeThreadCompact", () => {
       | undefined;
     assert.equal(row?.user_id, "user-1");
     assert.equal(row?.conversation_id, "conv-1");
-    assert.equal(row?.summary, "conversation-about-foo");
+    assert.match(row?.summary ?? "", /conversation-about-foo/);
   });
 
   it("threads the prior summary through on subsequent passes", async () => {
@@ -225,6 +225,24 @@ describe("summarizeThreadCompact", () => {
         .get() as { n: number }
     ).n;
     assert.equal(total, 0, "blank LLM output must not land in storage");
+  });
+
+  it("forces a manual summary run even when below the live window", async () => {
+    const db = createTestDb();
+    const { provider } = stubProvider("manual-summary");
+    seedMessages(db, "user-1", "conv-1", 5, Date.now());
+
+    const result = await summarizeThreadCompact(db, provider, "user-1", "conv-1", {
+      mode: "sandbox",
+      reason: "manual",
+      force: true,
+    });
+
+    assert.equal(result.triggered, true);
+    const row = db
+      .prepare("SELECT summary FROM memory_summaries LIMIT 1")
+      .get() as { summary: string } | undefined;
+    assert.match(row?.summary ?? "", /manual-summary/);
   });
 });
 

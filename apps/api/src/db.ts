@@ -109,6 +109,7 @@ export function createDatabase(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
+      conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       parent_id TEXT,
       fork_message_id TEXT,
@@ -294,6 +295,20 @@ export function createDatabase(): DatabaseSync {
   if (!hasToolPayloadColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN tool_payload TEXT;");
   }
+  const conversationColumns = db
+    .prepare("PRAGMA table_info(conversations)")
+    .all() as Array<{ name: string }>;
+  const hasConversationModeColumn = conversationColumns.some(
+    (column) => column.name === "conversation_mode"
+  );
+  if (!hasConversationModeColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN conversation_mode TEXT NOT NULL DEFAULT 'sandbox';");
+  }
+  db.exec(`
+    UPDATE conversations
+    SET conversation_mode = 'sandbox'
+    WHERE conversation_mode IS NULL OR trim(conversation_mode) = '';
+  `);
 
   const memoryColumns = db
     .prepare("PRAGMA table_info(memories)")
@@ -436,6 +451,7 @@ export function mapConversation(
     id: string;
     user_id: string;
     title: string;
+    conversation_mode?: string | null;
     bot_id: string | null;
     incognito: number;
     last_bot_id?: string | null;
@@ -450,6 +466,7 @@ export function mapConversation(
     id: row.id,
     userId: row.user_id,
     title: row.title,
+    mode: row.conversation_mode === "chat" ? "chat" : "sandbox",
     botId: row.bot_id ?? null,
     incognito: row.incognito === 1,
     lastBotId: row.last_bot_id ?? null,
