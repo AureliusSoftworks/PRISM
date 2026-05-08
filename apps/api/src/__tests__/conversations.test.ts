@@ -6,8 +6,11 @@ import {
   deleteAllConversations,
   deleteConversation,
   deleteConversationsByBot,
+  getConversationSweepState,
   listConversationSummaries,
   rewindConversation,
+  sweepConversations,
+  undoLatestConversationSweep,
 } from "../conversations.ts";
 
 /** Stand up an in-memory DB with just the tables deleteConversation touches. */
@@ -21,6 +24,8 @@ function createTestDb(): DatabaseSync {
       title TEXT NOT NULL,
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
+      archived_at TEXT,
+      archive_batch_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -80,6 +85,15 @@ function createTestDb(): DatabaseSync {
       source_message_ids TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
+    CREATE TABLE conversation_sweep_batches (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      archived_conversation_ids TEXT NOT NULL,
+      summary_conversation_ids TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      undo_expires_at TEXT NOT NULL,
+      undone_at TEXT
+    );
   `);
   return db;
 }
@@ -126,17 +140,19 @@ function seedListConversation(
     title: string;
     updatedAt: string;
     incognito?: boolean;
+    archivedAt?: string | null;
     botId?: string | null;
     assistantBotId?: string | null;
   }
 ): void {
   db.prepare(
-    "INSERT INTO conversations (id, user_id, title, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO conversations (id, user_id, title, bot_id, archived_at, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(
     options.id,
     options.userId,
     options.title,
     options.botId ?? null,
+    options.archivedAt ?? null,
     options.incognito ? 1 : 0,
     "2026-01-01T00:00:00.000Z",
     options.updatedAt
@@ -217,6 +233,26 @@ describe("listConversationSummaries", () => {
     assert.equal(conversation?.lastBotId, "bot-1");
     assert.equal(conversation?.lastBotColor, "#67e8f9");
     assert.equal(conversation?.hasAssistantReply, true);
+  });
+
+  it("hides archived conversations from the sidebar list", () => {
+    const db = createTestDb();
+    seedListConversation(db, {
+      id: "active-1",
+      userId: "user-1",
+      title: "Active chat",
+      updatedAt: "2026-01-01T00:00:02.000Z",
+    });
+    seedListConversation(db, {
+      id: "archived-1",
+      userId: "user-1",
+      title: "Archived chat",
+      updatedAt: "2026-01-01T00:00:03.000Z",
+      archivedAt: "2026-01-02T00:00:00.000Z",
+    });
+
+    const conversations = listConversationSummaries(db, "user-1");
+    assert.deepEqual(conversations.map((conversation) => conversation.id), ["active-1"]);
   });
 });
 
@@ -486,6 +522,146 @@ describe("deleteConversationsByBot", () => {
         .get("user-1") as { n: number }).n,
       1
     );
+  });
+});
+
+describe("sweepConversations + undoLatestConversationSweep", () => {
+  it("archives visible conversations and creates one summary per bot/default group", () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "bot-chat-1", "bot-1");
+    seedBotChat(db, "user-1", "bot-chat-2", "bot-1");
+    seedBotChat(db, "user-1", "default-chat-1", null);
+    seedBotChat(db, "user-2", "other-user-chat", "bot-1");
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-1",
+      "user-1",
+      "Plankton",
+      "#00ff88",
+      "bot",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    const result = sweepConversations(db, "user-1", "sandbox");
+
+    assert.ok(result.batchId, "sweep should create a batch id");
+    assert.equal(result.sweptGroups, 1);
+    assert.equal(result.archivedConversationCount, 2);
+    assert.equal(result.summaryConversationCount, 1);
+    assert.ok(result.undoExpiresAt, "sweep should return undo window expiration");
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS n FROM conversations WHERE user_id = ? AND archived_at IS NOT NULL"
+      ).get("user-1") as { n: number }).n,
+      2
+    );
+    const summaries = listConversationSummaries(db, "user-1");
+    assert.equal(summaries.length, 2);
+    assert.equal(
+      summaries.filter((conversation) => conversation.title.startsWith("Sweep Summary - ")).length,
+      1
+    );
+    const sweepState = getConversationSweepState(db, "user-1");
+    assert.equal(sweepState.canUndo, true);
+  });
+
+  it("undoes the latest sweep by restoring archived chats and removing summaries", () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "bot-chat-1", "bot-1");
+    seedBotChat(db, "user-1", "bot-chat-2", "bot-1");
+    seedBotChat(db, "user-1", "default-chat-1", null);
+    const sweep = sweepConversations(db, "user-1", "sandbox");
+    assert.ok(sweep.batchId, "expected sweep batch id");
+
+    const undo = undoLatestConversationSweep(db, "user-1", sweep.batchId);
+
+    assert.equal(undo.batchId, sweep.batchId);
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS n FROM conversations WHERE user_id = ? AND archived_at IS NOT NULL"
+      ).get("user-1") as { n: number }).n,
+      0
+    );
+    const remaining = db
+      .prepare(
+        "SELECT id, title FROM conversations WHERE user_id = ? ORDER BY id"
+      )
+      .all("user-1") as Array<{ id: string; title: string }>;
+    assert.deepEqual(
+      remaining.map((row) => row.id),
+      ["bot-chat-1", "bot-chat-2", "default-chat-1"]
+    );
+    assert.ok(remaining.every((row) => !row.title.startsWith("Sweep Summary - ")));
+    const state = getConversationSweepState(db, "user-1");
+    assert.equal(state.canUndo, false);
+  });
+
+  it("keeps only one undoable sweep batch at a time", () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "chat-1", "bot-1");
+    seedBotChat(db, "user-1", "chat-1b", "bot-1");
+    sweepConversations(db, "user-1", "sandbox");
+
+    seedBotChat(db, "user-1", "chat-2", "bot-1");
+    seedBotChat(db, "user-1", "chat-2b", "bot-1");
+    sweepConversations(db, "user-1", "sandbox");
+
+    const activeSweepCount = (
+      db.prepare(
+        "SELECT COUNT(*) AS n FROM conversation_sweep_batches WHERE user_id = ? AND undone_at IS NULL"
+      ).get("user-1") as { n: number }
+    ).n;
+    assert.equal(activeSweepCount, 1);
+  });
+
+  it("returns a no-op when undo is requested without an active sweep batch", () => {
+    const db = createTestDb();
+
+    const result = undoLatestConversationSweep(db, "user-1", null);
+
+    assert.equal(result.batchId, null);
+    assert.equal(result.archivedConversationCount, 0);
+    assert.equal(result.summaryConversationCount, 0);
+  });
+
+  it("returns a no-op when no bot group has more than one chat", () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "solo-bot-chat", "bot-1");
+    seedBotChat(db, "user-1", "solo-default-chat", null);
+
+    const result = sweepConversations(db, "user-1", "sandbox");
+
+    assert.equal(result.batchId, null);
+    assert.equal(result.sweptGroups, 0);
+    assert.equal(result.archivedConversationCount, 0);
+    assert.equal(result.summaryConversationCount, 0);
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS n FROM conversations WHERE user_id = ? AND archived_at IS NOT NULL"
+      ).get("user-1") as { n: number }).n,
+      0
+    );
+  });
+
+  it("refuses undo when the sweep batch is expired", () => {
+    const db = createTestDb();
+    seedBotChat(db, "user-1", "chat-1", "bot-1");
+    seedBotChat(db, "user-1", "chat-2", "bot-1");
+    const sweep = sweepConversations(db, "user-1", "sandbox");
+    assert.ok(sweep.batchId);
+    db.prepare(
+      "UPDATE conversation_sweep_batches SET undo_expires_at = ? WHERE id = ?"
+    ).run("2000-01-01T00:00:00.000Z", sweep.batchId);
+
+    const undo = undoLatestConversationSweep(db, "user-1", sweep.batchId);
+
+    assert.equal(undo.batchId, null);
+    const archived = db
+      .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+      .get("chat-1") as { archived_at: string | null };
+    assert.ok(archived.archived_at, "expired undo should not restore archived chats");
   });
 });
 

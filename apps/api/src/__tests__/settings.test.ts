@@ -18,6 +18,7 @@ import {
 
 function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
   return {
+    displayName: "Alex",
     theme: "dark",
     preferredProvider: "local",
     providerLocked: 0,
@@ -25,6 +26,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     hiddenBotModelIds: "[]",
     preferredLocalModel: null,
     preferredOnlineModel: null,
+    lenientLocalFallbackModel: null,
     secondaryOllamaHost: null,
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
@@ -55,6 +57,29 @@ describe("resolveNextSettings — theme", () => {
   it("keeps the stored theme when the value is garbage", () => {
     const next = resolveNextSettings({ theme: "purple" }, baseline({ theme: "light" }));
     assert.equal(next.theme, "light");
+  });
+});
+
+describe("resolveNextSettings — displayName", () => {
+  it("stores trimmed displayName", () => {
+    const next = resolveNextSettings({ displayName: "  Jordan  " }, baseline());
+    assert.equal(next.displayName, "Jordan");
+  });
+
+  it("keeps the stored displayName when field is missing, empty, or invalid", () => {
+    const current = baseline({ displayName: "Taylor" });
+    assert.equal(resolveNextSettings({}, current).displayName, "Taylor");
+    assert.equal(resolveNextSettings({ displayName: "   " }, current).displayName, "Taylor");
+    assert.equal(
+      resolveNextSettings({ displayName: 42 as unknown as string }, current).displayName,
+      "Taylor"
+    );
+  });
+
+  it("caps displayName length at 80 characters", () => {
+    const veryLong = `${"a".repeat(100)}`;
+    const next = resolveNextSettings({ displayName: veryLong }, baseline());
+    assert.equal(next.displayName.length, 80);
   });
 });
 
@@ -196,6 +221,20 @@ describe("resolveNextSettings — preferred auto models", () => {
     );
     assert.equal(next.preferredLocalModel, "llama3.2");
     assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
+  });
+
+  it("stores and clears the lenient local fallback model", () => {
+    const stored = resolveNextSettings(
+      { lenientLocalFallbackModel: " llama3.1:8b " },
+      baseline()
+    );
+    assert.equal(stored.lenientLocalFallbackModel, "llama3.1:8b");
+
+    const cleared = resolveNextSettings(
+      { lenientLocalFallbackModel: " " },
+      baseline({ lenientLocalFallbackModel: "llama3.1:8b" })
+    );
+    assert.equal(cleared.lenientLocalFallbackModel, null);
   });
 });
 

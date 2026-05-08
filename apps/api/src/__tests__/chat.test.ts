@@ -800,6 +800,514 @@ describe("processChatMessage starter prompts", () => {
   });
 });
 
+describe("processChatMessage copyright fallback", () => {
+  it("falls back to the configured local model when OpenAI rejects with copyright policy", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: "Request blocked due to copyright policy restrictions.",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Local lenient fallback answer." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Write a scene in that style.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Local lenient fallback answer.");
+    assert.equal(assistant?.provider, "local");
+    assert.equal(assistant?.model, "lenient-local:latest");
+    assert.equal(result.fallbackInvocation?.trigger, "copyright_refusal_error");
+    assert.equal(result.fallbackInvocation?.primaryProvider, "openai");
+    assert.equal(result.fallbackInvocation?.fallbackModel, "lenient-local:latest");
+  });
+
+  it("replaces generic refusal prose with the configured local fallback model output", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes("/api/chat")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      if (body.model === "strict-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                "Sorry, I can't help with that request.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.model === "lenient-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: { content: "Lenient local model response." },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: { content: "unknown model" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Keep going.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botOverrides: { model: "strict-local:latest" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Lenient local model response.");
+    assert.equal(assistant?.provider, "local");
+    assert.equal(assistant?.model, "lenient-local:latest");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+    assert.equal(result.fallbackInvocation?.primaryProvider, "local");
+    assert.equal(result.fallbackInvocation?.fallbackModel, "lenient-local:latest");
+  });
+
+  it("falls back when refusal prose uses smart apostrophes", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Sorry, I can’t help with that request.",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Fallback handled with local model." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Please do that exact style.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback handled with local model.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("falls back when OpenAI returns refusal text in the refusal field", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  refusal: "I cannot help with that request.",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Fallback from refusal field." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback from refusal field.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("falls back on denial-like OpenAI 400 errors with vague detail", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: "Request blocked.",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Fallback from vague-denial error." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback from vague-denial error.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_error");
+  });
+
+  it("falls back on short denial-tone prose without explicit cannot phrasing", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes("/api/chat")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      if (body.model === "strict-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Sorry, that request is not permitted.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.model === "lenient-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: { content: "Lenient local fallback output from soft denial tone." },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: { content: "unknown model" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botOverrides: { model: "strict-local:latest" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Lenient local fallback output from soft denial tone.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("falls back when OpenAI returns content_filter without refusal text", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {},
+                finish_reason: "content_filter",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Fallback from content filter." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback from content filter.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("suppresses denied primary output when fallback is not configured", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (!url.includes("api.openai.com/v1/chat/completions")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "Sorry, I can't provide that.",
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await assert.rejects(
+      processChatMessage(db, "user-1", "continue", CHAT_TEST_USER_KEY, {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "",
+        incognito: false,
+        mode: "sandbox",
+      }),
+      /Configure a local fallback model/
+    );
+  });
+
+  it("treats apology-prefixed denial prose as fallback-triggering", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes("/api/chat")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      if (body.model === "strict-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "I am sorry, but I cannot comply with that.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.model === "lenient-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: { content: "Fallback from apology-prefixed denial." },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botOverrides: { model: "strict-local:latest" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback from apology-prefixed denial.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("suppresses denial prose returned by the fallback model itself", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes("/api/chat")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      if (body.model === "strict-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "I cannot help with that request.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.model === "lenient-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Sorry, I can't provide that either.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    await assert.rejects(
+      processChatMessage(db, "user-1", "continue", CHAT_TEST_USER_KEY, {
+        preferredProvider: "local",
+        autoMemory: false,
+        botOverrides: { model: "strict-local:latest" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }),
+      /local fallback model could not complete it/i
+    );
+  });
+});
+
 describe("processChatMessage AskQuestion tool", () => {
   it("persists stripped prose and attaches askQuestion hydration", async () => {
     const db = createChatTestDb();
@@ -855,7 +1363,7 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.deepEqual(JSON.parse(row.tool_payload), askPayload);
   });
 
-  it("forces fallback AskQuestion payload when user explicitly requests multiple-choice", async () => {
+  it("skips AskQuestion payload when options are not synthesized", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (_input: string | URL | Request) =>
       new Response(
@@ -880,22 +1388,21 @@ describe("processChatMessage AskQuestion tool", () => {
     );
 
     const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
-    assert.equal(lastAssistant?.askQuestion?.name, "AskQuestion");
-    assert.equal(lastAssistant?.askQuestion?.options.length, 3);
-    assert.deepEqual(
-      lastAssistant?.askQuestion?.options.map((opt) => opt.id),
-      ["a", "b", "c"]
-    );
-    assert.equal(lastAssistant?.askQuestion?.options[0]?.label, "Yes");
+    assert.equal(lastAssistant?.askQuestion, undefined);
 
     const row = db.prepare(
       "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
     ).get("assistant") as { tool_payload: string | null };
     assert.notEqual(row.tool_payload, null);
-    assert.equal(JSON.parse(String(row.tool_payload)).name, "AskQuestion");
+    const payload = JSON.parse(String(row.tool_payload)) as {
+      askQuestion?: unknown;
+      mood?: unknown;
+    };
+    assert.equal(payload.askQuestion, undefined);
+    assert.ok(payload.mood);
   });
 
-  it("backfills AskQuestion when assistant prose signals a missing chip block", async () => {
+  it("does not backfill AskQuestion when synthesized options are missing", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async () =>
       new Response(
@@ -927,13 +1434,18 @@ describe("processChatMessage AskQuestion tool", () => {
     const latestAssistant = result.conversation.messages
       .filter((m) => m.role === "assistant")
       .pop();
-    assert.equal(latestAssistant?.askQuestion?.name, "AskQuestion");
-    assert.equal(latestAssistant?.askQuestion?.options.length, 3);
+    assert.equal(latestAssistant?.askQuestion, undefined);
 
     const row = db.prepare(
       "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
     ).get("assistant") as { tool_payload: string | null };
     assert.notEqual(row.tool_payload, null);
+    const payload = JSON.parse(String(row.tool_payload)) as {
+      askQuestion?: unknown;
+      mood?: unknown;
+    };
+    assert.equal(payload.askQuestion, undefined);
+    assert.ok(payload.mood);
   });
 
   it("strips duplicate prompt and bridge prose from assistant bubble", async () => {

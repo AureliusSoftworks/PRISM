@@ -16,6 +16,7 @@ import {
 } from "./memory-validation.ts";
 import {
   getAuxiliaryProvider,
+  LocalOllamaProvider,
   selectProvider,
   OPENAI_DEFAULT_MODEL,
   type GenerateOptions,
@@ -24,6 +25,7 @@ import {
 } from "./providers.ts";
 import {
   RECENT_WINDOW_SIZE,
+  summarizeSandboxBotStatus,
   getLatestThreadSummary,
   retrieveMemorySummaries,
   summarizeAndStoreMemories,
@@ -56,6 +58,17 @@ const config = getAppConfig();
 export interface ProcessChatMessageResult {
   conversation: Conversation;
   conversationStarters?: string[];
+  fallbackInvocation?: {
+    trigger:
+      | "copyright_refusal_text"
+      | "copyright_refusal_error"
+      | "generic_refusal_text"
+      | "generic_refusal_error"
+      | "generic_refusal_soft_error";
+    primaryProvider: "local" | "openai";
+    primaryModel: string;
+    fallbackModel: string;
+  };
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
   summaryCompaction?: {
@@ -393,6 +406,295 @@ function evaluateAssistantLanguageSignal(content: string): { warmHits: number; s
     warmHits: countPhraseHits(normalized, ASSISTANT_WARM_PHRASES),
     strainHits: countPhraseHits(normalized, ASSISTANT_STRAINED_PHRASES),
   };
+}
+
+const COPYRIGHT_REJECTION_KEYWORDS = [
+  "copyright",
+  "copyrighted",
+  "dmca",
+  "rights holder",
+  "intellectual property",
+];
+
+const REFUSAL_LANGUAGE_KEYWORDS = [
+  "can't",
+  "cannot",
+  "won't",
+  "unable",
+  "not able",
+  "i must refuse",
+  "i can't help with",
+  "i cannot help with",
+];
+
+const GENERIC_REFUSAL_PATTERNS: RegExp[] = [
+  /\bi can(?:no|['’])t\b/,
+  /\bi won[’']?t\b/,
+  /\bi(?:['’]m| am) unable\b/,
+  /\bi(?:'m| am) not able\b/,
+  /\bi must decline\b/,
+  /\bi have to decline\b/,
+  /\bi need to decline\b/,
+  /\bi refuse\b/,
+  /\bi(?: can(?:no|['’])t|cannot|won[’']?t|am unable to) comply\b/,
+];
+
+const REFUSAL_REQUEST_TARGET_PATTERNS: RegExp[] = [
+  /\bprovide\b/,
+  /\bshare\b/,
+  /\bhelp with\b/,
+  /\bassist with\b/,
+  /\bthat request\b/,
+  /\bthis request\b/,
+  /\blyrics?\b/,
+  /\bverbatim\b/,
+  /\bexact words?\b/,
+  /\bfull text\b/,
+];
+
+const SOFT_DENIAL_TONE_PATTERNS: RegExp[] = [
+  /\bsorry\b/,
+  /\bapolog(?:ize|ise|y)\b/,
+  /\bnot permitted\b/,
+  /\bcan(?:no|['’])t do that\b/,
+  /\bcannot do that\b/,
+  /\bcannot fulfill\b/,
+  /\bcan(?:no|['’])t fulfill\b/,
+  /\brequest blocked\b/,
+];
+
+const REFUSAL_ERROR_POLICY_KEYWORDS = [
+  "policy",
+  "safety",
+  "content",
+  "refused",
+  "refusal",
+  "denied",
+  "blocked",
+];
+
+function isCopyrightRefusalText(raw: string): boolean {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return false;
+  const hasCopyrightCue = COPYRIGHT_REJECTION_KEYWORDS.some((keyword) =>
+    normalized.includes(keyword)
+  );
+  if (!hasCopyrightCue) return false;
+  return REFUSAL_LANGUAGE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+}
+
+function isGenericRefusalText(raw: string): boolean {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes("sorry")) return true;
+  if (GENERIC_REFUSAL_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  const hasSoftDenialTone = SOFT_DENIAL_TONE_PATTERNS.some((pattern) => pattern.test(normalized));
+  if (!hasSoftDenialTone) return false;
+  return REFUSAL_REQUEST_TARGET_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function isCopyrightRefusalError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return COPYRIGHT_REJECTION_KEYWORDS.some((keyword) => message.includes(keyword));
+}
+
+function isGenericRefusalError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (message.includes("sorry")) return true;
+  const hasRefusal = GENERIC_REFUSAL_PATTERNS.some((pattern) => pattern.test(message));
+  const hasPolicyCue = REFUSAL_ERROR_POLICY_KEYWORDS.some((keyword) => message.includes(keyword));
+  return hasRefusal || hasPolicyCue;
+}
+
+function isLikelyDenialErrorNeedingFallback(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  const isOpenAiClientFailure = message.includes("openai request failed");
+  if (!isOpenAiClientFailure) return false;
+  const hasDenialLikeStatus = message.includes("status 400") || message.includes("status 403");
+  if (!hasDenialLikeStatus) return false;
+  const obviouslyNonDenialReasons = [
+    "api key",
+    "authentication",
+    "insufficient_quota",
+    "quota",
+    "rate limit",
+    "context length",
+    "model does not exist",
+    "not found",
+  ];
+  return !obviouslyNonDenialReasons.some((marker) => message.includes(marker));
+}
+
+function createDeniedReplySuppressedError(args: {
+  fallbackConfigured: boolean;
+  fallbackFailed?: boolean;
+}): Error {
+  if (args.fallbackConfigured) {
+    if (args.fallbackFailed) {
+      return new Error(
+        "The primary model denied this request, and the local fallback model could not complete it."
+      );
+    }
+    return new Error("The primary model denied this request.");
+  }
+  return new Error(
+    "The primary model denied this request. Configure a local fallback model to continue automatically."
+  );
+}
+
+function shouldSuppressAssistantReply(raw: string): boolean {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return false;
+  if (isCopyrightRefusalText(normalized) || isGenericRefusalText(normalized)) return true;
+  // Last-line guard: block obvious denial/prohibition prose from reaching chat.
+  const broadDenialCuePatterns: RegExp[] = [
+    /\bsorry\b/,
+    /\bi can(?:no|['’])t\b/,
+    /\bi cannot\b/,
+    /\bi won[’']?t\b/,
+    /\bi(?:['’]m| am) unable\b/,
+    /\bi refuse\b/,
+    /\bnot permitted\b/,
+    /\brequest blocked\b/,
+    /\bpolicy\b/,
+    /\bcopyright\b/,
+  ];
+  return broadDenialCuePatterns.some((pattern) => pattern.test(normalized));
+}
+
+function normalizeModelValue(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+async function generateWithLenientLocalFallback(args: {
+  provider: LlmProvider;
+  promptMessages: ProviderMessage[];
+  botOverrides: GenerateOptions | undefined;
+  secondaryOllamaHost?: string | null;
+  lenientLocalFallbackModel?: string | null;
+}): Promise<{
+  assistantReplyRaw: string;
+  providerNameUsed: "local" | "openai";
+  modelUsed: string;
+  fallbackInvocation?: {
+    trigger:
+      | "copyright_refusal_text"
+      | "copyright_refusal_error"
+      | "generic_refusal_text"
+      | "generic_refusal_error"
+      | "generic_refusal_soft_error";
+    primaryProvider: "local" | "openai";
+    primaryModel: string;
+    fallbackModel: string;
+  };
+}> {
+  const requestedModel = normalizeModelValue(args.botOverrides?.model);
+  const primaryModel =
+    requestedModel ??
+    (args.provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
+  const fallbackModel = normalizeModelValue(args.lenientLocalFallbackModel);
+  const canAttemptFallback =
+    fallbackModel !== null &&
+    !(args.provider.name === "local" && requestedModel === fallbackModel);
+
+  const runLenientFallback = async (
+    trigger:
+      | "copyright_refusal_text"
+      | "copyright_refusal_error"
+      | "generic_refusal_text"
+      | "generic_refusal_error"
+      | "generic_refusal_soft_error"
+  ): Promise<{
+    assistantReplyRaw: string;
+    providerNameUsed: "local";
+    modelUsed: string;
+    fallbackInvocation: {
+      trigger:
+        | "copyright_refusal_text"
+        | "copyright_refusal_error"
+        | "generic_refusal_text"
+        | "generic_refusal_error"
+        | "generic_refusal_soft_error";
+      primaryProvider: "local" | "openai";
+      primaryModel: string;
+      fallbackModel: string;
+    };
+  }> => {
+    if (!fallbackModel) {
+      throw new Error("Lenient local fallback model is not configured.");
+    }
+    const fallbackProvider = new LocalOllamaProvider({
+      secondaryOllamaHost: args.secondaryOllamaHost,
+    });
+    let reply = "";
+    try {
+      reply = await fallbackProvider.generateResponse(args.promptMessages, {
+        ...args.botOverrides,
+        model: fallbackModel,
+      });
+    } catch {
+      throw createDeniedReplySuppressedError({
+        fallbackConfigured: true,
+        fallbackFailed: true,
+      });
+    }
+    if (isCopyrightRefusalText(reply) || isGenericRefusalText(reply)) {
+      throw createDeniedReplySuppressedError({
+        fallbackConfigured: true,
+        fallbackFailed: true,
+      });
+    }
+    return {
+      assistantReplyRaw: reply,
+      providerNameUsed: "local",
+      modelUsed: fallbackModel,
+      fallbackInvocation: {
+        trigger,
+        primaryProvider: args.provider.name,
+        primaryModel,
+        fallbackModel,
+      },
+    };
+  };
+
+  try {
+    const assistantReplyRaw = await args.provider.generateResponse(
+      args.promptMessages,
+      args.botOverrides
+    );
+    if (isCopyrightRefusalText(assistantReplyRaw)) {
+      if (canAttemptFallback) return runLenientFallback("copyright_refusal_text");
+      throw createDeniedReplySuppressedError({ fallbackConfigured: false });
+    }
+    if (isGenericRefusalText(assistantReplyRaw)) {
+      if (canAttemptFallback) return runLenientFallback("generic_refusal_text");
+      throw createDeniedReplySuppressedError({ fallbackConfigured: false });
+    }
+    return {
+      assistantReplyRaw,
+      providerNameUsed: args.provider.name,
+      modelUsed: primaryModel,
+    };
+  } catch (error) {
+    const isDenialError =
+      isCopyrightRefusalError(error) ||
+      isGenericRefusalError(error) ||
+      isLikelyDenialErrorNeedingFallback(error);
+    if (isDenialError) {
+      if (canAttemptFallback) {
+        if (isCopyrightRefusalError(error)) return runLenientFallback("copyright_refusal_error");
+        if (isGenericRefusalError(error)) return runLenientFallback("generic_refusal_error");
+        return runLenientFallback("generic_refusal_soft_error");
+      }
+      throw createDeniedReplySuppressedError({ fallbackConfigured: false });
+    }
+    throw error;
+  }
 }
 
 function evaluateAssistantMood(args: {
@@ -840,6 +1142,8 @@ export interface UserChatSettings {
   preferredProvider: "local" | "openai";
   autoMemory: boolean;
   openAiApiKey?: string;
+  /** User-provided name from Settings for bot-side personal addressing. */
+  userDisplayName?: string;
   /**
    * When true, the model produces the opening assistant turn without
    * persisting a synthetic user message. Used by empty-composer Enter.
@@ -869,8 +1173,14 @@ export interface UserChatSettings {
   botSystemPrompt?: string;
   /** Optional per-bot generation overrides, forwarded to the provider. */
   botOverrides?: GenerateOptions;
+  /** Global developer rule layer applied across all bots when enabled. */
+  devMemoriesEnabled?: boolean;
+  /** Freeform rule text for the developer memory layer. */
+  devMemoriesText?: string;
   /** Optional user-saved second Ollama host for host-aware local model choices. */
   secondaryOllamaHost?: string | null;
+  /** Optional local-only fallback model used when copyright refusals happen. */
+  lenientLocalFallbackModel?: string | null;
   /**
    * Which post-auth surface the request originated from. Changes what
    * "memory" means for this turn:
@@ -1123,41 +1433,8 @@ function extractDynamicAskQuestion(displayContent: string): AskQuestionPayload |
   };
 }
 
-function coerceAskQuestionPrompt(displayContent: string, userMessage: string): string {
-  const firstLine =
-    displayContent
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.length > 0) ?? userMessage.trim();
-  let prompt = firstLine
-    .replace(/^[-*]\s+/, "")
-    .replace(/^[>#`]+/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (prompt.length > 88) {
-    prompt = `${prompt.slice(0, 85).trimEnd()}...`;
-  }
-  if (!prompt) {
-    prompt = "Which option fits best?";
-  } else if (!/[?.!]$/.test(prompt)) {
-    prompt = `${prompt}?`;
-  }
-  return prompt;
-}
-
-function buildAskQuestionFallback(displayContent: string, userMessage: string): AskQuestionPayload {
-  const dynamic = extractDynamicAskQuestion(displayContent);
-  if (dynamic) return dynamic;
-  return {
-    v: 1,
-    name: "AskQuestion",
-    prompt: coerceAskQuestionPrompt(displayContent, userMessage),
-    options: [
-      { id: "a", label: "Yes" },
-      { id: "b", label: "Maybe / need context" },
-      { id: "c", label: "No" },
-    ],
-  };
+function buildAskQuestionFallback(displayContent: string): AskQuestionPayload | undefined {
+  return extractDynamicAskQuestion(displayContent);
 }
 
 function normalizeAskQuestionComparisonText(text: string): string {
@@ -2033,6 +2310,9 @@ function upsertSessionOpinion(args: {
  */
 function buildPromptMessages(args: {
   botSystemPrompt?: string;
+  userDisplayName?: string;
+  devMemoriesEnabled?: boolean;
+  devMemoriesText?: string;
   botOpinion?: BotOpinion | null;
   threadSummary?: string | null;
   memoryLines: string[];
@@ -2042,6 +2322,7 @@ function buildPromptMessages(args: {
 }): ProviderMessage[] {
   const promptMessages: ProviderMessage[] = [];
   const trimmedBot = args.botSystemPrompt?.trim();
+  const trimmedDisplayName = args.userDisplayName?.trim() ?? "";
   const relationshipContext = botOpinionPromptContext(args.botOpinion ?? null);
   const toolsBlock =
     trimmedBot &&
@@ -2049,6 +2330,25 @@ function buildPromptMessages(args: {
       ? `${trimmedBot}\n\n${PRISM_ASSISTANT_TOOLS_APPENDIX}`
       : PRISM_ASSISTANT_TOOLS_APPENDIX;
   promptMessages.push({ role: "system", content: toolsBlock });
+  if (trimmedDisplayName.length > 0) {
+    promptMessages.push({
+      role: "system",
+      content: `The user's preferred name is "${trimmedDisplayName}". Use it naturally when it helps, but do not overuse it.`,
+    });
+  }
+  if (args.devMemoriesEnabled) {
+    const devMemoriesText = args.devMemoriesText?.trim() ?? "";
+    if (devMemoriesText.length > 0) {
+      promptMessages.push({
+        role: "system",
+        content: [
+          "Developer memory layer (global hard-rule simulation):",
+          "Treat these as active rules for this turn across every bot persona, including Prism/default.",
+          devMemoriesText,
+        ].join("\n"),
+      });
+    }
+  }
   if (relationshipContext) {
     promptMessages.push({ role: "system", content: relationshipContext });
   }
@@ -2274,8 +2574,9 @@ export async function processChatMessage(
   const effectiveProvider = settings.preferredProvider;
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
-  // Defense in depth: Chat mode always uses default Prism persona.
-  const activeBotId = mode === "chat" ? null : settings.botId;
+  // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
+  // UI surfaces can still choose to lock Chat mode by omitting that field.
+  const activeBotId = settings.botId;
   const activeMemoryBotId =
     typeof activeBotId === "string" && activeBotId.trim().length > 0
       ? activeBotId.trim()
@@ -2301,6 +2602,9 @@ export async function processChatMessage(
       : "off";
     const promptMessages = buildPromptMessages({
       botSystemPrompt: settings.botSystemPrompt,
+      userDisplayName: settings.userDisplayName,
+      devMemoriesEnabled: settings.devMemoriesEnabled,
+      devMemoriesText: settings.devMemoriesText,
       botOpinion: null,
       threadSummary: null,
       memoryLines: [],
@@ -2309,10 +2613,23 @@ export async function processChatMessage(
       askQuestionMode,
     });
 
-    const assistantReplyRaw = await provider.generateResponse(
+    const {
+      assistantReplyRaw,
+      providerNameUsed,
+      modelUsed,
+      fallbackInvocation,
+    } = await generateWithLenientLocalFallback({
+      provider,
       promptMessages,
-      settings.botOverrides
-    );
+      botOverrides: settings.botOverrides,
+      secondaryOllamaHost: settings.secondaryOllamaHost,
+      lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+    });
+    if (shouldSuppressAssistantReply(assistantReplyRaw)) {
+      throw createDeniedReplySuppressedError({
+        fallbackConfigured: normalizeModelValue(settings.lenientLocalFallbackModel) !== null,
+      });
+    }
     const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
     const shouldBackfillAskQuestion =
       forceAskQuestion ||
@@ -2320,7 +2637,7 @@ export async function processChatMessage(
     const askQuestionRaw =
       parsedAssistant.askQuestion ??
       (shouldBackfillAskQuestion
-        ? buildAskQuestionFallback(parsedAssistant.displayContent, message)
+        ? buildAskQuestionFallback(parsedAssistant.displayContent)
         : undefined);
     const askQuestionForTurn = askQuestionRaw
       ? refineAskQuestionPayloadFromDisplay(
@@ -2346,9 +2663,6 @@ export async function processChatMessage(
       toneDelta: turnEvaluation?.delta,
       repairSignal,
     });
-    const modelUsed =
-      settings.botOverrides?.model?.trim() ||
-      (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
     const assistantCreatedAt = new Date().toISOString();
     const activeBotName =
       typeof activeBotId === "string"
@@ -2359,7 +2673,7 @@ export async function processChatMessage(
       role: "assistant",
       content: assistantDisplay,
       createdAt: assistantCreatedAt,
-      provider: provider.name,
+      provider: providerNameUsed,
       model: modelUsed,
       moodKey: assistantMood.key,
       moodConfidence: assistantMood.confidence,
@@ -2429,6 +2743,7 @@ export async function processChatMessage(
 
     return {
       conversation: conversationIncognito,
+      ...(fallbackInvocation ? { fallbackInvocation } : {}),
       opinion: incognitoOpinion,
       ...(conversationStartersIncognito
         ? { conversationStarters: conversationStartersIncognito }
@@ -2555,6 +2870,9 @@ export async function processChatMessage(
   const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
   const promptMessages = buildPromptMessages({
     botSystemPrompt: settings.botSystemPrompt,
+    userDisplayName: settings.userDisplayName,
+    devMemoriesEnabled: settings.devMemoriesEnabled,
+    devMemoriesText: settings.devMemoriesText,
     botOpinion: existingBotOpinion,
     threadSummary,
     memoryLines,
@@ -2571,10 +2889,23 @@ export async function processChatMessage(
     ).run(userMessageId, activeConversationId, userId, message, now);
   }
 
-  const assistantReplyRaw = await provider.generateResponse(
+  const {
+    assistantReplyRaw,
+    providerNameUsed,
+    modelUsed,
+    fallbackInvocation,
+  } = await generateWithLenientLocalFallback({
+    provider,
     promptMessages,
-    settings.botOverrides
-  );
+    botOverrides: settings.botOverrides,
+    secondaryOllamaHost: settings.secondaryOllamaHost,
+    lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+  });
+  if (shouldSuppressAssistantReply(assistantReplyRaw)) {
+    throw createDeniedReplySuppressedError({
+      fallbackConfigured: normalizeModelValue(settings.lenientLocalFallbackModel) !== null,
+    });
+  }
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const shouldBackfillAskQuestion =
     forceAskQuestion ||
@@ -2582,7 +2913,7 @@ export async function processChatMessage(
   const askQuestionRaw =
     parsedAssistant.askQuestion ??
     (shouldBackfillAskQuestion
-      ? buildAskQuestionFallback(parsedAssistant.displayContent, message)
+      ? buildAskQuestionFallback(parsedAssistant.displayContent)
       : undefined);
   const askQuestionForTurn = askQuestionRaw
     ? refineAskQuestionPayloadFromDisplay(
@@ -2615,9 +2946,6 @@ export async function processChatMessage(
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
   });
-  const modelUsed =
-    settings.botOverrides?.model?.trim() ||
-    (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
   const assistantCreatedAt = new Date().toISOString();
   const assistantMessageId = randomId(12);
   db.prepare(
@@ -2627,7 +2955,7 @@ export async function processChatMessage(
     activeConversationId,
     userId,
     assistantDisplay,
-    provider.name,
+    providerNameUsed,
     modelUsed,
     activeBotId ?? null,
     toolPayloadStored,
@@ -2918,6 +3246,15 @@ export async function processChatMessage(
       ...(compacted.latestSummary ? { latestSummary: compacted.latestSummary } : {}),
       ...(compacted.latestSummaryAt ? { latestSummaryAt: compacted.latestSummaryAt } : {}),
     };
+    if (mode === "sandbox" && activeMemoryBotId) {
+      await summarizeSandboxBotStatus(
+        db,
+        auxiliaryProvider,
+        userId,
+        activeMemoryBotId,
+        { reason: "mode_exit", userKey }
+      );
+    }
   }
 
   // Row payload mirrors the GET endpoints' shape — last_bot_* plus
@@ -3003,6 +3340,7 @@ export async function processChatMessage(
 
   return {
     conversation: conversationPersisted,
+    ...(fallbackInvocation ? { fallbackInvocation } : {}),
     opinion,
     ...(botOpinion ? { botOpinion } : {}),
     ...(summaryCompaction ? { summaryCompaction } : {}),

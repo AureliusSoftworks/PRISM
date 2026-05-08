@@ -89,6 +89,70 @@ describe("validateMemoryCandidates", () => {
     assert.deepEqual(result.rejected, []);
   });
 
+  it("normalizes bullet-style name-led memories into second-person voice", async () => {
+    const result = await validateMemoryCandidates(
+      providerWithResponse(
+        JSON.stringify({
+          results: [
+            {
+              index: 0,
+              decision: "auto_fix",
+              text: "- Jared enjoys working on an app.",
+              confidence: 0.87,
+              reasonCodes: ["subject_role_confusion"],
+            },
+          ],
+        })
+      ),
+      {
+        source: "compiled",
+        scope: "bot",
+        rawContext: "Summary output from prior chats.",
+        candidates: [{ text: "- Jared enjoys working on an app.", confidence: 0.87 }],
+      }
+    );
+
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0]?.text, "You enjoy working on an app.");
+    assert.deepEqual(result.rejected, []);
+  });
+
+  it("normalizes third-person pronouns into second-person voice", async () => {
+    const result = await validateMemoryCandidates(
+      providerWithResponse(
+        JSON.stringify({
+          results: [
+            {
+              index: 0,
+              decision: "auto_fix",
+              text: "He plans a mix of relaxation and adventure for his upcoming PTO.",
+              confidence: 0.81,
+              reasonCodes: ["subject_role_confusion"],
+            },
+          ],
+        })
+      ),
+      {
+        source: "compiled",
+        scope: "bot",
+        rawContext: "Summary output from prior chats.",
+        candidates: [
+          {
+            text: "He plans a mix of relaxation and adventure for his upcoming PTO.",
+            confidence: 0.81,
+          },
+        ],
+      }
+    );
+
+    assert.equal(result.candidates.length, 1);
+    assert.equal(
+      result.candidates[0]?.text,
+      "You plan a mix of relaxation and adventure for your upcoming PTO."
+    );
+    assert.deepEqual(result.rejected, []);
+  });
+
   it("rejects assistant identity instructions when the critic leaves command syntax intact", async () => {
     const result = await validateMemoryCandidates(
       providerWithResponse(

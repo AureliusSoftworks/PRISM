@@ -20,6 +20,7 @@ export interface DbUserRecord {
   autoSwitchModel: number;
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
+  lenientLocalFallbackModel: string | null;
   secondaryOllamaHost: string | null;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
@@ -76,7 +77,10 @@ export function createDatabase(): DatabaseSync {
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
       preferred_local_model TEXT,
       preferred_online_model TEXT,
+      lenient_local_fallback_model TEXT,
       secondary_ollama_host TEXT,
+      dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
+      dev_memories_text TEXT NOT NULL DEFAULT '',
       openai_key_ciphertext TEXT,
       openai_key_iv TEXT,
       openai_key_tag TEXT,
@@ -113,6 +117,8 @@ export function createDatabase(): DatabaseSync {
       bot_id TEXT,
       parent_id TEXT,
       fork_message_id TEXT,
+      archived_at TEXT,
+      archive_batch_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -191,6 +197,16 @@ export function createDatabase(): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS conversation_sweep_batches (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      archived_conversation_ids TEXT NOT NULL,
+      summary_conversation_ids TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      undo_expires_at TEXT NOT NULL,
+      undone_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS memory_summaries (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -249,6 +265,18 @@ export function createDatabase(): DatabaseSync {
   if (!hasSecondaryOllamaHost) {
     db.exec("ALTER TABLE users ADD COLUMN secondary_ollama_host TEXT;");
   }
+  const hasDevMemoriesEnabled = userColumns.some(
+    (column) => column.name === "dev_memories_enabled"
+  );
+  if (!hasDevMemoriesEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN dev_memories_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasDevMemoriesText = userColumns.some(
+    (column) => column.name === "dev_memories_text"
+  );
+  if (!hasDevMemoriesText) {
+    db.exec("ALTER TABLE users ADD COLUMN dev_memories_text TEXT NOT NULL DEFAULT '';");
+  }
   const hasPreferredLocalModel = userColumns.some(
     (column) => column.name === "preferred_local_model"
   );
@@ -260,6 +288,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasPreferredOnlineModel) {
     db.exec("ALTER TABLE users ADD COLUMN preferred_online_model TEXT;");
+  }
+  const hasLenientLocalFallbackModel = userColumns.some(
+    (column) => column.name === "lenient_local_fallback_model"
+  );
+  if (!hasLenientLocalFallbackModel) {
+    db.exec("ALTER TABLE users ADD COLUMN lenient_local_fallback_model TEXT;");
   }
   db.exec(`
     UPDATE users
@@ -304,6 +338,32 @@ export function createDatabase(): DatabaseSync {
   if (!hasConversationModeColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN conversation_mode TEXT NOT NULL DEFAULT 'sandbox';");
   }
+  const hasConversationArchivedAtColumn = conversationColumns.some(
+    (column) => column.name === "archived_at"
+  );
+  if (!hasConversationArchivedAtColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN archived_at TEXT;");
+  }
+  const hasConversationArchiveBatchIdColumn = conversationColumns.some(
+    (column) => column.name === "archive_batch_id"
+  );
+  if (!hasConversationArchiveBatchIdColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN archive_batch_id TEXT;");
+  }
+  const sweepBatchColumns = db
+    .prepare("PRAGMA table_info(conversation_sweep_batches)")
+    .all() as Array<{ name: string }>;
+  const hasSweepUndoExpiresAt = sweepBatchColumns.some(
+    (column) => column.name === "undo_expires_at"
+  );
+  if (!hasSweepUndoExpiresAt) {
+    db.exec("ALTER TABLE conversation_sweep_batches ADD COLUMN undo_expires_at TEXT;");
+  }
+  db.exec(`
+    UPDATE conversation_sweep_batches
+    SET undo_expires_at = COALESCE(undo_expires_at, created_at)
+    WHERE undo_expires_at IS NULL OR trim(undo_expires_at) = '';
+  `);
   db.exec(`
     UPDATE conversations
     SET conversation_mode = 'sandbox'

@@ -23,7 +23,17 @@ import {
   restoreMemory
 } from "./memory.ts";
 import { inferAndStoreBotMemories } from "./memory-inference.ts";
-import { createDevSeedConversations, deleteAllConversations, deleteConversation, deleteConversationsByBot, listConversationSummaries, rewindConversation } from "./conversations.ts";
+import {
+  createDevSeedConversations,
+  deleteAllConversations,
+  deleteConversation,
+  deleteConversationsByBot,
+  getConversationSweepState,
+  listConversationSummaries,
+  rewindConversation,
+  sweepConversations,
+  undoLatestConversationSweep,
+} from "./conversations.ts";
 import {
   composeBotSystemPrompt,
   deleteAllBots,
@@ -37,6 +47,7 @@ import {
   parseHiddenBotModelIds,
   resolveNextSettings,
 } from "./settings.ts";
+import { normalizeMemoryDisplayText } from "./memory-validation.ts";
 import { buildModelCatalog, checkLocalModelHostStatus, getAuxiliaryProvider } from "./providers.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routing.ts";
@@ -44,9 +55,11 @@ import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type Ba
 import { generateImage } from "./image-provider.ts";
 import {
   clearThreadCompactions,
+  getLatestSandboxBotStatusSummary,
   getLatestThreadDisplaySummary,
   getLatestThreadSummary,
   getThreadCompactionDebug,
+  summarizeSandboxBotStatus,
   summarizeThreadCompact,
 } from "./memory-summarizer.ts";
 import {
@@ -93,7 +106,10 @@ interface UserDbRow {
   hidden_bot_model_ids: string;
   preferred_local_model: string | null;
   preferred_online_model: string | null;
+  lenient_local_fallback_model: string | null;
   secondary_ollama_host: string | null;
+  dev_memories_enabled: number;
+  dev_memories_text: string;
   openai_key_ciphertext: string | null;
   openai_key_iv: string | null;
   openai_key_tag: string | null;
@@ -196,7 +212,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, hidden_bot_model_ids, preferred_local_model, preferred_online_model, secondary_ollama_host, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, hidden_bot_model_ids, preferred_local_model, preferred_online_model, lenient_local_fallback_model, secondary_ollama_host, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -552,6 +568,37 @@ function buildRoutes(): RouteDefinition[] {
         conversations: listConversationSummaries(db, userId)
       });
     }),
+    route("GET", "/api/conversations/sweep/state", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        ...getConversationSweepState(db, userId),
+      });
+    }),
+    route("POST", "/api/conversations/sweep", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const mode = body.mode === "chat" ? "chat" : "sandbox";
+      const result = sweepConversations(db, userId, mode);
+      const state = getConversationSweepState(db, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
+        canUndo: state.canUndo,
+      });
+    }),
+    route("POST", "/api/conversations/sweep/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const batchId = typeof body.batchId === "string" ? body.batchId : null;
+      const result = undoLatestConversationSweep(db, userId, batchId);
+      const state = getConversationSweepState(db, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
+        canUndo: state.canUndo,
+      });
+    }),
     route("GET", "/api/conversations/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const conversationId = ctx.params.id;
@@ -744,6 +791,36 @@ function buildRoutes(): RouteDefinition[] {
         latestSummaryAt: debug.latestSummaryAt,
       });
     }),
+    route("GET", "/api/bots/:id/summary", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const botId = ctx.params.id;
+      const mode = ctx.query.get("mode") === "chat" ? "chat" : "sandbox";
+      const owned = db
+        .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
+        .get(botId, userId) as { id?: string } | undefined;
+      if (!owned?.id) {
+        throw new Error("Bot not found.");
+      }
+      if (mode !== "sandbox") {
+        json(ctx.res, 200, { ok: true, summary: null });
+        return;
+      }
+      // Always run a refresh pass so display-copy improvements and format
+      // updates can roll forward without requiring message activity.
+      await summarizeSandboxBotStatus(
+        db,
+        getAuxiliaryProvider(),
+        userId,
+        botId,
+        { reason: "manual", userKey }
+      );
+      const summary = getLatestSandboxBotStatusSummary(db, userId, botId);
+      json(ctx.res, 200, {
+        ok: true,
+        summary,
+      });
+    }),
     route("GET", "/api/conversations/:id/summarization-debug", async (ctx) => {
       const userId = requireAuth(ctx);
       const conversationId = ctx.params.id;
@@ -796,6 +873,28 @@ function buildRoutes(): RouteDefinition[] {
         conversationId,
         { mode, reason, force: true }
       );
+      if (mode === "sandbox" && reason === "mode_exit") {
+        const conversation = db
+          .prepare("SELECT bot_id, incognito FROM conversations WHERE id = ? AND user_id = ?")
+          .get(conversationId, userId) as {
+          bot_id: string | null;
+          incognito: number;
+        } | undefined;
+        const conversationBotId =
+          typeof conversation?.bot_id === "string" && conversation.bot_id.trim().length > 0
+            ? conversation.bot_id.trim()
+            : null;
+        if (conversation?.incognito !== 1 && conversationBotId) {
+          const userKey = decryptUserKey(userId);
+          await summarizeSandboxBotStatus(
+            db,
+            getAuxiliaryProvider(),
+            userId,
+            conversationBotId,
+            { reason: "mode_exit", userKey }
+          );
+        }
+      }
       json(ctx.res, 200, {
         ok: true,
         compacted,
@@ -928,11 +1027,10 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.conversationId === "string" ? body.conversationId : undefined;
       const forceNewConversation = body.forceNewConversation === true;
       const sessionEnding = body.sessionEnding === true;
-      // Three-valued parse used by Sandbox callers:
+      // Three-valued parse for bot routing:
       //   - absent key           → leave conversation's bot alone
       //   - explicit null        → switch to Default persona (no bot)
       //   - string               → switch to that specific bot
-      // Chat mode is locked to default Prism and ignores this field.
       const botId: string | null | undefined =
         typeof body.botId === "string"
           ? body.botId
@@ -963,21 +1061,18 @@ function buildRoutes(): RouteDefinition[] {
       if (incognito) {
         effectiveProvider = "local";
       }
-      // Companion Chat 2.0 enforces one persistent persona and no advanced
-      // runtime knobs. Sandbox keeps full control surface.
-      const effectiveBotId = mode === "chat" ? null : botId;
+      const effectiveBotId = botId;
       const explicitModelOverride =
         mode === "sandbox" ? readOptionalString(body.modelOverride) : null;
       if (
         mode === "chat" &&
         (
-          body.botId !== undefined ||
           body.preferredProvider !== undefined ||
           body.modelOverride !== undefined
         )
       ) {
         console.info(
-          `[chat-contract] Ignored advanced Chat controls for user ${userId} (bot/provider/model).`
+          `[chat-contract] Ignored advanced Chat controls for user ${userId} (provider/model).`
         );
       }
       const ephemeralMessages = Array.isArray(body.ephemeralMessages)
@@ -1066,9 +1161,13 @@ function buildRoutes(): RouteDefinition[] {
             preferredProvider: effectiveProvider,
             autoMemory: !incognito && Boolean(user.auto_memory),
             openAiApiKey,
+            userDisplayName: user.display_name,
             starterPrompt,
             starterPromptLabel,
             secondaryOllamaHost: user.secondary_ollama_host,
+            lenientLocalFallbackModel: user.lenient_local_fallback_model,
+            devMemoriesEnabled: user.dev_memories_enabled === 1,
+            devMemoriesText: user.dev_memories_text,
             botId: effectiveBotId,
             incognito,
             ephemeralMessages,
@@ -1091,6 +1190,7 @@ function buildRoutes(): RouteDefinition[] {
       const {
         conversation,
         conversationStarters,
+        fallbackInvocation,
         memoryLearned,
         opinion,
         botOpinion,
@@ -1099,6 +1199,7 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         conversation,
+        ...(fallbackInvocation ? { fallbackInvocation } : {}),
         ...(opinion ? { opinion } : {}),
         ...(botOpinion ? { botOpinion } : {}),
         ...(summaryCompaction ? { summaryCompaction } : {}),
@@ -1211,7 +1312,7 @@ function buildRoutes(): RouteDefinition[] {
           source: row.source,
           certainty: row.certainty ?? row.confidence,
           sourceMessageIds: parseSourceMessageIds(row.source_message_ids),
-          text: payload.text ?? "",
+          text: normalizeMemoryDisplayText(payload.text ?? ""),
           createdAt: row.created_at
         };
       });
@@ -1265,6 +1366,45 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const result = db.prepare("DELETE FROM memories WHERE user_id = ?").run(userId);
       json(ctx.res, 200, { ok: true, deleted: Number(result.changes ?? 0) });
+    }),
+    // Hard-reset every per-user memory artifact: extracted memory facts,
+    // SQLite summary rows (both thread-scoped and global), and the matching
+    // Qdrant vectors. Powers the dev-only `/clear` slash command in chat
+    // mode so the next session starts with no recall surface at all.
+    // Qdrant cleanup is best-effort because the local stack often runs
+    // without a vector DB attached; SQLite truth wins either way.
+    route("POST", "/api/dev/clear-session-memory", async (ctx) => {
+      const userId = requireAuth(ctx);
+      let deletedMemories = 0;
+      let deletedSummaries = 0;
+      db.exec("BEGIN IMMEDIATE TRANSACTION");
+      try {
+        const memoryResult = db
+          .prepare("DELETE FROM memories WHERE user_id = ?")
+          .run(userId);
+        const summaryResult = db
+          .prepare("DELETE FROM memory_summaries WHERE user_id = ?")
+          .run(userId);
+        deletedMemories = Number(memoryResult.changes ?? 0);
+        deletedSummaries = Number(summaryResult.changes ?? 0);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      let vectorsCleared = false;
+      try {
+        await deleteVectorsForUser(userId);
+        vectorsCleared = true;
+      } catch {
+        vectorsCleared = false;
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        deletedMemories,
+        deletedSummaries,
+        vectorsCleared,
+      });
     }),
     route("POST", "/api/memories/restore", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -1364,6 +1504,7 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         settings: {
+          displayName: user.display_name,
           theme: user.theme,
           preferredProvider: user.preferred_provider,
           providerLocked: Boolean(user.provider_locked),
@@ -1371,11 +1512,14 @@ function buildRoutes(): RouteDefinition[] {
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           preferredLocalModel: user.preferred_local_model ?? "",
           preferredOnlineModel: user.preferred_online_model ?? "",
+          lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
           ollamaModel: config.ollamaModel,
           secondaryOllamaHost: user.secondary_ollama_host ?? "",
+          devMemoriesEnabled: user.dev_memories_enabled === 1,
+          devMemoriesText: user.dev_memories_text ?? "",
         },
       });
     }),
@@ -1403,10 +1547,19 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const user = getUserRow(userId);
+      const devMemoriesEnabled =
+        typeof body.devMemoriesEnabled === "boolean"
+          ? Number(body.devMemoriesEnabled)
+          : user.dev_memories_enabled;
+      const devMemoriesText =
+        typeof body.devMemoriesText === "string"
+          ? body.devMemoriesText.trim().slice(0, 8000)
+          : user.dev_memories_text;
 
       // Validation + merge live in `./settings.ts` so the semantics are pinned
       // by unit tests. See `__tests__/settings.test.ts` for the contract.
       const next = resolveNextSettings(body, {
+        displayName: user.display_name,
         theme: user.theme,
         preferredProvider: user.preferred_provider,
         providerLocked: user.provider_locked,
@@ -1414,6 +1567,7 @@ function buildRoutes(): RouteDefinition[] {
         hiddenBotModelIds: user.hidden_bot_model_ids,
         preferredLocalModel: user.preferred_local_model,
         preferredOnlineModel: user.preferred_online_model,
+        lenientLocalFallbackModel: user.lenient_local_fallback_model,
         secondaryOllamaHost: user.secondary_ollama_host,
         primaryOllamaHost: config.ollamaHost,
       });
@@ -1438,11 +1592,13 @@ function buildRoutes(): RouteDefinition[] {
       // another migration.
       db.prepare(`
         UPDATE users
-        SET theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, hidden_bot_model_ids = ?,
-            preferred_local_model = ?, preferred_online_model = ?, secondary_ollama_host = ?,
+        SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, hidden_bot_model_ids = ?,
+            preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, secondary_ollama_host = ?,
+            dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
         WHERE id = ?
       `).run(
+        next.displayName,
         next.theme,
         next.preferredProvider,
         next.providerLocked,
@@ -1450,7 +1606,10 @@ function buildRoutes(): RouteDefinition[] {
         JSON.stringify(next.hiddenBotModelIds),
         next.preferredLocalModel,
         next.preferredOnlineModel,
+        next.lenientLocalFallbackModel,
         next.secondaryOllamaHost,
+        devMemoriesEnabled,
+        devMemoriesText,
         openAiCipher,
         openAiIv,
         openAiTag,

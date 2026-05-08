@@ -126,6 +126,16 @@ describe("extractMemoryCandidates", () => {
     ]);
   });
 
+  it("rewrites apology-prefixed self-state memories into concise user-facing wording", () => {
+    const candidates = extractMemoryCandidates(
+      "Sorry about that, I'm just distracted."
+    );
+
+    assert.deepEqual(candidates, [
+      { text: "You seem a little distracted.", confidence: 0.72 },
+    ]);
+  });
+
   it("does not store one-off task requests as memories just because they contain my", () => {
     const candidates = extractMemoryCandidates(
       "Write a quick email to my landlord about the sink leak."
@@ -140,6 +150,19 @@ describe("extractMemoryCandidates", () => {
     );
 
     assert.match(candidates[0]?.text ?? "", /^Your favorite drink is coffee\.$/);
+  });
+
+  it("keeps assistant-directed reminder preferences grammatically correct", () => {
+    const candidates = extractMemoryCandidates(
+      "Please don't forget that I do not want you to remind me that you are AI."
+    );
+
+    assert.deepEqual(candidates, [
+      {
+        text: "You do not want me to remind you that I am AI.",
+        confidence: 0.98,
+      },
+    ]);
   });
 });
 

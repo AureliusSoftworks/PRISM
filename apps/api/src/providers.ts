@@ -515,9 +515,22 @@ export class OpenAiProvider implements LlmProvider {
       throw new Error(formatOpenAiError("OpenAI request failed", response.status, detail));
     }
     const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{
+        message?: { content?: string; refusal?: string };
+        finish_reason?: string;
+      }>;
     };
     const content = payload.choices?.[0]?.message?.content?.trim();
+    const refusal = payload.choices?.[0]?.message?.refusal?.trim();
+    const finishReason = payload.choices?.[0]?.finish_reason?.trim().toLowerCase();
+    if (refusal) {
+      return refusal;
+    }
+    if (!content && finishReason === "content_filter") {
+      // Normalize content-filter refusals into refusal prose so the fallback
+      // router can detect and retry with the configured local model.
+      return "I cannot help with that request.";
+    }
     if (!content) {
       throw new Error("OpenAI returned an empty response.");
     }

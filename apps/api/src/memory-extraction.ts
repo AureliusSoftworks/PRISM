@@ -121,6 +121,9 @@ const FIRST_PERSON_REWRITES: Array<[RegExp, string]> = [
 const TRAILING_CONVERSATIONAL_TAG_PATTERN =
   /\s*,\s*(?:(?:(?:do|don't|did|didn't|would|wouldn't|could|couldn't|can|can't|will|won't|are|aren't|is|isn't|was|wasn't|were|weren't|have|haven't|has|hasn't|had|hadn't|should|shouldn't)\s+(?:you|we|they|it|he|she))|right|yeah|yes|no|okay|ok|you know)\s*$/i;
 
+const LEADING_APOLOGY_PREFIX_PATTERN =
+  /^(?:sorry(?:\s+about\s+that)?|my\s+bad|apologies)[\s,.:;-]*/i;
+
 const TASK_REQUEST_PREFIX_PATTERN =
   /^(?:please\s+)?(?:write|draft|compose|create|make|generate|summarize|summarise|explain|help|help\s+me|give\s+me|show\s+me|tell\s+me|find|search|look\s+up|translate|rewrite|edit|review|fix|debug|build|plan)\b/i;
 
@@ -133,14 +136,50 @@ const TASK_REQUEST_PREFIX_PATTERN =
 export function rewriteMemoryText(rawLine: string): string {
   let text = rawLine.trim().replace(MEMORY_CUE_PREFIX_PATTERN_RAW, "");
   text = stripGlobalScopeCues(text);
+  text = text.replace(LEADING_APOLOGY_PREFIX_PATTERN, "");
   text = text.replace(/^please[\s,]+/i, "");
   text = text.replace(TRAILING_CONVERSATIONAL_TAG_PATTERN, "").trim();
+  text = rewriteAssistantDirectedMemory(text);
   for (const [pattern, replacement] of FIRST_PERSON_REWRITES) {
     text = text.replace(pattern, replacement);
   }
+  text = rewriteSoftenedSelfStateMemory(text);
+  text = rewriteAssistantIdentityReminderMemory(text);
   text = text.replace(/\s+/g, " ").trim().replace(/[.!?]+$/, "").trim();
   if (text.length === 0) return rawLine.trim();
   return `${text[0].toUpperCase()}${text.slice(1)}.`;
+}
+
+function rewriteAssistantDirectedMemory(text: string): string {
+  let rewritten = text
+    .replace(
+      /^\s*I\s+do\s+not\s+want\s+you\s+to\s+/i,
+      "you do not want me to "
+    )
+    .replace(/^\s*I\s+don't\s+want\s+you\s+to\s+/i, "you don't want me to ");
+  if (/^\s*you\s+(?:do\s+not|don't)\s+want\s+me\s+to\b/i.test(rewritten)) {
+    rewritten = rewritten.replace(/\bremind\s+me\b/gi, "remind you");
+  }
+  return rewritten;
+}
+
+function rewriteAssistantIdentityReminderMemory(text: string): string {
+  return text
+    .replace(
+      /\byou\s+do\s+not\s+want\s+me\s+to\s+remind\s+you\s+that\s+you\s+are\s+ai\b/gi,
+      "you do not want me to remind you that I am AI"
+    )
+    .replace(
+      /\byou\s+don't\s+want\s+me\s+to\s+remind\s+you\s+that\s+you\s+are\s+ai\b/gi,
+      "you don't want me to remind you that I'm AI"
+    );
+}
+
+function rewriteSoftenedSelfStateMemory(text: string): string {
+  return text.replace(
+    /^\s*you(?:\s+are|'re)\s+just\s+distracted\b/i,
+    "you seem a little distracted"
+  );
 }
 
 function splitMemorySentences(message: string): string[] {

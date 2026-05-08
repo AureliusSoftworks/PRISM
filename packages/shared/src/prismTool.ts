@@ -183,8 +183,10 @@ function extractLastToolBlock(raw: string): {
 
   const closing = findFlexibleClosingSpan(raw, startInfo.innerBegin);
   if (!closing) {
-    // Incomplete — keep full raw content so streamed/partial tails never truncate real prose prematurely.
-    return { prose: raw, innerJson: null };
+    // Incomplete tail during streaming: never leak raw tool framing/JSON to UI.
+    // Keep everything before the opener; drop the dangling marker/blob.
+    const proseBeforeTail = raw.slice(0, startInfo.matchStart).trimEnd();
+    return { prose: proseBeforeTail, innerJson: null };
   }
   const innerJson = raw.slice(startInfo.innerBegin, closing.innerEnd).trim();
   const prose =
@@ -204,7 +206,7 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
   const trimmed = typeof rawAssistantText === "string" ? rawAssistantText : "";
   const { prose, innerJson } = extractLastToolBlock(trimmed);
   if (!innerJson) {
-    return { displayContent: trimmed };
+    return { displayContent: prose };
   }
   const jsonText = stripMarkdownFences(innerJson);
   try {

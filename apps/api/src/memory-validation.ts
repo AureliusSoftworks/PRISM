@@ -101,6 +101,104 @@ function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function stripListPrefix(text: string): string {
+  return text
+    .replace(/^(?:[-*•\u2022]\s*)+/u, "")
+    .replace(/^\d+[.):-]\s*/u, "")
+    .trim();
+}
+
+function toSecondPersonVerb(verb: string): string {
+  const lower = verb.toLowerCase();
+  const irregular = new Map<string, string>([
+    ["is", "are"],
+    ["was", "were"],
+    ["has", "have"],
+    ["does", "do"],
+  ]);
+  const irregularMatch = irregular.get(lower);
+  if (irregularMatch) return irregularMatch;
+  if (lower.endsWith("ies") && lower.length > 3) {
+    return `${lower.slice(0, -3)}y`;
+  }
+  if (/(ches|shes|sses|xes|zes|oes)$/.test(lower) && lower.length > 2) {
+    return lower.slice(0, -2);
+  }
+  if (lower.endsWith("s") && lower.length > 1) {
+    return lower.slice(0, -1);
+  }
+  return lower;
+}
+
+function normalizeSecondPersonLead(text: string, singularSubject: boolean): string {
+  if (!singularSubject) return text;
+  const lead = text.match(
+    /^You\s+(?:(always|usually|often|sometimes|generally|typically|currently|really)\s+)?([A-Za-z']+)(.*)$/u
+  );
+  if (!lead) return text;
+  const adverb = lead[1] ? `${lead[1]} ` : "";
+  const verb = toSecondPersonVerb(lead[2] ?? "");
+  const rest = lead[3] ?? "";
+  return `You ${adverb}${verb}${rest}`.replace(/\s+/g, " ").trim();
+}
+
+function looksLikeThirdPersonSingularVerb(word: string): boolean {
+  const lower = word.toLowerCase();
+  if (["is", "was", "has", "does"].includes(lower)) return true;
+  return lower.endsWith("s");
+}
+
+function canonicalizeMemoryPerspective(text: string): string {
+  let normalized = stripListPrefix(normalizeWhitespace(text));
+  if (!normalized) return normalized;
+
+  let singularSubject = false;
+  let perspectiveRewritten = false;
+  if (/^(?:the user|user)\b/i.test(normalized)) {
+    normalized = normalized.replace(/^(?:the user|user)\b/i, "You");
+    singularSubject = true;
+    perspectiveRewritten = true;
+  } else if (/^(?:he|she)\b/i.test(normalized)) {
+    normalized = normalized.replace(/^(?:he|she)\b/i, "You");
+    singularSubject = true;
+    perspectiveRewritten = true;
+  } else if (/^they\b/i.test(normalized)) {
+    normalized = normalized.replace(/^they\b/i, "You");
+    perspectiveRewritten = true;
+  } else {
+    const nameLead = normalized.match(
+      /^([A-Z][\p{L}'-]*(?:\s+[A-Z][\p{L}'-]*){0,2})\s+([a-z][a-z'-]*)(.*)$/u
+    );
+    if (nameLead) {
+      const name = (nameLead[1] ?? "").trim();
+      const leadVerb = (nameLead[2] ?? "").trim();
+      const reservedLead = /^(?:You|The|A|An|My|Your|I|We)$/u.test(name);
+      if (!reservedLead && looksLikeThirdPersonSingularVerb(leadVerb)) {
+        normalized = `You ${nameLead[2] ?? ""}${nameLead[3] ?? ""}`
+          .replace(/\s+/g, " ")
+          .trim();
+        singularSubject = true;
+        perspectiveRewritten = true;
+      }
+    }
+  }
+
+  normalized = normalizeSecondPersonLead(normalized, singularSubject);
+  if (perspectiveRewritten) {
+    normalized = normalized
+      .replace(/\bhis\b/gi, "your")
+      .replace(/\bher\b/gi, "your")
+      .replace(/\btheir\b/gi, "your")
+      .replace(/\bhim\b/gi, "you")
+      .replace(/\bthem\b/gi, "you");
+  }
+  return normalized;
+}
+
+export function normalizeMemoryDisplayText(text: string): string {
+  return sentenceCase(canonicalizeMemoryPerspective(text));
+}
+
 function parseJsonPayload(raw: string): CriticPayload | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
@@ -191,7 +289,7 @@ function normalizeCriticResult(
 ): ValidatedMemoryCandidate | RejectedMemoryCandidate {
   const reasonCodes = reasonCodesFrom(result.reasonCodes);
   const rawText = typeof result.text === "string" ? result.text : candidate.text;
-  const text = sentenceCase(rawText);
+  const text = normalizeMemoryDisplayText(rawText);
   const confidence =
     typeof result.confidence === "number" && Number.isFinite(result.confidence)
       ? Math.min(candidate.confidence, clamp01(result.confidence))

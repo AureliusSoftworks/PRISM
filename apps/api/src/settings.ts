@@ -29,6 +29,7 @@ const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
 
 /** Current persisted settings loaded from the users table. */
 export interface CurrentSettings {
+  displayName: string;
   theme: Theme;
   preferredProvider: Provider;
   providerLocked: number;
@@ -36,12 +37,14 @@ export interface CurrentSettings {
   hiddenBotModelIds: string;
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
+  lenientLocalFallbackModel: string | null;
   secondaryOllamaHost: string | null;
   primaryOllamaHost: string;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
 export interface NextSettings {
+  displayName: string;
   theme: Theme;
   preferredProvider: Provider;
   providerLocked: number;
@@ -49,6 +52,7 @@ export interface NextSettings {
   hiddenBotModelIds: string[];
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
+  lenientLocalFallbackModel: string | null;
   secondaryOllamaHost: string | null;
   /**
    * Intent for the OpenAI API key:
@@ -184,6 +188,13 @@ function readPreferredModel(value: unknown, fallback: string | null): string | n
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function readDisplayName(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return fallback;
+  return trimmed.slice(0, 80);
+}
+
 /**
  * Defensively strip shell/.env decoration that users commonly paste into the
  * Settings API-key field when copying from a `.env` line or quoted example.
@@ -232,6 +243,7 @@ export function resolveNextSettings(
   body: Record<string, unknown>,
   current: CurrentSettings
 ): NextSettings {
+  const displayName = readDisplayName(body.displayName, current.displayName);
   const theme: Theme = isTheme(body.theme) ? body.theme : current.theme;
   const preferredProvider: Provider = isProvider(body.preferredProvider)
     ? body.preferredProvider
@@ -255,6 +267,10 @@ export function resolveNextSettings(
   const preferredOnlineModel = readPreferredModel(
     body.preferredOnlineModel,
     current.preferredOnlineModel
+  );
+  const lenientLocalFallbackModel = readPreferredModel(
+    body.lenientLocalFallbackModel,
+    current.lenientLocalFallbackModel
   );
   const normalizedSecondaryOllamaHost = normalizeSecondaryOllamaHostInput(
     body.secondaryOllamaHost,
@@ -283,6 +299,7 @@ export function resolveNextSettings(
   }
 
   return {
+    displayName,
     theme,
     preferredProvider,
     providerLocked,
@@ -290,6 +307,7 @@ export function resolveNextSettings(
     hiddenBotModelIds,
     preferredLocalModel,
     preferredOnlineModel,
+    lenientLocalFallbackModel,
     secondaryOllamaHost,
     openAiKeyIntent,
   };

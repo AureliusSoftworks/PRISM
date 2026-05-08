@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
   RECENT_WINDOW_SIZE,
+  getLatestSandboxBotStatusSummary,
   getLatestThreadDisplaySummary,
   getLatestThreadSummary,
+  summarizeSandboxBotStatus,
   summarizeThreadCompact,
 } from "../memory-summarizer.ts";
+import { persistMemoryCandidates } from "../memory.ts";
 import type { LlmProvider, ProviderMessage } from "../providers.ts";
 
 /**
@@ -30,6 +33,25 @@ function createTestDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
   db.exec(`
     PRAGMA foreign_keys = ON;
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL
+    );
+    CREATE TABLE bots (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL
+    );
+    CREATE TABLE conversations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
+      bot_id TEXT,
+      incognito INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE TABLE messages (
       id TEXT PRIMARY KEY,
       conversation_id TEXT NOT NULL,
@@ -45,8 +67,55 @@ function createTestDb(): DatabaseSync {
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      bot_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'direct',
+      certainty REAL,
+      source_message_ids TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE bot_opinions (
+      user_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      score REAL,
+      band TEXT,
+      trend TEXT,
+      last_reason TEXT,
+      PRIMARY KEY (user_id, bot_scope_key)
+    );
+    CREATE TABLE conversation_opinions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      score REAL,
+      trend TEXT,
+      last_reason TEXT,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE session_opinions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      score REAL,
+      trend TEXT,
+      last_reason TEXT,
+      updated_at TEXT NOT NULL
+    );
   `);
   return db;
+}
+
+function seedUser(db: DatabaseSync, userId: string, displayName: string): void {
+  db.prepare("INSERT INTO users (id, display_name) VALUES (?, ?)")
+    .run(userId, displayName);
 }
 
 /**
@@ -96,6 +165,31 @@ function seedMessages(
       createdAt
     );
   }
+}
+
+function seedSandboxConversation(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  title: string;
+  botId: string;
+  updatedAt: string;
+  incognito?: boolean;
+}): void {
+  const { db, userId, conversationId, title, botId, updatedAt, incognito = false } = args;
+  db.prepare(
+    `INSERT INTO conversations (
+      id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+    ) VALUES (?, ?, ?, 'sandbox', ?, ?, ?, ?)`
+  ).run(
+    conversationId,
+    userId,
+    title,
+    botId,
+    incognito ? 1 : 0,
+    updatedAt,
+    updatedAt
+  );
 }
 
 describe("summarizeThreadCompact", () => {
@@ -276,7 +370,7 @@ describe("summarizeThreadCompact", () => {
       "chat-mode compaction should preserve transcript rows for persisted chat history"
     );
     const displaySummary = getLatestThreadDisplaySummary(db, "user-1", "conv-1", "chat");
-    assert.equal(displaySummary, "chat-mode-summary");
+    assert.equal(displaySummary, "chat-mode-summary.");
   });
 });
 
@@ -355,6 +449,201 @@ describe("getLatestThreadDisplaySummary", () => {
     assert.equal(
       getLatestThreadDisplaySummary(db, "user-1", "conv-1", "chat"),
       "legacy technical summary"
+    );
+  });
+});
+
+describe("summarizeSandboxBotStatus", () => {
+  it("builds a bot-level recap from sandbox conversations and reads it back", async () => {
+    const db = createTestDb();
+    seedUser(db, "user-1", "Jared");
+    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)")
+      .run("bot-1", "user-1", "Patrick");
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    seedSandboxConversation({
+      db,
+      userId: "user-1",
+      conversationId: "conv-a",
+      title: "Shipwreck Explorations",
+      botId: "bot-1",
+      updatedAt: new Date(now + 1000).toISOString(),
+    });
+    seedSandboxConversation({
+      db,
+      userId: "user-1",
+      conversationId: "conv-b",
+      title: "Seashells",
+      botId: "bot-1",
+      updatedAt: new Date(now + 2000).toISOString(),
+    });
+    seedSandboxConversation({
+      db,
+      userId: "user-1",
+      conversationId: "conv-private",
+      title: "Private topic",
+      botId: "bot-1",
+      updatedAt: new Date(now + 3000).toISOString(),
+      incognito: true,
+    });
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "sum-a",
+      "user-1",
+      "conv-a",
+      JSON.stringify({
+        v: 1,
+        kind: "thread_compact",
+        mode: "sandbox",
+        summary: "We explored hidden caves and found a calmer routine.",
+      }),
+      new Date(now + 4000).toISOString()
+    );
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "sum-b",
+      "user-1",
+      "conv-b",
+      JSON.stringify({
+        v: 1,
+        kind: "thread_compact",
+        mode: "sandbox",
+        summary: "You wanted practical next steps and we narrowed two options.",
+      }),
+      new Date(now + 5000).toISOString()
+    );
+    const { provider, calls } = stubProvider(
+      "I'm helping the user balance curiosity with practical next steps."
+    );
+
+    const result = await summarizeSandboxBotStatus(db, provider, "user-1", "bot-1");
+
+    assert.equal(result.triggered, true);
+    assert.equal(calls.length, 1);
+    const prompt = calls[0]?.find((message) => message.role === "user")?.content ?? "";
+    assert.match(prompt, /Shipwreck Explorations/);
+    assert.match(prompt, /Seashells/);
+    assert.match(prompt, /User name: Jared/);
+    assert.doesNotMatch(prompt, /Private topic/);
+    assert.equal(
+      getLatestSandboxBotStatusSummary(db, "user-1", "bot-1"),
+      "I'm helping Jared balance curiosity with practical next steps."
+    );
+  });
+
+  it("uses saved memories but excludes global session summaries from bot recaps", async () => {
+    const db = createTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    seedUser(db, "user-1", "Jared");
+    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)")
+      .run("bot-1", "user-1", "Sandy");
+    const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+    seedSandboxConversation({
+      db,
+      userId: "user-1",
+      conversationId: "conv-sandy",
+      title: "Fresh Start",
+      botId: "bot-1",
+      updatedAt: new Date(now + 1000).toISOString(),
+    });
+    await persistMemoryCandidates(
+      db,
+      "user-1",
+      "default-memory-source",
+      null,
+      [{ text: "Jared likes surreal but calming fidget-toy interfaces.", confidence: 0.9 }],
+      userKey
+    );
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, NULL, ?, ?)"
+    ).run(
+      "global-session-summary",
+      "user-1",
+      JSON.stringify({
+        v: 1,
+        kind: "chat_facts",
+        summary: `- Jared loves Rick James' "Super Freak".\n- Dev tools repeated themselves.`,
+      }),
+      new Date(now + 2000).toISOString()
+    );
+    const { provider, calls } = stubProvider(
+      "I'm remembering Jared likes surreal but calming interfaces."
+    );
+
+    const result = await summarizeSandboxBotStatus(db, provider, "user-1", "bot-1", {
+      userKey,
+    });
+
+    assert.equal(result.triggered, true);
+    const prompt = calls[0]?.find((message) => message.role === "user")?.content ?? "";
+    assert.match(prompt, /surreal but calming fidget-toy interfaces/);
+    assert.doesNotMatch(prompt, /Rick James/);
+    assert.doesNotMatch(prompt, /Dev tools repeated/);
+  });
+
+  it("no-ops when there is no sandbox conversation context for the bot", async () => {
+    const db = createTestDb();
+    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)")
+      .run("bot-1", "user-1", "Patrick");
+    const { provider } = stubProvider("unused");
+
+    const result = await summarizeSandboxBotStatus(db, provider, "user-1", "bot-1");
+
+    assert.equal(result.triggered, false);
+    assert.equal(getLatestSandboxBotStatusSummary(db, "user-1", "bot-1"), null);
+  });
+
+  it("clears stale bot status when the bot has no valid recap sources", async () => {
+    const db = createTestDb();
+    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)")
+      .run("bot-1", "user-1", "Patrick");
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, NULL, ?, ?)"
+    ).run(
+      "stale-status",
+      "user-1",
+      JSON.stringify({
+        v: 1,
+        kind: "sandbox_bot_status",
+        mode: "sandbox",
+        botId: "bot-1",
+        summary: "I'm carrying over another bot's private thread.",
+        displaySummary: "I'm carrying over another bot's private thread.",
+      }),
+      new Date().toISOString()
+    );
+    const { provider } = stubProvider("unused");
+
+    const result = await summarizeSandboxBotStatus(db, provider, "user-1", "bot-1");
+
+    assert.equal(result.triggered, false);
+    assert.equal(getLatestSandboxBotStatusSummary(db, "user-1", "bot-1"), null);
+  });
+
+  it("stores a resilient fallback when recap rewrite comes back empty", async () => {
+    const db = createTestDb();
+    seedUser(db, "user-1", "Jared");
+    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)")
+      .run("bot-1", "user-1", "Patrick");
+    const now = new Date().toISOString();
+    seedSandboxConversation({
+      db,
+      userId: "user-1",
+      conversationId: "conv-a",
+      title: "Forgiveness",
+      botId: "bot-1",
+      updatedAt: now,
+    });
+    seedMessages(db, "user-1", "conv-a", 4, Date.now());
+    const { provider } = stubProvider("   ");
+
+    const result = await summarizeSandboxBotStatus(db, provider, "user-1", "bot-1");
+
+    assert.equal(result.triggered, true);
+    assert.equal(
+      getLatestSandboxBotStatusSummary(db, "user-1", "bot-1"),
+      "I'm staying aligned with Jared's direction and keeping momentum moving forward."
     );
   });
 });

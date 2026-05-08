@@ -31,10 +31,10 @@ describe("parseAssistantPrismTools", () => {
     assert.equal(out.askQuestion, undefined);
   });
 
-  it("does not strip when the closing delimiter is missing", () => {
+  it("strips incomplete tool tails when the closing delimiter is missing", () => {
     const raw = `Hello.\n${PRISM_TOOL_START}\n{"v":1`;
     const out = parseAssistantPrismTools(raw);
-    assert.equal(out.displayContent, raw);
+    assert.equal(out.displayContent, "Hello.");
     assert.equal(out.askQuestion, undefined);
   });
 
