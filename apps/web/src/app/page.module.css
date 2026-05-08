@@ -297,6 +297,79 @@
   overscroll-behavior: none;
 }
 
+/* Fullscreen curtain during Hub/Chat/Sandbox switches so the next
+   surface can settle before it appears. Prevents abrupt content pop-in. */
+.viewSwitchOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(
+      circle at 50% 24%,
+      color-mix(in srgb, var(--accent) 14%, var(--bg)),
+      var(--bg) 58%
+    ),
+    var(--bg);
+  backdrop-filter: blur(9px) saturate(120%);
+  -webkit-backdrop-filter: blur(9px) saturate(120%);
+  opacity: 0;
+  transition: opacity 280ms ease;
+  pointer-events: none;
+}
+
+.viewSwitchOverlay[data-phase="entering"] {
+  opacity: 0;
+  pointer-events: auto;
+}
+
+.viewSwitchOverlay[data-phase="visible"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.viewSwitchOverlay[data-phase="fading"] {
+  opacity: 0;
+  pointer-events: auto;
+}
+
+.viewSwitchOverlayInner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: var(--shadow-lg);
+}
+
+.viewSwitchOverlaySpinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-top-color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+  animation: viewSwitchOverlaySpin 0.72s linear infinite;
+}
+
+@keyframes viewSwitchOverlaySpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewSwitchOverlaySpinner {
+    animation: none;
+  }
+}
+
 .card {
   width: 100%;
   max-width: 440px;
@@ -1209,6 +1282,24 @@
   display: block;
 }
 
+.chatHubWordmarkStack {
+  display: inline-grid;
+  justify-items: start;
+  gap: 3px;
+  min-width: 0;
+}
+
+.chatHubBackHint {
+  width: 100%;
+  text-align: right;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  line-height: 1;
+  text-transform: uppercase;
+  opacity: 0.78;
+}
+
 .headerIdentity {
   --header-identity-color: var(--fg);
   display: inline-flex;
@@ -1386,6 +1477,75 @@
 
 .appLayout[data-chat-sidebar-hidden="true"] {
   grid-template-columns: 1fr;
+}
+
+/* Chat mode typography pass:
+   - swap title treatment to a literary serif
+   - keep controls/system chrome untouched
+   - apply serif only to reading/writing surfaces */
+.appLayout[data-chat-sidebar-hidden="true"] {
+  --font-chat-reading: var(--font-chat-serif), Georgia, "Times New Roman", serif;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .message p,
+.appLayout[data-chat-sidebar-hidden="true"] .message .markdownBody,
+.appLayout[data-chat-sidebar-hidden="true"] .chatSessionSummaryBubble {
+  font-family: var(--font-chat-reading);
+}
+
+/* Keep header identity/title non-serif in Chat Mode. */
+.appLayout[data-chat-sidebar-hidden="true"] .headerIdentityName,
+.appLayout[data-chat-sidebar-hidden="true"] .chatHeaderTitle {
+  font-family: var(--font-title-sans), var(--font-ui-sans), system-ui, sans-serif;
+}
+
+/* Chat mode layout pass:
+   - keep the thread surface full-bleed
+   - center assistant prose in the same reading measure as summary cards
+   - remove assistant bubble chrome so responses read like a document
+   - keep user bubbles as-is for clear "you vs assistant" separation */
+.appLayout[data-chat-sidebar-hidden="true"] .messages {
+  --chat-reading-width: min(860px, 94%);
+  max-width: none;
+  margin-inline: auto;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .message {
+  max-width: 100%;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messageAssistant {
+  justify-self: center;
+  align-self: flex-start;
+  width: var(--chat-reading-width);
+  max-width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  overflow: visible;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messageAssistant::before,
+.appLayout[data-chat-sidebar-hidden="true"] .messageAssistant::after {
+  display: none;
+}
+
+/* Chat mode + ephemeral stream:
+   existing cinematic clamps center content at ~72vw. In Chat Mode we pin it
+   to the same centered reading width used by the summary card. */
+.appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"] .message {
+  width: var(--chat-reading-width);
+  max-width: 100%;
+  margin-inline: auto;
+  justify-self: center;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"] .messageAssistant {
+  width: var(--chat-reading-width);
+  max-width: 100%;
+  justify-self: center;
 }
 
 .appLayout[data-private-active="true"][data-accent-active="true"] {
@@ -4083,6 +4243,18 @@
   margin: 0 auto;
 }
 
+.messages[data-chat-ephemeral="true"] {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  padding-bottom: max(64px, 32dvh);
+}
+
+.messagesFrame[data-chat-focus="true"] .messages[data-chat-ephemeral="true"] {
+  max-height: min(72vh, 760px);
+  margin-block: auto;
+}
+
 /* Extra breathing room when AskQuestion chips dock over the thread. */
 .messages.messagesAskQuestionTailSpace {
   padding-bottom: max(160px, 48dvh);
@@ -4606,18 +4778,52 @@
   margin-top: 0;
 }
 
+.emptyStateTitleBlock {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.emptyStateHeroCue {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 74%, var(--bot-ink, var(--fg)) 26%);
+  line-height: 1.2;
+}
+
 /* Match the band card: no frosted panel below 980px — stack hero + copy
    centered; at 980px+ the panel appears and the row goes horizontal + 2-col header. */
 @media (max-width: 979px) {
+  .emptyState {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .emptyStateInfoBand {
+    width: min(100%, calc(100vw - 20px));
+  }
+
   .emptyStateInfoBandRow {
     grid-template-columns: 1fr;
-    justify-items: center;
+    justify-items: stretch;
     text-align: center;
   }
 
   .emptyStateInfoBandRow .emptyStateHeader {
     justify-items: center;
     text-align: center;
+    width: 100%;
+  }
+
+  .emptyStateHeroCue {
+    justify-self: center;
+  }
+
+  .emptyStateInfoBandRow .emptyStateHint {
+    max-width: none;
   }
 
   /* No frosted band card — match the centered hero; `safe` keeps start
@@ -4653,7 +4859,7 @@
   max-width: min(780px, 92%);
   padding: 12px 14px;
   border-radius: 16px;
-  text-align: center;
+  text-align: left;
   color: var(--fg);
   background:
     linear-gradient(
@@ -4667,6 +4873,49 @@
     inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
   font-size: 0.9rem;
   line-height: 1.42;
+}
+
+.chatCanvasSummaryContainer {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  justify-items: center;
+  padding-top: 6px;
+  margin-bottom: 4px;
+  pointer-events: none;
+}
+
+.chatCanvasSummaryContainer .chatSessionSummaryBubble {
+  margin: 0;
+  pointer-events: auto;
+}
+
+.chatSummaryBubbleContent {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+}
+
+.chatSummaryHeroInlineButton {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.chatSummaryHeroInlineButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 @media (min-width: 980px) {
@@ -4720,6 +4969,14 @@
     margin-top: 0;
     margin-bottom: 0;
     white-space: normal;
+  }
+
+  .emptyStateTitleBlock {
+    align-content: start;
+  }
+
+  .emptyStateHeroCue {
+    justify-self: start;
   }
 
   .emptyStateInfoBandRow .emptyStateHint {
@@ -6098,6 +6355,22 @@
   animation: messageIn 0.22s ease-out;
 }
 
+.messages[data-chat-ephemeral="true"] .message {
+  animation: none;
+  width: clamp(340px, 72vw, 980px);
+  max-width: 100%;
+  margin-inline: auto;
+  padding-inline: 0;
+}
+
+.messages[data-chat-ephemeral="true"] .message.messageChatManifesting {
+  animation: chatMessageManifest 0.48s ease-out both;
+}
+
+.messages[data-chat-ephemeral="true"] .message.messageChatDissolving {
+  animation: chatMessageDissolve 2.2s ease-in both;
+}
+
 @keyframes messageIn {
   from {
     opacity: 0;
@@ -6106,6 +6379,105 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes chatMessageManifest {
+  from {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translateY(5px) scale(0.988);
+  }
+  55% {
+    opacity: 0.9;
+    filter: blur(1.4px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes chatMessageDissolve {
+  from {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    filter: blur(6px);
+    transform: translateY(-8px) scale(0.992);
+  }
+}
+
+@keyframes chatEphemeralLineManifest {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes chatEphemeralLineDissolve {
+  from {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    filter: blur(6px);
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes chatEphemeralWordIn {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .messages[data-chat-ephemeral="true"] .message.messageChatManifesting,
+  .messages[data-chat-ephemeral="true"] .message.messageChatDissolving {
+    animation-duration: 0.18s;
+  }
+
+  @keyframes chatMessageManifest {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes chatMessageDissolve {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+
+  @keyframes chatEphemeralLineManifest {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes chatEphemeralLineDissolve {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+
+  @keyframes chatEphemeralWordIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 }
 
@@ -6126,6 +6498,24 @@
      row shrink the assistant bubble down to just its header height once
      the conversation grew tall enough to need scrolling. */
   overflow: clip;
+}
+
+.messages[data-chat-ephemeral="true"] .messageAssistant,
+.messages[data-chat-ephemeral="true"] .messageUser {
+  justify-self: center;
+  align-self: center;
+  width: clamp(340px, 72vw, 980px);
+  max-width: 100%;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.messages[data-chat-ephemeral="true"] .messageAssistant::before,
+.messages[data-chat-ephemeral="true"] .messageAssistant::after {
+  display: none;
 }
 
 /* A bot's color belongs on the bubble itself, not as a competing dot next to
@@ -6200,6 +6590,59 @@
   box-shadow: var(--shadow-sm);
 }
 
+.messages[data-chat-ephemeral="true"] .message h4 {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: color-mix(in srgb, var(--fg) 66%, transparent);
+}
+
+.messages[data-chat-ephemeral="true"] .message p,
+.messages[data-chat-ephemeral="true"] .message .markdownBody {
+  color: color-mix(in srgb, var(--fg) 92%, transparent);
+  text-shadow:
+    0 0 0.35em color-mix(in srgb, var(--accent) 12%, transparent),
+    0 0 0.8em color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.messages[data-chat-ephemeral="true"] .messageUser h4 {
+  color: color-mix(in srgb, var(--fg) 58%, transparent);
+}
+
+.chatEphemeralMarkdownBody {
+  display: grid;
+  gap: 0.16em;
+}
+
+.messages[data-chat-ephemeral="true"] .chatEphemeralMarkdownBody {
+  inline-size: 100%;
+  justify-self: stretch;
+  margin-inline: 0;
+}
+
+.chatEphemeralLine {
+  display: block;
+  white-space: pre-wrap;
+}
+
+.chatEphemeralTypedWord {
+  display: inline;
+  opacity: 1;
+  animation: none;
+}
+
+.messages[data-chat-ephemeral="true"]
+  .chatEphemeralMarkdownBody[data-chat-phase="manifest"]
+  .chatEphemeralLine {
+  animation: chatEphemeralLineManifest 0.34s ease-out both;
+}
+
+.messages[data-chat-ephemeral="true"]
+  .chatEphemeralMarkdownBody[data-chat-phase="dissolving"]
+  .chatEphemeralLine {
+  animation: chatEphemeralLineDissolve 0.52s ease-in both;
+  animation-delay: calc(var(--line-index, 0) * 140ms);
+}
+
 .messagesFrame[data-mode="private"] .messageUser {
   background:
     linear-gradient(
@@ -6231,6 +6674,66 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.messageMoodBadge {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.messageMoodFace {
+  width: 18px;
+  height: 18px;
+}
+
+.messageMoodFaceBase {
+  fill: color-mix(in srgb, var(--bg) 72%, var(--fg) 28%);
+}
+
+.messageMoodFeature {
+  fill: none;
+  stroke: color-mix(in srgb, var(--fg) 84%, var(--bg) 16%);
+  stroke-width: 1.55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.messageMoodBadge[data-mood="joyful"] .messageMoodFaceBase {
+  fill: color-mix(in srgb, #f59e0b 26%, var(--bg) 74%);
+}
+
+.messageMoodBadge[data-mood="warm"] .messageMoodFaceBase {
+  fill: color-mix(in srgb, #60a5fa 18%, var(--bg) 82%);
+}
+
+.messageMoodBadge[data-mood="guarded"] .messageMoodFaceBase {
+  fill: color-mix(in srgb, #94a3b8 26%, var(--bg) 74%);
+}
+
+.messageMoodBadge[data-mood="strained"] .messageMoodFaceBase {
+  fill: color-mix(in srgb, #f97316 22%, var(--bg) 78%);
+}
+
+@media (min-width: 800px) {
+  .messageAssistant h4 .messageMoodBadge {
+    margin-left: auto;
+    width: 34px;
+    height: 34px;
+  }
+
+  .messageAssistant h4 .messageMoodFace {
+    width: 34px;
+    height: 34px;
+  }
+
+  .messageAssistant h4 .messageMoodFeature {
+    stroke-width: 1.9;
+  }
 }
 
 .prismMessageRoleLabel {
@@ -6662,6 +7165,66 @@
   padding: 6px 2px;
 }
 
+.typingIndicatorChatCenter {
+  justify-self: center;
+  position: sticky;
+  top: 42%;
+  z-index: 4;
+  width: fit-content;
+  margin: 0 auto;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--typing-accent, var(--line)) 36%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--typing-accent, var(--accent)) 10%, transparent),
+      color-mix(in srgb, var(--bg-surface) 84%, transparent)
+    );
+  box-shadow:
+    0 10px 24px color-mix(in srgb, #000000 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.devChatDebugStream {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.devChatDebugEvent {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--line) 74%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  color: color-mix(in srgb, var(--fg-muted) 88%, var(--fg));
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.devChatDebugEventSummary {
+  border-color: color-mix(in srgb, #4ddcff 66%, transparent);
+  background: color-mix(in srgb, #4ddcff 14%, var(--bg-surface));
+}
+
+.devChatDebugEventMemory {
+  border-color: color-mix(in srgb, #55f7a4 62%, transparent);
+  background: color-mix(in srgb, #55f7a4 13%, var(--bg-surface));
+}
+
+.devChatDebugEventOpinion {
+  border-color: color-mix(in srgb, #ff9f1c 62%, transparent);
+  background: color-mix(in srgb, #ff9f1c 14%, var(--bg-surface));
+}
+
+.devChatDebugTimestamp {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--fg-muted) 74%, transparent);
+}
+
 .typingDots {
   display: inline-flex;
   gap: 4px;
@@ -6722,6 +7285,45 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+.chatEmotionStrip {
+  width: 100%;
+  max-width: 860px;
+  margin: 10px auto 0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 8%, transparent),
+      color-mix(in srgb, var(--bg-surface) 78%, transparent)
+    );
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chatEmotionStripMood {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in srgb, var(--fg) 90%, transparent);
+}
+
+.chatEmotionStripMoodText {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chatEmotionStripCaption {
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 86%, transparent);
 }
 
 .compose {
@@ -6953,6 +7555,55 @@
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
 }
 
+.conversationStarterHeadingRow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.conversationStarterHeadingRow .conversationStarterChipHeading {
+  margin-bottom: 0;
+}
+
+.askQuestionDismissButton {
+  pointer-events: auto;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--askq-chip-border) 86%, var(--line));
+  border-radius: 12px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--askq-chip-bg) 92%, transparent);
+  color: var(--askq-chip-text);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.05s;
+}
+
+.askQuestionDismissButton:hover {
+  border-color: var(--askq-chip-border-hover);
+  background: color-mix(in srgb, var(--askq-chip-bg-hover) 92%, transparent);
+}
+
+.askQuestionDismissButton:active {
+  transform: translateY(1px);
+}
+
+.askQuestionDismissButton:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg-surface),
+    0 0 0 4px var(--askq-chip-focus);
+}
+
 @media (max-width: 620px) {
   .conversationStarterRail {
     width: 100%;
@@ -6966,6 +7617,16 @@
 
   .conversationStarterChipHeading {
     margin-bottom: 6px;
+  }
+
+  .conversationStarterHeadingRow {
+    gap: 8px;
+  }
+
+  .askQuestionDismissButton {
+    min-width: 30px;
+    height: 30px;
+    border-radius: 10px;
   }
 }
 
@@ -7058,11 +7719,80 @@
   transition:
     opacity 0.22s ease-out,
     transform 0.22s ease-out;
+  animation: askQuestionRailIn 0.22s ease-out both;
+}
+
+.askQuestionRail .conversationStarterChipHeading {
+  opacity: 0;
+  animation: askQuestionRailChildIn 0.2s ease-out 0.04s both;
+}
+
+.askQuestionRail > .conversationStarterChip {
+  opacity: 0;
+  animation: askQuestionRailChildIn 0.2s ease-out both;
+}
+
+.askQuestionRail > .conversationStarterChip:nth-of-type(1) {
+  animation-delay: 0.08s;
+}
+
+.askQuestionRail > .conversationStarterChip:nth-of-type(2) {
+  animation-delay: 0.13s;
+}
+
+.askQuestionRail > .conversationStarterChip:nth-of-type(3) {
+  animation-delay: 0.18s;
+}
+
+.askQuestionRail > .conversationStarterChip:nth-of-type(4) {
+  animation-delay: 0.23s;
+}
+
+.askQuestionRailCollapsed {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.askQuestionRailCollapsed .conversationStarterChip,
+.askQuestionRailCollapsed .conversationStarterChipHeading {
+  pointer-events: none;
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .askQuestionRail {
     transition: none;
+    animation: none;
+  }
+
+  .askQuestionRail .conversationStarterChipHeading,
+  .askQuestionRail > .conversationStarterChip {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+@keyframes askQuestionRailIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes askQuestionRailChildIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
   }
 }
 
@@ -14727,6 +15457,14 @@
     max-width: min(36vw, 200px);
   }
 
+  .chatHeader .chatHubWordmarkStack {
+    max-width: min(48vw, 230px);
+  }
+
+  .chatHeader .chatHubBackHint {
+    max-width: min(48vw, 230px);
+  }
+
   /* Wide side gutters: room for fixed ☰ / wrench + centered identity. */
   .chatPane {
     --chat-inline-gutter: max(
@@ -14753,6 +15491,29 @@
     padding: 18px var(--chat-inline-gutter);
     /* Reduce scroll-anchoring feedback loops with the collapsing header + threshold logic. */
     overflow-anchor: none;
+  }
+
+  /* Empty-state should read as a broad hero lane on phone; don't inherit the
+     very wide 60px message gutter that's tuned for active chat controls. */
+  .messages:has(> .emptyState),
+  .messagesEmptyState {
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+  }
+
+  /* If the mobile sidebar handle is visible, maximize empty-state width —
+     that handle already communicates edge affordance, so we don't need the
+     extra horizontal reserve used by regular chat content lanes. */
+  .appLayout:has(> .sidebarHandle) .messages:has(> .emptyState),
+  .appLayout:has(> .sidebarHandle) .messagesEmptyState {
+    padding-left: max(4px, env(safe-area-inset-left));
+    padding-right: max(4px, env(safe-area-inset-right));
+  }
+
+  .appLayout:has(> .sidebarHandle) .messages:has(> .emptyState) > .emptyState,
+  .appLayout:has(> .sidebarHandle) .messagesEmptyState > .emptyState {
+    padding-left: 2px;
+    padding-right: 2px;
   }
 
   /* Uses the gutter above by default for 561–720; on phones the nested ≤560 rule
