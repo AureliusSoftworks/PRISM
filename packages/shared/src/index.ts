@@ -118,8 +118,18 @@ export interface Conversation {
    * conversation — the same bot drives every assistant reply and
    * supplies the shell accent color when the chat is open. `null` means
    * the default grayscale persona (no color wheel, brand mark only).
+   *
+   * Coffee mode leaves this null and uses {@link botGroupIds} instead.
    */
   botId: string | null;
+  /**
+   * Coffee-only — ordered list of 2-5 bot ids that participate in this
+   * group conversation. Captured once when the Coffee thread is created
+   * (per-thread one-off picker) and frozen for the conversation. The
+   * router LLM picks which one of these speaks next on each turn.
+   * Always undefined for `chat` and `sandbox` mode rows.
+   */
+  botGroupIds?: string[];
   /**
    * Private chat marker — once `true`, accent styling is suppressed to
    * grayscale, the thread stays client-held, and nothing is written to
@@ -207,11 +217,16 @@ export interface MemoryValidationEvent {
  * - `"sandbox"`: the full command-center. Cross-session memory is disabled
  *   entirely here — the rolling message window IS the thread's memory. The
  *   `incognito` flag is ignored for Sandbox requests.
+ * - `"coffee"`: group chat for 2-5 reactive bots. Each user turn triggers a
+ *   router LLM pick (which bot speaks next based on personality + context),
+ *   then that bot replies through the standard chat pipeline. Memory is
+ *   thread-scoped only (mirrors Sandbox's rolling compaction) — no
+ *   cross-thread per-bot memory writes in v0.
  *
  * Defaults to `"sandbox"` on the server when omitted, so pre-`mode` clients
  * keep the previous cross-session memory behavior.
  */
-export type ChatMode = "chat" | "sandbox";
+export type ChatMode = "chat" | "sandbox" | "coffee";
 
 /**
  * Companion-only preferences. These are intentionally "feel" controls, not
@@ -351,4 +366,34 @@ export interface ConversationSummaryDebug {
   summaryCount: number;
   totalMessages: number;
   messagesSinceLastCompaction: number;
+}
+
+/** Request body for `POST /api/coffee/turn`. */
+export interface CoffeeTurnRequest {
+  /** Existing Coffee conversation id, or omitted for the first turn (server creates a new row). */
+  conversationId?: string;
+  /**
+   * Ordered list of 2-5 bot ids in this group. Required when starting a
+   * new conversation; ignored on subsequent turns (server uses the group
+   * stored on the conversation row).
+   */
+  groupBotIds?: string[];
+  /**
+   * Per-request provider override (matches the Sandbox `/api/chat`
+   * `preferredProvider` semantics). When present, replaces the user's
+   * saved preference for this turn only. Per-bot online gating still
+   * wins — a bot with `online_enabled=0` always falls back to local.
+   */
+  preferredProvider?: "local" | "openai";
+  /** The user's outgoing message. */
+  message: string;
+}
+
+/** Response body for `POST /api/coffee/turn`. */
+export interface CoffeeTurnResponse {
+  conversation: Conversation;
+  /** The bot id chosen by the router for this turn (matches the assistant message's bot_id). */
+  speakerBotId: string;
+  /** Optional human-readable router rationale for debugging/inspection. Never shown to the user verbatim. */
+  routerReason?: string;
 }

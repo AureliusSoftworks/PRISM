@@ -4,8 +4,10 @@ import { randomId } from "./security.ts";
 export interface ConversationSummary {
   id: string;
   title: string;
-  mode: "chat" | "sandbox";
+  mode: "chat" | "sandbox" | "coffee";
   botId: string | null;
+  /** Coffee-only — the 2-5 bot ids participating in this group thread. */
+  botGroupIds?: string[];
   incognito: boolean;
   lastBotId: string | null;
   lastBotColor: string | null;
@@ -219,7 +221,7 @@ export function listConversationSummaries(
   // the conversation, regardless of the conversation's locked bot_id.
   const rows = db
     .prepare(
-      `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
+      `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids, c.incognito, c.created_at, c.updated_at,
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
                    AND m.role = 'assistant'
@@ -243,6 +245,7 @@ export function listConversationSummaries(
     title: string;
     conversation_mode: string | null;
     bot_id: string | null;
+    bot_group_ids: string | null;
     incognito: number;
     created_at: string;
     updated_at: string;
@@ -251,18 +254,41 @@ export function listConversationSummaries(
     has_assistant_reply: number;
   }>;
 
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    mode: row.conversation_mode === "chat" ? "chat" : "sandbox",
-    botId: row.bot_id ?? null,
-    incognito: row.incognito === 1,
-    lastBotId: row.last_bot_id ?? null,
-    lastBotColor: row.last_bot_color ?? null,
-    hasAssistantReply: row.has_assistant_reply === 1,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
+  return rows.map((row) => {
+    const mode: "chat" | "sandbox" | "coffee" =
+      row.conversation_mode === "chat"
+        ? "chat"
+        : row.conversation_mode === "coffee"
+          ? "coffee"
+          : "sandbox";
+    const botGroupIds = parseBotGroupIdsForSummary(row.bot_group_ids);
+    return {
+      id: row.id,
+      title: row.title,
+      mode,
+      botId: row.bot_id ?? null,
+      ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
+      incognito: row.incognito === 1,
+      lastBotId: row.last_bot_id ?? null,
+      lastBotColor: row.last_bot_color ?? null,
+      hasAssistantReply: row.has_assistant_reply === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  });
+}
+
+function parseBotGroupIdsForSummary(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (value): value is string => typeof value === "string" && value.length > 0
+    );
+  } catch {
+    return [];
+  }
 }
 
 export function getConversationSweepState(

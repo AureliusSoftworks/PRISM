@@ -507,6 +507,59 @@ function PrismWordmark({ className }: PrismWordmarkProps): React.JSX.Element {
   );
 }
 
+interface PrismWordmarkWithVersionProps {
+  /** Class applied to the wordmark SVG (e.g. brandWordmark / hubHomeWordmark). */
+  className?: string;
+  /**
+   * Visual scale of the version pill.
+   *  - "lg" matches the 30px brandWordmark (Hub card, auth, gated screen)
+   *  - "sm" matches the 20px hubHomeWordmark (chat/sandbox header back button)
+   */
+  size?: "lg" | "sm";
+  /** Optional override applied to the lockup row span. */
+  rowClassName?: string;
+  /** Optional override applied to the pill span. */
+  pillClassName?: string;
+  /** Optional test-id passthrough on the pill (auth screen relies on this). */
+  pillTestId?: string;
+}
+
+/**
+ * Lockup that renders the Prism wordmark with the app version pill aligned
+ * to its baseline. Single component so the chip stays visually consistent
+ * everywhere the wordmark appears.
+ */
+function PrismWordmarkWithVersion({
+  className,
+  size = "lg",
+  rowClassName,
+  pillClassName,
+  pillTestId,
+}: PrismWordmarkWithVersionProps): React.JSX.Element {
+  const rowClasses = [
+    styles.wordmarkLockup,
+    size === "sm" ? styles.wordmarkLockupSm : null,
+    rowClassName,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const pillClasses = [
+    styles.wordmarkVersionPill,
+    size === "sm" ? styles.wordmarkVersionPillSm : null,
+    pillClassName,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <span className={rowClasses}>
+      <PrismWordmark className={className} />
+      <span className={pillClasses} data-testid={pillTestId}>
+        {PRISM_APP_VERSION}
+      </span>
+    </span>
+  );
+}
+
 interface PrismTriangleMarkProps {
   className?: string;
 }
@@ -1767,7 +1820,34 @@ const VIEW_SWITCH_OVERLAY_FADE_OUT_MS = 280;
 // screen shown after login; each mode tile navigates to a specific
 // experience. Future modes can be advertised as disabled Hub tiles
 // without entering this route union until their shells actually exist.
-type View = "hub" | "chat" | "sandbox";
+type View = "hub" | "chat" | "sandbox" | "coffee";
+
+// Coffee mode group-size bounds — intentionally duplicated from the
+// server-side `COFFEE_GROUP_MIN_SIZE`/`MAX_SIZE` (see `apps/api/src/coffee.ts`)
+// because the web bundle does not import server modules. Any change here
+// MUST be made in tandem on the server so the picker UI and the
+// `normalizeCoffeeGroupBotIds` validator agree on what's acceptable.
+const COFFEE_GROUP_MIN_SIZE_CLIENT = 2;
+const COFFEE_GROUP_MAX_SIZE_CLIENT = 5;
+
+interface CoffeeConversationMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: string;
+  botName?: string;
+  botColor?: string;
+  botGlyph?: string;
+}
+
+/** Local mirror of the Coffee conversation shape returned by `POST /api/coffee/turn`. */
+interface CoffeeConversationState {
+  id: string;
+  title: string;
+  mode?: "coffee";
+  botGroupIds?: string[];
+  messages: CoffeeConversationMessage[];
+}
 
 interface SessionUser { id: string; email: string; displayName: string; theme: Theme; preferredProvider: Provider; }
 interface ConversationSummary {
@@ -8673,9 +8753,15 @@ function GlyphStory({ size = 88 }: GlyphProps): React.JSX.Element {
   );
 }
 
-function GlyphLibrary({ size = 88 }: GlyphProps): React.JSX.Element {
-  // Library is the training shelf: source material flows into a small
-  // memory core before it becomes usable context for bots.
+function GlyphGym({ size = 88 }: GlyphProps): React.JSX.Element {
+  // Gym is the training floor: a dumbbell anchored on a floor line, with
+  // a memory orb hovering above and a progression arc rising toward it.
+  // PRISM letters map roughly:
+  //   P → left weight disc
+  //   R → bar / handle
+  //   S → right weight disc
+  //   I → training trajectory (arc rising from the bar to the memory)
+  //   M → memory orb (what training crystallises into)
   return (
     <svg
       width={size}
@@ -8686,16 +8772,22 @@ function GlyphLibrary({ size = 88 }: GlyphProps): React.JSX.Element {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      {/* Shelves / archive frame */}
-      <path d="M8 38 H40" stroke="currentColor" strokeWidth={2.5} opacity="0.45" />
-      <path d="M10 12 H38 V38 H10 Z" stroke="currentColor" strokeWidth={2.5} opacity="0.45" />
-      {/* Ingestible materials */}
-      <path d="M15 18 V31" stroke={PRISM_COLORS.p} strokeWidth={3} />
-      <path d="M21 16 V31" stroke={PRISM_COLORS.r} strokeWidth={3} />
-      <path d="M27 20 V31" stroke={PRISM_COLORS.i} strokeWidth={3} />
-      {/* Context flow into memory */}
-      <path d="M14 34 C20 28 28 28 34 34" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
-      <circle cx="34" cy="23" r="4" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
+      {/* Floor line */}
+      <path d="M6 40 H42" stroke="currentColor" strokeWidth={2.5} opacity="0.45" />
+      {/* Left weight disc (P) */}
+      <path d="M11 24 V36" stroke={PRISM_COLORS.p} strokeWidth={5} />
+      {/* Bar / handle (R) */}
+      <path d="M13 30 H35" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      {/* Right weight disc (S) */}
+      <path d="M37 24 V36" stroke={PRISM_COLORS.s} strokeWidth={5} />
+      {/* Training trajectory arc rising toward the memory (I) */}
+      <path
+        d="M14 26 C18 14 30 14 34 26"
+        stroke={PRISM_COLORS.i}
+        strokeWidth={2.5}
+      />
+      {/* Memory orb — what training crystallises into (M) */}
+      <circle cx="24" cy="13" r="3.2" stroke={PRISM_COLORS.m} strokeWidth={2.5} />
     </svg>
   );
 }
@@ -8773,9 +8865,11 @@ function GlyphPseudo({ size = 88 }: GlyphProps): React.JSX.Element {
   );
 }
 
-function GlyphBrowser({ size = 88 }: GlyphProps): React.JSX.Element {
+function GlyphSurf({ size = 88 }: GlyphProps): React.JSX.Element {
   // Browser window + globe motif so the tile reads as web navigation
-  // rather than a generic document or app launcher.
+  // rather than a generic document or app launcher. The glyph stays
+  // literal (a window-with-globe) even though the label is "Surf",
+  // because a surfboard/wave shape would conflict with water-surfing.
   return (
     <svg
       width={size}
@@ -8803,6 +8897,58 @@ function GlyphBrowser({ size = 88 }: GlyphProps): React.JSX.Element {
       <path d="M24 20 V36" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
       <path d="M19 24 C22 26 26 26 29 24" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
       <path d="M19 32 C22 30 26 30 29 32" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+    </svg>
+  );
+}
+
+function GlyphFeed({ size = 88 }: GlyphProps): React.JSX.Element {
+  // Newsfeed window: an outer frame with a header bar and two stacked
+  // post rows (avatar + text). A small heart sits in the corner as the
+  // "social interaction" cue. PRISM letters map roughly:
+  //   P → first post avatar
+  //   R → first post text + subtitle line
+  //   I → second post avatar
+  //   S → second post text line
+  //   M → heart / like indicator
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Feed window frame */}
+      <path
+        d="M8 8 H40 V40 H8 Z"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        opacity="0.45"
+      />
+      {/* Header divider (under brand bar) */}
+      <path
+        d="M8 14 H40"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        opacity="0.45"
+      />
+      {/* First post — avatar (P) */}
+      <circle cx="14" cy="21" r="2.8" stroke={PRISM_COLORS.p} strokeWidth={2.5} />
+      {/* First post — name + subtitle (R) */}
+      <path d="M20 19 H35" stroke={PRISM_COLORS.r} strokeWidth={2.5} />
+      <path d="M20 23 H30" stroke={PRISM_COLORS.r} strokeWidth={2} opacity="0.55" />
+      {/* Second post — avatar (I) */}
+      <circle cx="14" cy="32" r="2.8" stroke={PRISM_COLORS.i} strokeWidth={2.5} />
+      {/* Second post — text line (S) */}
+      <path d="M20 30 H35" stroke={PRISM_COLORS.s} strokeWidth={2.5} />
+      {/* Heart / like indicator (M) — small social-interaction cue */}
+      <path
+        d="M30 33 C30 31.6 31.6 31.6 32 33 C32.4 31.6 34 31.6 34 33 C34 34.4 32 36 32 36 C32 36 30 34.4 30 33 Z"
+        stroke={PRISM_COLORS.m}
+        strokeWidth={2}
+      />
     </svg>
   );
 }
@@ -10530,13 +10676,14 @@ function HomeContent(): React.JSX.Element {
   const authMode = searchParams.get("mode") === "login" ? "login" : "register";
   // Post-auth surface is derived from the URL so refreshes preserve the
   // current mode and browser back/forward walk naturally between Hub,
-  // Chat, and Sandbox. Anything unrecognised (missing param, stale
-  // values) resolves to the Hub.
+  // Chat, Sandbox, and Coffee. Anything unrecognised (missing param,
+  // stale values) resolves to the Hub.
   const viewParam = searchParams.get("view");
   const view: View =
     viewParam === "chat" ? "chat"
       : viewParam === "sandbox" ? "sandbox"
-        : "hub";
+        : viewParam === "coffee" ? "coffee"
+          : "hub";
   const [viewSwitchTarget, setViewSwitchTarget] = useState<View | null>(null);
   const [viewSwitchOverlayPhase, setViewSwitchOverlayPhase] =
     useState<"hidden" | "entering" | "visible" | "fading">("hidden");
@@ -10619,6 +10766,7 @@ function HomeContent(): React.JSX.Element {
   const viewSwitchOverlayLabel = useMemo(() => {
     if (viewSwitchTarget === "chat") return "Opening Chat";
     if (viewSwitchTarget === "sandbox") return "Opening Sandbox";
+    if (viewSwitchTarget === "coffee") return "Opening Coffee";
     if (viewSwitchTarget === "hub") return "Returning to Hub";
     return "Switching modes";
   }, [viewSwitchTarget]);
@@ -19242,7 +19390,7 @@ function resendUserMessage(msg: Message): void {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/icon-triangle.svg" alt="" aria-hidden="true" className={styles.brandIconLight} />
             </div>
-            <PrismWordmark className={styles.brandWordmark} />
+            <PrismWordmarkWithVersion className={styles.brandWordmark} />
           </div>
           <p className={styles.muted}>Local-first AI playground. ChatGPT Gov fidelity, FL Studio creativity.</p>
           <h2 className={styles.authHeading}>
@@ -19391,6 +19539,55 @@ function resendUserMessage(msg: Message): void {
     );
   }
 
+  // ── Coffee mode hooks ──
+  // Declared here so they run on every render of HomeContent BEFORE
+  // any conditional early returns (auth gate, hub branch, etc.).
+  // Helpers/handlers + the renderCoffeeShell closure live further
+  // down next to the `if (view === "coffee") return ...` gate.
+  const [coffeeSelectedBotIds, setCoffeeSelectedBotIds] = useState<string[]>([]);
+  const [coffeeConversation, setCoffeeConversation] =
+    useState<CoffeeConversationState | null>(null);
+  const [coffeeDraft, setCoffeeDraft] = useState<string>("");
+  const [coffeeBusy, setCoffeeBusy] = useState<boolean>(false);
+  const [coffeeError, setCoffeeError] = useState<string | null>(null);
+  const [coffeeRouterReason, setCoffeeRouterReason] = useState<string | null>(null);
+  // Per-request provider override (mirrors the Sandbox toggle). The
+  // user can flip it inside the Coffee shell without touching their
+  // global setting; once they manually toggle, we stop syncing from
+  // their saved preference for the rest of the session so a global
+  // change made elsewhere doesn't quietly stomp the in-shell choice.
+  const [coffeeProvider, setCoffeeProvider] = useState<"local" | "openai">("local");
+  const [coffeeProviderTouched, setCoffeeProviderTouched] = useState<boolean>(false);
+  useEffect(() => {
+    if (coffeeProviderTouched) return;
+    if (user?.preferredProvider === "openai" || user?.preferredProvider === "local") {
+      setCoffeeProvider(user.preferredProvider);
+    }
+  }, [user?.preferredProvider, coffeeProviderTouched]);
+  // Whenever we leave Coffee view, drop the in-progress thread so a
+  // re-entry from the Hub starts fresh on the picker. (We don't persist
+  // Coffee threads in the sidebar in v0; a future round can wire them
+  // through `listConversationSummaries` once the visual treatment lands.)
+  useEffect(() => {
+    if (view !== "coffee") {
+      setCoffeeConversation(null);
+      setCoffeeSelectedBotIds([]);
+      setCoffeeDraft("");
+      setCoffeeBusy(false);
+      setCoffeeError(null);
+      setCoffeeRouterReason(null);
+    }
+  }, [view]);
+  const coffeeBotsLibrary = useMemo(
+    () =>
+      [...bots]
+        .filter((bot) => bot.chat_enabled === 1)
+        .sort((a, b) =>
+          compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
+        ),
+    [bots, resolvedTheme, panelColorHarmonyActive]
+  );
+
   // ── Auth screen ──
   if (!user) return (
     <main className={`${styles.authLayout} ${themeClass}`}>
@@ -19421,12 +19618,10 @@ function resendUserMessage(msg: Message): void {
             />
           </div>
           <div className={styles.authBrandTextBlock}>
-            <div className={styles.authBrandWordmarkRow}>
-              <PrismWordmark className={styles.brandWordmark} />
-              <span className={styles.authVersionChip} data-testid="auth-app-version">
-                {PRISM_APP_VERSION}
-              </span>
-            </div>
+            <PrismWordmarkWithVersion
+              className={styles.brandWordmark}
+              pillTestId="auth-app-version"
+            />
             <p className={`${styles.muted} ${styles.authTagline}`}>
               Private by default. Creative by design.
             </p>
@@ -20554,20 +20749,6 @@ function resendUserMessage(msg: Message): void {
                 Images
               </button>
             )}
-            {!showSettingsOnly && view !== "chat" && (
-              <button
-                type="button"
-                role="menuitem"
-                className={styles.chatOverflowMenuItem}
-                disabled={!canMemoryActions}
-                onClick={(event) => {
-                  swallowMenuEvent(event);
-                  handleMemories();
-                }}
-              >
-                Memories
-              </button>
-            )}
             {!showSettingsOnly && view !== "chat" && canExport && (
               <button
                 type="button"
@@ -20628,65 +20809,81 @@ function resendUserMessage(msg: Message): void {
                 {deleteButtonText}
               </button>
             )}
+            {/* Glyph row at the bottom of the popout — replaces the floating
+                Memories / Theme / Hub buttons that used to sit beside the
+                gear and overlap the PRISM wordmark at narrow widths. */}
+            {(showToolbarMemoriesButton
+              || showChatThemeButton
+              || showSandboxHubButton) && (
+              <div
+                className={styles.chatOverflowMenuGlyphRow}
+                role="group"
+                aria-label="Header tools"
+              >
+                {showToolbarMemoriesButton ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.headerIconButton}
+                    onClick={(event) => {
+                      swallowMenuEvent(event);
+                      handleMemories();
+                    }}
+                    aria-label="Memories"
+                    data-glyph-tooltip="Memories"
+                    disabled={headerActionsDisabled || !canMemoryActions}
+                  >
+                    <BookmarkGlyph />
+                  </button>
+                ) : null}
+                {showChatThemeButton ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.themeToggleButton}
+                    onClick={(event) => {
+                      swallowMenuEvent(event);
+                      void cycleThemeMode();
+                    }}
+                    aria-label={
+                      effectiveThemeMode === "system"
+                        ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                        : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                    }
+                    data-title={
+                      effectiveThemeMode === "system"
+                        ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                        : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+                    }
+                    data-glyph-tooltip={
+                      effectiveThemeMode === "system"
+                        ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                        : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+                    }
+                  >
+                    <ThemeGlyph mode={effectiveThemeMode} />
+                  </button>
+                ) : null}
+                {showSandboxHubButton ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.headerIconButton}
+                    onClick={(event) => {
+                      swallowMenuEvent(event);
+                      handleHeaderHubClick();
+                    }}
+                    aria-label="Back to Hub"
+                    data-glyph-tooltip="Back to Hub"
+                  >
+                    <HomeGlyph />
+                  </button>
+                ) : null}
+              </div>
+            )}
             </div>
           )}
         </div>
-        {showToolbarMemoriesButton ? (
-          <button
-            type="button"
-            className={styles.headerIconButton}
-            onClick={(event) => {
-              swallowMenuEvent(event);
-              handleMemories();
-            }}
-            aria-label="Memories"
-            data-glyph-tooltip="Memories"
-            disabled={headerActionsDisabled || !canMemoryActions}
-          >
-            <BookmarkGlyph />
-          </button>
-        ) : null}
-        {showChatThemeButton ? (
-          <button
-            type="button"
-            className={styles.themeToggleButton}
-            onClick={(event) => {
-              swallowMenuEvent(event);
-              void cycleThemeMode();
-            }}
-            aria-label={
-              effectiveThemeMode === "system"
-                ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-            }
-            data-title={
-              effectiveThemeMode === "system"
-                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-            }
-            data-glyph-tooltip={
-              effectiveThemeMode === "system"
-                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-            }
-          >
-            <ThemeGlyph mode={effectiveThemeMode} />
-          </button>
-        ) : null}
-        {showSandboxHubButton ? (
-          <button
-            type="button"
-            className={styles.headerIconButton}
-            onClick={(event) => {
-              swallowMenuEvent(event);
-              handleHeaderHubClick();
-            }}
-            aria-label="Back to Hub"
-            data-glyph-tooltip="Back to Hub"
-          >
-            <HomeGlyph />
-          </button>
-        ) : null}
       </div>
     );
   };
@@ -23279,12 +23476,295 @@ function resendUserMessage(msg: Message): void {
     </>
   );
 
+  // ── Coffee mode (v0) ──
+  // Group chat for 2-5 reactive bots. v0 keeps it deliberately small —
+  // a per-thread one-off picker, a router LLM that picks who speaks
+  // next on each turn, and a plain message thread that labels each
+  // assistant bubble with the bot's name + color. Polish (streaming,
+  // per-bot bubble theming, "another bot chimes in" cascades, sidebar
+  // integration) is intentionally a Phase ❸ pass; this scaffolding
+  // exists so the multi-bot primitive is real and playtestable now.
+  //
+  // Hooks for Coffee live near the top of HomeContent (above the
+  // `if (!user) return ...` early-return) so they always run in the
+  // same order on every render. Only the plain helper functions and
+  // the JSX render closure live here.
+  const coffeeSelectionValid =
+    coffeeSelectedBotIds.length >= COFFEE_GROUP_MIN_SIZE_CLIENT &&
+    coffeeSelectedBotIds.length <= COFFEE_GROUP_MAX_SIZE_CLIENT;
+  const toggleCoffeeBot = (botId: string) => {
+    setCoffeeError(null);
+    setCoffeeSelectedBotIds((current) => {
+      if (current.includes(botId)) {
+        return current.filter((id) => id !== botId);
+      }
+      if (current.length >= COFFEE_GROUP_MAX_SIZE_CLIENT) return current;
+      return [...current, botId];
+    });
+  };
+  const sendCoffeeTurn = async () => {
+    const trimmed = coffeeDraft.trim();
+    if (!trimmed) return;
+    if (coffeeBusy) return;
+    if (!coffeeConversation) {
+      if (!coffeeSelectionValid) {
+        setCoffeeError(
+          `Pick ${COFFEE_GROUP_MIN_SIZE_CLIENT}-${COFFEE_GROUP_MAX_SIZE_CLIENT} bots before starting.`
+        );
+        return;
+      }
+    }
+    setCoffeeBusy(true);
+    setCoffeeError(null);
+    try {
+      const body = coffeeConversation
+        ? {
+            conversationId: coffeeConversation.id,
+            message: trimmed,
+            preferredProvider: coffeeProvider,
+          }
+        : {
+            groupBotIds: coffeeSelectedBotIds,
+            message: trimmed,
+            preferredProvider: coffeeProvider,
+          };
+      const response = await api<{
+        ok: true;
+        conversation: CoffeeConversationState;
+        speakerBotId: string;
+        routerReason?: string;
+      }>("/api/coffee/turn", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setCoffeeConversation(response.conversation);
+      setCoffeeRouterReason(response.routerReason ?? null);
+      setCoffeeDraft("");
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to send.");
+    } finally {
+      setCoffeeBusy(false);
+    }
+  };
+  const exitCoffeeToHub = () => {
+    navigateToView("hub");
+  };
+  const renderCoffeeShell = (): React.JSX.Element => {
+    const conversationActive = coffeeConversation !== null;
+    return (
+      <main
+        className={`${styles.authLayout} ${themeClass} ${styles.coffeeShell}`}
+        onContextMenu={handleAppContextMenu}
+      >
+        <header className={styles.coffeeHeader}>
+          <button
+            type="button"
+            className={styles.coffeeHubButton}
+            onClick={exitCoffeeToHub}
+            aria-label="Back to Hub"
+            title="Back to Hub"
+          >
+            <PrismWordmarkWithVersion size="sm" className={styles.hubHomeWordmark} />
+          </button>
+          <h2 className={styles.coffeeTitle}>
+            {conversationActive
+              ? coffeeConversation?.title || "Coffee"
+              : "Coffee"}
+          </h2>
+          <div
+            className={styles.coffeeProviderToggle}
+            role="group"
+            aria-label="Provider for the next reply"
+          >
+            <button
+              type="button"
+              className={styles.coffeeProviderOption}
+              data-active={coffeeProvider === "local" ? "true" : undefined}
+              aria-pressed={coffeeProvider === "local"}
+              onClick={() => {
+                setCoffeeProvider("local");
+                setCoffeeProviderTouched(true);
+              }}
+              title="Replies route through your local Ollama models."
+            >
+              Local
+            </button>
+            <button
+              type="button"
+              className={styles.coffeeProviderOption}
+              data-active={coffeeProvider === "openai" ? "true" : undefined}
+              aria-pressed={coffeeProvider === "openai"}
+              onClick={() => {
+                setCoffeeProvider("openai");
+                setCoffeeProviderTouched(true);
+              }}
+              title="Replies route through OpenAI (online). Per-bot online gating still wins."
+            >
+              Online
+            </button>
+          </div>
+        </header>
+
+        {!conversationActive && (
+          <section className={styles.coffeePicker}>
+            <p className={styles.coffeePickerHint}>
+              Pick {COFFEE_GROUP_MIN_SIZE_CLIENT}-{COFFEE_GROUP_MAX_SIZE_CLIENT} bots,
+              then send the first message to start the chat.
+            </p>
+            {coffeeBotsLibrary.length === 0 ? (
+              <p className={styles.coffeePickerEmpty}>
+                You don&apos;t have any chat-enabled bots yet. Open the Bots panel
+                from the Hub to create some.
+              </p>
+            ) : (
+              <ul className={styles.coffeePickerGrid} role="listbox" aria-label="Bots available for Coffee">
+                {coffeeBotsLibrary.map((bot) => {
+                  const selected = coffeeSelectedBotIds.includes(bot.id);
+                  const disabled =
+                    !selected &&
+                    coffeeSelectedBotIds.length >= COFFEE_GROUP_MAX_SIZE_CLIENT;
+                  return (
+                    <li key={bot.id}>
+                      <button
+                        type="button"
+                        className={styles.coffeePickerTile}
+                        data-selected={selected ? "true" : undefined}
+                        disabled={disabled}
+                        aria-pressed={selected}
+                        style={
+                          bot.color
+                            ? ({ "--coffee-bot-color": bot.color } as React.CSSProperties)
+                            : undefined
+                        }
+                        onClick={() => toggleCoffeeBot(bot.id)}
+                      >
+                        <span className={styles.coffeePickerTileName}>{bot.name}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <p className={styles.coffeePickerCount}>
+              {coffeeSelectedBotIds.length} of {COFFEE_GROUP_MIN_SIZE_CLIENT}-
+              {COFFEE_GROUP_MAX_SIZE_CLIENT} selected
+            </p>
+          </section>
+        )}
+
+        {conversationActive && coffeeConversation && (
+          <section className={styles.coffeeThread} aria-live="polite">
+            <ul className={styles.coffeeMessages}>
+              {coffeeConversation.messages.map((message) => {
+                const isAssistant = message.role === "assistant";
+                const isUser = message.role === "user";
+                return (
+                  <li
+                    key={message.id}
+                    className={styles.coffeeMessage}
+                    data-role={message.role}
+                  >
+                    {isAssistant && (
+                      <div
+                        className={styles.coffeeMessageBotLabel}
+                        style={
+                          message.botColor
+                            ? ({ "--coffee-bot-color": message.botColor } as React.CSSProperties)
+                            : undefined
+                        }
+                      >
+                        {message.botName ?? "Bot"}
+                      </div>
+                    )}
+                    {isUser && (
+                      <div className={styles.coffeeMessageUserLabel}>You</div>
+                    )}
+                    <div className={styles.coffeeMessageContent}>
+                      {message.content}
+                    </div>
+                  </li>
+                );
+              })}
+              {coffeeBusy && (
+                <li
+                  className={styles.coffeeMessage}
+                  data-role="assistant"
+                  data-pending="true"
+                >
+                  <div className={styles.coffeeMessageBotLabel}>...</div>
+                  <div className={styles.coffeeMessageContent}>
+                    Picking the next speaker.
+                  </div>
+                </li>
+              )}
+            </ul>
+            {coffeeRouterReason && (
+              <p className={styles.coffeeRouterReason}>
+                Router: {coffeeRouterReason}
+              </p>
+            )}
+          </section>
+        )}
+
+        {coffeeError && (
+          <p className={styles.coffeeError} role="alert">
+            {coffeeError}
+          </p>
+        )}
+
+        <form
+          className={styles.coffeeComposer}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void sendCoffeeTurn();
+          }}
+        >
+          <textarea
+            value={coffeeDraft}
+            onChange={(event) => setCoffeeDraft(event.target.value)}
+            placeholder={
+              conversationActive
+                ? "Say something to the group..."
+                : "What's on your mind? (Sends the first message)"
+            }
+            rows={2}
+            disabled={
+              coffeeBusy ||
+              (!conversationActive && coffeeBotsLibrary.length === 0)
+            }
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void sendCoffeeTurn();
+              }
+            }}
+          />
+          <button
+            type="submit"
+            className={styles.coffeeSend}
+            disabled={
+              coffeeBusy ||
+              coffeeDraft.trim().length === 0 ||
+              (!conversationActive && !coffeeSelectionValid)
+            }
+          >
+            {coffeeBusy ? "Sending..." : conversationActive ? "Send" : "Start Coffee"}
+          </button>
+        </form>
+
+        {renderViewSwitchOverlay()}
+        <GlyphTooltipLayer />
+      </main>
+    );
+  };
+
   // ── Hub ──
   // Landing screen shown immediately after login. Reuses the auth
   // background verbatim so the visual transition from login to hub feels
   // like a single continuous surface. Each tile represents a post-auth
   // mode; Chat stays disabled in Phase 1 and lights up once the mode is
   // built out.
+  if (view === "coffee") return renderCoffeeShell();
   if (view === "hub") return (
     <main
       className={`${styles.authLayout} ${themeClass}`}
@@ -23310,7 +23790,7 @@ function resendUserMessage(msg: Message): void {
               className={styles.brandIconLight}
             />
           </div>
-          <PrismWordmark className={styles.brandWordmark} />
+          <PrismWordmarkWithVersion className={styles.brandWordmark} />
         </div>
         <p className={styles.hubGreeting}>
           Welcome back, <span className={styles.hubGreetingName}>{user.displayName}</span>.
@@ -23373,8 +23853,7 @@ function resendUserMessage(msg: Message): void {
           <button
             type="button"
             className={styles.hubTile}
-            disabled
-            title="Coffee mode is not available yet."
+            onClick={() => navigateToView("coffee")}
           >
             <div className={styles.hubTileGlyph}>
               <GlyphCoffee size={88} />
@@ -23382,6 +23861,24 @@ function resendUserMessage(msg: Message): void {
             <div className={styles.hubTileLabel}>Coffee</div>
             <div className={styles.hubTileTagline}>
               Group chat for 2-5 reactive bots.
+            </div>
+          </button>
+          {/* Feed — BotBook social platform. Disabled placeholder until the
+              real-time newsfeed surface is built; advertised here so the
+              Hub previews the full mode roadmap. Old-school nostalgic
+              social vibes; bots are "friends" who post to a shared feed. */}
+          <button
+            type="button"
+            className={styles.hubTile}
+            disabled
+            title="Feed mode is not available yet."
+          >
+            <div className={styles.hubTileGlyph}>
+              <GlyphFeed size={88} />
+            </div>
+            <div className={styles.hubTileLabel}>Feed</div>
+            <div className={styles.hubTileTagline}>
+              BotBook — an old-school social feed where your bots hang out.
             </div>
           </button>
           <button
@@ -23416,14 +23913,14 @@ function resendUserMessage(msg: Message): void {
             type="button"
             className={styles.hubTile}
             disabled
-            title="Library mode is not available yet."
+            title="Gym mode is not available yet."
           >
             <div className={styles.hubTileGlyph}>
-              <GlyphLibrary size={88} />
+              <GlyphGym size={88} />
             </div>
-            <div className={styles.hubTileLabel}>Library</div>
+            <div className={styles.hubTileLabel}>Gym</div>
             <div className={styles.hubTileTagline}>
-              Where gathered things learn how to be remembered.
+              Where bots train to remember.
             </div>
           </button>
           {/* Slate — bot-free document editor (akin to ChatGPT's canvas
@@ -23463,14 +23960,14 @@ function resendUserMessage(msg: Message): void {
             type="button"
             className={styles.hubTile}
             disabled
-            title="Web Browser mode is not available yet."
+            title="Surf mode is not available yet."
           >
             <div className={styles.hubTileGlyph}>
-              <GlyphBrowser size={88} />
+              <GlyphSurf size={88} />
             </div>
-            <div className={styles.hubTileLabel}>Web Browser</div>
+            <div className={styles.hubTileLabel}>Surf</div>
             <div className={styles.hubTileTagline}>
-              Simple browsing, plus optional bot screen viewing.
+              Simple surfing, plus optional bot screen viewing.
             </div>
           </button>
         </div>
@@ -23549,7 +24046,10 @@ function resendUserMessage(msg: Message): void {
               title="Back to Hub"
             >
               <span className={styles.chatHubWordmarkStack}>
-                <PrismWordmark className={styles.hubHomeWordmark} />
+                <PrismWordmarkWithVersion
+                  size="sm"
+                  className={styles.hubHomeWordmark}
+                />
               </span>
             </button>
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
@@ -24664,7 +25164,10 @@ function resendUserMessage(msg: Message): void {
             >
               {sandboxShowHubReturnWordmark ? (
                 <span className={styles.chatHubWordmarkStack}>
-                  <PrismWordmark className={styles.hubHomeWordmark} />
+                  <PrismWordmarkWithVersion
+                    size="sm"
+                    className={styles.hubHomeWordmark}
+                  />
                 </span>
               ) : headerIdentity ? (
                 <span
@@ -24696,7 +25199,10 @@ function resendUserMessage(msg: Message): void {
                   </span>
                 </span>
               ) : (
-                <PrismWordmark className={styles.hubHomeWordmark} />
+                <PrismWordmarkWithVersion
+                  size="sm"
+                  className={styles.hubHomeWordmark}
+                />
               )}
             </button>
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}

@@ -115,6 +115,7 @@ export function createDatabase(): DatabaseSync {
       title TEXT NOT NULL,
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
+      bot_group_ids TEXT,
       parent_id TEXT,
       fork_message_id TEXT,
       archived_at TEXT,
@@ -350,6 +351,12 @@ export function createDatabase(): DatabaseSync {
   if (!hasConversationArchiveBatchIdColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN archive_batch_id TEXT;");
   }
+  const hasConversationBotGroupIdsColumn = conversationColumns.some(
+    (column) => column.name === "bot_group_ids"
+  );
+  if (!hasConversationBotGroupIdsColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN bot_group_ids TEXT;");
+  }
   const sweepBatchColumns = db
     .prepare("PRAGMA table_info(conversation_sweep_batches)")
     .all() as Array<{ name: string }>;
@@ -513,6 +520,7 @@ export function mapConversation(
     title: string;
     conversation_mode?: string | null;
     bot_id: string | null;
+    bot_group_ids?: string | null;
     incognito: number;
     last_bot_id?: string | null;
     last_bot_color?: string | null;
@@ -522,12 +530,20 @@ export function mapConversation(
   },
   messages: ChatMessage[]
 ): Conversation {
+  const conversationMode =
+    row.conversation_mode === "chat"
+      ? "chat"
+      : row.conversation_mode === "coffee"
+        ? "coffee"
+        : "sandbox";
+  const botGroupIds = parseBotGroupIds(row.bot_group_ids);
   return {
     id: row.id,
     userId: row.user_id,
     title: row.title,
-    mode: row.conversation_mode === "chat" ? "chat" : "sandbox",
+    mode: conversationMode,
     botId: row.bot_id ?? null,
+    ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
     incognito: row.incognito === 1,
     lastBotId: row.last_bot_id ?? null,
     lastBotColor: row.last_bot_color ?? null,
@@ -536,6 +552,19 @@ export function mapConversation(
     updatedAt: row.updated_at,
     messages
   };
+}
+
+function parseBotGroupIds(raw: string | null | undefined): string[] {
+  if (!raw || typeof raw !== "string") return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (value): value is string => typeof value === "string" && value.length > 0
+    );
+  } catch {
+    return [];
+  }
 }
 
 export function mapMemoryRow(row: DbMemoryRecord, text: string): UserMemory {

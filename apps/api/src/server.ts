@@ -15,6 +15,7 @@ import { buildHealthResponse } from "./health.ts";
 import { consumePairingCode, createPairingCode } from "./pairing.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
+import { processCoffeeTurn } from "./coffee.ts";
 import {
   createDevSeedMemories,
   deleteMemoryById,
@@ -297,6 +298,19 @@ function readConnectionReasons(value: unknown, fallback: string): string[] {
     .map((reason) => reason.trim())
     .filter((reason) => reason.length > 0);
   return Array.from(new Set(cleaned)).slice(0, 4);
+}
+
+function parseConversationBotGroupIds(raw: string | null | undefined): string[] {
+  if (!raw || typeof raw !== "string") return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (value): value is string => typeof value === "string" && value.length > 0
+    );
+  } catch {
+    return [];
+  }
 }
 
 function parseSourceMessageIds(raw: string | null | undefined): string[] {
@@ -608,7 +622,7 @@ function buildRoutes(): RouteDefinition[] {
       // + composer-dropdown sync the same way.
       const conversation = db
         .prepare(
-          `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
+          `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids, c.incognito, c.created_at, c.updated_at,
                   (SELECT m.bot_id FROM messages m
                      WHERE m.conversation_id = c.id
                        AND m.role = 'assistant'
@@ -630,6 +644,7 @@ function buildRoutes(): RouteDefinition[] {
             title: string;
             conversation_mode: string | null;
             bot_id: string | null;
+            bot_group_ids: string | null;
             incognito: number;
             created_at: string;
             updated_at: string;
@@ -746,13 +761,21 @@ function buildRoutes(): RouteDefinition[] {
           }
         : undefined;
       const botOpinion = readBotOpinion(db, userId, conversation.bot_id ?? null);
+      const conversationModeOut: "chat" | "sandbox" | "coffee" =
+        conversation.conversation_mode === "chat"
+          ? "chat"
+          : conversation.conversation_mode === "coffee"
+            ? "coffee"
+            : "sandbox";
+      const botGroupIdsOut = parseConversationBotGroupIds(conversation.bot_group_ids);
       json(ctx.res, 200, {
         ok: true,
         conversation: {
           id: conversation.id,
           title: conversation.title,
-          mode: conversation.conversation_mode === "chat" ? "chat" : "sandbox",
+          mode: conversationModeOut,
           botId: conversation.bot_id ?? null,
+          ...(botGroupIdsOut.length > 0 ? { botGroupIds: botGroupIdsOut } : {}),
           incognito: conversation.incognito === 1,
           lastBotId: conversation.last_bot_id ?? null,
           lastBotColor: conversation.last_bot_color ?? null,
@@ -1205,6 +1228,52 @@ function buildRoutes(): RouteDefinition[] {
         ...(summaryCompaction ? { summaryCompaction } : {}),
         ...(memoryLearned ? { memoryLearned } : {}),
         ...(conversationStarters ? { conversationStarters } : {}),
+      });
+    }),
+    // Coffee mode (group chat for 2-5 reactive bots). Lives on its own
+    // endpoint rather than inside /api/chat so the lighter coffee
+    // pipeline (router LLM + per-bot reply, no cross-thread memory) can
+    // evolve independently of the heavier Chat/Sandbox flow.
+    route("POST", "/api/coffee/turn", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const message = readString(body.message, "message");
+      const conversationId =
+        typeof body.conversationId === "string" ? body.conversationId : undefined;
+      const groupBotIds = Array.isArray(body.groupBotIds)
+        ? body.groupBotIds
+        : undefined;
+      // Per-request provider override matches Sandbox's /api/chat semantics:
+      // the client toggle wins over the user's saved preferred_provider for
+      // this single turn. Anything else (including absent or malformed)
+      // falls back to the saved preference.
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const result = await processCoffeeTurn(
+        db,
+        userId,
+        {
+          conversationId,
+          groupBotIds,
+          message,
+        },
+        {
+          preferredProvider: effectiveProvider,
+          openAiApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          userDisplayName: user.display_name,
+        }
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
       });
     }),
     route("GET", "/api/memories", async (ctx) => {

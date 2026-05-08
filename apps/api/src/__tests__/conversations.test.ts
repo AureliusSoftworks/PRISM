@@ -24,6 +24,7 @@ function createTestDb(): DatabaseSync {
       title TEXT NOT NULL,
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
+      bot_group_ids TEXT,
       archived_at TEXT,
       archive_batch_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
