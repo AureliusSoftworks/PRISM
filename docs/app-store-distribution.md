@@ -1,5 +1,15 @@
 # Prism App Store Distribution
 
+> **Status: Historical.** This document captures the App Store distribution
+> plan that was active before Prism pivoted to indie / Patreon / direct-download
+> distribution. The current model is documented in
+> [distribution-model.md](distribution-model.md) and supersedes everything
+> below. This file is retained for archive in case App Store distribution is
+> revisited; the iPhone shipping path is now a Progressive Web App (see
+> [prism-ios-client.md](prism-ios-client.md) for the PWA approach), and the
+> Mac client ships as a Developer ID signed and notarized DMG, not a Mac App
+> Store binary.
+
 Prism's Apple distribution model is a two-binary product:
 
 - **Prism Server**: the open-source local runtime that runs on Mac, Windows, or
@@ -126,6 +136,13 @@ Submission checklist:
   server/user.
 
 ## Licensing And Commercial Model
+
+> **Superseded.** The current licensing model is JetBrains-style (one-time
+> purchase = current version on all platforms; monthly subscription =
+> always-current on all platforms with ongoing updates; cancellation keeps the
+> last entitled version). See
+> [distribution-model.md#licensing-model-jetbrains-style](distribution-model.md#licensing-model-jetbrains-style)
+> for details. The text below is the original App-Store-era plan.
 
 Prism should be transparent about what is open and what is paid.
 

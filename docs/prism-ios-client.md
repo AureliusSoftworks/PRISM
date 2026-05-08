@@ -1,5 +1,121 @@
 # Prism iOS Client
 
+> **Status: Deprecated.** Under the indie distribution model documented in
+> [distribution-model.md](distribution-model.md), the iPhone experience is
+> delivered as a Progressive Web App (PWA) served by Prism Server, not as a
+> native App Store binary. The Xcode project at `apps/ios-client/` is retained
+> for archive and historical reference only; it is no longer the shipping
+> path. The PWA approach is described first below; the original native-client
+> design notes follow under "Archived: Native iOS Client" at the bottom of
+> this file.
+
+## iOS Delivery via PWA
+
+The iPhone client today is the same web shell that desktop browsers see,
+served by Prism Server, with PWA metadata that lets iOS users install it as a
+home-screen app. There is no App Store listing, no TestFlight, no native
+binary download.
+
+### User flow
+
+1. User installs and starts Prism Server on Mac, Windows, or Linux.
+2. User opens the server URL on their iPhone in **Safari** (Add to Home Screen
+   only works from Safari, not Chrome or Firefox on iOS).
+3. User completes the standard pairing flow in the browser: enters the
+   pairing code shown by the server and the license code from
+   [distribution-model.md](distribution-model.md).
+4. Once paired, the user taps the Safari Share sheet and selects
+   **"Add to Home Screen"**. iOS adds a springboard icon for Prism.
+5. Tapping the home-screen icon launches Prism in a chromeless, fullscreen,
+   kiosk-style window — no Safari address bar, no tab strip. Visually
+   indistinguishable from a native app for everyday use.
+
+The pairing token and license-code state are stored by the server and
+authenticated through the `prism_client_access` cookie (the same gate the Mac
+client uses), so the home-screen launcher resumes the paired session without
+re-pairing.
+
+### Web manifest requirements
+
+The web app needs a `manifest.json` (or `manifest.webmanifest`) declaring the
+home-screen install metadata:
+
+```json
+{
+  "name": "Prism",
+  "short_name": "Prism",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "/icons/prism-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/prism-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
+```
+
+`display: "standalone"` is what gives the home-screen launch its kiosk feel
+(no Safari chrome). `display: "fullscreen"` is also supported on iOS but hides
+the iOS status bar; `standalone` is the better default unless the app is
+explicitly designed to take over the whole screen.
+
+### Apple-specific meta tags
+
+Apple ignores parts of the standard manifest and reads its own legacy meta
+tags. The web shell's `<head>` should include both, so the manifest covers
+Android/Chromium browsers and the meta tags cover iOS Safari:
+
+```html
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Prism">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/prism-180.png">
+```
+
+- `apple-mobile-web-app-capable=yes` is the legacy switch that makes Safari
+  treat the site as a home-screen-installable app.
+- `apple-mobile-web-app-status-bar-style` controls the iOS status bar tint
+  when the PWA is launched from the home screen. `black-translucent` lets the
+  Prism background extend behind the status bar.
+- `apple-mobile-web-app-title` sets the home-screen icon label (otherwise iOS
+  uses the document `<title>`, which can be longer than ideal).
+- `apple-touch-icon` (`180x180` PNG, no transparency) is the icon iOS shows on
+  the home screen. Without it, iOS falls back to a screenshot of the page,
+  which looks unfinished.
+
+### License code in the PWA flow
+
+The license-code prompt for the PWA is rendered by the web shell during
+pairing, not by a native onboarding screen. Once accepted, the server stores
+the license entitlement against the paired client identity; subsequent
+home-screen launches re-use the stored entitlement.
+
+### What this replaces
+
+Compared to the deprecated native iOS client, the PWA approach gives up:
+
+- Bonjour/mDNS server discovery (browser sandbox can't do this; users enter
+  the server URL by hand or follow a deep link from Prism Server's setup
+  flow).
+- Native Local Network permission UX (irrelevant — the browser handles
+  network calls under its own permission model).
+- Face ID / Touch ID app lock (out of scope today; can be added later via
+  WebAuthn if needed).
+- Keychain-backed token storage (the server-side pairing cookie replaces
+  this).
+
+In return, it gains: zero App Store overhead, no TestFlight 90-day expiry,
+instant updates (the PWA loads whatever the server is serving), and one less
+native codebase to maintain.
+
+## Archived: Native iOS Client
+
+> Everything below this line describes the **deprecated** native iOS Xcode
+> project at `apps/ios-client/`. It is kept for archive only. The iPhone
+> shipping path is the PWA above. The native project may be deleted in a
+> future cleanup pass.
+
 Prism iOS is the iPhone-first hybrid client for Prism. It owns the native
 onboarding, pairing, Local Network posture, and secure device session, then
 opens the existing mobile-friendly Prism web interface in a `WKWebView`.

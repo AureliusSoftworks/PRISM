@@ -1,40 +1,83 @@
-name: Build Prism Client macOS (artifact only)
+name: Release Prism Client macOS App
 
-# Produces a Release build for QA; does not upload to GitHub Releases.
-# Retail distribution is via the App Store / TestFlight.
+# Builds, signs, notarizes, and uploads the Mac client DMG to the matching
+# client/v<version> GitHub Release. Mirrors the structure of
+# release-server-mac.yml. See docs/distribution-model.md and
+# docs/release-process.md for the surrounding pipeline.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Marketing version label for the artifact name (example: 0.1.0)"
+        description: "Shared release version without leading v (example: 0.2.0)"
         required: true
         type: string
+      force_clobber:
+        description: "Overwrite existing DMG asset on the release (only for intentional reruns)"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       version:
-        description: "Marketing version label for the artifact name (example: 0.1.0)"
+        description: "Shared release version without leading v (example: 0.2.0)"
         required: true
         type: string
+      force_clobber:
+        description: "Overwrite existing DMG asset on the release (only for intentional reruns)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: build-client-mac-${{ github.ref }}
+  group: release-client-mac-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Xcode Release build (unsigned ok)
+  build-sign-notarize:
+    name: Build signed Prism.app DMG
     runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      FORCE_CLOBBER: ${{ inputs.force_clobber }}
+      DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_NOTARYTOOL_APPLE_ID: ${{ secrets.APPLE_NOTARYTOOL_APPLE_ID }}
+      APPLE_NOTARYTOOL_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_NOTARYTOOL_APP_SPECIFIC_PASSWORD }}
+      APPLE_DEVELOPER_ID_CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+      APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
     steps:
-      - name: Enforce main-only client build lane
+      - name: Enforce main-only client release lane
         run: |
           if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
-            echo "Client mac CI build is allowed only from main."
+            echo "Prism Client release workflow is allowed only from main."
             exit 1
           fi
+
+      - name: Validate inputs and signing secrets
+        run: |
+          set -euo pipefail
+          if ! [[ "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must follow SemVer core format (example: 0.2.0)."
+            exit 1
+          fi
+          for name in \
+            DEVELOPER_ID_APPLICATION \
+            APPLE_TEAM_ID \
+            APPLE_NOTARYTOOL_APPLE_ID \
+            APPLE_NOTARYTOOL_APP_SPECIFIC_PASSWORD \
+            APPLE_DEVELOPER_ID_CERT_BASE64 \
+            APPLE_DEVELOPER_ID_CERT_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required secret: ${name}"
+              exit 1
+            fi
+          done
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,21 +85,81 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
 
-      - name: Build PrismClient (Release, no code signing)
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+          APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
         run: |
-          DERIVED="build/PrismClient-Derived"
+          set -euo pipefail
+          CERT_PATH="${RUNNER_TEMP}/developer-id.p12"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/prism-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          printf '%s' "${APPLE_DEVELOPER_ID_CERT_BASE64}" | base64 --decode > "${CERT_PATH}"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security import "${CERT_PATH}" -P "${APPLE_DEVELOPER_ID_CERT_PASSWORD}" -A -t cert -f pkcs12 -k "${KEYCHAIN_PATH}"
+          security list-keychain -d user -s "${KEYCHAIN_PATH}"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+      - name: Build PrismClient (Release, manual signing)
+        run: |
           xcodebuild \
             -project "apps/client-mac/PrismClient.xcodeproj" \
             -scheme PrismClient \
             -configuration Release \
-            -derivedDataPath "${DERIVED}" \
+            -derivedDataPath "apps/client-mac/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_IDENTITY="" \
             build
 
-      - name: Upload Prism.app artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: PrismClient-macOS-v${{ inputs.version }}
-          path: build/PrismClient-Derived/Build/Products/Release/Prism.app
-          retention-days: 60
+      - name: Document shipped entitlements (paper trail)
+        run: |
+          echo "::group::Prism.app entitlements"
+          codesign -d --entitlements - \
+            "apps/client-mac/DerivedData/Build/Products/Release/Prism.app" || true
+          echo "::endgroup::"
+
+      - name: Sign, notarize, and package DMG
+        run: |
+          apps/client-mac/scripts/sign-and-notarize.sh \
+            "apps/client-mac/DerivedData/Build/Products/Release/Prism.app" \
+            "${RELEASE_VERSION}"
+
+      - name: Verify Gatekeeper acceptance
+        run: |
+          set -euo pipefail
+          DMG="apps/client-mac/dist/Prism-v${RELEASE_VERSION}.dmg"
+          xcrun stapler validate "${DMG}"
+          spctl --assess --type open \
+            --context context:primary-signature \
+            --verbose=4 "${DMG}"
+
+      - name: Ensure client release exists
+        run: |
+          set -euo pipefail
+          gh release view "client/v${RELEASE_VERSION}" >/dev/null
+
+      - name: Check DMG asset is not already published
+        if: ${{ inputs.force_clobber != true }}
+        run: |
+          set -euo pipefail
+          ASSET="Prism-v${RELEASE_VERSION}.dmg"
+          existing="$(gh release view "client/v${RELEASE_VERSION}" --json assets \
+            --jq ".assets[] | select(.name == \"${ASSET}\") | .name" || true)"
+          if [ -n "${existing}" ]; then
+            echo "Asset ${ASSET} already exists on client/v${RELEASE_VERSION}."
+            echo "Re-run the workflow with force_clobber=true to overwrite."
+            exit 1
+          fi
+
+      - name: Upload Prism.app DMG
+        run: |
+          set -euo pipefail
+          UPLOAD_FLAGS=()
+          if [ "${FORCE_CLOBBER}" = "true" ]; then
+            UPLOAD_FLAGS+=(--clobber)
+          fi
+          gh release upload "client/v${RELEASE_VERSION}" \
+            "apps/client-mac/dist/Prism-v${RELEASE_VERSION}.dmg" \
+            "${UPLOAD_FLAGS[@]}"

@@ -34,6 +34,24 @@ Workflows: draft + bundle asset from **Release Pipeline (dev -> main)**; platfor
 builds from **Release Prism Server (all platforms)** (one run) or individual
 `release-server-*.yml` workflows. See [docs/release-process.md](docs/release-process.md).
 
+## Get Prism Client (paid)
+
+The **`client/v<version>`** GitHub Release is the paid client download lane.
+Today only the macOS client is wired up; Windows and Linux desktop clients
+are future scaffolds, and the iPhone experience is a PWA (no download — see
+[Prism on iPhone (PWA)](#prism-on-iphone-pwa) below).
+
+| Platform | File on the release | Notes |
+|----------|----------------------|-------|
+| macOS | `Prism-v<version>.dmg` | Developer ID signed and notarized; signing pipeline is a follow-up. |
+| iPhone | (none) | Add to Home Screen from Safari pointed at your Prism Server. |
+| Windows / Linux | (none yet) | Future scaffolds; see [docs/distribution-model.md](docs/distribution-model.md). |
+
+Pairing requires a **license code** issued through Patreon (subscription) or
+the one-time purchase store. See
+[docs/distribution-model.md](docs/distribution-model.md) for the full
+licensing model and per-platform delivery details.
+
 ### Local `dev` push guardrail (temporary)
 
 To reduce accidental branch damage without paid GitHub branch-protection
@@ -63,30 +81,50 @@ the SVGs (requires macOS `qlmanage` plus Python [Pillow](https://pypi.org/projec
 python3 scripts/render-app-icons.py
 ```
 
-## App Store Split Roadmap
+## Distribution Model
 
-Prism's planned Apple distribution model is a two-binary split:
+Prism is an indie product. Distribution is direct, not via app stores:
 
-- **Prism Server** — the open-source local runtime for Mac, Windows, or Linux,
-  distributed from GitHub Releases.
-- **Prism iOS/Mac** — the official paid native App Store client that discovers,
-  pairs with, and controls a user-owned Prism Server.
+- **Prism Server** — open-source local runtime for Mac, Windows, or Linux,
+  free download from GitHub Releases.
+- **Prism Client** — paid frontend, also distributed from GitHub Releases.
+  Today: macOS DMG (Developer ID signed and notarized). Future: Windows
+  installer + portable ZIP, Linux tarball.
+- **Prism on iPhone** — delivered as a Progressive Web App served by Prism
+  Server. Open the server URL in Safari and "Add to Home Screen" for a
+  springboard shortcut that launches in kiosk mode. **No App Store, no
+  TestFlight, no native iOS binary.**
 
-The existing web UI remains the reusable Prism interface, but the paid client
-owns native pairing, distribution, session storage, and app-shell presentation.
+Purchases happen through **Patreon** (monthly subscription, ongoing updates
+included) or a separate one-time purchase store (Gumroad / Lemonsqueezy /
+similar — choice deferred). Both paths issue a **license code**, which the
+client passes during pairing so the server can verify entitlement. One license
+code works on every platform the user owns — the same code activates the
+Mac DMG, the Windows client (when it exists), and the iPhone PWA.
 
-Planning docs:
+The licensing model is JetBrains-style: one-time purchase = current version
+on all platforms, perpetual personal use of that version; subscription =
+always-current on all platforms with ongoing updates; cancellation keeps the
+last entitled version.
 
-- [App Store distribution model](docs/app-store-distribution.md)
-- [Mobile API contract](docs/mobile-api-contract.md)
-- [Native client MVP](docs/native-client-mvp.md)
-- [App Store review checklist](docs/app-store-review.md)
-- [Licensing and brand model](docs/licensing-and-brand.md)
-- [Production readiness gate](docs/production-readiness-gate.md)
-- [Release process (dev -> main)](docs/release-process.md)
+Canonical reference: [Distribution model](docs/distribution-model.md).
+
+Planning and operator docs:
+
+- [Distribution model](docs/distribution-model.md) — positioning + licensing
+- [Release process (dev -> main)](docs/release-process.md) — operator runbook
 - [Prism Server.app build and release](docs/prism-server-app.md)
 - [Prism.app client build and pairing](docs/prism-client-app.md)
-- [Prism iOS client build and pairing](docs/prism-ios-client.md)
+- [Prism iPhone client (PWA + archived native)](docs/prism-ios-client.md)
+- [Mobile API contract](docs/mobile-api-contract.md)
+- [Licensing and brand model](docs/licensing-and-brand.md)
+- [Production readiness gate](docs/production-readiness-gate.md)
+
+Historical (App Store path, no longer the active plan):
+
+- [App Store distribution model](docs/app-store-distribution.md) — superseded by `distribution-model.md`
+- [App Store review checklist](docs/app-store-review.md) — retained for archive
+- [Native client MVP](docs/native-client-mvp.md) — original native iOS scope, now superseded by the PWA approach
 
 ## Prism Server.app (macOS)
 
@@ -171,13 +209,23 @@ The Debug build writes:
 apps/client-mac/DerivedData/Build/Products/Debug/Prism.app
 ```
 
-## Prism iOS Client
+## Prism on iPhone (PWA)
 
-Prism iOS is the iPhone-first hybrid client. It handles native pairing and
-Keychain-backed session storage, then opens the mobile-friendly Prism interface
-in a WebKit kiosk.
+The iPhone shipping path is a Progressive Web App served by Prism Server.
+Users open the server URL in **Safari**, complete the standard pairing flow
+(server URL + pairing code + license code), then tap **Share -> Add to Home
+Screen** to install a springboard launcher that opens Prism in a chromeless,
+kiosk-style window. No App Store. No TestFlight. No download. See
+[docs/prism-ios-client.md](docs/prism-ios-client.md) for the manifest and
+Apple-specific meta-tag setup the web shell needs.
 
-Local simulator build:
+### Archived: Native iOS Client (deprecated)
+
+The Xcode project at `apps/ios-client/` is **deprecated** under the indie
+distribution model and is no longer the iOS shipping path. It is retained for
+archive only; see the deprecation banner at the top of
+[docs/prism-ios-client.md](docs/prism-ios-client.md). The local simulator
+build still works if you need to inspect the archived native shell:
 
 ```bash
 xcodebuild \
@@ -189,7 +237,7 @@ xcodebuild \
   build
 ```
 
-Quick launch shortcuts:
+Quick launch shortcuts (still functional against the archived project):
 
 ```bash
 prism ios      # Simulator
