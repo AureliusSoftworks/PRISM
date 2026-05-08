@@ -200,6 +200,72 @@
   margin-top: 0;
 }
 
+.conversationHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conversationSpotlightButton {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid color-mix(in srgb, #62d68a 44%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 84%, #52c679 16%),
+      color-mix(in srgb, var(--bg) 88%, #43b667 12%)
+    );
+  color: color-mix(in srgb, #8af5ad 72%, var(--fg) 28%);
+  min-width: 34px;
+  height: 24px;
+  padding: 0 8px;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  border-radius: 9px;
+  font: inherit;
+  line-height: 0;
+  opacity: 0.94;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
+    0 1px 4px color-mix(in srgb, #49bf70 18%, transparent);
+  transition:
+    background 130ms ease-out,
+    color 130ms ease-out,
+    border-color 130ms ease-out,
+    box-shadow 130ms ease-out,
+    opacity 130ms ease-out,
+    transform 80ms ease-out;
+}
+
+.conversationSpotlightButtonGlyph :where(svg) {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.15;
+}
+
+.conversationSpotlightButton:hover,
+.conversationSpotlightButton:focus-visible {
+  color: color-mix(in srgb, #b5ffcc 92%, var(--fg) 8%);
+  border-color: color-mix(in srgb, #66db92 60%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 78%, #55cb7d 22%),
+      color-mix(in srgb, var(--bg) 82%, #49bf70 18%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent),
+    0 0 0 1px color-mix(in srgb, #66db92 28%, transparent),
+    0 4px 12px color-mix(in srgb, #49bf70 22%, transparent);
+  outline: none;
+}
+
+.conversationSpotlightButton:active {
+  transform: translateY(1px);
+}
+
 .conversationDeleteAllButton {
   appearance: none;
   -webkit-appearance: none;
@@ -237,6 +303,67 @@
   width: 14px;
   height: 14px;
   stroke-width: 2.15;
+}
+
+.conversationSweepButton {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid color-mix(in srgb, #ffc85e 46%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 84%, #f2bf4b 16%),
+      color-mix(in srgb, var(--bg) 88%, #efb535 12%)
+    );
+  color: color-mix(in srgb, #ffd77f 72%, var(--fg) 28%);
+  min-width: 34px;
+  height: 24px;
+  padding: 0 8px;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  border-radius: 9px;
+  font: inherit;
+  line-height: 0;
+  opacity: 0.94;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
+    0 1px 4px color-mix(in srgb, #f0bf45 18%, transparent);
+  transition:
+    color 130ms ease-out,
+    background 130ms ease-out,
+    border-color 130ms ease-out,
+    box-shadow 130ms ease-out,
+    opacity 130ms ease-out,
+    transform 80ms ease-out;
+}
+
+.conversationSweepButtonGlyph :where(svg) {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.15;
+}
+
+.conversationSweepButton:hover,
+.conversationSweepButton:focus-visible {
+  color: color-mix(in srgb, #ffd872 90%, var(--fg) 10%);
+  border-color: color-mix(in srgb, #f5c964 62%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 78%, #f2bf4b 22%),
+      color-mix(in srgb, var(--bg) 82%, #efb535 18%)
+    );
+  opacity: 1;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent),
+    0 0 0 1px color-mix(in srgb, #f5c964 30%, transparent),
+    0 4px 12px color-mix(in srgb, #f2bf4b 22%, transparent);
+  outline: none;
+}
+
+.conversationSweepButton:active {
+  transform: translateY(1px);
 }
 
 .conversationDeleteAllButton:hover,
@@ -1289,17 +1416,6 @@
   min-width: 0;
 }
 
-.chatHubBackHint {
-  width: 100%;
-  text-align: right;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  line-height: 1;
-  text-transform: uppercase;
-  opacity: 0.78;
-}
-
 .headerIdentity {
   --header-identity-color: var(--fg);
   display: inline-flex;
@@ -1312,8 +1428,15 @@
 .headerIdentityCopy {
   display: grid;
   align-content: center;
+  justify-items: start;
   gap: 2px;
   min-width: 0;
+  text-align: left;
+}
+
+.headerIdentityCopyCollapsed .headerIdentityName,
+.headerIdentityCopyCollapsed .headerIdentityBackToBots {
+  display: none;
 }
 
 .headerIdentityGlyph {
@@ -1385,50 +1508,17 @@
   color: var(--fg);
 }
 
-.headerIdentityHint {
-  max-width: min(28vw, 220px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+.headerIdentityBackToBots {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.075em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--fg-muted) 70%, var(--accent-ink) 30%);
-  opacity: 0.9;
-  animation: headerIdentityHintNudge 1800ms cubic-bezier(0.22, 1, 0.36, 1) 1 320ms;
-  transition: color 120ms ease-out, opacity 120ms ease-out;
-}
-
-.hubHomeButton:hover .headerIdentityHint,
-.hubHomeButton:focus-visible .headerIdentityHint {
-  color: color-mix(in srgb, var(--accent-ink) 82%, var(--fg) 18%);
-  opacity: 1;
-}
-
-@keyframes headerIdentityHintNudge {
-  0% {
-    opacity: 0.58;
-    transform: translateX(0);
-  }
-  36% {
-    opacity: 1;
-    transform: translateX(-4px);
-  }
-  70% {
-    transform: translateX(1px);
-  }
-  100% {
-    opacity: 0.9;
-    transform: translateX(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .headerIdentityHint {
-    animation: none;
-  }
+  line-height: 1.05;
+  color: color-mix(in srgb, var(--header-identity-color) 72%, var(--fg) 28%);
+  opacity: 0.92;
 }
 
 /* Mirror the auth/hub lockup in light mode: force every letter stroke
@@ -1491,6 +1581,11 @@
 .appLayout[data-chat-sidebar-hidden="true"] .message .markdownBody,
 .appLayout[data-chat-sidebar-hidden="true"] .chatSessionSummaryBubble {
   font-family: var(--font-chat-reading);
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messageUser p,
+.appLayout[data-chat-sidebar-hidden="true"] .messageUser .markdownBody {
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
 }
 
 /* Keep header identity/title non-serif in Chat Mode. */
@@ -2278,11 +2373,14 @@
 }
 
 .conversationGroupAccordionItem .conversationGroupTile {
-  cursor: grab;
+  cursor: pointer;
   touch-action: none;
 }
 
-.conversationGroupAccordionItem .conversationGroupTile:active,
+.conversationGroupAccordionItem .conversationGroupTile:active {
+  cursor: grabbing;
+}
+
 .conversationGroupAccordionItem[data-dragging="true"] .conversationGroupTile {
   cursor: grabbing;
 }
@@ -3085,6 +3183,56 @@
   }
 }
 
+.sweepUndoToast {
+  position: fixed;
+  left: 50%;
+  bottom: max(18px, calc(env(safe-area-inset-bottom) + 14px));
+  transform: translateX(-50%);
+  z-index: 1001;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(520px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #f3c55f 46%, var(--line));
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  box-shadow: var(--shadow-lg);
+}
+
+.sweepUndoToastCopy {
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.sweepUndoToastButton {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid color-mix(in srgb, #f0be52 60%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated) 80%, #f0be52 20%);
+  color: color-mix(in srgb, #ffe09a 72%, var(--fg) 28%);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
+.sweepUndoToastButton:hover,
+.sweepUndoToastButton:focus-visible {
+  color: color-mix(in srgb, #ffe09a 88%, var(--fg) 12%);
+  border-color: color-mix(in srgb, #f4ca72 70%, var(--line));
+  outline: none;
+}
+
+.sweepUndoToastButton:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
 /* Developer Tools: local-dev floating surface for stress testing bot density,
    sidebar seed chats, and viewport-sensitive picker stages. */
 .devToolsButton {
@@ -3487,6 +3635,30 @@
   cursor: not-allowed;
 }
 
+.devToolsTextarea {
+  width: 100%;
+  min-height: 104px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.devToolsTextarea:focus {
+  border-color: var(--line-strong);
+  outline: none;
+}
+
+.devToolsTextarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .devToolsQuantityRail {
   display: flex;
   gap: 6px;
@@ -3756,9 +3928,67 @@
     flex-basis 320ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+.chatHeaderModelPicker {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition:
+    max-width 320ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 200ms ease,
+    flex-basis 320ms cubic-bezier(0.32, 0.72, 0, 1),
+    margin 320ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.chatHeaderModelPicker.chatHeaderTitleCollapsed {
+  flex: 0 0 0;
+  max-width: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.chatHeaderModeToggle {
+  height: 30px;
+  flex-shrink: 0;
+}
+
+.chatHeaderModeToggle .modeToggleTrack {
+  height: 30px;
+}
+
+.chatHeaderModeToggle .modeThumb {
+  min-width: 72px;
+  height: 24px;
+}
+
+.chatHeaderModelPicker .composeModelControl {
+  width: auto;
+  max-width: min(9.5rem, 28vw);
+  height: 30px;
+  border-radius: 9px;
+}
+
+.chatHeaderModelPicker .composeModelTrigger {
+  justify-content: center;
+  width: auto;
+  padding-inline: 10px;
+}
+
+.chatHeaderModelPicker .composeControlLabel {
+  display: none;
+}
+
+.chatHeaderModelPicker .composeModelTriggerName {
+  max-width: min(11ch, 20vw);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chatHeaderTitle,
-  .chatHeaderTitlePlaceholder {
+  .chatHeaderTitlePlaceholder,
+  .chatHeaderModelPicker {
     transition: none;
   }
 }
@@ -4045,6 +4275,87 @@
     );
 }
 
+.messagesFrame[data-chat-focus="true"][data-replying-live="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 220px;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--bg-surface) 97%, transparent) 8%,
+    color-mix(in srgb, var(--bg-surface) 92%, transparent) 34%,
+    color-mix(in srgb, var(--bg-surface) 72%, transparent) 56%,
+    transparent 100%
+  );
+}
+
+.messagesFrameBotSwitchLoading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  background:
+    radial-gradient(
+      ellipse at 50% 24%,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      transparent 62%
+    ),
+    color-mix(in srgb, var(--bg-deep) 88%, #000 12%);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  pointer-events: none;
+  opacity: 1;
+  animation: messagesFrameBotSwitchFadeIn 180ms ease-out;
+}
+
+.messagesFrameBotSwitchLoading[data-phase="exit"] {
+  opacity: 0;
+  transition: opacity 180ms ease-out;
+}
+
+.messagesFrameBotSwitchLoading p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 84%, var(--fg-muted) 16%);
+}
+
+.messagesFrameBotSwitchSpinner {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--fg-muted) 48%, transparent);
+  border-top-color: color-mix(in srgb, var(--accent) 66%, #fff 34%);
+  animation: messagesFrameBotSwitchSpin 0.72s linear infinite;
+}
+
+@keyframes messagesFrameBotSwitchSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes messagesFrameBotSwitchFadeIn {
+  from {
+    opacity: 0.96;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .themeLight .messagesFrame {
   /* Light canvas: warm whites/tans for eye comfort. */
   background:
@@ -4226,6 +4537,7 @@
 .messages {
   overflow-y: auto;
   overflow-x: clip;
+  overscroll-behavior-y: none;
   /* Keep thread scrolling, but hide browser chrome so no floating rail cuts
      through the scene on desktop/mobile. */
   scrollbar-width: none;
@@ -4243,11 +4555,51 @@
   margin: 0 auto;
 }
 
+/* Sandbox layout: tighten the conversation measure so bot chats feel
+   denser and easier to scan without changing Chat mode's centered document
+   width (`data-chat-sidebar-hidden="true"` path). */
+.appLayout:not([data-chat-sidebar-hidden="true"]) .messages {
+  max-width: 720px;
+}
+
 .messages[data-chat-ephemeral="true"] {
   overflow-y: auto;
-  overscroll-behavior-y: contain;
+  overscroll-behavior-y: none;
   touch-action: pan-y;
-  padding-bottom: max(64px, 32dvh);
+  scroll-behavior: smooth;
+  padding-bottom: max(140px, calc(env(safe-area-inset-bottom) + 112px));
+}
+
+.messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+  /* Live replies need enough tail room for the actively typed line to sit
+     around mid-screen instead of being clamped above the input pill. */
+  padding-bottom: max(46dvh, calc(env(safe-area-inset-bottom) + 112px));
+  /* Per-frame scrollTop writes drive the live follow-scroll. Browser-level
+     smooth scrolling fights those tiny eases, so disable it during reply. */
+  scroll-behavior: auto;
+  /* Reading tunnel while live-replying:
+     - top fade: older lines dissolve as they cross the top edge
+     - bottom fade: latest lines dissolve before the floating reply pill */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.75) 58px,
+    #000 132px,
+    #000 calc(100% - 190px),
+    rgba(0, 0, 0, 0.7) calc(100% - 140px),
+    transparent calc(100% - 84px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.75) 58px,
+    #000 132px,
+    #000 calc(100% - 190px),
+    rgba(0, 0, 0, 0.7) calc(100% - 140px),
+    transparent calc(100% - 84px),
+    transparent 100%
+  );
 }
 
 .messagesFrame[data-chat-focus="true"] .messages[data-chat-ephemeral="true"] {
@@ -4257,7 +4609,7 @@
 
 /* Extra breathing room when AskQuestion chips dock over the thread. */
 .messages.messagesAskQuestionTailSpace {
-  padding-bottom: max(160px, 48dvh);
+  padding-bottom: max(240px, 58dvh);
   transition: padding-bottom 0.22s ease-out;
 }
 
@@ -4845,6 +5197,10 @@
   justify-items: stretch;
 }
 
+.emptyStateInfoBand[data-unfold="true"] {
+  animation: emptyStateInfoBandUnfold 340ms cubic-bezier(0.22, 0.82, 0.2, 1) both;
+}
+
 .emptyStateHint {
   font-size: 15px;
   font-weight: var(--font-weight-subtext, 600);
@@ -4852,6 +5208,12 @@
   max-width: 420px;
   line-height: 1.55;
   margin: 0;
+}
+
+.emptyStateHintLoading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .chatSessionSummaryBubble {
@@ -4911,6 +5273,11 @@
   pointer-events: auto;
   margin: 0;
   cursor: pointer;
+}
+
+.chatSummaryHeroInlineGlyph {
+  pointer-events: none;
+  cursor: default;
 }
 
 .chatSummaryHeroInlineButton:disabled {
@@ -5038,6 +5405,11 @@
   margin-top: 2px;
 }
 
+.emptyStateRecentRailWrap[data-unfold="true"] {
+  animation: emptyStateRecentRailUnfold 380ms cubic-bezier(0.22, 0.82, 0.2, 1) both;
+  animation-delay: 70ms;
+}
+
 .emptyStateRecentRailLabel {
   margin: 0;
   font-size: 11px;
@@ -5136,6 +5508,34 @@
 
 .emptyStateRecentChip:active {
   transform: translateY(1px);
+}
+
+@keyframes emptyStateInfoBandUnfold {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scaleY(0.94);
+    transform-origin: top center;
+    filter: blur(1.2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+    transform-origin: top center;
+    filter: blur(0);
+  }
+}
+
+@keyframes emptyStateRecentRailUnfold {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scaleY(0.96);
+    transform-origin: top center;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+    transform-origin: top center;
+  }
 }
 
 @media (min-width: 980px) {
@@ -6347,6 +6747,7 @@
 
 .message {
   --message-focus-progress: 1;
+  --message-dynamic-font-size: var(--font-size-message);
   display: grid;
   gap: 6px;
   max-width: 78%;
@@ -6361,10 +6762,16 @@
   max-width: 100%;
   margin-inline: auto;
   padding-inline: 0;
+  transition: opacity 180ms linear;
 }
 
 .messages[data-chat-ephemeral="true"] .message.messageChatManifesting {
   animation: chatMessageManifest 0.48s ease-out both;
+}
+
+.messages[data-chat-ephemeral="true"] .message.messageUserQuestionFadeIn {
+  opacity: 0;
+  animation: chatUserQuestionFadeIn 0.92s cubic-bezier(0.18, 0.72, 0.22, 1) both;
 }
 
 .messages[data-chat-ephemeral="true"] .message.messageChatDissolving {
@@ -6385,74 +6792,100 @@
 @keyframes chatMessageManifest {
   from {
     opacity: 0;
-    filter: blur(7px);
-    transform: translateY(5px) scale(0.988);
+    transform: none;
   }
   55% {
     opacity: 0.9;
-    filter: blur(1.4px);
   }
   to {
     opacity: 1;
-    filter: blur(0);
-    transform: translateY(0) scale(1);
+    transform: none;
+  }
+}
+
+@keyframes chatUserQuestionFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
 @keyframes chatMessageDissolve {
   from {
     opacity: 1;
-    filter: blur(0);
-    transform: translateY(0) scale(1);
+    transform: none;
   }
   to {
     opacity: 0;
-    filter: blur(6px);
-    transform: translateY(-8px) scale(0.992);
+    transform: none;
   }
 }
 
 @keyframes chatEphemeralLineManifest {
   from {
     opacity: 0;
-    filter: blur(4px);
-    transform: translateY(3px);
+    transform: none;
   }
   to {
     opacity: 1;
-    filter: blur(0);
-    transform: translateY(0);
+    transform: none;
   }
 }
 
 @keyframes chatEphemeralLineDissolve {
   from {
     opacity: 1;
-    filter: blur(0);
-    transform: translateY(0);
+    transform: none;
   }
   to {
     opacity: 0;
-    filter: blur(6px);
-    transform: translateY(-6px);
+    transform: none;
   }
 }
 
 @keyframes chatEphemeralWordIn {
   from {
     opacity: 0;
-    filter: blur(3px);
   }
   to {
     opacity: 1;
-    filter: blur(0);
   }
+}
+
+@keyframes chatEphemeralLetterIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes chatEphemeralRainbowShift {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .messages[data-chat-ephemeral="true"] .message.messageChatManifesting,
-  .messages[data-chat-ephemeral="true"] .message.messageChatDissolving {
+  .messages[data-chat-ephemeral="true"] .message.messageChatDissolving,
+  .messages[data-chat-ephemeral="true"] .message.messageUserQuestionFadeIn {
     animation-duration: 0.18s;
+  }
+
+  .chatEphemeralTypedLetter {
+    animation: none;
+    opacity: 1;
+    filter: none;
+  }
+
+  .chatEphemeralTypedWordRainbow {
+    animation: none;
+    background-position: 50% 50%;
   }
 
   @keyframes chatMessageManifest {
@@ -6463,6 +6896,11 @@
   @keyframes chatMessageDissolve {
     from { opacity: 1; }
     to { opacity: 0; }
+  }
+
+  @keyframes chatUserQuestionFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   @keyframes chatEphemeralLineManifest {
@@ -6476,6 +6914,11 @@
   }
 
   @keyframes chatEphemeralWordIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes chatEphemeralLetterIn {
     from { opacity: 0; }
     to { opacity: 1; }
   }
@@ -6513,6 +6956,46 @@
   padding: 0;
 }
 
+/* Keep an intentional scene break between the new prompt and any prior
+   session residue above it, so reply starts feel reset/clean. */
+.messages[data-chat-ephemeral="true"] .message[data-chat-latest-user-anchor="true"] {
+  margin-top: 0;
+}
+
+.chatArchiveLoadingIndicator {
+  justify-self: center;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  color: var(--fg-muted);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.chatArchiveLoadingSpinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--fg-muted) 44%, transparent);
+  border-top-color: color-mix(in srgb, var(--accent) 62%, #fff 38%);
+  animation: chatArchiveLoadingSpin 0.72s linear infinite;
+}
+
+@keyframes chatArchiveLoadingSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .messages[data-chat-ephemeral="true"] .messageAssistant::before,
 .messages[data-chat-ephemeral="true"] .messageAssistant::after {
   display: none;
@@ -6548,6 +7031,14 @@
   background: color-mix(in srgb, var(--accent) 30%, var(--fg) 70%);
 }
 
+.messageAssistant[data-fallback-model-used="true"]::before {
+  background: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, #f6b73c 82%, #ffffff 18%) 0 3px,
+    color-mix(in srgb, #283040 88%, #000000 12%) 3px 6px
+  );
+}
+
 .messageAssistant::after {
   content: "";
   position: absolute;
@@ -6580,6 +7071,15 @@
   );
 }
 
+.messageAssistant[data-fallback-model-used="true"]::after {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, #f6b73c 13%, transparent),
+    color-mix(in srgb, #283040 9%, transparent) 46%,
+    transparent
+  );
+}
+
 .messageUser {
   justify-self: end;
   align-self: flex-end;
@@ -6599,9 +7099,7 @@
 .messages[data-chat-ephemeral="true"] .message p,
 .messages[data-chat-ephemeral="true"] .message .markdownBody {
   color: color-mix(in srgb, var(--fg) 92%, transparent);
-  text-shadow:
-    0 0 0.35em color-mix(in srgb, var(--accent) 12%, transparent),
-    0 0 0.8em color-mix(in srgb, var(--accent) 7%, transparent);
+  text-shadow: none;
 }
 
 .messages[data-chat-ephemeral="true"] .messageUser h4 {
@@ -6622,6 +7120,66 @@
 .chatEphemeralLine {
   display: block;
   white-space: pre-wrap;
+  font-size: var(--chat-line-dynamic-font-size, inherit);
+}
+
+.chatEphemeralLineHeading1,
+.chatEphemeralLineHeading2,
+.chatEphemeralLineHeading3,
+.chatEphemeralLineHeading4,
+.chatEphemeralLineHeading5 {
+  line-height: 1.24;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.chatEphemeralLineHeading1 {
+  margin: 0.32em 0 0.18em;
+  font-size: clamp(1.58em, 1.14em + 1.18vw, 2.08em);
+  color: var(--message-heading-color-h1, currentColor);
+}
+
+.chatEphemeralLineHeading2 {
+  margin: 0.28em 0 0.14em;
+  font-size: clamp(1.34em, 1.06em + 0.86vw, 1.68em);
+  color: var(--message-heading-color-h2, currentColor);
+}
+
+.chatEphemeralLineHeading3 {
+  margin: 0.24em 0 0.12em;
+  font-size: clamp(1.18em, 1.02em + 0.58vw, 1.38em);
+  color: var(--message-heading-color-h3, currentColor);
+}
+
+.chatEphemeralLineHeading4 {
+  margin: 0.2em 0 0.1em;
+  font-size: clamp(1.08em, 0.98em + 0.4vw, 1.22em);
+  color: var(--message-heading-color-h4, currentColor);
+}
+
+.chatEphemeralLineHeading5 {
+  margin: 0.16em 0 0.08em;
+  font-size: clamp(1.02em, 0.95em + 0.26vw, 1.12em);
+  color: var(--message-heading-color-h5, currentColor);
+}
+
+.chatEphemeralLinePullQuote {
+  position: relative;
+  margin: 0.42em 0 0.2em;
+  padding: 0.32em 0.2em 0.32em 1.16em;
+  border-left: 4px solid color-mix(in srgb, currentColor 66%, transparent);
+  border-radius: 0 10px 10px 0;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.chatEphemeralLinePullQuote::before {
+  content: "|";
+  position: absolute;
+  left: 0.34em;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 700;
+  color: color-mix(in srgb, currentColor 78%, transparent);
 }
 
 .chatEphemeralTypedWord {
@@ -6630,8 +7188,46 @@
   animation: none;
 }
 
+.chatEphemeralTypedWordNoFade {
+  opacity: 1;
+  filter: none;
+}
+
+.chatEphemeralTypedWordItalic {
+  font-style: italic;
+}
+
+.chatEphemeralTypedWordBold {
+  font-weight: 700;
+}
+
+.chatEphemeralTypedWordRainbow {
+  /* Per-letter PRISM hues are applied inline from the renderer. */
+  color: inherit;
+}
+
+.chatEphemeralTypedWordQuote {
+  /* Make quoted passages feel citation-like without affecting layout. */
+  font-style: italic;
+  opacity: 0.92;
+}
+
+.chatEphemeralTypedLetter {
+  display: inline;
+  opacity: 0;
+  --char-step-ms: 14ms;
+  animation: chatEphemeralLetterIn 0.2s ease-out both;
+  animation-delay: calc(var(--char-index, 0) * var(--char-step-ms, 14ms));
+}
+
+.chatEphemeralTypedLetterNoFade {
+  opacity: 1;
+  animation: none;
+  filter: none;
+}
+
 .messages[data-chat-ephemeral="true"]
-  .chatEphemeralMarkdownBody[data-chat-phase="manifest"]
+  .chatEphemeralMarkdownBody[data-chat-phase="manifest"][data-message-role="assistant"]
   .chatEphemeralLine {
   animation: chatEphemeralLineManifest 0.34s ease-out both;
 }
@@ -6641,6 +7237,56 @@
   .chatEphemeralLine {
   animation: chatEphemeralLineDissolve 0.52s ease-in both;
   animation-delay: calc(var(--line-index, 0) * 140ms);
+}
+
+/* Markdown render path (chat mode): preserve authored Markdown/newlines while
+   keeping the same soft manifest/dissolve motion language. */
+.messages[data-chat-ephemeral="true"]
+  .chatEphemeralMarkdownBody[data-chat-render-kind="markdown"][data-chat-phase="manifest"][data-message-role="assistant"]
+  > * {
+  animation: chatEphemeralLineManifest 0.34s ease-out both;
+}
+
+.messages[data-chat-ephemeral="true"]
+  .chatEphemeralMarkdownBody[data-chat-render-kind="markdown"][data-chat-phase="manifest"][data-message-role="assistant"]
+  > *:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.messages[data-chat-ephemeral="true"]
+  .chatEphemeralMarkdownBody[data-chat-render-kind="markdown"][data-chat-phase="manifest"][data-message-role="assistant"]
+  > *:nth-child(3) {
+  animation-delay: 120ms;
+}
+
+.messages[data-chat-ephemeral="true"]
+  .chatEphemeralMarkdownBody[data-chat-render-kind="markdown"][data-chat-phase="manifest"][data-message-role="assistant"]
+  > *:nth-child(4) {
+  animation-delay: 160ms;
+}
+
+.messages[data-chat-ephemeral="true"]
+  .chatEphemeralMarkdownBody[data-chat-render-kind="markdown"][data-chat-phase="dissolving"]
+  > * {
+  animation: chatEphemeralLineDissolve 0.52s ease-in both;
+}
+
+.messages[data-chat-ephemeral="true"] .chatEphemeralMarkdownBody pre {
+  border-radius: 16px;
+  border-color: color-mix(in srgb, var(--fg) 14%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 90%, transparent),
+      color-mix(in srgb, var(--bg-deep) 88%, transparent)
+    );
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+.messages[data-chat-ephemeral="true"] .chatEphemeralMarkdownBody pre code {
+  font-size: 0.9em;
 }
 
 .messagesFrame[data-mode="private"] .messageUser {
@@ -6686,6 +7332,38 @@
   flex-shrink: 0;
 }
 
+.messageMoodAnchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.messageMoodTooltip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  transform: none;
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: calc(100vw - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 6;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  color: color-mix(in srgb, var(--fg) 92%, transparent);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 8px;
+  box-shadow:
+    var(--shadow-sm),
+    0 0 14px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
 .messageMoodFace {
   width: 18px;
   height: 18px;
@@ -6720,18 +7398,18 @@
 }
 
 @media (min-width: 800px) {
-  .messageAssistant h4 .messageMoodBadge {
+  .messageAssistant h4 .messageMoodBadge[data-placement="trailing"] {
     margin-left: auto;
     width: 34px;
     height: 34px;
   }
 
-  .messageAssistant h4 .messageMoodFace {
+  .messageAssistant h4 .messageMoodBadge[data-placement="trailing"] .messageMoodFace {
     width: 34px;
     height: 34px;
   }
 
-  .messageAssistant h4 .messageMoodFeature {
+  .messageAssistant h4 .messageMoodBadge[data-placement="trailing"] .messageMoodFeature {
     stroke-width: 1.9;
   }
 }
@@ -6770,9 +7448,14 @@
 }
 
 /* Private user bubbles invert the usual "You" label treatment by shifting
-   from accent-contrast text to the opposite neutral tone. */
+   from accent-contrast text to the theme-opposite neutral tone:
+   dark mode -> light text, light mode -> dark text. */
 .messageUser[data-private-user-role-header="true"] .messageRoleLabel {
-  color: color-mix(in srgb, var(--bg) 78%, var(--fg) 22%);
+  color: var(--fg);
+}
+
+.messageUser[data-private-user-role-header="true"] .providerDotHuman {
+  background: var(--fg);
 }
 
 /* Subtle "who generated this" tag shown next to the role label.
@@ -6829,7 +7512,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.55;
-  font-size: var(--font-size-message);
+  font-size: var(--message-dynamic-font-size, var(--font-size-message));
 }
 
 .markdownBody {
@@ -6837,7 +7520,7 @@
   gap: 0.65em;
   overflow-x: auto;
   word-break: break-word;
-  font-size: var(--font-size-message);
+  font-size: var(--message-dynamic-font-size, var(--font-size-message));
   line-height: 1.55;
 }
 
@@ -6853,6 +7536,42 @@
   white-space: normal;
 }
 
+.markdownBody h1,
+.markdownBody h2,
+.markdownBody h3,
+.markdownBody h4,
+.markdownBody h5 {
+  margin: 0.26em 0 0.08em;
+  line-height: 1.24;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.markdownBody h1 {
+  font-size: clamp(1.56em, 1.14em + 1.08vw, 2em);
+  color: var(--message-heading-color-h1, currentColor);
+}
+
+.markdownBody h2 {
+  font-size: clamp(1.32em, 1.04em + 0.8vw, 1.64em);
+  color: var(--message-heading-color-h2, currentColor);
+}
+
+.markdownBody h3 {
+  font-size: clamp(1.16em, 1.01em + 0.54vw, 1.34em);
+  color: var(--message-heading-color-h3, currentColor);
+}
+
+.markdownBody h4 {
+  font-size: clamp(1.08em, 0.98em + 0.36vw, 1.2em);
+  color: var(--message-heading-color-h4, currentColor);
+}
+
+.markdownBody h5 {
+  font-size: clamp(1.02em, 0.95em + 0.24vw, 1.1em);
+  color: var(--message-heading-color-h5, currentColor);
+}
+
 .markdownBody ul,
 .markdownBody ol {
   margin: 0;
@@ -6864,10 +7583,85 @@
 }
 
 .markdownBody blockquote {
-  margin: 0;
-  padding: 0.1em 0 0.1em 0.9em;
+  position: relative;
+  margin: 0.12em 0;
+  padding: 0.2em 0.46em 0.2em 1em;
   border-left: 3px solid color-mix(in srgb, currentColor 32%, transparent);
-  color: color-mix(in srgb, currentColor 82%, transparent);
+  border-radius: 0 7px 7px 0;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: color-mix(in srgb, currentColor 84%, transparent);
+  font-style: italic;
+}
+
+.markdownBody blockquote::before {
+  content: "\201C";
+  position: absolute;
+  left: 0.3em;
+  top: 0.08em;
+  font-size: 0.98em;
+  line-height: 1;
+  color: color-mix(in srgb, currentColor 48%, transparent);
+}
+
+.markdownBody blockquote[data-pull-quote="true"] {
+  margin: 0.34em 0;
+  padding: 0.5em 0.9em 0.5em 1.4em;
+  border-left-width: 4px;
+  border-left-color: color-mix(in srgb, currentColor 48%, transparent);
+  border-radius: 0 12px 12px 0;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: color-mix(in srgb, currentColor 92%, transparent);
+  font-size: 1.06em;
+  line-height: 1.58;
+  letter-spacing: 0.01em;
+}
+
+.markdownBody blockquote[data-pull-quote="true"]::before {
+  left: 0.36em;
+  top: 0.03em;
+  font-size: 1.12em;
+  color: color-mix(in srgb, currentColor 68%, transparent);
+}
+
+.markdownBody blockquote > :first-child {
+  margin-top: 0;
+}
+
+.markdownBody blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.markdownBody .markdownPullQuoteInline {
+  position: relative;
+  margin: 0.46em 0 0.2em;
+  padding: 0.32em 0.2em 0.32em 1.18em;
+  border-left: 4px solid color-mix(in srgb, currentColor 64%, transparent);
+  border-radius: 0 10px 10px 0;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: 1.07em;
+  line-height: 1.56;
+  color: color-mix(in srgb, currentColor 94%, transparent);
+}
+
+.markdownBody .markdownPullQuoteInline::before {
+  content: "|";
+  position: absolute;
+  left: 0.34em;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 700;
+  color: color-mix(in srgb, currentColor 76%, transparent);
+}
+
+.markdownBody .markdownPullQuoteInline strong:first-child {
+  font-weight: 760;
+  letter-spacing: 0.005em;
+  color: color-mix(in srgb, currentColor 98%, transparent);
+}
+
+.markdownBody .markdownPullQuoteInline em {
+  font-style: italic;
+  color: color-mix(in srgb, currentColor 90%, transparent);
 }
 
 .markdownBody code {
@@ -6875,8 +7669,10 @@
   border-radius: 6px;
   padding: 0.08em 0.32em;
   background: color-mix(in srgb, currentColor 10%, transparent);
-  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.92em;
+  font-family: var(--font-chat-reading, var(--font-chat-serif), Georgia, "Times New Roman", serif);
+  font-size: 0.94em;
+  font-weight: 100;
+  letter-spacing: 0.01em;
 }
 
 .markdownBody pre {
@@ -6899,6 +7695,119 @@
   padding: 0;
   background: transparent;
   white-space: pre;
+}
+
+.markdownBody pre.markdownCodeBlockWithCopy {
+  position: relative;
+  padding-top: 42px;
+}
+
+.markdownBody pre.markdownCodeBlockComposing {
+  min-height: calc(var(--code-total-lines, 1) * 1.5em + 3.2rem);
+  overflow: hidden;
+  max-height: 0;
+  animation: markdownCodeBlockExpandIn 220ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes markdownCodeBlockExpandIn {
+  from {
+    max-height: 0;
+    opacity: 0.9;
+  }
+  to {
+    max-height: calc(var(--code-total-lines, 1) * 1.5em + 3.2rem);
+    opacity: 1;
+  }
+}
+
+.markdownBody pre.markdownCodeBlock {
+  --code-lang-accent: color-mix(in srgb, var(--fg) 24%, transparent);
+  border-color: color-mix(in srgb, var(--code-lang-accent) 42%, var(--line));
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--code-lang-accent) 74%, transparent),
+    var(--shadow-sm);
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.markdownBody pre.markdownCodeBlock code {
+  font-family:
+    var(--font-geist-mono),
+    "SF Mono",
+    "SFMono-Regular",
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    ui-monospace,
+    monospace;
+  font-size: 13px !important;
+  line-height: 1.5;
+  font-weight: 420;
+  letter-spacing: 0.01em;
+  font-variant-ligatures: none;
+  text-rendering: geometricPrecision;
+  color: color-mix(in srgb, var(--code-lang-accent) 56%, var(--fg) 44%);
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+.markdownCodeLanguageBadge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  border: 1px solid color-mix(in srgb, var(--code-lang-accent) 42%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--code-lang-accent) 14%, var(--bg-surface) 86%);
+  color: color-mix(in srgb, var(--code-lang-accent) 74%, var(--fg) 26%);
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+  padding: 6px 9px;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.markdownCodeCopyButton {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: color-mix(in srgb, var(--fg) 86%, transparent);
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 7px 11px;
+  cursor: pointer;
+  transform: none !important;
+  filter: none !important;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: none;
+}
+
+.markdownCodeCopyButton:hover,
+.markdownCodeCopyButton:focus-visible {
+  border-color: color-mix(in srgb, var(--fg) 30%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  color: var(--fg);
+  box-shadow: none;
+  transform: none !important;
+  filter: none !important;
 }
 
 .markdownBody a {
@@ -6931,6 +7840,7 @@
   z-index: 850;
   border: 0;
   background: transparent;
+  pointer-events: none;
 }
 
 .messageContextBackdrop[data-msg-focus-overlay="true"] {
@@ -7054,6 +7964,12 @@
   opacity: 0;
 }
 
+/* Context-open state: let the mood tooltip escape the bubble bounds.
+   Default assistant bubbles keep overflow clipped for the accent edge. */
+.messageAssistant[data-msg-context-root="true"] {
+  overflow: visible;
+}
+
 .messageCopyToast {
   position: absolute;
   right: 10px;
@@ -7153,25 +8069,44 @@
 
 .typingIndicator {
   justify-self: start;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--typing-accent, var(--line)) 34%, var(--line));
+  border-radius: 12px;
+  background: linear-gradient(
+    130deg,
+    color-mix(in srgb, var(--typing-accent, var(--accent)) 8%, transparent),
+    color-mix(in srgb, var(--bg-surface) 92%, transparent)
+  );
   color: color-mix(
     in srgb,
-    var(--typing-accent, var(--fg-muted)) 52%,
-    var(--fg-muted)
+    var(--typing-accent, var(--fg)) 64%,
+    var(--fg)
   );
   font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 2px;
+  width: fit-content;
+  max-width: min(100%, 44rem);
+  box-shadow:
+    0 8px 22px color-mix(in srgb, #000000 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+  padding: 8px 12px;
+  cursor: default;
 }
 
 .typingIndicatorChatCenter {
   justify-self: center;
-  position: sticky;
-  top: 42%;
-  z-index: 4;
+  position: fixed;
+  left: 50%;
+  bottom: max(112px, 14dvh);
+  transform: translateX(-50%);
+  z-index: 14;
   width: fit-content;
-  margin: 0 auto;
+  margin: 0;
   padding: 9px 14px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--typing-accent, var(--line)) 36%, var(--line));
@@ -7185,6 +8120,117 @@
     0 10px 24px color-mix(in srgb, #000000 22%, transparent),
     inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
   backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+/* Denial fallback is likely in-flight: keep text stable, but add a distinct
+   checkerboard border so the processing state is visible at a glance. */
+.typingIndicatorFallbackProcessing {
+  position: relative;
+  border-color: transparent;
+  isolation: isolate;
+}
+
+.typingIndicatorFallbackProcessing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, #f6b73c 80%, #ffffff 20%) 0 6px,
+    color-mix(in srgb, #283040 86%, #000000 14%) 6px 12px
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+/* Keep the floating cancel pill perfectly anchored on hover/press/focus.
+   Some broader button hover rules can apply transforms; lock this one. */
+.typingIndicatorChatCenter:hover,
+.typingIndicatorChatCenter:active,
+.typingIndicatorChatCenter:focus-visible {
+  transform: translateX(-50%) !important;
+}
+
+.typingIndicatorStopButton {
+  cursor: pointer;
+  border: 0;
+  text-align: left;
+  font: inherit;
+}
+
+.typingIndicatorStopButton:hover {
+  box-shadow:
+    0 14px 28px color-mix(in srgb, #000000 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
+}
+
+.typingIndicatorStopButton:active {
+  box-shadow:
+    0 8px 18px color-mix(in srgb, #000000 20%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+}
+
+.typingIndicatorStopButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--typing-accent, var(--accent)) 66%, #ffffff 34%);
+  outline-offset: 2px;
+}
+
+/* While text is actively revealing, make the pill feel "alive" with a
+   gently spinning PRISM edge + soft pulse. */
+.typingIndicatorChatCenter.typingIndicatorReplyingLive {
+  position: fixed;
+  isolation: isolate;
+  border-color: transparent;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--typing-accent, var(--accent)) 12%, transparent),
+    color-mix(in srgb, var(--bg-surface) 84%, transparent)
+  );
+  box-shadow:
+    0 12px 28px color-mix(in srgb, #000000 24%, transparent),
+    0 0 0 1px color-mix(in srgb, #ffffff 12%, transparent) inset,
+    0 0 28px color-mix(in srgb, #2fd3e3 22%, transparent),
+    0 0 34px color-mix(in srgb, #7b5cff 18%, transparent);
+  animation:
+    typingPrismBreath 1.7s ease-in-out infinite,
+    typingPrismAura 2.2s ease-in-out infinite;
+}
+
+.typingIndicatorChatCenter.typingIndicatorReplyingLive::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    #ff4d6d,
+    #ff9f1c 18%,
+    #b7e63a 36%,
+    #2fd3e3 56%,
+    #7b5cff 78%,
+    #ff4d6d
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.typingIndicatorReplyingLive .typingDots span {
+  animation-duration: 0.95s;
 }
 
 .devChatDebugStream {
@@ -7287,43 +8333,30 @@
   }
 }
 
-.chatEmotionStrip {
-  width: 100%;
-  max-width: 860px;
-  margin: 10px auto 0;
-  padding: 8px 12px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent) 8%, transparent),
-      color-mix(in srgb, var(--bg-surface) 78%, transparent)
-    );
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+@keyframes typingPrismBreath {
+  0%, 100% {
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    transform: translateX(-50%) scale(1.015);
+  }
 }
 
-.chatEmotionStripMood {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: color-mix(in srgb, var(--fg) 90%, transparent);
-}
-
-.chatEmotionStripMoodText {
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.chatEmotionStripCaption {
-  font-size: 10px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--fg-muted) 86%, transparent);
+@keyframes typingPrismAura {
+  0%, 100% {
+    box-shadow:
+      0 10px 22px color-mix(in srgb, #000000 22%, transparent),
+      0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent) inset,
+      0 0 20px color-mix(in srgb, #2fd3e3 14%, transparent),
+      0 0 24px color-mix(in srgb, #7b5cff 12%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 14px 30px color-mix(in srgb, #000000 26%, transparent),
+      0 0 0 1px color-mix(in srgb, #ffffff 14%, transparent) inset,
+      0 0 32px color-mix(in srgb, #2fd3e3 26%, transparent),
+      0 0 40px color-mix(in srgb, #7b5cff 22%, transparent);
+  }
 }
 
 .compose {
@@ -7349,6 +8382,63 @@
   border-top-color: transparent;
   background: transparent;
   box-shadow: none;
+  padding: 4px 20px 6px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .composeTools {
+  margin-bottom: 4px;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .markdownComposerSurface {
+  padding: 6px 8px 6px 6px;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .markdownComposerInputRow textarea {
+  min-height: 52px;
+  padding: 10px 12px;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .chatPane {
+  grid-template-rows: minmax(0, 1fr);
+  position: relative;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .chatHeader {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame {
+  height: 100dvh;
+  min-height: 100dvh;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"] {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  padding-top: 76px;
+  padding-bottom: 104px;
+}
+
+/* While the bot is streaming, give the messages pane enough tail padding
+   that locking scrollTop to its bottom parks the most-recent typing line
+   around the middle of the screen instead of pinned just above the pill. */
+.appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+  padding-bottom: max(32dvh, 104px);
+  scroll-behavior: auto;
 }
 
 .appLayout[data-private-active="true"] .compose {
@@ -7444,13 +8534,136 @@
 
 .composeTools > .composeBotControl .composeBotTrigger,
 .composeTools > .composeModelControl .composeModelTrigger {
-  justify-content: center;
   width: 100%;
   box-sizing: border-box;
 }
 
+.composeTools > .composeBotControl .composeBotTrigger {
+  justify-content: center;
+}
+
+.composeTools > .composeModelControl .composeModelTrigger {
+  justify-content: flex-start;
+}
+
 .composeTools > .modeControl {
   flex: 0 0 auto;
+}
+
+.chatComposerRow {
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.chatComposerStack {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.chatComposerRow > .composeEditorShell {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chatComposerInlineToggle {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+/* Keep chat inline toggle stable after tap; don't show the larger ambient
+   focus halo that reads like a random border artifact. */
+.chatComposerInlineToggle:focus-within {
+  box-shadow: none;
+  border-color: var(--line);
+}
+
+.debugComposerBox {
+  width: 100%;
+  border: 1px dashed color-mix(in srgb, var(--danger) 72%, var(--line));
+  border-radius: 12px;
+  background:
+    radial-gradient(
+      circle at 12% 22%,
+      color-mix(in srgb, var(--danger) 14%, transparent),
+      transparent 56%
+    ),
+    color-mix(in srgb, var(--bg-surface) 90%, var(--danger-soft) 10%);
+  padding: 8px 10px;
+}
+
+.debugComposerLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--danger) 76%, var(--fg));
+  margin-bottom: 7px;
+}
+
+.debugComposerRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.debugComposerRow textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 42px;
+  max-height: 132px;
+  resize: vertical;
+  border: 1px solid color-mix(in srgb, var(--danger) 44%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 82%, var(--danger-soft) 18%);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 10px;
+}
+
+.debugComposerRow textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--danger) 64%, var(--line-strong));
+}
+
+.debugComposerRow button {
+  flex: 0 0 auto;
+  height: 36px;
+  border: 1px solid color-mix(in srgb, var(--danger) 52%, var(--line));
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger-soft) 34%, var(--bg-elevated)),
+      color-mix(in srgb, var(--danger-soft) 18%, var(--bg))
+    );
+  color: color-mix(in srgb, var(--danger) 82%, var(--fg));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.debugComposerRow button:hover:not(:disabled),
+.debugComposerRow button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--danger) 68%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger-soft) 46%, var(--bg-elevated)),
+      color-mix(in srgb, var(--danger-soft) 24%, var(--bg))
+    );
+}
+
+.debugComposerRow button:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
 }
 
 .companionComposeHint {
@@ -7527,8 +8740,8 @@
   z-index: -1;
   pointer-events: none;
   /* Readability layer: blur extends well above chips for heading + nearby text. */
-  backdrop-filter: blur(24px) saturate(130%);
-  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  backdrop-filter: blur(20px) saturate(130%);
+  -webkit-backdrop-filter: blur(20px) saturate(130%);
   background: linear-gradient(
     to top,
     rgba(0, 0, 0, 0.95) 0%,
@@ -8039,7 +9252,7 @@
   flex: 1 1 0;
   flex-wrap: nowrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: clamp(2px, 1.5vw, 6px);
   min-width: 0;
   box-sizing: border-box;
@@ -8349,10 +9562,32 @@
 }
 
 .markdownRichEditorHost :global(.tiptap blockquote) {
-  margin: 0.35em 0;
-  padding: 0.15em 0 0.15em 0.85em;
-  border-left: 3px solid color-mix(in srgb, var(--accent) 42%, var(--line) 58%);
-  color: color-mix(in srgb, var(--fg) 88%, var(--fg-muted) 12%);
+  position: relative;
+  margin: 0.38em 0;
+  padding: 0.34em 0.7em 0.34em 1.2em;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 48%, var(--line) 52%);
+  border-radius: 0 9px 9px 0;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: color-mix(in srgb, var(--fg) 90%, var(--fg-muted) 10%);
+  font-style: italic;
+}
+
+.markdownRichEditorHost :global(.tiptap blockquote)::before {
+  content: "\201C";
+  position: absolute;
+  left: 0.32em;
+  top: 0.08em;
+  font-size: 1.02em;
+  line-height: 1;
+  color: color-mix(in srgb, var(--accent) 62%, var(--line) 38%);
+}
+
+.markdownRichEditorHost :global(.tiptap blockquote > :first-child) {
+  margin-top: 0;
+}
+
+.markdownRichEditorHost :global(.tiptap blockquote > :last-child) {
+  margin-bottom: 0;
 }
 
 .markdownRichEditorHost :global(.tiptap code) {
@@ -8574,6 +9809,7 @@
   appearance: none;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   min-width: 0;
   height: 100%;
@@ -8611,6 +9847,7 @@
   align-items: center;
   color: var(--fg-subtle);
   flex-shrink: 0;
+  margin-left: auto;
   transition: transform 0.18s ease;
 }
 
@@ -9259,6 +10496,13 @@
 
 .modeControl:focus-within {
   box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+/* Chat composer variant: suppress the larger focus halo that reads like an
+   accidental "selected border" after toggling. */
+.modeControl.chatComposerInlineToggle:focus-within {
+  box-shadow: none;
+  border-color: var(--line);
 }
 
 .modeControl:hover {
@@ -11993,6 +13237,12 @@
   filter: drop-shadow(0 1px 1px color-mix(in srgb, var(--bg) 72%, transparent));
 }
 
+/* Match the hero's Prism triangle footprint ratio (30 inside 56). */
+.memoryBotPrismTriangle {
+  width: calc(100% * 37 / 56);
+  height: auto;
+}
+
 .themeDark .memoryBotGlyph :where(svg) {
   color: #111111;
   stroke: #111111;
@@ -14645,6 +15895,7 @@
   height: 15px;
   flex-shrink: 0;
   stroke-width: 1.65;
+  color: inherit;
   transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
@@ -14714,7 +15965,7 @@
    (Memories first, Delete last) while the ergonomically-dangerous Delete
    settles in last. */
 .chatHeaderActionsAccordion {
-  --accordion-max-width: 540px;
+  --accordion-max-width: min(920px, calc(100vw - 180px));
   --accordion-duration: 320ms;
   --accordion-easing: cubic-bezier(0.32, 0.72, 0, 1);
   position: absolute;
@@ -14769,9 +16020,9 @@
 .chatHeaderAction {
   appearance: none;
   -webkit-appearance: none;
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 42%, var(--bg-surface) 58%);
   color: var(--accent-ink);
-  border: 1px solid color-mix(in srgb, var(--accent-ink) 72%, var(--line-strong));
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 62%, var(--line-strong));
   border-radius: 999px;
   height: 30px;
   padding: 0 14px;
@@ -14818,57 +16069,39 @@
   -webkit-text-fill-color: currentColor;
 }
 
-.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(1) {
-  background: color-mix(in srgb, var(--accent) 100%, transparent);
-  color: #050505;
+.chatHeaderActionsRow > .chatHeaderAction {
+  background: color-mix(
+    in srgb,
+    var(--accent) var(--accordion-accent-strength, 42%),
+    var(--bg-surface) var(--accordion-surface-strength, 58%)
+  );
+  color: color-mix(
+    in srgb,
+    #000000 var(--accordion-text-black-strength, 66%),
+    var(--accent-ink) var(--accordion-text-accent-strength, 34%)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--accent-ink) var(--accordion-border-accent-strength, 58%),
+    var(--line-strong) var(--accordion-border-line-strength, 42%)
+  );
 }
 
-.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(2) {
-  background: color-mix(in srgb, var(--accent) 75%, transparent);
-  color: #050505;
+.chatHeaderActionsRow > .chatHeaderAction:first-of-type {
+  color: #000000;
 }
 
-.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(2) .chatHeaderActionText {
-  opacity: 1;
-}
-
-.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(3) {
-  background: color-mix(in srgb, var(--accent) 50%, transparent);
-  color: #050505;
-}
-
-.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(3) .chatHeaderActionText {
-  opacity: 1;
-}
-
-.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(4) {
-  background: color-mix(in srgb, var(--accent) 25%, transparent);
-}
-
-.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(4) .chatHeaderActionText {
-  opacity: 1;
-}
-
-.chatHeaderActionsRow > .chatHeaderAction:nth-of-type(5) {
+.chatHeaderActionsRow > .chatHeaderAction:last-of-type {
   background: transparent;
+  border-color: color-mix(in srgb, var(--accent-ink) 56%, var(--line-strong));
+  color: color-mix(in srgb, var(--accent-ink) 88%, var(--fg) 12%);
 }
 
 .themeLight .chatHeaderAction {
-  color: color-mix(in srgb, var(--accent-ink) 72%, var(--fg) 28%);
-  border-color: color-mix(in srgb, var(--accent-ink) 58%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent) 34%, #ffffff 66%);
+  color: color-mix(in srgb, var(--accent-ink) 82%, var(--fg) 18%);
+  border-color: color-mix(in srgb, var(--accent-ink) 54%, var(--line-strong));
   text-shadow: 0 1px 1px color-mix(in srgb, var(--bg-surface) 72%, transparent);
-}
-
-.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(1),
-.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(2),
-.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(3) {
-  color: #050505;
-}
-
-.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(4),
-.themeLight .chatHeaderActionsRow > .chatHeaderAction:nth-of-type(5) {
-  color: color-mix(in srgb, var(--accent-ink) 78%, #17130f 22%);
-  border-color: color-mix(in srgb, var(--accent-ink) 66%, var(--line-strong));
 }
 
 /* Reduced-motion: skip the accordion slide + per-button stagger so the panel
@@ -14890,6 +16123,12 @@
 .chatHeaderAction:focus-visible:not(:disabled) {
   outline: none;
   transform: translateY(-1px);
+  background: color-mix(
+    in srgb,
+    var(--accent) var(--accordion-hover-accent-strength, 56%),
+    var(--bg-surface) var(--accordion-hover-surface-strength, 44%)
+  );
+  border-color: color-mix(in srgb, var(--accent-ink) 72%, var(--line-strong));
 }
 
 .chatHeaderAction[data-memory-learned="true"],
@@ -14915,14 +16154,29 @@
 }
 
 .chatHeaderActionDanger {
-  border-color: var(--danger);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 22%, var(--bg-surface) 78%);
+  border-color: color-mix(in srgb, var(--danger) 66%, var(--line-strong));
+  color: color-mix(in srgb, var(--danger) 84%, var(--fg) 16%);
 }
 
 .chatHeaderActionDanger:hover:not(:disabled),
 .chatHeaderActionDanger:focus-visible:not(:disabled) {
-  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 30%, var(--bg-surface) 70%);
+  border-color: color-mix(in srgb, var(--danger) 78%, var(--line-strong));
   transform: translateY(-1px);
+}
+
+.chatHeaderActionsRow > .chatHeaderAction.chatHeaderActionDanger:last-of-type {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent-ink) 56%, var(--line-strong));
+  color: color-mix(in srgb, var(--accent-ink) 88%, var(--fg) 12%);
+}
+
+.chatHeaderActionsRow > .chatHeaderAction.chatHeaderActionDanger:last-of-type:hover:not(:disabled),
+.chatHeaderActionsRow > .chatHeaderAction.chatHeaderActionDanger:last-of-type:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-ink) 68%, var(--line-strong));
+  color: color-mix(in srgb, var(--accent-ink) 94%, var(--fg) 6%);
 }
 
 .chatGearButton {
@@ -14934,7 +16188,7 @@
   margin: 0 !important;
   border: 0 !important;
   background: transparent !important;
-  color: var(--fg-muted);
+  color: var(--accent-ink);
   border-radius: 999px !important;
   box-shadow: none !important;
   display: inline-grid;
@@ -14946,7 +16200,7 @@
 }
 
 .chatGearButton:hover {
-  color: var(--fg);
+  color: color-mix(in srgb, var(--accent-ink) 88%, var(--fg) 12%);
   background: transparent !important;
   border-color: transparent !important;
 }
@@ -14957,7 +16211,7 @@
 
 /* Open state — wrench reads as the live toggle owning the accordion. */
 .chatGearButton[aria-expanded="true"] {
-  color: var(--fg);
+  color: color-mix(in srgb, var(--accent-ink) 88%, var(--fg) 12%);
 }
 
 .chatGearButton[aria-expanded="true"] .chatGearGlyph {
@@ -14969,9 +16223,61 @@
   height: 18px;
 }
 
+.chatHeaderActions .themeToggleButton .themeToggleGlyph,
 .chatGearAnchor .themeToggleButton .themeToggleGlyph {
   width: 18px;
   height: 18px;
+}
+
+/* Keep toolbar icon sizing consistent: gear, theme, and home all share
+   the same visual footprint in desktop + mobile tool clusters. */
+.chatHeaderActions .headerIconButton .headerIconGlyph,
+.chatGearAnchor .headerIconButton .headerIconGlyph {
+  width: 18px;
+  height: 18px;
+}
+
+/* Keep the header theme glyph readable in light mode using the same
+   accent-ink treatment as the wrench button. */
+.themeLight .chatHeaderActions .themeToggleButton,
+.themeLight .chatGearAnchor .themeToggleButton {
+  color: var(--accent-ink);
+}
+
+.themeLight .chatHeaderActions .headerIconButton,
+.themeLight .chatGearAnchor .headerIconButton {
+  color: var(--accent-ink);
+}
+
+.themeLight .chatHeaderActions .themeToggleButton:hover:not(:disabled),
+.themeLight .chatGearAnchor .themeToggleButton:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--accent-ink) 88%, var(--fg) 12%);
+}
+
+.themeLight .chatHeaderActions .headerIconButton:hover:not(:disabled),
+.themeLight .chatGearAnchor .headerIconButton:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--accent-ink) 88%, var(--fg) 12%);
+}
+
+/* Dark mode parity with wrench icon treatment. */
+.themeDark .chatHeaderActions .themeToggleButton,
+.themeDark .chatGearAnchor .themeToggleButton {
+  color: var(--accent-ink);
+}
+
+.themeDark .chatHeaderActions .headerIconButton,
+.themeDark .chatGearAnchor .headerIconButton {
+  color: var(--accent-ink);
+}
+
+.themeDark .chatHeaderActions .themeToggleButton:hover:not(:disabled),
+.themeDark .chatGearAnchor .themeToggleButton:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--accent-ink) 88%, var(--fg) 12%);
+}
+
+.themeDark .chatHeaderActions .headerIconButton:hover:not(:disabled),
+.themeDark .chatGearAnchor .headerIconButton:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--accent-ink) 88%, var(--fg) 12%);
 }
 
 .chatOverflowMenu {
@@ -15453,15 +16759,7 @@
     max-width: min(36vw, 200px);
   }
 
-  .chatHeader .headerIdentityHint {
-    max-width: min(36vw, 200px);
-  }
-
   .chatHeader .chatHubWordmarkStack {
-    max-width: min(48vw, 230px);
-  }
-
-  .chatHeader .chatHubBackHint {
     max-width: min(48vw, 230px);
   }
 
@@ -15491,6 +16789,14 @@
     padding: 18px var(--chat-inline-gutter);
     /* Reduce scroll-anchoring feedback loops with the collapsing header + threshold logic. */
     overflow-anchor: none;
+  }
+
+  .messages[data-chat-ephemeral="true"] {
+    padding-bottom: max(140px, calc(env(safe-area-inset-bottom) + 112px));
+  }
+
+  .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+    padding-bottom: max(46dvh, calc(env(safe-area-inset-bottom) + 112px));
   }
 
   /* Empty-state should read as a broad hero lane on phone; don't inherit the

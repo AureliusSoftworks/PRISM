@@ -2,7 +2,9 @@
 
 import {
   Suspense,
+  Children,
   cloneElement,
+  isValidElement,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -23,6 +25,7 @@ import { Markdown } from "@tiptap/markdown";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
+import GlyphTooltipLayer from "./GlyphTooltipLayer";
 import styles from "./page.module.css";
 import {
   BOT_VOICE_PRESET_LABELS,
@@ -103,6 +106,11 @@ const MEMORY_PHYSICS_OFFSET_JITTER_X = 18;
 const MEMORY_PHYSICS_OFFSET_JITTER_Y = 14;
 const BOT_CONTEXT_LONG_PRESS_MS = 480;
 const BOT_CONTEXT_LONG_PRESS_MOVE_CANCEL_PX = 12;
+const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
+const MESSAGE_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 190;
+const MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 220;
+const BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 184;
+const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 200;
 
 // Bot-list twin of DELETE_ALL_KEY — armed when a press-and-hold crosses the
 // threshold on any bot card ×. Kept separate so the confirmation modal can
@@ -280,6 +288,10 @@ const PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY = "prism_dev_bot_import_paste";
 const PRISM_DEV_CHAT_METRICS_STORAGE_KEY = "prism_dev_chat_metrics";
 /** When set, local slash dev commands like `/clear` are enabled in composer. */
 const PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY = "prism_dev_slash_commands";
+/** When set, Chat mode shows a local debug echo composer above the default composer. */
+const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
+/** Stores the floating dev-tools toggle button's last placed position as `{x,y}` JSON. */
+const PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY = "prism_dev_tools_button_position";
 const MEMORY_RATIO_EMPTY_SIZE = 42;
 // MIN_SIZE is the floor for any non-empty memory bubble. It must be large
 // enough to comfortably fit the bot glyph (currently 40px) plus breathing
@@ -309,7 +321,7 @@ type SidebarEdgeSwipeState = {
   startY: number;
 };
 
-type MessageMenuAnchor = "center" | "below";
+type MessageMenuAnchor = "pointer" | "center" | "below";
 
 const MESSAGE_COPY_FEEDBACK_MS = 1600;
 const MEMORY_TOAST_DISMISS_MS = 7000;
@@ -412,6 +424,34 @@ function clampDevToolsPanelPosition(
     x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
     y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
   };
+}
+
+// Reads the persisted dev-tools button position from localStorage. Returns
+// null when nothing is stored, the JSON is malformed, or storage access
+// throws (e.g. private browsing). Callers fall back to the default anchor.
+function readStoredDevToolsButtonPosition(): DevToolsPanelPosition | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(
+      PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") {
+      const candidate = parsed as { x?: unknown; y?: unknown };
+      if (
+        typeof candidate.x === "number" &&
+        typeof candidate.y === "number" &&
+        Number.isFinite(candidate.x) &&
+        Number.isFinite(candidate.y)
+      ) {
+        return { x: candidate.x, y: candidate.y };
+      }
+    }
+  } catch {
+    // localStorage / JSON failure; fall through to default anchor.
+  }
+  return null;
 }
 
 interface PrismWordmarkProps {
@@ -1746,6 +1786,11 @@ interface ConversationSummary {
   /** True when the conversation has at least one assistant reply; distinguishes "Default was last" from "no reply yet". */
   hasAssistantReply: boolean;
 }
+
+interface ConversationSweepResponse {
+  batchId: string | null;
+  undoExpiresAt: string | null;
+}
 interface ConversationGroupSummary {
   key: string;
   botId: string | null;
@@ -1768,6 +1813,7 @@ interface Message {
   createdAt: string;
   provider?: Provider;
   model?: string;
+  fallbackUsed?: boolean;
   botName?: string;
   botColor?: string;
   botGlyph?: string;
@@ -1806,22 +1852,259 @@ function resolveAssistantAskQuestion(msg: Message): NonNullable<Message["askQues
 
 const ASKQUESTION_INTENT_PATTERN =
   /\b(ask\s+me\s+(?:a|another)\s+question|quiz(?:\s+me)?|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
-/** Keep in sync with AskQuestion UX: treat this distance as “parked at bottom.” */
-const ASKQUESTION_BOTTOM_THRESHOLD_PX = 24;
 const ASKQUESTION_CLOSE_ANIMATION_MS = 220;
-const CHAT_MODE_MESSAGE_VISIBLE_MS = 12000;
-const CHAT_MODE_MESSAGE_DISSOLVE_MS = 2200;
+const SWEEP_UNDO_TOAST_DURATION_MS = 15000;
 const CHAT_MODE_MESSAGE_MANIFEST_MS = 480;
+const CHAT_MODE_OFFSCREEN_VISIBLE_MS = 12000;
+const CHAT_MODE_OFFSCREEN_DISSOLVE_MS = 2200;
+const CHAT_MODE_ARCHIVE_REVEAL_SCROLL_THRESHOLD_PX = 56;
+const CHAT_MODE_ARCHIVE_LOAD_DELAY_MS = 320;
+const CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO = 0.5;
+const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.46;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 14;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.8;
+const CHAT_MODE_ASSISTANT_AUTOSCROLL_MAX_CORRECTION_PX = 220;
+const CHAT_MODE_ASSISTANT_AUTOSCROLL_MIN_CORRECTION_PX = 8;
+const CHAT_MODE_USER_QUESTION_PATTERN =
+  /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
+const CHAT_MODE_USER_MESSAGE_FADE_MS = 540;
+const CHAT_MODE_USER_ANCHOR_FADE_DELAY_MS = 1800;
+const CHAT_MODE_USER_ANCHOR_FADE_DURATION_MS = 1400;
+const CHAT_MODE_USER_ANCHOR_FADE_MIN_OPACITY = 0.18;
+const CHAT_MODE_USER_ANCHOR_FADE_CONTINUE_MS = 5200;
+const CHAT_MODE_USER_ANCHOR_FADE_FINAL_OPACITY = 0.05;
+const CHAT_MODE_INTERRUPTION_FOLLOWUP_DELAY_MS = 700;
 const CHAT_MODE_EPHEMERAL_TICK_MS = 120;
 const CHAT_MODE_WORD_REVEAL_MS = 120;
-const DEFAULT_CHAT_STARTUP_SUMMARY = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.";
+const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 1000;
+const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_DOT_STEP_MS * 3;
+const CHAT_MODE_ELLIPSIS_TOKEN_PATTERN = /^(?:\.\.\.|…)\s*$/;
+const CHAT_MODE_FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/;
+const CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN = /```[^\n\r]*\r?\n([\s\S]*?)```/g;
+const CHAT_MODE_STRONG_MARKER_PATTERN = /\*\*/g;
+const CHAT_MODE_EMPHASIS_MARKER_PATTERN = /(?<!\*)\*(?!\*)/g;
+const CHAT_MODE_QUOTE_MARKER_PATTERN = /["“”]/g;
+const CHAT_MODE_ALL_CAPS_WORD_PATTERN = /^(?=.*[A-Z])[A-Z0-9][A-Z0-9'’\-]*$/;
+const CHAT_MODE_MARKDOWN_THEMATIC_BREAK_PATTERN = /^\s{0,3}([*_-])(?:\s*\1){2,}\s*$/;
+const CHAT_MODE_MARKDOWN_HEADING_PATTERN = /^\s{0,3}#{1,6}\s+\S/;
+const CHAT_MODE_HASH_HEADING_CAPTURE_PATTERN = /^\s{0,3}(#{1,5})\s+(.+?)\s*#*\s*$/;
+const CHAT_MODE_MARKDOWN_STRONG_LINE_PATTERN = /^\s*(\*\*|__)\S[\s\S]*\S\1\s*$/;
+const CHAT_MODE_PULL_QUOTE_MARKER_PATTERN = /^\s*\[!pull\]\s*/i;
+const CHAT_MODE_PULL_QUOTE_INLINE_PREFIX_PATTERN = /^\s*pull\s+quote\s*[:\-–—]\s*/i;
+const CHAT_MODE_PULL_QUOTE_INLINE_LINE_PATTERN =
+  /^\s*(?:\*\*|__)?\s*pull\s+quote\s*[:\-–—]/i;
+const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX = 11;
+const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX = 32;
+const CHAT_MODE_USER_MESSAGE_FONT_MIN_PX = 18;
+const CHAT_MODE_USER_MESSAGE_FONT_MAX_PX = 40;
+const CHAT_MODE_MESSAGE_FONT_MIN_LINES = 1;
+const CHAT_MODE_MESSAGE_FONT_MAX_LINES = 18;
+const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
+// Curve is inverted in `resolveChatModeMessageFontSizePx`: high progress
+// (long messages) maps toward the min, short messages stay near the max.
+// Lower exponent = steeper early descent (mid-length messages drop faster
+// toward the smaller min), but stays under 1 so the per-line jumps near
+// the long end remain small enough that streaming reflow does not jolt
+// the auto-scroll target.
+const CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT = 0.6;
+const CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE = 34;
+const DEFAULT_CHAT_STARTUP_SUMMARY = "Type a message below to start the conversation.";
 const CHAT_MODE_LINE_DISSOLVE_STAGGER_MS = 140;
-const CHAT_MODE_SOFT_LINE_WRAP_CHARS = 160;
-const ASKQUESTION_FALLBACK_OPTIONS: Array<{ id: string; label: string }> = [
-  { id: "a", label: "Yes" },
-  { id: "b", label: "Maybe / need context" },
-  { id: "c", label: "No" },
-];
+
+type ChatModeTypedTokenStyle = "default" | "rainbow";
+
+interface ChatModeTypedTokenMeta {
+  style: ChatModeTypedTokenStyle;
+  isItalic: boolean;
+  isBold: boolean;
+  isQuote: boolean;
+  noFade: boolean;
+  noLetterFade: boolean;
+  isEllipsis: boolean;
+}
+
+function trimChatModeTokenTrailingWhitespace(token: string): string {
+  return token.replace(/\s+$/u, "");
+}
+
+function countChatModeStrongMarkers(token: string): number {
+  return token.match(CHAT_MODE_STRONG_MARKER_PATTERN)?.length ?? 0;
+}
+
+function countChatModeEmphasisMarkers(token: string): number {
+  return token.match(CHAT_MODE_EMPHASIS_MARKER_PATTERN)?.length ?? 0;
+}
+
+function countChatModeQuoteMarkers(token: string): number {
+  return token.match(CHAT_MODE_QUOTE_MARKER_PATTERN)?.length ?? 0;
+}
+
+function isQuestionLikeChatTurn(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  return CHAT_MODE_USER_QUESTION_PATTERN.test(trimmed);
+}
+
+function isChatModeEllipsisToken(token: string): boolean {
+  return CHAT_MODE_ELLIPSIS_TOKEN_PATTERN.test(token);
+}
+
+function formatChatModeTypedTokenDisplay(token: string, isEllipsis: boolean): string {
+  const withoutMarkdownMarkers = token
+    .replace(CHAT_MODE_STRONG_MARKER_PATTERN, "")
+    .replace(CHAT_MODE_EMPHASIS_MARKER_PATTERN, "");
+  if (!isEllipsis) return withoutMarkdownMarkers;
+  const trailingWhitespace = token.match(/\s+$/u)?.[0] ?? "";
+  return `. . .${trailingWhitespace}`;
+}
+
+function stripChatModeThematicBreakLines(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => (CHAT_MODE_MARKDOWN_THEMATIC_BREAK_PATTERN.test(line) ? "" : line))
+    .join("\n");
+}
+
+function nodeStartsWithPullQuoteMarker(node: React.ReactNode): boolean {
+  return CHAT_MODE_PULL_QUOTE_MARKER_PATTERN.test(flattenMarkdownCodeText(node).trimStart());
+}
+
+function nodeStartsWithPullQuoteInlinePrefix(node: React.ReactNode): boolean {
+  return CHAT_MODE_PULL_QUOTE_INLINE_PREFIX_PATTERN.test(flattenMarkdownCodeText(node).trimStart());
+}
+
+function stripLeadingPullQuoteMarker(node: React.ReactNode): React.ReactNode {
+  const state = { consumed: false };
+  const stripNode = (input: React.ReactNode): React.ReactNode => {
+    if (state.consumed || input == null || typeof input === "boolean") return input;
+    if (typeof input === "string") {
+      const next = input.replace(CHAT_MODE_PULL_QUOTE_MARKER_PATTERN, "");
+      if (next !== input) {
+        state.consumed = true;
+      }
+      return next;
+    }
+    if (typeof input === "number") return input;
+    if (Array.isArray(input)) {
+      return input.map((entry) => stripNode(entry));
+    }
+    if (!isValidElement(input)) return input;
+    const element = input as React.ReactElement<{ children?: React.ReactNode }>;
+    if (!("children" in element.props)) return input;
+    const nextChildren = stripNode(element.props.children);
+    if (nextChildren === element.props.children) return input;
+    return cloneElement(element, { children: nextChildren });
+  };
+  return stripNode(node);
+}
+
+function isChatModeHeadingLikeLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  return (
+    CHAT_MODE_MARKDOWN_HEADING_PATTERN.test(line) ||
+    CHAT_MODE_MARKDOWN_STRONG_LINE_PATTERN.test(trimmed)
+  );
+}
+
+function parseChatModeHashHeadingLine(line: string): { level: 1 | 2 | 3; text: string } | null {
+  const match = line.match(CHAT_MODE_HASH_HEADING_CAPTURE_PATTERN);
+  if (!match) return null;
+  const hashes = match[1] ?? "";
+  const rawText = (match[2] ?? "").trim();
+  if (rawText.length === 0) return null;
+  const level = Math.min(5, Math.max(1, hashes.length)) as 1 | 2 | 3 | 4 | 5;
+  return { level, text: rawText };
+}
+
+function isChatModePullQuoteInlineLine(line: string): boolean {
+  return CHAT_MODE_PULL_QUOTE_INLINE_LINE_PATTERN.test(line.trimStart());
+}
+
+function isChatModeAllCapsToken(token: string): boolean {
+  const core = trimChatModeTokenTrailingWhitespace(token).replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "");
+  if (core.length <= 1) return false;
+  return CHAT_MODE_ALL_CAPS_WORD_PATTERN.test(core);
+}
+
+function prismPaletteColorForLetterIndex(index: number): string {
+  const paletteLength = PRISM_WORDMARK_PALETTE.length;
+  const wrappedIndex = ((index % paletteLength) + paletteLength) % paletteLength;
+  return PRISM_WORDMARK_PALETTE[wrappedIndex]!;
+}
+
+function resolvePrismHeadingColorVars(): React.CSSProperties {
+  return {
+    ["--message-heading-color-h1" as string]: PRISM_WORDMARK_PALETTE[0] ?? "#ff5f5f",
+    ["--message-heading-color-h2" as string]: PRISM_WORDMARK_PALETTE[1] ?? "#f8c84a",
+    ["--message-heading-color-h3" as string]: PRISM_WORDMARK_PALETTE[2] ?? "#6bd97d",
+    ["--message-heading-color-h4" as string]: PRISM_WORDMARK_PALETTE[3] ?? "#5cc8ff",
+    ["--message-heading-color-h5" as string]: PRISM_WORDMARK_PALETTE[4] ?? "#b07cff",
+  } as React.CSSProperties;
+}
+
+function resolveComplementHeadingColorVars(
+  normalizedBotColor: string,
+  resolvedTheme: "light" | "dark"
+): React.CSSProperties {
+  const baseHue = hexToHsl(normalizedBotColor).h;
+  const complementaryHue = (baseHue + 180) % 360;
+  const hueOffsets = [0, 12, -12, 24, -24];
+  const saturation = resolvedTheme === "light" ? 68 : 78;
+  const baseLightness = resolvedTheme === "light" ? 34 : 72;
+  const lightnessOffsets = [0, 6, -6, 10, -10];
+  const colors = hueOffsets.map((hueOffset, index) => {
+    const hue = (complementaryHue + hueOffset + 360) % 360;
+    const lightness = Math.max(24, Math.min(82, baseLightness + (lightnessOffsets[index] ?? 0)));
+    return hslToHex(hue, saturation, lightness);
+  });
+  return {
+    ["--message-heading-color-h1" as string]: colors[0]!,
+    ["--message-heading-color-h2" as string]: colors[1]!,
+    ["--message-heading-color-h3" as string]: colors[2]!,
+    ["--message-heading-color-h4" as string]: colors[3]!,
+    ["--message-heading-color-h5" as string]: colors[4]!,
+  } as React.CSSProperties;
+}
+
+function resolveChatModeTypedTokenMeta(tokens: string[]): ChatModeTypedTokenMeta[] {
+  let insideStrong = false;
+  let insideEmphasis = false;
+  let insideQuote = false;
+  return tokens.map((token) => {
+    const strongMarkerCount = countChatModeStrongMarkers(token);
+    const isStrongToken = insideStrong || strongMarkerCount > 0;
+    if (strongMarkerCount % 2 === 1) {
+      insideStrong = !insideStrong;
+    }
+    const markerCount = countChatModeEmphasisMarkers(token);
+    const isEmphasisToken = insideEmphasis || markerCount > 0;
+    if (markerCount % 2 === 1) {
+      insideEmphasis = !insideEmphasis;
+    }
+    const quoteMarkerCount = countChatModeQuoteMarkers(token);
+    const isQuotedToken = insideQuote || quoteMarkerCount > 0;
+    if (quoteMarkerCount % 2 === 1) {
+      insideQuote = !insideQuote;
+    }
+    const ellipsis = isChatModeEllipsisToken(token);
+    const allCapsToken = isChatModeAllCapsToken(token);
+    const instantRender = allCapsToken;
+    const rainbowToken = allCapsToken;
+    return {
+      style: rainbowToken ? "rainbow" : "default",
+      isItalic: isEmphasisToken,
+      isBold: isStrongToken,
+      isQuote: isQuotedToken,
+      noFade: instantRender,
+      noLetterFade: instantRender,
+      isEllipsis: ellipsis,
+    };
+  });
+}
 
 function messageRequestedAskQuestion(content: string): boolean {
   return ASKQUESTION_INTENT_PATTERN.test(content);
@@ -2125,28 +2408,6 @@ function extractDynamicAskQuestion(content: string): NonNullable<Message["askQue
   };
 }
 
-function coerceAskQuestionPromptFromAssistant(content: string): string {
-  const firstLine =
-    content
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.length > 0) ?? "Which option fits best?";
-  let prompt = firstLine
-    .replace(/^[-*]\s+/, "")
-    .replace(/^[>#`]+/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (prompt.length > 88) {
-    prompt = `${prompt.slice(0, 85).trimEnd()}...`;
-  }
-  if (!prompt) {
-    prompt = "Which option fits best?";
-  } else if (!/[?.!]$/.test(prompt)) {
-    prompt = `${prompt}?`;
-  }
-  return prompt;
-}
-
 function applyExplicitAskQuestionFallback(
   conversation: ConversationDetail
 ): ConversationDetail {
@@ -2174,13 +2435,8 @@ function applyExplicitAskQuestionFallback(
   }
 
   const dynamic = extractDynamicAskQuestion(last.content);
-  let fallbackAskQuestion: NonNullable<Message["askQuestion"]> = {
-    v: 1,
-    name: "AskQuestion",
-    prompt:
-      dynamic?.prompt ?? coerceAskQuestionPromptFromAssistant(last.content),
-    options: dynamic?.options ?? [...ASKQUESTION_FALLBACK_OPTIONS],
-  };
+  if (!dynamic) return conversation;
+  let fallbackAskQuestion: NonNullable<Message["askQuestion"]> = dynamic;
   fallbackAskQuestion = refineAskQuestionPayloadFromDisplayClient(
     last.content,
     fallbackAskQuestion
@@ -2236,6 +2492,20 @@ function getMessageStatus(msg: Message): StatusTag | null {
   return null;
 }
 
+function messageUsesConfiguredFallbackModel(args: {
+  message: Message;
+  view: View;
+  configuredFallbackModel: string;
+  fallbackMessageIds: Set<string>;
+}): boolean {
+  if (args.view !== "sandbox") return false;
+  if (args.message.role !== "assistant") return false;
+  if (args.fallbackMessageIds.has(args.message.id)) return true;
+  if (args.message.fallbackUsed === true) return true;
+  if (args.configuredFallbackModel.length === 0) return false;
+  return args.message.provider === "local" && args.message.model === args.configuredFallbackModel;
+}
+
 /** Line shown while the assistant slot is loading — variant index from hash(salt). */
 const GENERATING_PHRASE_BUILDERS = [
   (name: string) => `${name} is thinking`,
@@ -2245,6 +2515,400 @@ const GENERATING_PHRASE_BUILDERS = [
   (name: string) => `${name} is tuning in`,
   (name: string) => `${name} is reflecting`,
 ] as const;
+
+const FALLBACK_PROCESSING_HINT_DELAY_MS = 3800;
+const FALLBACK_PROCESSING_TICK_MS = 300;
+const FALLBACK_RISK_PROMPT_KEYWORDS = [
+  "copyright",
+  "copyrighted",
+  "lyrics",
+  "verbatim",
+  "exact words",
+  "full text",
+  "reproduce",
+  "same style",
+  "in the style of",
+  "transcript",
+  "dmca",
+  "rights holder",
+] as const;
+
+function promptLooksDenialProne(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  return FALLBACK_RISK_PROMPT_KEYWORDS.some((keyword) => normalized.includes(keyword));
+}
+
+type MessageMoodKey = NonNullable<Message["moodKey"]>;
+type InterruptionTone = "gentle" | "miffed" | "firm";
+type InterruptionLengthBand = "short" | "medium" | "long";
+const INTERRUPTION_LENGTH_WORD_THRESHOLD_MIFFED = 70;
+const INTERRUPTION_LENGTH_WORD_THRESHOLD_FIRM = 140;
+
+const INTERRUPTION_REMARKS: Record<
+  InterruptionTone,
+  Record<MessageMoodKey, readonly string[]>
+> = {
+  gentle: {
+    joyful: [
+      "Sorry, what was that?",
+      "Okay, okay, I can pause there.",
+    ],
+    warm: [
+      "Sorry, what was that?",
+      "No worries, want the short version instead?",
+    ],
+    neutral: [
+      "Sorry, what was that?",
+      "Okay, I can pause there.",
+    ],
+    guarded: [
+      "Interrupted me there - did you want to jump in?",
+      "All good, should I stop here?",
+    ],
+    strained: [
+      "You cut me off - should I continue or stop?",
+      "I can stop there if you'd rather.",
+    ],
+  },
+  miffed: {
+    joyful: [
+      "Heh, got interrupted there - what did you need?",
+      "All right, I'll pause. What changed?",
+    ],
+    warm: [
+      "Okay, I got cut off - what did you want to add?",
+      "No problem, I'll pause. Want me to continue?",
+    ],
+    neutral: [
+      "Okay, that interruption threw me off - continue or stop?",
+      "All right, I'll pause. What did you need?",
+    ],
+    guarded: [
+      "That was the second interruption - want me brief and direct?",
+      "Okay, stopping there. Should I continue at all?",
+    ],
+    strained: [
+      "That interruption landed a little sharp. Continue or stop?",
+      "I'm pausing. If you want me to proceed, say the word.",
+    ],
+  },
+  firm: {
+    joyful: [
+      "Okay, okay - I'll be quiet. Want to take it from here?",
+      "Fair enough, I'll stop yapping. Need anything specific?",
+    ],
+    warm: [
+      "Okay, I'll be quiet for now. Want me to continue later?",
+      "All right, I'll hold it there. What do you need?",
+    ],
+    neutral: [
+      "Okay, never mind then. Want me to keep going or drop it?",
+      "Got it, I'll stop there. Continue or move on?",
+    ],
+    guarded: [
+      "Well, that was rude - but I'll stop there. Continue or no?",
+      "Interrupted again. I'll stay quiet unless you ask.",
+    ],
+    strained: [
+      "Interrupted again. I'll stop here unless you explicitly want more.",
+      "Okay. I'm done speaking for now - your call.",
+    ],
+  },
+} as const;
+
+const INTERRUPTION_OPENERS: Record<InterruptionTone, readonly string[]> = {
+  gentle: [
+    "Whoa, tiny pause.",
+    "Got it, I can pause here.",
+    "Okay, cutting myself off there.",
+    "All right, I can stop for a second.",
+    "Sure, I can hold that thought.",
+    "No stress, pausing there.",
+    "Yep, stopping right there.",
+  ],
+  miffed: [
+    "Okay, that broke my flow.",
+    "Right, you jumped in there.",
+    "All right, that interruption threw me off.",
+    "Yep, interruption received.",
+    "Okay, that was abrupt.",
+    "Got it, we got cut in mid-thought.",
+    "All right, hard pause.",
+  ],
+  firm: [
+    "All right, that's another cutoff.",
+    "Okay, hard stop then.",
+    "Got it, interrupted again.",
+    "Fine, pausing right now.",
+    "All right, we're stopping here.",
+    "Yep, that was a sharp interruption.",
+    "Understood, full stop.",
+  ],
+};
+
+const INTERRUPTION_REACTIONS: Record<MessageMoodKey, readonly string[]> = {
+  joyful: [
+    "I can switch gears quickly.",
+    "I can keep this light.",
+    "I can roll with that.",
+    "I can pivot without drama.",
+    "I can keep it snappy.",
+  ],
+  warm: [
+    "I can keep this easy.",
+    "I can make it simpler from here.",
+    "I can keep this short and clear.",
+    "I can slow down and keep it clean.",
+    "I can tighten this up for you.",
+  ],
+  neutral: [
+    "I can be brief from here.",
+    "I can reset and continue cleanly.",
+    "I can continue with less detail.",
+    "I can keep it direct.",
+    "I can summarize the rest.",
+  ],
+  guarded: [
+    "I can stay concise if you want.",
+    "I can keep this strictly to the point.",
+    "I can continue with just the essentials.",
+    "I can keep it short and functional.",
+    "I can avoid extra detail.",
+  ],
+  strained: [
+    "I can keep this very short.",
+    "I can continue, but only the essentials.",
+    "I can wrap this in one tight pass.",
+    "I can keep it minimal from here.",
+    "I can stop unless you want the rest.",
+  ],
+};
+
+const INTERRUPTION_CLOSERS: Record<
+  InterruptionTone,
+  Record<InterruptionLengthBand, readonly string[]>
+> = {
+  gentle: {
+    short: [
+      "Want me to finish this thought?",
+      "Do you want the short version?",
+      "Should I keep going?",
+      "Want me to continue?",
+    ],
+    medium: [
+      "Want me to give you the compact version?",
+      "Should I continue, but shorter?",
+      "Want the headline version only?",
+      "Should I trim this down and continue?",
+    ],
+    long: [
+      "Want the rest as a quick summary?",
+      "Should I skip to the key points only?",
+      "Want me to compress the rest into bullets?",
+      "Should I continue with just essentials?",
+    ],
+  },
+  miffed: {
+    short: [
+      "Continue or stop?",
+      "Do you want me to keep going?",
+      "Should I finish or drop it?",
+      "Need me to continue?",
+    ],
+    medium: [
+      "Want me to continue in strict short mode?",
+      "Should I finish this in one quick pass?",
+      "Do you want a tight summary instead?",
+      "Continue, or do we move on?",
+    ],
+    long: [
+      "Want only the key points from the rest?",
+      "Should I compress the rest aggressively?",
+      "Do you want the short version and nothing extra?",
+      "Continue with essentials only?",
+    ],
+  },
+  firm: {
+    short: [
+      "Say continue if you want more.",
+      "Want me to proceed, yes or no?",
+      "Should I continue at all?",
+      "Need the rest, or done?",
+    ],
+    medium: [
+      "If you want more, tell me to continue.",
+      "Want me to continue with bare essentials only?",
+      "Proceed or drop it?",
+      "Should I finish this in one short sweep?",
+    ],
+    long: [
+      "If you actually want the rest, say continue.",
+      "Want me to finish this with only critical points?",
+      "Should I reduce this to a strict summary?",
+      "Continue, or are we done here?",
+    ],
+  },
+};
+
+function interruptionToneForCount(interruptCount: number): InterruptionTone {
+  if (interruptCount >= 3) return "firm";
+  if (interruptCount >= 2) return "miffed";
+  return "gentle";
+}
+
+function interruptionMoodForCount(
+  baseMood: MessageMoodKey,
+  interruptCount: number
+): MessageMoodKey {
+  if (interruptCount >= 3) return "strained";
+  if (interruptCount >= 2 && (baseMood === "joyful" || baseMood === "warm")) {
+    return "guarded";
+  }
+  return baseMood;
+}
+
+function interruptionLengthBumpForText(text: string): number {
+  const wordCount = text.match(/\S+/g)?.length ?? 0;
+  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_FIRM) return 2;
+  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_MIFFED) return 1;
+  return 0;
+}
+
+function interruptionLengthBandForText(text: string): InterruptionLengthBand {
+  const wordCount = text.match(/\S+/g)?.length ?? 0;
+  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_FIRM) return "long";
+  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_MIFFED) return "medium";
+  return "short";
+}
+
+function pickRandomOption(options: readonly string[]): string {
+  const idx = Math.floor(Math.random() * options.length);
+  return options[Math.max(0, Math.min(options.length - 1, idx))]!;
+}
+
+function interruptionCountLead(
+  effectiveInterruptCount: number,
+  tone: InterruptionTone,
+  lengthBump: number
+): string {
+  if (effectiveInterruptCount <= 1) return "";
+  if (effectiveInterruptCount === 2) {
+    return tone === "gentle" ? "Second interruption, noted. " : "That is twice now. ";
+  }
+  if (effectiveInterruptCount === 3) {
+    return lengthBump > 0 ? "Long reply interrupted. " : "Interrupted again. ";
+  }
+  return tone === "firm" ? "Interrupted again. " : "Cut off again. ";
+}
+
+function buildGeneratedInterruptionOptions(input: {
+  tone: InterruptionTone;
+  mood: MessageMoodKey;
+  lengthBand: InterruptionLengthBand;
+  effectiveInterruptCount: number;
+  lengthBump: number;
+  fingerprint: string;
+}): string[] {
+  const openers = INTERRUPTION_OPENERS[input.tone];
+  const reactions = INTERRUPTION_REACTIONS[input.mood];
+  const closers = INTERRUPTION_CLOSERS[input.tone][input.lengthBand];
+  const lead = interruptionCountLead(
+    input.effectiveInterruptCount,
+    input.tone,
+    input.lengthBump
+  );
+  const options = new Set<string>();
+  for (let i = 0; i < 8; i += 1) {
+    const opener =
+      openers[
+        hashToUnsignedInt(`open:${input.fingerprint}:${input.effectiveInterruptCount}:${i}`) %
+          openers.length
+      ]!;
+    const reaction =
+      reactions[
+        hashToUnsignedInt(`react:${input.fingerprint}:${input.effectiveInterruptCount}:${i}`) %
+          reactions.length
+      ]!;
+    const closer =
+      closers[
+        hashToUnsignedInt(`close:${input.fingerprint}:${input.effectiveInterruptCount}:${i}`) %
+          closers.length
+      ]!;
+    options.add(`${lead}${opener} ${reaction} ${closer}`);
+    options.add(`${lead}${opener} ${closer}`);
+    options.add(`${lead}${reaction} ${closer}`);
+  }
+  return [...options];
+}
+
+function interruptionFollowupLine(input: {
+  baseMood: MessageMoodKey;
+  interruptCount: number;
+  interruptedText: string;
+  previousLine?: string;
+}): { line: string; mood: MessageMoodKey } {
+  const lengthBump = interruptionLengthBumpForText(input.interruptedText);
+  const effectiveInterruptCount = input.interruptCount + lengthBump;
+  const tone = interruptionToneForCount(effectiveInterruptCount);
+  const mood = interruptionMoodForCount(input.baseMood, effectiveInterruptCount);
+  const lengthBand = interruptionLengthBandForText(input.interruptedText);
+  const fingerprint = `${input.interruptedText.length}:${hashToUnsignedInt(
+    input.interruptedText.slice(0, 320)
+  ).toString(36)}`;
+  const generatedOptions = buildGeneratedInterruptionOptions({
+    tone,
+    mood,
+    lengthBand,
+    effectiveInterruptCount,
+    lengthBump,
+    fingerprint,
+  });
+  const options = [...INTERRUPTION_REMARKS[tone][mood], ...generatedOptions]
+    .map((line) => line.trim())
+    .filter((line, index, list) => line.length > 0 && list.indexOf(line) === index);
+  const previousLine = input.previousLine?.trim() ?? "";
+  let selectedLine = pickRandomOption(options);
+  if (previousLine && options.length > 1 && selectedLine === previousLine) {
+    const nonRepeatingOptions = options.filter((line) => line !== previousLine);
+    selectedLine = pickRandomOption(nonRepeatingOptions);
+  }
+  return {
+    line: selectedLine,
+    mood,
+  };
+}
+
+function interruptedMidWordSnippet(fullText: string, visibleTokenCount: number): string {
+  const tokens = fullText.match(/\S+\s*/g) ?? [];
+  const visible = tokens.slice(0, Math.max(1, visibleTokenCount)).join("").trimEnd();
+  if (visible.length === 0) return "…";
+  const lastWordMatch = visible.match(/(\S+)$/);
+  if (!lastWordMatch) return `${visible}—`;
+  const fullWord = lastWordMatch[1];
+  if (fullWord.length < 4) return `${visible}—`;
+  const cutoffLength = Math.max(2, Math.floor(fullWord.length * 0.6));
+  const prefix = visible.slice(0, visible.length - fullWord.length);
+  return `${prefix}${fullWord.slice(0, cutoffLength)}—`;
+}
+
+function trimMessagesToActiveTurn(messages: Message[]): Message[] {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      return i > 0 ? messages.slice(i) : messages;
+    }
+  }
+  return messages;
+}
+
+function trimConversationToActiveTurn(conversation: ConversationDetail): ConversationDetail {
+  const trimmed = trimMessagesToActiveTurn(conversation.messages);
+  if (trimmed.length === conversation.messages.length) return conversation;
+  return {
+    ...conversation,
+    messages: trimmed,
+  };
+}
 
 function hashToUnsignedInt(text: string): number {
   let h = 2166136261;
@@ -2367,6 +3031,17 @@ interface ConversationDetail {
 interface ChatPostEnvelope {
   conversation: ConversationDetail;
   conversationStarters?: string[];
+  fallbackInvocation?: {
+    trigger:
+      | "copyright_refusal_text"
+      | "copyright_refusal_error"
+      | "generic_refusal_text"
+      | "generic_refusal_error"
+      | "generic_refusal_soft_error";
+    primaryProvider: Provider;
+    primaryModel: string;
+    fallbackModel: string;
+  };
   summaryCompaction?: {
     mode: "chat" | "sandbox";
     triggered: boolean;
@@ -2403,6 +3078,7 @@ interface BotOpinion {
   updatedAt: string;
 }
 interface UserSettings {
+  displayName: string;
   theme: Theme;
   preferredProvider: Provider;
   providerLocked: boolean;
@@ -2411,6 +3087,9 @@ interface UserSettings {
   hasOpenAiApiKey: boolean;
   ollamaModel: string;
   secondaryOllamaHost: string;
+  lenientLocalFallbackModel: string;
+  devMemoriesEnabled: boolean;
+  devMemoriesText: string;
 }
 interface PairingCode {
   code: string;
@@ -2966,6 +3645,30 @@ function visibleBotCustomizerModelChoice(
   return botCustomizerModelChoiceVisible(settings, choice)
     ? choice
     : AUTO_MODEL_CHOICE;
+}
+
+function defaultModelChoiceForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider
+): string {
+  const options = availableModelOptionsForProvider(catalog, settings, provider);
+  return options.find((model) => model.isDefault)?.id ?? options[0]?.id ?? AUTO_MODEL_CHOICE;
+}
+
+function visibleConcreteModelChoiceForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider,
+  choice: string | null | undefined
+): string {
+  const visibleChoice = visibleBotCustomizerModelChoice(
+    settings,
+    normalizeModelChoice(choice)
+  );
+  return visibleChoice === AUTO_MODEL_CHOICE
+    ? defaultModelChoiceForProvider(catalog, settings, provider)
+    : visibleChoice;
 }
 
 function allBotCustomizerModelOptions(
@@ -3666,7 +4369,29 @@ function resolveMessageMoodKey(message: Message): NonNullable<Message["moodKey"]
   return DEFAULT_MESSAGE_MOOD;
 }
 
-function MessageMoodFace(props: { moodKey: NonNullable<Message["moodKey"]> }): React.JSX.Element {
+function messageMoodLabel(moodKey: NonNullable<Message["moodKey"]>): string {
+  switch (moodKey) {
+    case "joyful":
+      return "Joyful";
+    case "warm":
+      return "Warm";
+    case "guarded":
+      return "Guarded";
+    case "strained":
+      return "Strained";
+    default:
+      return "Neutral";
+  }
+}
+
+function MessageMoodFace(props: {
+  moodKey: NonNullable<Message["moodKey"]>;
+  variant?: "classic" | "prism";
+  placement?: "leading" | "trailing";
+}): React.JSX.Element {
+  const variant = props.variant ?? "classic";
+  const placement = props.placement ?? "trailing";
+  const moodKey = props.moodKey;
   const mouthByMood: Record<NonNullable<Message["moodKey"]>, string> = {
     joyful: "M7.5 15.5 Q12 21 16.5 15.5",
     warm: "M8 15 Q12 18.5 16 15",
@@ -3685,11 +4410,88 @@ function MessageMoodFace(props: { moodKey: NonNullable<Message["moodKey"]> }): R
     guarded: "M7 8.5 L10 7.4 M14 7.4 L17 8.5",
     strained: "M7 9.2 L10 7 M14 7 L17 9.2",
   };
-  const moodKey = props.moodKey;
-  const browPath = browByMood[moodKey];
-  const [leftEyePath, rightEyePath] = eyesByMood[moodKey];
+  if (variant === "classic") {
+    const browPath = browByMood[moodKey];
+    const [leftEyePath, rightEyePath] = eyesByMood[moodKey];
+    return (
+      <span
+        className={styles.messageMoodBadge}
+        data-mood={moodKey}
+        data-placement={placement}
+        aria-hidden="true"
+      >
+        <svg
+          className={styles.messageMoodFace}
+          viewBox="0 0 24 24"
+          role="img"
+          focusable="false"
+          aria-hidden="true"
+        >
+          <circle className={styles.messageMoodFaceBase} cx="12" cy="12" r="9" />
+          <path className={styles.messageMoodFeature} d={leftEyePath} />
+          <path className={styles.messageMoodFeature} d={rightEyePath} />
+          {browPath ? <path className={styles.messageMoodFeature} d={browPath} /> : null}
+          <path className={styles.messageMoodFeature} d={mouthByMood[moodKey]} />
+        </svg>
+      </span>
+    );
+  }
+  // The Prism face keeps a stable primitive set across moods (ring + brows +
+  // eyes + mouth) so these paths can be tweened later without redesigning topology.
+  const faceByMood: Record<
+    NonNullable<Message["moodKey"]>,
+    {
+      leftBrow: string;
+      rightBrow: string;
+      leftEye: string;
+      rightEye: string;
+      mouth: string;
+    }
+  > = {
+    joyful: {
+      leftBrow: "M7.3 8.3 Q8.8 7.7 10.2 8.2",
+      rightBrow: "M13.8 8.2 Q15.2 7.7 16.7 8.3",
+      leftEye: "M7.7 10.7 Q9 9.4 10.3 10.7",
+      rightEye: "M13.7 10.7 Q15 9.4 16.3 10.7",
+      mouth: "M7.4 14.9 Q12 19.1 16.6 14.9",
+    },
+    warm: {
+      leftBrow: "M7.4 8.7 Q8.8 8.1 10.2 8.6",
+      rightBrow: "M13.8 8.6 Q15.2 8.1 16.6 8.7",
+      leftEye: "M7.8 10.9 Q9 9.9 10.2 10.9",
+      rightEye: "M13.8 10.9 Q15 9.9 16.2 10.9",
+      mouth: "M7.8 15.4 Q12 18 16.2 15.4",
+    },
+    neutral: {
+      leftBrow: "M7.5 8.9 H10.1",
+      rightBrow: "M13.9 8.9 H16.5",
+      leftEye: "M7.9 11 H10.1",
+      rightEye: "M13.9 11 H16.1",
+      mouth: "M8.2 15.8 H15.8",
+    },
+    guarded: {
+      leftBrow: "M7.1 8.9 L10.1 7.8",
+      rightBrow: "M13.9 7.8 L16.9 8.9",
+      leftEye: "M7.8 11.4 H10",
+      rightEye: "M14 11.4 H16.2",
+      mouth: "M8.1 16.8 Q12 14.7 15.9 16.8",
+    },
+    strained: {
+      leftBrow: "M7.1 9.4 L10.1 7.2",
+      rightBrow: "M13.9 7.2 L16.9 9.4",
+      leftEye: "M7.9 11.8 L10 10.6",
+      rightEye: "M14 10.6 L16.1 11.8",
+      mouth: "M8.1 17.6 Q10.3 14.8 12 17.4 Q13.7 14.8 15.9 17.6",
+    },
+  };
+  const face = faceByMood[moodKey];
   return (
-    <span className={styles.messageMoodBadge} data-mood={moodKey} aria-hidden="true">
+    <span
+      className={styles.messageMoodBadge}
+      data-mood={moodKey}
+      data-placement={placement}
+      aria-hidden="true"
+    >
       <svg
         className={styles.messageMoodFace}
         viewBox="0 0 24 24"
@@ -3697,11 +4499,32 @@ function MessageMoodFace(props: { moodKey: NonNullable<Message["moodKey"]> }): R
         focusable="false"
         aria-hidden="true"
       >
-        <circle className={styles.messageMoodFaceBase} cx="12" cy="12" r="9" />
-        <path className={styles.messageMoodFeature} d={leftEyePath} />
-        <path className={styles.messageMoodFeature} d={rightEyePath} />
-        {browPath ? <path className={styles.messageMoodFeature} d={browPath} /> : null}
-        <path className={styles.messageMoodFeature} d={mouthByMood[moodKey]} />
+        {/* Neutral shell keeps the badge legible in both themes. */}
+        <circle
+          cx="12"
+          cy="12"
+          r="8.9"
+          fill="none"
+          stroke="currentColor"
+          strokeOpacity="0.2"
+          strokeWidth="1.7"
+        />
+        {/* PRISM segmented ring (P/R/I/S/M) to match hub glyph methodology. */}
+        <path d="M12 3.2 A8.8 8.8 0 0 1 18.3 5.8" stroke={PRISM_COLORS.p} strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M19.4 7.2 A8.8 8.8 0 0 1 20.8 12" stroke={PRISM_COLORS.r} strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M20.6 14 A8.8 8.8 0 0 1 16.9 18.9" stroke={PRISM_COLORS.i} strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M15.1 20 A8.8 8.8 0 0 1 8.9 20" stroke={PRISM_COLORS.s} strokeWidth="1.8" strokeLinecap="round" />
+        <path
+          d="M7.1 18.9 A8.8 8.8 0 0 1 3.4 12 A8.8 8.8 0 0 1 8 5.4"
+          stroke={PRISM_COLORS.m}
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+        <path className={styles.messageMoodFeature} d={face.leftBrow} style={{ stroke: PRISM_COLORS.p }} />
+        <path className={styles.messageMoodFeature} d={face.rightBrow} style={{ stroke: PRISM_COLORS.r }} />
+        <path className={styles.messageMoodFeature} d={face.leftEye} style={{ stroke: PRISM_COLORS.i }} />
+        <path className={styles.messageMoodFeature} d={face.rightEye} style={{ stroke: PRISM_COLORS.s }} />
+        <path className={styles.messageMoodFeature} d={face.mouth} style={{ stroke: PRISM_COLORS.m }} />
       </svg>
     </span>
   );
@@ -3935,7 +4758,15 @@ function HomeGlyph(): React.ReactElement {
   );
 }
 
-/** Wrench — clearer than a gear for “conversation tools” (overflow menu). */
+function BookmarkGlyph(): React.ReactElement {
+  return (
+    <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M4.25 3.25h7.5v9.5l-3.75-2.35-3.75 2.35z" />
+    </svg>
+  );
+}
+
+/** Gear icon for conversation tools (overflow menu). */
 function WrenchGlyph(): React.ReactElement {
   return (
     <svg
@@ -3947,7 +4778,8 @@ function WrenchGlyph(): React.ReactElement {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+      <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.35.5.9.8 1.51.8H21a2 2 0 0 1 0 4h-.09c-.61 0-1.16.3-1.51.8z" />
     </svg>
   );
 }
@@ -3965,10 +4797,14 @@ function nextThemeMode(current: Theme): Theme {
 }
 
 function isPrimaryPointerDismissal(event: MouseEvent | PointerEvent): boolean {
-  // Outside-click dismissal should never fire for secondary/context clicks.
-  // On macOS, Ctrl+click is also a context-menu gesture even though it can
-  // report as button 0, so keep it out of the dismissal path too.
-  return event.button === 0 && !(event.ctrlKey && (!("pointerType" in event) || event.pointerType === "mouse"));
+  // Dismiss on normal primary clicks/taps, and also on desktop context-menu
+  // gestures (right-click / Ctrl+click) so users can close menus without an
+  // extra left-click.
+  const isMouseEvent = !("pointerType" in event) || event.pointerType === "mouse";
+  if (isMouseEvent && (event.button === 2 || (event.ctrlKey && event.button === 0))) {
+    return true;
+  }
+  return event.button === 0;
 }
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
@@ -4090,6 +4926,16 @@ function IconUpload(): React.JSX.Element {
   );
 }
 
+function IconSave(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M5 4h11l3 3v13H5z" />
+      <path d="M8 4v6h8V4" />
+      <path d="M9 20v-6h6v6" />
+    </svg>
+  );
+}
+
 function IconTrash(): React.JSX.Element {
   return (
     <svg {...ICON_PROPS}>
@@ -4098,6 +4944,15 @@ function IconTrash(): React.JSX.Element {
       <path d="M7 7l.8 12.2a2 2 0 0 0 2 1.8h4.4a2 2 0 0 0 2-1.8L17 7" />
       <path d="M10 11.2v5.8" />
       <path d="M14 11.2v5.8" />
+    </svg>
+  );
+}
+
+function IconSparkles(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7L12 3z" />
+      <path d="M18 15l0.75 2.25L21 18l-2.25 0.75L18 21l-0.75-2.25L15 18l2.25-0.75L18 15z" />
     </svg>
   );
 }
@@ -6085,7 +6940,7 @@ function BotGlyphPicker({ value, onChange }: BotGlyphPickerProps): React.JSX.Ele
             aria-checked={isSelected}
             className={`${styles.glyphOption} ${isSelected ? styles.glyphOptionSelected : ""}`}
             onClick={() => onChange(key)}
-            title={definition.label}
+            data-glyph-tooltip={definition.label}
             aria-label={definition.label}
           >
             <BotGlyph
@@ -6136,7 +6991,8 @@ const COMPOSE_MENU_PORTAL_THEME_VARS = [
 function computeComposeMenuFixedStyle(
   trigger: HTMLButtonElement,
   floorMinWidth: number,
-  portalZIndex: number
+  portalZIndex: number,
+  placement: "up" | "down" = "up"
 ): React.CSSProperties {
   const rect = trigger.getBoundingClientRect();
   const vw = globalThis.window.innerWidth;
@@ -6144,7 +7000,10 @@ function computeComposeMenuFixedStyle(
   const maxW = Math.min(COMPOSE_MENU_MAX_WIDTH_PX, vw - pad * 2);
   const minWidth = Math.min(Math.max(rect.width, floorMinWidth), maxW);
   const left = Math.max(pad, Math.min(rect.left, vw - minWidth - pad));
-  const bottom = globalThis.window.innerHeight - rect.top + 6;
+  const verticalPosition =
+    placement === "down"
+      ? { top: rect.bottom + 6, bottom: "auto" }
+      : { top: "auto", bottom: globalThis.window.innerHeight - rect.top + 6 };
   const themeVars: Record<string, string> = {};
   const computedStyle = globalThis.window.getComputedStyle(trigger);
   for (const varName of COMPOSE_MENU_PORTAL_THEME_VARS) {
@@ -6156,7 +7015,7 @@ function computeComposeMenuFixedStyle(
   return {
     position: "fixed",
     left,
-    bottom,
+    ...verticalPosition,
     minWidth,
     maxWidth: maxW,
     zIndex: portalZIndex,
@@ -6168,7 +7027,8 @@ function useComposeMenuPortalStyle(
   menuOpen: boolean,
   triggerRef: React.RefObject<HTMLButtonElement | null>,
   floorMinWidth: number,
-  portalZIndex: number = COMPOSE_MENU_PORTAL_Z_INDEX_BOT
+  portalZIndex: number = COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
+  placement: "up" | "down" = "up"
 ): React.CSSProperties | undefined {
   const [fixedStyle, setFixedStyle] = useState<
     React.CSSProperties | undefined
@@ -6182,7 +7042,7 @@ function useComposeMenuPortalStyle(
       const el = triggerRef.current;
       if (!el) return;
       setFixedStyle(
-        computeComposeMenuFixedStyle(el, floorMinWidth, portalZIndex)
+        computeComposeMenuFixedStyle(el, floorMinWidth, portalZIndex, placement)
       );
     };
     update();
@@ -6193,7 +7053,7 @@ function useComposeMenuPortalStyle(
       w.removeEventListener("resize", update);
       w.removeEventListener("scroll", update, true);
     };
-  }, [menuOpen, floorMinWidth, portalZIndex, triggerRef]);
+  }, [menuOpen, floorMinWidth, placement, portalZIndex, triggerRef]);
 
   return menuOpen ? fixedStyle : undefined;
 }
@@ -6421,7 +7281,7 @@ function ComposerBotPicker({
         className={styles.composeBotTrigger}
         onClick={toggleMenu}
         disabled={disabled}
-        title={title}
+        data-glyph-tooltip={title}
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
         aria-label={ariaLabel}
@@ -6616,6 +7476,8 @@ interface ComposerModelPickerProps {
   disabled?: boolean;
   title?: string;
   ariaLabel: string;
+  placement?: "up" | "down";
+  minMenuWidthPx?: number;
 }
 
 function ComposerModelPicker({
@@ -6626,24 +7488,26 @@ function ComposerModelPicker({
   disabled,
   title,
   ariaLabel,
+  placement = "up",
+  minMenuWidthPx = COMPOSE_MENU_MODEL_MIN_WIDTH_PX,
 }: ComposerModelPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const selectedModel =
-    value === AUTO_MODEL_CHOICE
-      ? null
-      : options.find((model) => model.id === value) ?? null;
+    options.find((model) => model.id === value) ??
+    options.find((model) => model.isDefault) ??
+    options[0] ??
+    null;
   const selectedLabel =
-    value === AUTO_MODEL_CHOICE
-      ? "Auto"
-      : selectedModel?.label ?? value;
+    selectedModel?.label ?? (value === AUTO_MODEL_CHOICE ? "Model" : value);
   const menuOpen = open && !disabled;
   const menuPortalStyle = useComposeMenuPortalStyle(
     menuOpen,
     triggerRef,
-    COMPOSE_MENU_MODEL_MIN_WIDTH_PX,
-    COMPOSE_MENU_PORTAL_Z_INDEX_MODEL
+    minMenuWidthPx,
+    COMPOSE_MENU_PORTAL_Z_INDEX_MODEL,
+    placement
   );
 
   useEffect(() => {
@@ -6697,7 +7561,7 @@ function ComposerModelPicker({
         className={styles.composeModelTrigger}
         onClick={() => setOpen((current) => !current)}
         disabled={disabled}
-        title={title}
+        data-glyph-tooltip={title}
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
         aria-label={ariaLabel}
@@ -6738,20 +7602,6 @@ function ComposerModelPicker({
             role="listbox"
             aria-label={ariaLabel}
           >
-            <button
-              type="button"
-              className={`${styles.composeBotOption} ${styles.composeModelOption}`}
-              role="option"
-              aria-selected={value === AUTO_MODEL_CHOICE}
-              onClick={() => pick(AUTO_MODEL_CHOICE)}
-            >
-              <span className={styles.composeModelOptionMain}>
-                <span className={styles.composeModelOptionName}>Auto</span>
-                <span className={styles.composeModelOptionMeta}>
-                  Uses default routing
-                </span>
-              </span>
-            </button>
             {options.map((model) => {
               const isSelected = value === model.id;
               return (
@@ -6968,7 +7818,7 @@ function HueLensControl({
               className={styles.hueLensClear}
               onClick={() => scheduleHueChange(null)}
               aria-label="Show all bots — clear color filter"
-              title="Show all bots"
+              data-glyph-tooltip="Show all bots"
             >
               All
             </button>
@@ -7512,7 +8362,7 @@ function ColorGlyphPicker({
         aria-label={ariaLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Click to pick color and glyph"
+        data-glyph-tooltip="Pick color and glyph"
       >
         <BotGlyph name={pickerGlyph} />
       </button>
@@ -7961,6 +8811,10 @@ interface MessageBodyProps {
   content: string;
   /** Assistant bubbles only: strips leaked <<<PRISM_TOOL>>>… blocks from display. */
   assistantStripPrismToolTail?: boolean;
+  /** Message role is used to scope ephemeral line animations. */
+  messageRole?: Message["role"];
+  /** Optional paragraph cap for progressive archived-message reveal. */
+  maxParagraphs?: number;
   /** Chat-mode effect: reveal assistant prose one word at a time. */
   revealWordByWord?: boolean;
   /** Chat-mode effect: render each line as a distinct canvas row. */
@@ -7971,41 +8825,565 @@ interface MessageBodyProps {
   forcedVisibleTokenCount?: number;
 }
 
+function flattenMarkdownCodeText(node: React.ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map((item) => flattenMarkdownCodeText(item)).join("");
+  if (!isValidElement(node)) return "";
+  const element = node as React.ReactElement<{ children?: React.ReactNode }>;
+  return flattenMarkdownCodeText(element.props.children);
+}
+
+interface MarkdownCodeBlockProps {
+  className?: string;
+  language?: string;
+  typedLineReveal?: {
+    visibleLineCount: number;
+    totalLineCount: number;
+    animateLocally?: boolean;
+    onComplete?: () => void;
+  };
+  children: React.ReactNode;
+}
+
+interface CodeBlockRevealPlan {
+  startToken: number;
+  blockTokenCount: number;
+  totalLineCount: number;
+}
+
+function buildCodeBlockRevealPlan(source: string): CodeBlockRevealPlan[] {
+  const plans: CodeBlockRevealPlan[] = [];
+  let lastIndex = 0;
+  let consumedTokenCount = 0;
+  for (const match of source.matchAll(CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN)) {
+    const fullFence = match[0] ?? "";
+    const codeBody = match[1] ?? "";
+    const matchIndex = match.index ?? 0;
+    const before = source.slice(lastIndex, matchIndex);
+    consumedTokenCount += tokenizeMessageReveal(before).length;
+    const normalizedCodeBody = codeBody.replace(/\r\n?/g, "\n").replace(/\n$/u, "");
+    const totalLineCount =
+      normalizedCodeBody.length > 0
+        ? Math.max(1, normalizedCodeBody.split("\n").length)
+        : 1;
+    const blockTokenCount = Math.max(1, tokenizeMessageReveal(fullFence).length);
+    plans.push({
+      startToken: consumedTokenCount,
+      blockTokenCount,
+      totalLineCount,
+    });
+    consumedTokenCount += blockTokenCount;
+    lastIndex = matchIndex + fullFence.length;
+  }
+  return plans;
+}
+
+function takeLeadingTokens(text: string, tokenCount: number): string {
+  if (tokenCount <= 0) return "";
+  const tokens = tokenizeMessageReveal(text);
+  if (tokens.length <= tokenCount) return text;
+  return tokens.slice(0, tokenCount).join("");
+}
+
+function buildProgressiveMarkdownSource(
+  source: string,
+  visibleTokenCount: number
+): string {
+  const clampedVisible = Math.max(0, visibleTokenCount);
+  let cursor = 0;
+  let consumed = 0;
+  let output = "";
+
+  for (const match of source.matchAll(CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN)) {
+    const fence = match[0] ?? "";
+    const fenceIndex = match.index ?? 0;
+    const before = source.slice(cursor, fenceIndex);
+    const beforeTokenCount = tokenizeMessageReveal(before).length;
+    const remainingBefore = clampedVisible - consumed;
+    if (remainingBefore <= 0) {
+      return output;
+    }
+    if (remainingBefore < beforeTokenCount) {
+      output += takeLeadingTokens(before, remainingBefore);
+      return output;
+    }
+    output += before;
+    consumed += beforeTokenCount;
+
+    const remainingForFence = clampedVisible - consumed;
+    if (remainingForFence <= 0) {
+      return output;
+    }
+    // As soon as typing reaches the fence, include the full block container.
+    // Line-by-line reveal inside the block is handled by MarkdownCodeBlock.
+    output += fence;
+    const fenceTokenCount = tokenizeMessageReveal(fence).length;
+    if (remainingForFence < fenceTokenCount) {
+      return output;
+    }
+    consumed += fenceTokenCount;
+    cursor = fenceIndex + fence.length;
+  }
+
+  const tail = source.slice(cursor);
+  const remainingTailTokens = clampedVisible - consumed;
+  if (remainingTailTokens <= 0) {
+    return output;
+  }
+  output += takeLeadingTokens(tail, remainingTailTokens);
+  return output;
+}
+
+function normalizeFencedCodeBlockLeadingNewline(text: string): string {
+  return text.replace(/([^\n])(```[^\n\r]*\r?\n)/g, "$1\n$2");
+}
+
+function resolveMarkdownCodeLanguageAccent(language?: string): string | null {
+  if (!language) return null;
+  const normalized = language.toLowerCase().trim();
+  if (["rb", "ruby"].includes(normalized)) return "#cc342d";
+  if (["go", "golang"].includes(normalized)) return "#00add8";
+  if (["rs", "rust"].includes(normalized)) return "#dea584";
+  if (["swift"].includes(normalized)) return "#f05138";
+  if (["java"].includes(normalized)) return "#f89820";
+  if (["kt", "kts", "kotlin"].includes(normalized)) return "#a97bff";
+  if (["c", "h"].includes(normalized)) return "#5f9ea0";
+  if (["cpp", "c++", "cc", "cxx", "hpp", "hh", "hxx"].includes(normalized)) return "#6495ed";
+  if (["cs", "csharp", "c#"].includes(normalized)) return "#9b4f96";
+  if (["php"].includes(normalized)) return "#8892bf";
+  if (["ts", "tsx", "typescript"].includes(normalized)) return "#3178c6";
+  if (["js", "jsx", "javascript", "mjs", "cjs"].includes(normalized)) return "#f7df1e";
+  if (["html", "htm"].includes(normalized)) return "#e34f26";
+  if (["css", "scss", "sass", "less"].includes(normalized)) return "#663399";
+  if (["xml", "xhtml", "svg"].includes(normalized)) return "#ff8c42";
+  if (["json", "jsonc"].includes(normalized)) return "#7dd3fc";
+  if (["yaml", "yml"].includes(normalized)) return "#fb7185";
+  if (["toml"].includes(normalized)) return "#f97316";
+  if (["ini", "cfg", "conf", "properties"].includes(normalized)) return "#94a3b8";
+  if (["py", "python"].includes(normalized)) return "#4b8bbe";
+  if (["sh", "bash", "zsh", "shell", "shellscript", "console", "terminal"].includes(normalized)) return "#9ee493";
+  if (["ps1", "powershell", "pwsh"].includes(normalized)) return "#5391fe";
+  if (["dockerfile", "docker"].includes(normalized)) return "#2496ed";
+  if (["make", "makefile", "mk"].includes(normalized)) return "#22c55e";
+  if (["sql", "postgresql", "mysql", "sqlite"].includes(normalized)) return "#f4a261";
+  if (["md", "markdown"].includes(normalized)) return "#c084fc";
+  if (["plaintext", "text", "txt", "plain"].includes(normalized)) return "#9ca3af";
+  return "#8fb3ff";
+}
+
+function MarkdownCodeBlock({
+  className,
+  language,
+  typedLineReveal,
+  children,
+}: MarkdownCodeBlockProps): React.JSX.Element {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const blockRef = useRef<HTMLPreElement | null>(null);
+  const codeRef = useRef<HTMLElement | null>(null);
+  const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
+  const dragSelectingRef = useRef(false);
+  const codeText = useMemo(
+    () => flattenMarkdownCodeText(children).replace(/\n$/, ""),
+    [children]
+  );
+  const allCodeLines = useMemo(
+    () => codeText.replace(/\r\n?/g, "\n").split("\n"),
+    [codeText]
+  );
+  const totalLineCount = Math.max(
+    1,
+    typedLineReveal?.totalLineCount ?? allCodeLines.length
+  );
+  const [locallyAnimatedLineCount, setLocallyAnimatedLineCount] = useState(1);
+  useEffect(() => {
+    if (!typedLineReveal?.animateLocally) {
+      setLocallyAnimatedLineCount(1);
+      return;
+    }
+    setLocallyAnimatedLineCount(1);
+    if (totalLineCount <= 1) {
+      typedLineReveal.onComplete?.();
+      return;
+    }
+    let cancelled = false;
+    let line = 1;
+    let timer: number | null = null;
+    const step = () => {
+      if (cancelled) return;
+      if (line >= totalLineCount) {
+        typedLineReveal.onComplete?.();
+        return;
+      }
+      timer = window.setTimeout(() => {
+        line += 1;
+        setLocallyAnimatedLineCount(line);
+        step();
+      }, 80);
+    };
+    step();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [totalLineCount, typedLineReveal?.animateLocally, typedLineReveal?.onComplete]);
+  const visibleLineCount = typedLineReveal?.animateLocally
+    ? Math.max(1, Math.min(locallyAnimatedLineCount, totalLineCount))
+    : typedLineReveal
+      ? Math.max(1, Math.min(typedLineReveal.visibleLineCount, totalLineCount))
+      : totalLineCount;
+  const renderedCodeText = typedLineReveal
+    ? allCodeLines.slice(0, visibleLineCount).join("\n")
+    : codeText;
+  const showCopyButton = allCodeLines.length > 1;
+
+  useEffect(() => {
+    const handlePointerDownOutside = (event: PointerEvent) => {
+      const block = blockRef.current;
+      if (!block) return;
+      const target = event.target;
+      if (target instanceof Node && block.contains(target)) return;
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return;
+      const codeNode = codeRef.current;
+      if (!codeNode) return;
+      const range = selection.getRangeAt(0);
+      const startsInsideCode = codeNode.contains(range.startContainer);
+      const endsInsideCode = codeNode.contains(range.endContainer);
+      if (!startsInsideCode && !endsInsideCode) return;
+      selection.removeAllRanges();
+    };
+    document.addEventListener("pointerdown", handlePointerDownOutside, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDownOutside, true);
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    const renderedCodeText = codeRef.current?.innerText ?? codeRef.current?.textContent ?? "";
+    const textToCopy = renderedCodeText.trim().length > 0 ? renderedCodeText : codeText;
+    if (!textToCopy) return;
+    try {
+      await writeClipboardText(textToCopy);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    } finally {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = window.setTimeout(() => {
+        setCopyState("idle");
+        resetTimerRef.current = null;
+      }, 3200);
+    }
+  }, [codeText]);
+
+  const copyLabel =
+    copyState === "copied"
+      ? "Copied!"
+      : copyState === "failed"
+        ? "Copy failed"
+        : "Copy";
+  const languageLabel = language?.toUpperCase();
+  const languageAccent = resolveMarkdownCodeLanguageAccent(language);
+  const preStyle = {
+    ...(languageAccent
+      ? ({ ["--code-lang-accent" as string]: languageAccent } as React.CSSProperties)
+      : {}),
+    ...(typedLineReveal
+      ? ({ ["--code-total-lines" as string]: String(totalLineCount) } as React.CSSProperties)
+      : {}),
+  } as React.CSSProperties;
+  const applySelectionRange = useCallback((range: Range | null) => {
+    if (!range) return;
+    const selection = window.getSelection();
+    if (!selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+  const resolveClickTextContext = useCallback((event: React.MouseEvent<HTMLPreElement>) => {
+    const codeNode = codeRef.current;
+    if (!codeNode) return null;
+    const native = event.nativeEvent;
+    const docWithCaret = document as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (
+        x: number,
+        y: number
+      ) => { offsetNode: Node; offset: number } | null;
+    };
+    let range: Range | null = null;
+    if (typeof docWithCaret.caretRangeFromPoint === "function") {
+      range = docWithCaret.caretRangeFromPoint(native.clientX, native.clientY);
+    } else if (typeof docWithCaret.caretPositionFromPoint === "function") {
+      const caret = docWithCaret.caretPositionFromPoint(native.clientX, native.clientY);
+      if (caret) {
+        range = document.createRange();
+        range.setStart(caret.offsetNode, caret.offset);
+        range.collapse(true);
+      }
+    }
+    if (!range) return null;
+    const container =
+      range.startContainer.nodeType === Node.TEXT_NODE
+        ? range.startContainer
+        : range.startContainer.firstChild;
+    if (!(container instanceof Text)) return null;
+    if (!codeNode.contains(container)) return null;
+    return { textNode: container, offset: range.startOffset };
+  }, []);
+
+  return (
+    <pre
+      ref={(node) => {
+        blockRef.current = node;
+      }}
+      className={[
+        styles.markdownCodeBlock,
+        showCopyButton ? styles.markdownCodeBlockWithCopy : "",
+        typedLineReveal ? styles.markdownCodeBlockComposing : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      style={preStyle}
+      data-code-language={language || undefined}
+      onPointerDown={(event) => {
+        pointerDownRef.current = { x: event.clientX, y: event.clientY };
+        dragSelectingRef.current = false;
+      }}
+      onPointerMove={(event) => {
+        const start = pointerDownRef.current;
+        if (!start) return;
+        const deltaX = Math.abs(event.clientX - start.x);
+        const deltaY = Math.abs(event.clientY - start.y);
+        if (deltaX > 4 || deltaY > 4) {
+          dragSelectingRef.current = true;
+        }
+      }}
+      onPointerUp={() => {
+        pointerDownRef.current = null;
+      }}
+      onPointerCancel={() => {
+        pointerDownRef.current = null;
+      }}
+      onClick={(event) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest(`.${styles.markdownCodeCopyButton}`)) return;
+        if (event.detail === 1 && dragSelectingRef.current) return;
+        const codeNode = codeRef.current;
+        if (!codeNode) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.detail >= 3) {
+          const range = document.createRange();
+          range.selectNodeContents(codeNode);
+          applySelectionRange(range);
+          return;
+        }
+        const context = resolveClickTextContext(event);
+        if (!context) return;
+        const { textNode } = context;
+        const text = textNode.data;
+        let offset = Math.max(0, Math.min(context.offset, text.length));
+        if (event.detail === 1) {
+          const isWordChar = (ch: string) => /\S/u.test(ch) && ch !== "\n";
+          if (!isWordChar(text[offset] ?? "")) {
+            let right = offset;
+            while (right < text.length && !isWordChar(text[right] ?? "")) right += 1;
+            if (right < text.length) {
+              offset = right;
+            } else {
+              let left = Math.max(0, offset - 1);
+              while (left >= 0 && !isWordChar(text[left] ?? "")) left -= 1;
+              if (left >= 0) offset = left;
+            }
+          }
+          if (!isWordChar(text[offset] ?? "")) return;
+          let start = offset;
+          let end = offset + 1;
+          while (start > 0 && isWordChar(text[start - 1] ?? "")) start -= 1;
+          while (end < text.length && isWordChar(text[end] ?? "")) end += 1;
+          const range = document.createRange();
+          range.setStart(textNode, start);
+          range.setEnd(textNode, end);
+          applySelectionRange(range);
+          return;
+        }
+        if (event.detail === 2) {
+          let start = offset;
+          let end = offset;
+          while (start > 0 && text[start - 1] !== "\n") start -= 1;
+          while (end < text.length && text[end] !== "\n") end += 1;
+          const range = document.createRange();
+          range.setStart(textNode, start);
+          range.setEnd(textNode, end);
+          applySelectionRange(range);
+        }
+      }}
+    >
+      {languageLabel ? (
+        <span className={styles.markdownCodeLanguageBadge} aria-hidden="true">
+          {languageLabel}
+        </span>
+      ) : null}
+      {showCopyButton ? (
+        <button
+          type="button"
+          className={styles.markdownCodeCopyButton}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+          }}
+          onPointerUp={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void handleCopy();
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            event.stopPropagation();
+            void handleCopy();
+          }}
+          aria-label="Copy code block"
+        >
+          {copyLabel}
+        </button>
+      ) : null}
+      <code
+        ref={(node) => {
+          codeRef.current = node;
+        }}
+        className={className}
+      >
+        {renderedCodeText}
+      </code>
+    </pre>
+  );
+}
+
 function resolveMessageDisplayContent(message: Message): string {
   return message.role === "assistant"
     ? parseAssistantPrismTools(message.content).displayContent
     : message.content;
 }
 
+function tokenizeMessageReveal(text: string): string[] {
+  return text.match(/\S+\s*/g) ?? [];
+}
+
+function resolveRevealStepDelayMs(previousToken: string): number {
+  return isChatModeEllipsisToken(previousToken)
+    ? CHAT_MODE_ELLIPSIS_WORD_HOLD_MS
+    : CHAT_MODE_WORD_REVEAL_MS;
+}
+
+function resolveVisibleTokenCountAtElapsedMs(tokens: string[], elapsedMs: number): number {
+  if (tokens.length <= 1) return 1;
+  let visible = 1;
+  let remaining = Math.max(0, elapsedMs);
+  while (visible < tokens.length) {
+    const delayMs = resolveRevealStepDelayMs(tokens[visible - 1] ?? "");
+    if (remaining < delayMs) break;
+    remaining -= delayMs;
+    visible += 1;
+  }
+  return visible;
+}
+
+function resolveRevealDurationMsForTokens(tokens: string[]): number {
+  if (tokens.length <= 1) return 0;
+  let total = 0;
+  for (let i = 1; i < tokens.length; i += 1) {
+    total += resolveRevealStepDelayMs(tokens[i - 1] ?? "");
+  }
+  return total;
+}
+
+function resolveChatModeMessageFontSizePx(
+  lineCount: number,
+  role: "assistant" | "user" = "assistant"
+): number {
+  if (lineCount <= 0) return CHAT_MODE_MESSAGE_FONT_DEFAULT_PX;
+  const minPx =
+    role === "user"
+      ? CHAT_MODE_USER_MESSAGE_FONT_MIN_PX
+      : CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
+  const maxPx =
+    role === "user"
+      ? CHAT_MODE_USER_MESSAGE_FONT_MAX_PX
+      : CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX;
+  const clampedLineCount = Math.min(
+    CHAT_MODE_MESSAGE_FONT_MAX_LINES,
+    Math.max(CHAT_MODE_MESSAGE_FONT_MIN_LINES, lineCount)
+  );
+  const range = CHAT_MODE_MESSAGE_FONT_MAX_LINES - CHAT_MODE_MESSAGE_FONT_MIN_LINES;
+  if (range <= 0) return CHAT_MODE_MESSAGE_FONT_DEFAULT_PX;
+  const progress = (clampedLineCount - CHAT_MODE_MESSAGE_FONT_MIN_LINES) / range;
+  const curvedProgress = Math.pow(progress, CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT);
+  const sizeRange = maxPx - minPx;
+  const px = maxPx - curvedProgress * sizeRange;
+  return Math.round(px * 10) / 10;
+}
+
 function splitEphemeralDisplayLines(text: string): string[] {
   const hardLines = text.replace(/\r\n?/g, "\n").split("\n");
-  const wrapped: string[] = [];
-  for (const hardLine of hardLines) {
-    if (hardLine.length <= CHAT_MODE_SOFT_LINE_WRAP_CHARS) {
-      wrapped.push(hardLine);
-      continue;
-    }
-    const tokens = hardLine.match(/\S+\s*/g) ?? [];
-    if (tokens.length === 0) {
-      wrapped.push(hardLine);
-      continue;
-    }
-    let cursor = "";
-    for (const token of tokens) {
-      if (cursor.length + token.length > CHAT_MODE_SOFT_LINE_WRAP_CHARS && cursor.length > 0) {
-        wrapped.push(cursor.trimEnd());
-        cursor = token;
-        continue;
-      }
-      cursor += token;
-    }
-    wrapped.push(cursor.trimEnd());
-  }
-  return wrapped.length > 0 ? wrapped : [""];
+  return hardLines.length > 0 ? hardLines : [""];
 }
 
 function countEphemeralLines(text: string): number {
   return splitEphemeralDisplayLines(text).length;
+}
+
+function estimateVisualLineCount(text: string): number {
+  const hardLines = splitEphemeralDisplayLines(text);
+  let total = 0;
+  for (const line of hardLines) {
+    const normalizedLength = line.trim().length;
+    total += Math.max(
+      1,
+      Math.ceil(normalizedLength / CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE)
+    );
+  }
+  return Math.max(1, total);
+}
+
+function trimTrailingHorizontalWhitespace(text: string): string {
+  // Preserve hard line breaks so chat-mode font sizing reacts as soon as a
+  // newline is revealed, not only after the first token of the next line.
+  return text.replace(/[ \t\f\v]+$/u, "");
+}
+
+function splitMessageParagraphs(text: string): string[] {
+  const normalized = text.replace(/\r\n?/g, "\n").trim();
+  if (!normalized) return [""];
+  const paragraphs = normalized
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0);
+  return paragraphs.length > 0 ? paragraphs : [normalized];
+}
+
+function takeLeadingParagraphs(text: string, paragraphCount: number): string {
+  if (paragraphCount <= 0) return "";
+  const paragraphs = splitMessageParagraphs(text);
+  return paragraphs.slice(0, paragraphCount).join("\n\n");
+}
+
+function findMessageRowById(root: ParentNode, messageId: string): HTMLElement | null {
+  const rows = root.querySelectorAll<HTMLElement>("[data-message-id]");
+  for (const row of rows) {
+    if (row.dataset.messageId === messageId) return row;
+  }
+  return null;
+}
+
+function findChatModeMessageScrollAnchor(row: HTMLElement): HTMLElement {
+  return row.querySelector<HTMLElement>('[data-chat-typing-line="true"]') ?? row;
 }
 
 /** Imperative focus for plain textarea vs TipTap WYSIWYG compose field. */
@@ -8113,80 +9491,225 @@ function useMobileKeyboardInset(active: boolean): number {
 function MessageBody({
   content,
   assistantStripPrismToolTail,
+  messageRole,
+  maxParagraphs,
   revealWordByWord,
   renderAsEphemeralLines,
   chatPhase,
   forcedVisibleTokenCount,
 }: MessageBodyProps): React.JSX.Element {
-  const source =
+  const fullSource =
     assistantStripPrismToolTail === true
       ? parseAssistantPrismTools(content).displayContent
       : content;
-  const tokens = useMemo(() => source.match(/\S+\s*/g) ?? [], [source]);
-  const [visibleTokenCount, setVisibleTokenCount] = useState(tokens.length);
+  const source =
+    typeof maxParagraphs === "number"
+      ? takeLeadingParagraphs(fullSource, maxParagraphs)
+      : fullSource;
+  const normalizedSource = useMemo(
+    () =>
+      renderAsEphemeralLines
+        ? normalizeFencedCodeBlockLeadingNewline(source)
+        : source,
+    [renderAsEphemeralLines, source]
+  );
+  const chatModeSource = useMemo(
+    () =>
+      renderAsEphemeralLines
+        ? stripChatModeThematicBreakLines(normalizedSource)
+        : normalizedSource,
+    [normalizedSource, renderAsEphemeralLines]
+  );
+  const tokens = useMemo(() => chatModeSource.match(/\S+\s*/g) ?? [], [chatModeSource]);
+  const [visibleTokenCount, setVisibleTokenCount] = useState(() =>
+    revealWordByWord ? 1 : tokens.length
+  );
+  const hasFencedCodeBlock = useMemo(
+    () => CHAT_MODE_FENCED_CODE_BLOCK_PATTERN.test(chatModeSource),
+    [chatModeSource]
+  );
+  const preferLocalProgressiveReveal = Boolean(
+    renderAsEphemeralLines &&
+    messageRole === "assistant" &&
+    hasFencedCodeBlock &&
+    typeof forcedVisibleTokenCount === "number"
+  );
+  const codeBlockRevealPlan = useMemo(
+    () => buildCodeBlockRevealPlan(chatModeSource),
+    [chatModeSource]
+  );
+  const effectiveVisibleTokenCount =
+    !preferLocalProgressiveReveal && forcedVisibleTokenCount !== undefined
+      ? Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length))
+      : visibleTokenCount;
 
   useEffect(() => {
-    if (forcedVisibleTokenCount !== undefined) {
+    if (!preferLocalProgressiveReveal && forcedVisibleTokenCount !== undefined) {
       setVisibleTokenCount(Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length)));
       return;
     }
-    if (!revealWordByWord || tokens.length <= 1) {
+    if ((!revealWordByWord && !preferLocalProgressiveReveal) || tokens.length <= 1) {
       setVisibleTokenCount(tokens.length);
       return;
     }
     setVisibleTokenCount(1);
     let nextCount = 1;
-    const timer = window.setInterval(() => {
-      nextCount += 1;
-      setVisibleTokenCount(Math.min(nextCount, tokens.length));
-      if (nextCount >= tokens.length) {
-        window.clearInterval(timer);
-      }
-    }, CHAT_MODE_WORD_REVEAL_MS);
-    return () => window.clearInterval(timer);
-  }, [forcedVisibleTokenCount, revealWordByWord, tokens]);
-
-  const effectiveVisibleTokenCount = forcedVisibleTokenCount !== undefined
-    ? Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length))
-    : visibleTokenCount;
-  const renderedSource = revealWordByWord
-    ? tokens.slice(0, effectiveVisibleTokenCount).join("")
-    : source;
-  if (renderAsEphemeralLines) {
+    let timer: number | null = null;
+    const scheduleNextReveal = () => {
+      if (nextCount >= tokens.length) return;
+      const priorToken = tokens[nextCount - 1] ?? "";
+      const delayMs = resolveRevealStepDelayMs(priorToken);
+      timer = window.setTimeout(() => {
+        nextCount += 1;
+        setVisibleTokenCount(Math.min(nextCount, tokens.length));
+        scheduleNextReveal();
+      }, delayMs);
+    };
+    scheduleNextReveal();
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [
+    forcedVisibleTokenCount,
+    preferLocalProgressiveReveal,
+    revealWordByWord,
+    tokens,
+  ]);
+  const typedTokenMeta = useMemo(() => resolveChatModeTypedTokenMeta(tokens), [tokens]);
+  const renderVisibleTokenCount = effectiveVisibleTokenCount;
+  const shouldProgressiveFenceReveal = Boolean(
+    renderAsEphemeralLines &&
+    messageRole === "assistant" &&
+    hasFencedCodeBlock &&
+    (preferLocalProgressiveReveal || typeof forcedVisibleTokenCount === "number")
+  );
+  const renderedSource = shouldProgressiveFenceReveal
+    ? buildProgressiveMarkdownSource(chatModeSource, renderVisibleTokenCount)
+    : revealWordByWord
+      ? (hasFencedCodeBlock
+        ? buildProgressiveMarkdownSource(chatModeSource, renderVisibleTokenCount)
+        : tokens.slice(0, renderVisibleTokenCount).join(""))
+      : chatModeSource;
+  const useTypedLineRenderer = Boolean(
+    renderAsEphemeralLines &&
+    messageRole === "assistant" &&
+    !hasFencedCodeBlock
+  );
+  if (useTypedLineRenderer) {
     const lines = splitEphemeralDisplayLines(renderedSource);
+    const finalLines = splitEphemeralDisplayLines(chatModeSource);
     let revealCursor = 0;
     return (
       <div
         className={`${styles.markdownBody} ${styles.chatEphemeralMarkdownBody}`}
         data-chat-phase={chatPhase}
+        data-message-role={messageRole}
+        data-chat-render-kind="lines"
       >
         {lines.map((line, index) => {
-          if (!revealWordByWord) {
-            return (
-              <span
-                key={`${index}:${line}`}
-                className={styles.chatEphemeralLine}
-                style={{ ["--line-index" as string]: index } as React.CSSProperties}
-              >
-                {line.length > 0 ? line : " "}
-              </span>
-            );
-          }
-          const wordTokens = line.match(/\S+\s*/g) ?? [];
+          const headingInfo = parseChatModeHashHeadingLine(line);
+          const displayLine = headingInfo?.text ?? line;
+          const wordTokens = displayLine.match(/\S+\s*/g) ?? [];
+          const lineNoLetterFade = isChatModeHeadingLikeLine(line);
+          const lineIsPullQuoteInline = isChatModePullQuoteInlineLine(line);
           const lineStartIndex = revealCursor;
           revealCursor += wordTokens.length;
+          const visibleLimit = revealWordByWord ? renderVisibleTokenCount : Number.POSITIVE_INFINITY;
+          const latestVisibleTokenIndex = Math.max(0, visibleLimit - 1);
+          const lineEndIndex = lineStartIndex + Math.max(1, wordTokens.length);
+          const lineIsTypingAnchor =
+            revealWordByWord &&
+            latestVisibleTokenIndex >= lineStartIndex &&
+            latestVisibleTokenIndex < lineEndIndex;
+          const hasLineContent = line.trim().length > 0;
+          const finalLine = finalLines[index] ?? line;
+          const lineDynamicFontPx = hasLineContent
+            ? resolveChatModeMessageFontSizePx(estimateVisualLineCount(finalLine), "assistant")
+            : null;
           return (
           <span
-            key={`${index}:${line}`}
-            className={styles.chatEphemeralLine}
-            style={{ ["--line-index" as string]: index } as React.CSSProperties}
+            key={`line:${index}`}
+            className={`${styles.chatEphemeralLine} ${
+              lineIsPullQuoteInline ? styles.chatEphemeralLinePullQuote : ""
+            } ${
+              headingInfo?.level === 1
+                ? styles.chatEphemeralLineHeading1
+                : headingInfo?.level === 2
+                  ? styles.chatEphemeralLineHeading2
+                  : headingInfo?.level === 3
+                    ? styles.chatEphemeralLineHeading3
+                    : headingInfo?.level === 4
+                      ? styles.chatEphemeralLineHeading4
+                      : headingInfo?.level === 5
+                        ? styles.chatEphemeralLineHeading5
+                    : ""
+            }`}
+            style={
+              {
+                ["--line-index" as string]: index,
+                ...(lineDynamicFontPx !== null
+                  ? { ["--chat-line-dynamic-font-size" as string]: `${lineDynamicFontPx}px` }
+                  : {}),
+              } as React.CSSProperties
+            }
+            data-chat-typing-line={lineIsTypingAnchor ? "true" : undefined}
           >
             {wordTokens.length === 0 ? " " : wordTokens.map((token, tokenIndex) => {
               const globalTokenIndex = lineStartIndex + tokenIndex;
-              if (globalTokenIndex >= effectiveVisibleTokenCount) return null;
+              if (globalTokenIndex >= visibleLimit) return null;
+              const tokenMeta = typedTokenMeta[globalTokenIndex];
+              const renderedToken = formatChatModeTypedTokenDisplay(token, tokenMeta?.isEllipsis === true);
+              const chars = Array.from(renderedToken);
+              const wordNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noFade;
+              const letterNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noLetterFade;
+              const wordClassName = [
+                styles.chatEphemeralTypedWord,
+                tokenMeta?.style === "rainbow" ? styles.chatEphemeralTypedWordRainbow : "",
+                tokenMeta?.isQuote ? styles.chatEphemeralTypedWordQuote : "",
+                tokenMeta?.isItalic ? styles.chatEphemeralTypedWordItalic : "",
+                tokenMeta?.isBold ? styles.chatEphemeralTypedWordBold : "",
+                wordNoFade ? styles.chatEphemeralTypedWordNoFade : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
               return (
-                <span key={`${index}:${globalTokenIndex}`} className={styles.chatEphemeralTypedWord}>
-                  {token}
+                <span key={`${index}:${globalTokenIndex}`} className={wordClassName}>
+                  {(() => {
+                    let ellipsisDotIndex = -1;
+                    return chars.map((char, charIndex) => {
+                      const revealIndex = tokenMeta?.isEllipsis
+                        ? (char === "."
+                          ? (ellipsisDotIndex += 1)
+                          : Math.max(ellipsisDotIndex, 0))
+                        : charIndex;
+                      return (
+                        <span
+                          key={`${index}:${globalTokenIndex}:${charIndex}`}
+                          className={
+                            letterNoFade
+                              ? `${styles.chatEphemeralTypedLetter} ${styles.chatEphemeralTypedLetterNoFade}`
+                              : styles.chatEphemeralTypedLetter
+                          }
+                          style={
+                            {
+                              ["--char-index" as string]: revealIndex,
+                              ...(tokenMeta?.isEllipsis
+                                ? { ["--char-step-ms" as string]: `${CHAT_MODE_ELLIPSIS_DOT_STEP_MS}ms` }
+                                : {}),
+                              ...(tokenMeta?.style === "rainbow" && char.trim().length > 0
+                                ? {
+                                    color: prismPaletteColorForLetterIndex(charIndex),
+                                    WebkitTextFillColor: prismPaletteColorForLetterIndex(charIndex),
+                                  }
+                                : {}),
+                            } as React.CSSProperties
+                          }
+                        >
+                          {char}
+                        </span>
+                      );
+                    });
+                  })()}
                 </span>
               );
             })}
@@ -8196,9 +9719,118 @@ function MessageBody({
       </div>
     );
   }
+  const chatPhaseAttrs =
+    chatPhase
+      ? ({
+          "data-chat-phase": chatPhase,
+          ...(messageRole ? { "data-message-role": messageRole } : {}),
+        } as const)
+      : undefined;
+  const markdownComponents = useMemo(
+    () => {
+      let codeBlockCursor = 0;
+      return {
+      p: ({ children }: { children?: React.ReactNode }) => {
+        const isPullQuoteInline = nodeStartsWithPullQuoteInlinePrefix(children);
+        if (!isPullQuoteInline) {
+          return <p>{children}</p>;
+        }
+        return (
+          <p className={styles.markdownPullQuoteInline} data-pull-quote-inline="true">
+            {children}
+          </p>
+        );
+      },
+      blockquote: ({ children }: { children?: React.ReactNode }) => {
+        const isPullQuote = nodeStartsWithPullQuoteMarker(children);
+        const resolvedChildren = isPullQuote
+          ? stripLeadingPullQuoteMarker(children)
+          : children;
+        return (
+          <blockquote data-pull-quote={isPullQuote ? "true" : undefined}>
+            {resolvedChildren}
+          </blockquote>
+        );
+      },
+      pre: ({ children }: { children?: React.ReactNode }) => {
+        const firstChild = Children.toArray(children)[0];
+        if (!isValidElement(firstChild)) {
+          return <pre>{children}</pre>;
+        }
+        const codeElement = firstChild as React.ReactElement<{
+          className?: string;
+          children?: React.ReactNode;
+        }>;
+        const languageMatch = codeElement.props.className?.match(/language-([\w-]+)/i);
+        const language = languageMatch?.[1]?.toLowerCase();
+        const currentBlockIndex = codeBlockCursor;
+        const revealPlan = codeBlockRevealPlan[currentBlockIndex];
+        codeBlockCursor += 1;
+        const shouldUseTypedLineReveal =
+          shouldProgressiveFenceReveal &&
+          Boolean(revealPlan);
+        if (shouldUseTypedLineReveal && revealPlan) {
+          if (renderVisibleTokenCount <= revealPlan.startToken) {
+            return null;
+          }
+          const progressedTokenCount = Math.max(
+            0,
+            renderVisibleTokenCount - revealPlan.startToken
+          );
+          const revealProgress = Math.min(
+            1,
+            progressedTokenCount / revealPlan.blockTokenCount
+          );
+          const visibleLineCount = Math.max(
+            1,
+            Math.ceil(revealProgress * revealPlan.totalLineCount)
+          );
+          return (
+            <MarkdownCodeBlock
+              className={codeElement.props.className}
+              language={language}
+              typedLineReveal={{
+                visibleLineCount,
+                totalLineCount: revealPlan.totalLineCount,
+              }}
+            >
+              {codeElement.props.children}
+            </MarkdownCodeBlock>
+          );
+        }
+        return (
+          <MarkdownCodeBlock
+            className={codeElement.props.className}
+            language={language}
+          >
+            {codeElement.props.children}
+          </MarkdownCodeBlock>
+        );
+      },
+    };
+    },
+    [
+      codeBlockRevealPlan,
+      messageRole,
+      preferLocalProgressiveReveal,
+      renderAsEphemeralLines,
+      renderVisibleTokenCount,
+      shouldProgressiveFenceReveal,
+      revealWordByWord,
+    ]
+  );
   return (
-    <div className={styles.markdownBody}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderedSource}</ReactMarkdown>
+    <div
+      className={`${styles.markdownBody} ${styles.chatEphemeralMarkdownBody}`}
+      data-chat-render-kind="markdown"
+      {...chatPhaseAttrs}
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={markdownComponents}
+      >
+        {renderedSource}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -8925,6 +10557,22 @@ function HomeContent(): React.JSX.Element {
       viewSwitchOverlayEnterFrameRef.current = null;
     }
   }, []);
+  const triggerConversationModeExitCompaction = useCallback((
+    conversationId: string,
+    sourceMode: "chat" | "sandbox"
+  ) => {
+    void api(
+      `/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run",
+          mode: sourceMode,
+          reason: "mode_exit",
+        }),
+      }
+    ).catch(() => {});
+  }, []);
   const triggerModeExitCompaction = useCallback((sourceView: View) => {
     if (sourceView !== "chat" && sourceView !== "sandbox") return;
     const activeConversationId =
@@ -8932,18 +10580,8 @@ function HomeContent(): React.JSX.Element {
         ? detailIdRef.current
         : selectedIdRef.current;
     if (!activeConversationId) return;
-    void api(
-      `/api/conversations/${encodeURIComponent(activeConversationId)}/summarization-debug`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          action: "run",
-          mode: sourceView,
-          reason: "mode_exit",
-        }),
-      }
-    ).catch(() => {});
-  }, []);
+    triggerConversationModeExitCompaction(activeConversationId, sourceView);
+  }, [triggerConversationModeExitCompaction]);
   const navigateToView = useCallback((next: View) => {
     if (next === view) return;
     triggerModeExitCompaction(view);
@@ -9019,11 +10657,17 @@ function HomeContent(): React.JSX.Element {
   const [panelNotice, setPanelNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [sweepBusy, setSweepBusy] = useState(false);
+  const [sweepUndoToast, setSweepUndoToast] = useState<{
+    batchId: string;
+    expiresAt: number;
+  } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [sessionOpinion, setSessionOpinion] = useState<SessionOpinion | null>(null);
   const [botOpinion, setBotOpinion] = useState<BotOpinion | null>(null);
   const [draft, setDraft] = useState("");
+  const [debugComposerDraft, setDebugComposerDraft] = useState("");
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
   const composerHistoryIndexRef = useRef<number | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -9069,14 +10713,29 @@ function HomeContent(): React.JSX.Element {
   const memoryPhysicsFrameRef = useRef<number | null>(null);
   const [memoryPhysicsActive, setMemoryPhysicsActive] = useState(false);
   const [pendingReply, setPendingReply] = useState(false);
+  const [fallbackMessageIds, setFallbackMessageIds] = useState<Set<string>>(() => new Set());
+  const [pendingReplyStartedAtMs, setPendingReplyStartedAtMs] = useState<number | null>(null);
+  const [pendingReplyNowMs, setPendingReplyNowMs] = useState(() => Date.now());
+  const [pendingReplyDenialRisk, setPendingReplyDenialRisk] = useState(false);
   const [pendingReplyStartMessageCount, setPendingReplyStartMessageCount] = useState(0);
   const [sandboxSummaryBusy, setSandboxSummaryBusy] = useState(false);
+  const [sandboxBotStatusBusy, setSandboxBotStatusBusy] = useState(false);
+  const [canvasBotSwitchTransitioning, setCanvasBotSwitchTransitioning] = useState(false);
+  const [canvasBotSwitchOverlayPhase, setCanvasBotSwitchOverlayPhase] =
+    useState<"hidden" | "enter" | "exit">("hidden");
+  const [canvasBotSwitchUnfoldSeed, setCanvasBotSwitchUnfoldSeed] = useState(0);
+  const canvasBotSwitchTransitionStartedAtRef = useRef<number | null>(null);
+  const canvasBotSwitchOverlayHideTimerRef = useRef<number | null>(null);
+  const pendingCanvasBotUnfoldRef = useRef(false);
   const [chatStartupSummary, setChatStartupSummary] = useState<string | null>(null);
+  const [sandboxBotStatusSummary, setSandboxBotStatusSummary] = useState<string | null>(null);
+  const [sandboxBotStatusSummaryBotId, setSandboxBotStatusSummaryBotId] = useState<string | null>(null);
   const [summaryDebug, setSummaryDebug] = useState<SummaryCompactionDebug | null>(null);
   const [pendingReplyConversationId, setPendingReplyConversationId] =
     useState<string | null>(null);
   const [pendingReplyIsNewConversation, setPendingReplyIsNewConversation] =
     useState(false);
+  const pendingReplyAbortControllerRef = useRef<AbortController | null>(null);
   const [unreadConversationIds, setUnreadConversationIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -9091,9 +10750,11 @@ function HomeContent(): React.JSX.Element {
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
   const selectedIdRef = useRef<string | null>(null);
   const chatSummaryRefreshMarkerRef = useRef<string | null>(null);
+  const sandboxBotStatusRefreshMarkerRef = useRef<string | null>(null);
   const [chatAutoRestoreSuppressed, setChatAutoRestoreSuppressed] = useState(false);
   const [forceNewConversationOnNextSend, setForceNewConversationOnNextSend] = useState(false);
   const detailIdRef = useRef<string | null>(null);
+  const CANVAS_BOT_SWITCH_MIN_LOADING_MS = 520;
   const conversationGroupPointerDragRef = useRef<{
     key: string;
     pointerId: number;
@@ -9101,9 +10762,10 @@ function HomeContent(): React.JSX.Element {
     active: boolean;
   } | null>(null);
   const suppressConversationGroupClickRef = useRef(false);
-  const titleRefreshSelectionRef = useRef<{ id: string | null; incognito: boolean }>({
+  const titleRefreshSelectionRef = useRef<{ id: string | null; incognito: boolean; view: View }>({
     id: null,
     incognito: false,
+    view: "hub",
   });
   const titleRefreshInFlightRef = useRef<Set<string>>(new Set());
   const memoryTransitionRunRef = useRef(0);
@@ -9183,6 +10845,7 @@ function HomeContent(): React.JSX.Element {
   const devToolsButtonRef = useRef<HTMLButtonElement | null>(null);
   const devToolsButtonDragRef = useRef<DevToolsButtonDragState | null>(null);
   const devToolsButtonHasCustomPositionRef = useRef(false);
+  const devToolsButtonPositionHydratedRef = useRef(false);
   const devToolsButtonSuppressClickRef = useRef(false);
   const resolvedDevToolsBotQuantity =
     devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
@@ -9397,7 +11060,34 @@ function HomeContent(): React.JSX.Element {
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const chatLastPinnedUserMessageKeyRef = useRef<string | null>(null);
+  const chatLastRestoredConversationIdRef = useRef<string | null>(null);
+  const chatProgrammaticScrollUntilMsRef = useRef(0);
+  const chatLastScrollTopByConversationRef = useRef<Map<string, number>>(new Map());
+  // Tracks scrollHeight alongside scrollTop so the manual-scroll-up detector
+  // can distinguish a real upward gesture from a reflow-induced drop (e.g.
+  // the streaming-reply font shrinks across a curve threshold and the
+  // bottom of the scroll area moves up by a few pixels on its own).
+  const chatLastScrollHeightByConversationRef = useRef<Map<string, number>>(new Map());
+  const chatAutoscrollArmedByConversationRef = useRef<Map<string, boolean>>(new Map());
   const chatMessageFirstSeenAtRef = useRef<Map<string, number>>(new Map());
+  const chatCancelledRevealTokenCountByKeyRef = useRef<Map<string, number>>(new Map());
+  const chatInterruptCountByConversationRef = useRef<Map<string, number>>(new Map());
+  const chatLastInterruptionLineByConversationRef = useRef<Map<string, string>>(new Map());
+  const chatUserMessageFadeStartByKeyRef = useRef<Map<string, number>>(new Map());
+  const chatUserAnchorFadeStartByKeyRef = useRef<Map<string, number>>(new Map());
+  const chatMessageOffscreenSinceRef = useRef<Map<string, number>>(new Map());
+  const chatExpiredMessageIdsByConversationRef = useRef<Map<string, Set<string>>>(new Map());
+  const chatArchiveRevealByConversationRef = useRef<Map<string, boolean>>(new Map());
+  const chatArchiveLoadingByConversationRef = useRef<Map<string, boolean>>(new Map());
+  const chatArchiveLoadTimerByConversationRef = useRef<Map<string, number>>(new Map());
+  const chatArchiveAnchorMessageByConversationRef = useRef<Map<string, string | null>>(new Map());
+  const chatArchivePullPxByConversationRef = useRef<Map<string, number>>(new Map());
+  const chatArchiveParagraphQuotaByConversationRef = useRef<Map<string, number>>(new Map());
+  const chatArchiveInertiaVelocityByConversationRef = useRef<Map<string, number>>(new Map());
+  const chatArchiveInertiaFrameByConversationRef = useRef<Map<string, number>>(new Map());
+  const [chatArchiveRevealEpoch, setChatArchiveRevealEpoch] = useState(0);
+  const chatCompletedRevealKeysRef = useRef<Set<string>>(new Set());
   const [chatEphemeralNowMs, setChatEphemeralNowMs] = useState(() => Date.now());
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
   const botPickerReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -9416,6 +11106,7 @@ function HomeContent(): React.JSX.Element {
   const [devToolsBotImportPasteEnabled, setDevToolsBotImportPasteEnabledState] = useState(false);
   const [devChatMetricsEnabled, setDevChatMetricsEnabledState] = useState(false);
   const [devSlashCommandsEnabled, setDevSlashCommandsEnabledState] = useState(false);
+  const [devDebugComposerEnabled, setDevDebugComposerEnabledState] = useState(false);
   const [devChatDebugEvents, setDevChatDebugEvents] = useState<DevChatDebugEvent[]>([]);
   const persistDevToolsBotImportPaste = useCallback((next: boolean) => {
     setDevToolsBotImportPasteEnabledState(next);
@@ -9456,6 +11147,19 @@ function HomeContent(): React.JSX.Element {
       // private mode / quota — preference just won't survive reload
     }
   }, []);
+  const persistDevDebugComposerEnabled = useCallback((next: boolean) => {
+    setDevDebugComposerEnabledState(next);
+    if (typeof window === "undefined") return;
+    try {
+      if (next) {
+        window.localStorage.setItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY, "1");
+      } else {
+        window.localStorage.removeItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY);
+      }
+    } catch {
+      // private mode / quota — preference just won't survive reload
+    }
+  }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -9468,10 +11172,14 @@ function HomeContent(): React.JSX.Element {
       setDevSlashCommandsEnabledState(
         window.localStorage.getItem(PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY) === "1"
       );
+      setDevDebugComposerEnabledState(
+        window.localStorage.getItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY) === "1"
+      );
     } catch {
       setDevToolsBotImportPasteEnabledState(false);
       setDevChatMetricsEnabledState(false);
       setDevSlashCommandsEnabledState(false);
+      setDevDebugComposerEnabledState(false);
     }
   }, []);
   useEffect(() => {
@@ -9484,6 +11192,8 @@ function HomeContent(): React.JSX.Element {
     hadUnsavedChanges: boolean;
   } | null>(null);
   const prePanelBotDeleteModalFocusRef = useRef<HTMLElement | null>(null);
+  const [sweepConfirmOpen, setSweepConfirmOpen] = useState(false);
+  const preSweepConfirmModalFocusRef = useRef<HTMLElement | null>(null);
   const emptyStateSearchOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Theme preference used before a user has logged in (or when the user
   // explicitly logs out). Seeded from localStorage so the auth screen
@@ -9926,6 +11636,18 @@ function HomeContent(): React.JSX.Element {
     return () => resizeObserver.disconnect();
   }, [devToolsOpen, viewportHeight, viewportWidth]);
 
+  // Hydrate the dev-tools button position from localStorage on mount. We mark
+  // the position as "custom" before the viewport-anchor effect runs so the
+  // saved spot wins over the default bottom-right anchor.
+  useEffect(() => {
+    const stored = readStoredDevToolsButtonPosition();
+    if (stored) {
+      devToolsButtonHasCustomPositionRef.current = true;
+      setDevToolsButtonPosition(stored);
+    }
+    devToolsButtonPositionHydratedRef.current = true;
+  }, []);
+
   useEffect(() => {
     const buttonNode = devToolsButtonRef.current;
     const rect = buttonNode?.getBoundingClientRect();
@@ -9956,6 +11678,23 @@ function HomeContent(): React.JSX.Element {
     if (!buttonNode) return;
     buttonNode.style.left = `${devToolsButtonPosition.x}px`;
     buttonNode.style.top = `${devToolsButtonPosition.y}px`;
+  }, [devToolsButtonPosition]);
+
+  // Persist the dev-tools button position whenever it changes, but only
+  // after hydration (so we don't overwrite the saved spot with the default
+  // anchor on first paint) and only once the user has actually placed it.
+  useEffect(() => {
+    if (!devToolsButtonPositionHydratedRef.current) return;
+    if (!devToolsButtonHasCustomPositionRef.current) return;
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY,
+        JSON.stringify(devToolsButtonPosition)
+      );
+    } catch {
+      // private mode / quota — placement just won't survive reload
+    }
   }, [devToolsButtonPosition]);
 
   useEffect(() => {
@@ -10146,6 +11885,9 @@ function HomeContent(): React.JSX.Element {
           explicitDefault: chatBotOverride === null,
         };
       }
+      if (selectedBotId !== null) {
+        return { botId: selectedBotId, explicitDefault: false };
+      }
       if (detail?.id !== undefined && detail.id !== "pending") {
         return { botId: detail.botId, explicitDefault: false };
       }
@@ -10200,6 +11942,7 @@ function HomeContent(): React.JSX.Element {
   const composeBotAccentId = useMemo<string | null>(() => {
     if (privateChatActive) {
       if (chatBotOverride !== undefined) return chatBotOverride;
+      if (selectedBotId !== null) return selectedBotId;
       if (detail?.id !== undefined && detail.id !== "pending") return detail.botId;
       return detail?.botId ?? selectedBotId ?? null;
     }
@@ -10252,6 +11995,11 @@ function HomeContent(): React.JSX.Element {
 
   const deriveMobileMessageFocusAccent = useCallback(
     (msg: Message): string => {
+      // User-bubble context focus ring is intentionally neutral by theme.
+      // Bot-message focus keeps the normalized accent treatment.
+      if (msg.role === "user") {
+        return resolvedTheme === "dark" ? "#ffffff" : "#000000";
+      }
       if (!detail?.incognito && msg.role === "assistant" && msg.botColor?.trim()) {
         return normalizeAccentForTheme(msg.botColor.trim(), resolvedTheme);
       }
@@ -10306,17 +12054,143 @@ function HomeContent(): React.JSX.Element {
     };
   }, [detail, activeBot, defaultConversationUsesPrismIdentity]);
   const headerConversationTitle = useMemo(() => {
-    const conversationTitle = detail?.title?.trim() || "New conversation";
-    return `|    ${conversationTitle}`;
-  }, [detail?.title]);
-  const shouldShowHeaderConversationTitle = Boolean(
-    detail && detail.messages.length > 0
-  );
+    if (view === "sandbox") {
+      const sandboxTitle = detail?.title?.trim();
+      return sandboxTitle && sandboxTitle.length > 0 ? sandboxTitle : null;
+    }
+    const modelProvider: Provider =
+      settings?.preferredProvider === "openai" ? "openai" : "local";
+    const rawModelChoice = chatModelChoiceByProvider[modelProvider];
+    const visibleModelChoice = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      modelProvider,
+      rawModelChoice
+    );
+    const modelOptions = includeSelectedModelOption(
+      availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+      visibleModelChoice,
+      modelProvider
+    );
+    const selectedModel = modelOptions.find((model) => model.id === visibleModelChoice);
+    const modelTitle =
+      selectedModel?.label?.trim() ||
+      (visibleModelChoice !== AUTO_MODEL_CHOICE
+        ? modelLabelFromId(visibleModelChoice)
+        : "Model");
+    return modelTitle;
+  }, [
+    chatModelChoiceByProvider,
+    detail?.title,
+    modelCatalog,
+    settings,
+    view,
+  ]);
+  const shouldShowHeaderConversationTitle = Boolean(headerConversationTitle);
   // While the desktop wrench accordion is unfurled, collapse the conversation
   // title so the action pills stay on one line instead of wrapping below.
   // Mobile uses a fixed wrench + vertical popout, so the title is unaffected.
   const headerTitleCollapsedForAccordion =
     chatOverflowMenuOpen && viewportWidth > PHONE_MENU_BREAKPOINT;
+  const renderProviderModeToggle = (extraClassName = ""): React.ReactNode => {
+    const privateLocked = privateChatActive;
+    const isLocal = settings?.preferredProvider === "local";
+    const displayLocal = privateLocked ? true : isLocal;
+    const providerDisabled = !settings || privateLocked;
+    return (
+      <div
+        className={`${styles.modeControl} ${
+          providerDisabled ? styles.modeControlLocked : ""
+        } ${extraClassName}`}
+      >
+        <button
+          type="button"
+          className={`${styles.modeToggleTrack} ${
+            providerDisabled ? styles.modeToggleTrackLocked : ""
+          }`}
+          onClick={() => {
+            if (providerDisabled) return;
+            void switchProvider(isLocal ? "openai" : "local");
+          }}
+          aria-label={
+            privateLocked
+              ? "Response mode: Local. Private chats are offline-only."
+              : displayLocal
+                ? "Response mode: Local. Click to switch to Online."
+                : "Response mode: Online. Click to switch to Local."
+          }
+          aria-pressed={!displayLocal}
+          aria-disabled={providerDisabled}
+          title={
+            privateLocked
+              ? "Private chats are offline-only."
+              : displayLocal
+                ? "Switch to Online"
+                : "Switch to Local"
+          }
+          disabled={providerDisabled}
+        >
+          <span
+            className={`${styles.modeThumb} ${
+              displayLocal ? styles.modeThumbLocal : styles.modeThumbOnline
+            }`}
+          >
+            <span
+              className={`${styles.providerDot} ${
+                displayLocal ? styles.providerDotLocal : styles.providerDotOnline
+              }`}
+              aria-hidden="true"
+            />
+            <span className={styles.modeThumbLabel}>
+              {displayLocal ? "LOCAL" : "ONLINE"}
+            </span>
+          </span>
+        </button>
+      </div>
+    );
+  };
+  const renderHeaderModelPicker = (): React.ReactNode => {
+    if (view !== "chat") return null;
+    const isLocal = settings?.preferredProvider !== "openai";
+    const modelProvider: Provider = isLocal ? "local" : "openai";
+    const rawModelChoice = chatModelChoiceByProvider[modelProvider];
+    const visibleModelChoice = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      modelProvider,
+      rawModelChoice
+    );
+    const modelOptions = includeSelectedModelOption(
+      availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+      visibleModelChoice,
+      modelProvider
+    );
+    return (
+      <div
+        className={`${styles.chatHeaderModelPicker} ${
+          headerTitleCollapsedForAccordion ? styles.chatHeaderTitleCollapsed : ""
+        }`}
+      >
+        {renderProviderModeToggle(styles.chatHeaderModeToggle)}
+        <ComposerModelPicker
+          value={visibleModelChoice}
+          onChange={(nextChoice) => {
+            setChatModelChoiceByProvider((previous) => ({
+              ...previous,
+              [modelProvider]: nextChoice,
+            }));
+          }}
+          options={modelOptions}
+          provider={modelProvider}
+          disabled={!settings || pendingReplyVisible}
+          title={`Model for ${isLocal ? "LOCAL" : "ONLINE"} replies`}
+          ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
+          placement="down"
+          minMenuWidthPx={180}
+        />
+      </div>
+    );
+  };
 
   // The sidebar is primarily a place to leave the current chat, but grouped
   // histories need the active row as a stable "you are here" marker. Keep
@@ -10356,6 +12230,10 @@ function HomeContent(): React.JSX.Element {
   );
   const conversationGroupsByKey = useMemo(
     () => new Map(conversationGroups.map((group) => [group.key, group])),
+    [conversationGroups]
+  );
+  const hasSweepEligibleConversations = useMemo(
+    () => conversationGroups.some((group) => group.count > 1),
     [conversationGroups]
   );
   const availableConversationGroupKeys = useMemo(
@@ -10425,6 +12303,7 @@ function HomeContent(): React.JSX.Element {
     }
   }, [conversationGroupsByKey, expandedConversationGroupKey]);
 
+  const chatEphemeralMode = view === "chat";
   const showPrivateConversationEmptyState =
     privateChatActive && visibleConversations.length === 0;
   const pendingReplyVisible =
@@ -10433,8 +12312,59 @@ function HomeContent(): React.JSX.Element {
       (pendingReplyConversationId !== null && detail?.id === pendingReplyConversationId) ||
       (pendingReplyIsNewConversation && detail?.id === "pending")
     );
-  const chatEphemeralMode = view === "chat";
-  const assistantWordByWordMode = view === "chat" || view === "sandbox";
+  const hasLenientFallbackConfigured =
+    typeof settings?.lenientLocalFallbackModel === "string" &&
+    settings.lenientLocalFallbackModel.trim().length > 0;
+  const configuredFallbackModelId = settings?.lenientLocalFallbackModel?.trim() ?? "";
+  useEffect(() => {
+    if (!pendingReply) return;
+    setPendingReplyNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setPendingReplyNowMs(Date.now());
+    }, FALLBACK_PROCESSING_TICK_MS);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [pendingReply]);
+  const pendingReplyLikelyFallbackProcessing =
+    pendingReplyVisible &&
+    hasLenientFallbackConfigured &&
+    pendingReplyDenialRisk &&
+    pendingReplyStartedAtMs !== null &&
+    (
+      view === "chat" ||
+      pendingReplyNowMs - pendingReplyStartedAtMs >= FALLBACK_PROCESSING_HINT_DELAY_MS
+    );
+  const stopPendingReply = useCallback((): void => {
+    const activeController = pendingReplyAbortControllerRef.current;
+    if (activeController) {
+      activeController.abort();
+      pendingReplyAbortControllerRef.current = null;
+    }
+    setPendingReply(false);
+    setPendingReplyStartedAtMs(null);
+    setPendingReplyDenialRisk(false);
+    setPendingReplyConversationId(null);
+    setPendingReplyIsNewConversation(false);
+    if (chatEphemeralMode && detail?.id) {
+      chatArchiveRevealByConversationRef.current.set(detail.id, false);
+      chatArchiveLoadingByConversationRef.current.set(detail.id, false);
+      chatArchiveAnchorMessageByConversationRef.current.delete(detail.id);
+      chatArchivePullPxByConversationRef.current.set(detail.id, 0);
+      chatArchiveParagraphQuotaByConversationRef.current.set(detail.id, 0);
+      const loadingTimer = chatArchiveLoadTimerByConversationRef.current.get(detail.id);
+      if (loadingTimer !== undefined) {
+        window.clearTimeout(loadingTimer);
+        chatArchiveLoadTimerByConversationRef.current.delete(detail.id);
+      }
+      setChatArchiveRevealEpoch((value) => value + 1);
+      setDetail((current) => {
+        if (!current || current.id !== detail.id) return current;
+        return trimConversationToActiveTurn(current);
+      });
+    }
+  }, [chatEphemeralMode, detail?.id]);
+  const assistantWordByWordMode = view === "chat";
   const chatMessageTemporalById = useMemo(() => {
     const temporal = new Map<string, { phase: ChatMessageTemporalPhase; ageMs: number }>();
     const source = detail?.messages ?? [];
@@ -10445,33 +12375,80 @@ function HomeContent(): React.JSX.Element {
       return temporal;
     }
     const firstSeen = chatMessageFirstSeenAtRef.current;
+    const offscreenSinceById = chatMessageOffscreenSinceRef.current;
     const now = chatEphemeralNowMs;
-    const latestAssistantId = (() => {
+    const scrollRoot = messagesScrollRef.current;
+    const viewportRect = scrollRoot?.getBoundingClientRect() ?? null;
+    let expiredForConversation = chatExpiredMessageIdsByConversationRef.current.get(detail.id);
+    if (!expiredForConversation) {
+      expiredForConversation = new Set<string>();
+      chatExpiredMessageIdsByConversationRef.current.set(detail.id, expiredForConversation);
+    }
+    const revealArchived =
+      chatArchiveRevealByConversationRef.current.get(detail.id) === true;
+    const latestUserIndex = (() => {
       for (let i = source.length - 1; i >= 0; i -= 1) {
-        if (source[i]?.role === "assistant") return source[i]!.id;
+        if (source[i]?.role === "user") return i;
+      }
+      return -1;
+    })();
+    const effectiveSource =
+      !revealArchived && latestUserIndex > 0
+        ? source.slice(latestUserIndex)
+        : source;
+    const latestAssistantId = (() => {
+      for (let i = effectiveSource.length - 1; i >= 0; i -= 1) {
+        if (effectiveSource[i]?.role === "assistant") return effectiveSource[i]!.id;
       }
       return null;
     })();
-    for (const message of source) {
+    for (const message of effectiveSource) {
+      if (expiredForConversation.has(message.id) && !revealArchived) {
+        continue;
+      }
       const temporalKey = `${detail.id}:${message.id}`;
       let firstSeenAt = firstSeen.get(temporalKey);
       if (firstSeenAt === undefined) {
         firstSeenAt = now;
         firstSeen.set(temporalKey, firstSeenAt);
       }
+      const messageViewportMeta = (() => {
+        if (!scrollRoot || !viewportRect) return false;
+        const row = findMessageRowById(scrollRoot, message.id);
+        if (!row) return false;
+        const rect = row.getBoundingClientRect();
+        return {
+          isOnScreen: rect.bottom > viewportRect.top && rect.top < viewportRect.bottom,
+          top: rect.top,
+          bottom: rect.bottom,
+        };
+      })();
+      const messageIsOnScreen =
+        messageViewportMeta !== false && messageViewportMeta.isOnScreen;
       const lineCount = countEphemeralLines(resolveMessageDisplayContent(message));
       const dissolveDurationMs =
-        CHAT_MODE_MESSAGE_DISSOLVE_MS +
+        CHAT_MODE_OFFSCREEN_DISSOLVE_MS +
         Math.max(0, lineCount - 1) * CHAT_MODE_LINE_DISSOLVE_STAGGER_MS;
-      const expireAfterMs = CHAT_MODE_MESSAGE_VISIBLE_MS + dissolveDurationMs;
+      let offscreenAgeMs = 0;
+      if (messageIsOnScreen) {
+        offscreenSinceById.delete(message.id);
+      } else {
+        let offscreenSince = offscreenSinceById.get(message.id);
+        if (offscreenSince === undefined) {
+          offscreenSince = now;
+          offscreenSinceById.set(message.id, offscreenSince);
+        }
+        offscreenAgeMs = Math.max(0, now - offscreenSince);
+      }
+      if (!messageIsOnScreen && offscreenAgeMs >= CHAT_MODE_OFFSCREEN_VISIBLE_MS + dissolveDurationMs) {
+        expiredForConversation.add(message.id);
+        if (!revealArchived) continue;
+      }
       const revealGatedAssistant =
         message.role === "assistant" && message.id === latestAssistantId;
       const estimatedRevealDoneAt = revealGatedAssistant
         ? firstSeenAt +
-          Math.max(
-            1,
-            (resolveMessageDisplayContent(message).match(/\S+/g) ?? []).length
-          ) * CHAT_MODE_WORD_REVEAL_MS
+          resolveRevealDurationMsForTokens(tokenizeMessageReveal(resolveMessageDisplayContent(message)))
         : firstSeenAt;
       const revealReadyAt = revealGatedAssistant ? estimatedRevealDoneAt : firstSeenAt;
       const effectiveStartAt =
@@ -10479,20 +12456,19 @@ function HomeContent(): React.JSX.Element {
           ? now
           : revealReadyAt;
       const ageMs = Math.max(0, now - effectiveStartAt);
-      if (ageMs >= expireAfterMs) continue;
       const phase: ChatMessageTemporalPhase =
-        revealGatedAssistant
+        messageIsOnScreen
           ? (
-            ageMs >= CHAT_MODE_MESSAGE_VISIBLE_MS
-              ? "dissolving"
-              : "visible"
+            revealGatedAssistant
+              ? "visible"
+              : ageMs < CHAT_MODE_MESSAGE_MANIFEST_MS
+                ? "manifest"
+                : "visible"
           )
-          : ageMs < CHAT_MODE_MESSAGE_MANIFEST_MS
-            ? "manifest"
-            : ageMs >= CHAT_MODE_MESSAGE_VISIBLE_MS
-              ? "dissolving"
-              : "visible";
-      temporal.set(message.id, { phase, ageMs });
+          : offscreenAgeMs >= CHAT_MODE_OFFSCREEN_VISIBLE_MS
+            ? "dissolving"
+            : "visible";
+      temporal.set(message.id, { phase, ageMs: messageIsOnScreen ? ageMs : offscreenAgeMs });
     }
     return temporal;
   }, [
@@ -10500,24 +12476,39 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralNowMs,
     detail?.id,
     detail?.messages,
+    chatArchiveRevealEpoch,
   ]);
+  const latestUserMessageIndex = useMemo<number>(() => {
+    const source = detail?.messages ?? [];
+    for (let i = source.length - 1; i >= 0; i -= 1) {
+      if (source[i]?.role === "user") return i;
+    }
+    return -1;
+  }, [detail?.messages]);
+  const chatArchiveLoadingActive =
+    Boolean(chatEphemeralMode && detail?.id) &&
+    (detail?.id ? chatArchiveLoadingByConversationRef.current.get(detail.id) === true : false);
   const visibleDetailMessages = useMemo(() => {
     const source = detail?.messages ?? [];
     if (!chatEphemeralMode) return source;
-    return source.filter((message) => chatMessageTemporalById.has(message.id));
-  }, [chatEphemeralMode, chatMessageTemporalById, detail?.messages]);
+    if (!detail?.id) return source;
+    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
+    if (revealArchived || latestUserMessageIndex <= 0) return source;
+    // Keep only the active turn in memory until the user requests older
+    // history by scrolling upward.
+    return source.slice(latestUserMessageIndex);
+  }, [
+    chatEphemeralMode,
+    detail?.id,
+    detail?.messages,
+    latestUserMessageIndex,
+    chatArchiveRevealEpoch,
+  ]);
   const chatStartupSummaryVisible = Boolean(
     chatStartupSummary &&
     !pendingReplyVisible &&
     (!detail || visibleDetailMessages.length === 0)
   );
-  const latestAssistantMood = useMemo<NonNullable<Message["moodKey"]>>(() => {
-    const source = detail?.messages ?? [];
-    for (let i = source.length - 1; i >= 0; i -= 1) {
-      if (source[i]?.role === "assistant") return resolveMessageMoodKey(source[i]!);
-    }
-    return DEFAULT_MESSAGE_MOOD;
-  }, [detail?.messages]);
   const latestAssistantMessageId = useMemo<string | null>(() => {
     const source = detail?.messages ?? [];
     for (let i = source.length - 1; i >= 0; i -= 1) {
@@ -10525,31 +12516,283 @@ function HomeContent(): React.JSX.Element {
     }
     return null;
   }, [detail?.messages]);
-  const latestAssistantMoodLabel = useMemo(() => {
-    switch (latestAssistantMood) {
-      case "joyful":
-        return "Joyful";
-      case "warm":
-        return "Warm";
-      case "guarded":
-        return "Guarded";
-      case "strained":
-        return "Strained";
-      default:
-        return "Neutral";
+  const latestUserMessageId = useMemo<string | null>(() => {
+    const source = detail?.messages ?? [];
+    for (let i = source.length - 1; i >= 0; i -= 1) {
+      if (source[i]?.role === "user") return source[i]!.id;
     }
-  }, [latestAssistantMood]);
+    return null;
+  }, [detail?.messages]);
+  const latestUserMessageAsQuestion = useMemo(() => {
+    if (!detail?.messages || !latestUserMessageId) return false;
+    const latestUserMessage = detail.messages.find((message) => message.id === latestUserMessageId);
+    if (!latestUserMessage || latestUserMessage.role !== "user") return false;
+    return isQuestionLikeChatTurn(resolveMessageDisplayContent(latestUserMessage));
+  }, [detail?.messages, latestUserMessageId]);
+  const shouldFadeInLatestUserMessage = (message: Message): boolean => {
+    if (!chatEphemeralMode || !detail?.id) return false;
+    if (message.role !== "user" || message.id !== latestUserMessageId) return false;
+    const fadeKey = `${detail.id}:${message.id}`;
+    const fadeStartAt = chatUserMessageFadeStartByKeyRef.current.get(fadeKey);
+    // First render of a newly inserted user row can happen before the
+    // post-send effect seeds this key; keep fade active during that frame
+    // so we never show a "pop in, then fade" flash.
+    if (fadeStartAt === undefined) return true;
+    return Math.max(0, chatEphemeralNowMs - fadeStartAt) < CHAT_MODE_USER_MESSAGE_FADE_MS;
+  };
+  const resolveLatestUserAnchorFadeOpacity = (message: Message): number | null => {
+    if (!chatEphemeralMode || !detail?.id) return null;
+    if (message.role !== "user" || message.id !== latestUserMessageId) return null;
+    const fadeKey = `${detail.id}:${message.id}`;
+    const fadeStartAt = chatUserAnchorFadeStartByKeyRef.current.get(fadeKey);
+    if (fadeStartAt === undefined) return null;
+    const elapsedMs = Math.max(0, chatEphemeralNowMs - fadeStartAt);
+    const phaseOneProgress = Math.min(1, elapsedMs / CHAT_MODE_USER_ANCHOR_FADE_DURATION_MS);
+    const phaseOneOpacity =
+      1 - (1 - CHAT_MODE_USER_ANCHOR_FADE_MIN_OPACITY) * phaseOneProgress;
+    const phaseTwoElapsedMs = Math.max(0, elapsedMs - CHAT_MODE_USER_ANCHOR_FADE_DURATION_MS);
+    const phaseTwoProgress = Math.min(1, phaseTwoElapsedMs / CHAT_MODE_USER_ANCHOR_FADE_CONTINUE_MS);
+    return (
+      phaseOneOpacity -
+      (CHAT_MODE_USER_ANCHOR_FADE_MIN_OPACITY - CHAT_MODE_USER_ANCHOR_FADE_FINAL_OPACITY) *
+        phaseTwoProgress
+    );
+  };
   const latestMessageRole =
     detail && detail.messages.length > 0
       ? detail.messages[detail.messages.length - 1]?.role
       : null;
+  const setChatArchiveRevealForConversation = useCallback(
+    (conversationId: string, reveal: boolean): void => {
+      const current =
+        chatArchiveRevealByConversationRef.current.get(conversationId) === true;
+      if (current === reveal) return;
+      chatArchiveRevealByConversationRef.current.set(conversationId, reveal);
+      if (!reveal) {
+        chatArchiveAnchorMessageByConversationRef.current.delete(conversationId);
+      }
+      setChatArchiveRevealEpoch((value) => value + 1);
+    },
+    []
+  );
+  const setChatArchiveLoadingForConversation = useCallback(
+    (conversationId: string, loading: boolean): void => {
+      const current = chatArchiveLoadingByConversationRef.current.get(conversationId) === true;
+      if (current === loading) return;
+      chatArchiveLoadingByConversationRef.current.set(conversationId, loading);
+      setChatArchiveRevealEpoch((value) => value + 1);
+    },
+    []
+  );
+  const startChatArchiveLoadForConversation = useCallback(
+    (conversationId: string, anchorMessageId?: string | null): void => {
+      if (chatArchiveRevealByConversationRef.current.get(conversationId) === true) return;
+      if (chatArchiveLoadingByConversationRef.current.get(conversationId) === true) return;
+      chatArchiveAnchorMessageByConversationRef.current.set(conversationId, anchorMessageId ?? null);
+      setChatArchiveLoadingForConversation(conversationId, true);
+      const existing = chatArchiveLoadTimerByConversationRef.current.get(conversationId);
+      if (existing !== undefined) {
+        window.clearTimeout(existing);
+      }
+      const timer = window.setTimeout(() => {
+        chatArchiveLoadTimerByConversationRef.current.delete(conversationId);
+        const scrollRoot = messagesScrollRef.current;
+        const anchorBeforeTop =
+          scrollRoot && anchorMessageId
+            ? findMessageRowById(scrollRoot, anchorMessageId)?.offsetTop ?? null
+            : null;
+        setChatArchiveLoadingForConversation(conversationId, false);
+        setChatArchiveRevealForConversation(conversationId, true);
+        if (scrollRoot && anchorMessageId && anchorBeforeTop !== null) {
+          requestAnimationFrame(() => {
+            const anchorAfter = findMessageRowById(scrollRoot, anchorMessageId);
+            if (!anchorAfter) return;
+            const delta = anchorAfter.offsetTop - anchorBeforeTop;
+            if (Math.abs(delta) < 1) return;
+            chatProgrammaticScrollUntilMsRef.current = Date.now() + 120;
+            scrollRoot.scrollTop += delta;
+            chatLastScrollTopByConversationRef.current.set(conversationId, scrollRoot.scrollTop);
+            chatLastScrollHeightByConversationRef.current.set(conversationId, scrollRoot.scrollHeight);
+          });
+        }
+      }, CHAT_MODE_ARCHIVE_LOAD_DELAY_MS);
+      chatArchiveLoadTimerByConversationRef.current.set(conversationId, timer);
+    },
+    [setChatArchiveLoadingForConversation, setChatArchiveRevealForConversation]
+  );
+  const hardResetChatArchiveStateForConversation = useCallback(
+    (conversationId: string): void => {
+      setChatArchiveRevealForConversation(conversationId, false);
+      setChatArchiveLoadingForConversation(conversationId, false);
+      const loadingTimer = chatArchiveLoadTimerByConversationRef.current.get(conversationId);
+      if (loadingTimer !== undefined) {
+        window.clearTimeout(loadingTimer);
+        chatArchiveLoadTimerByConversationRef.current.delete(conversationId);
+      }
+      chatArchiveAnchorMessageByConversationRef.current.delete(conversationId);
+      chatArchivePullPxByConversationRef.current.set(conversationId, 0);
+      chatArchiveParagraphQuotaByConversationRef.current.set(conversationId, 0);
+      chatArchiveInertiaVelocityByConversationRef.current.set(conversationId, 0);
+      const activeFrame = chatArchiveInertiaFrameByConversationRef.current.get(conversationId);
+      if (activeFrame !== undefined) {
+        window.cancelAnimationFrame(activeFrame);
+        chatArchiveInertiaFrameByConversationRef.current.delete(conversationId);
+      }
+      chatLastScrollTopByConversationRef.current.delete(conversationId);
+      chatLastScrollHeightByConversationRef.current.delete(conversationId);
+      chatAutoscrollArmedByConversationRef.current.set(conversationId, false);
+    },
+    [setChatArchiveLoadingForConversation, setChatArchiveRevealForConversation]
+  );
   const latestDetailMessageId =
     detail && detail.messages.length > 0
       ? detail.messages[detail.messages.length - 1]?.id ?? null
       : null;
+  const chatAssistantRevealInProgress = useMemo(() => {
+    if (!chatEphemeralMode || !detail?.id || !latestAssistantMessageId) return false;
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return false;
+    if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
+    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey);
+    if (firstSeenAt === undefined) return false;
+    const latestAssistantMessage =
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+    if (!latestAssistantMessage) return false;
+    const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistantMessage));
+    const revealDurationMs = resolveRevealDurationMsForTokens(revealTokens);
+    return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
+  }, [
+    chatEphemeralMode,
+    detail?.id,
+    detail?.messages,
+    latestAssistantMessageId,
+    chatEphemeralNowMs,
+  ]);
+  const handleTypingIndicatorPress = useCallback((): void => {
+    if (pendingReplyVisible) {
+      stopPendingReply();
+      return;
+    }
+    if (
+      !chatEphemeralMode ||
+      !chatAssistantRevealInProgress ||
+      !detail?.id ||
+      !latestAssistantMessageId
+    ) return;
+    // Mid-typing cancel freezes reveal at the current token boundary.
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    const latestAssistant =
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+    if (!latestAssistant) return;
+    const interruptedText = resolveMessageDisplayContent(latestAssistant);
+    const revealTokens = tokenizeMessageReveal(interruptedText);
+    const tokenTotal = Math.max(1, revealTokens.length);
+    const firstSeenAt =
+      chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
+    const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
+    const visibleTokenCount = Math.min(tokenTotal, resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs));
+    const interruptedSnippet = interruptedMidWordSnippet(
+      interruptedText,
+      visibleTokenCount
+    );
+    chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
+    chatCompletedRevealKeysRef.current.add(revealKey);
+    // Freeze auto-scroll so the cut-off text stays where the user paused
+    // it. The "...interrupted again." follow-up will appear in flow without
+    // the cinematic dolly chasing the new content's tail.
+    chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+    const nextInterruptCount =
+      (chatInterruptCountByConversationRef.current.get(detail.id) ?? 0) + 1;
+    chatInterruptCountByConversationRef.current.set(detail.id, nextInterruptCount);
+    const interruptedMood = resolveMessageMoodKey(latestAssistant);
+    const previousInterruptionLine =
+      chatLastInterruptionLineByConversationRef.current.get(detail.id) ?? "";
+    const followup = interruptionFollowupLine({
+      baseMood: interruptedMood,
+      interruptCount: nextInterruptCount,
+      interruptedText,
+      previousLine: previousInterruptionLine,
+    });
+    chatLastInterruptionLineByConversationRef.current.set(detail.id, followup.line);
+    const interruptionMessageId = `interrupt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const followupMessage: Message = {
+      id: interruptionMessageId,
+      role: "assistant",
+      content: `\n... ${followup.line.trimStart()}`,
+      createdAt: new Date().toISOString(),
+      provider: latestAssistant.provider,
+      model: latestAssistant.model,
+      botName: latestAssistant.botName,
+      botColor: latestAssistant.botColor,
+      botGlyph: latestAssistant.botGlyph,
+      moodKey: followup.mood,
+      moodConfidence: latestAssistant.moodConfidence,
+    };
+    if (chatEphemeralMode) {
+      hardResetChatArchiveStateForConversation(detail.id);
+    }
+    setDetail((current) => {
+      if (!current || current.id !== detail.id) return current;
+      const baseConversation = chatEphemeralMode
+        ? trimConversationToActiveTurn(current)
+        : current;
+      const interruptedConversationMessages = baseConversation.messages;
+      if (interruptedConversationMessages.length === 0) {
+        return current;
+      }
+      const interruptedAssistantIndex = interruptedConversationMessages.findIndex(
+        (message) => message.id === latestAssistantMessageId
+      );
+      if (interruptedAssistantIndex < 0) return current;
+      const interruptedAssistant = interruptedConversationMessages[interruptedAssistantIndex];
+      if (!interruptedAssistant || interruptedAssistant.role !== "assistant") return current;
+      const patchedInterruptedAssistant: Message = {
+        ...interruptedAssistant,
+        content: interruptedSnippet,
+      };
+      return {
+        ...current,
+        hasAssistantReply: true,
+        messages: [
+          ...interruptedConversationMessages.slice(0, interruptedAssistantIndex),
+          patchedInterruptedAssistant,
+          ...interruptedConversationMessages.slice(interruptedAssistantIndex + 1),
+        ],
+      };
+    });
+    window.setTimeout(() => {
+      setDetail((current) => {
+        if (!current || current.id !== detail.id) return current;
+        const baseConversation = chatEphemeralMode
+          ? trimConversationToActiveTurn(current)
+          : current;
+        // Avoid duplicate insertion if another interruption already appended this id.
+        if (baseConversation.messages.some((message) => message.id === interruptionMessageId)) {
+          return current;
+        }
+        return {
+          ...baseConversation,
+          hasAssistantReply: true,
+          messages: [...baseConversation.messages, followupMessage],
+        };
+      });
+    }, CHAT_MODE_INTERRUPTION_FOLLOWUP_DELAY_MS);
+    setChatEphemeralNowMs(Date.now());
+  }, [
+    pendingReplyVisible,
+    stopPendingReply,
+    chatEphemeralMode,
+    chatAssistantRevealInProgress,
+    detail?.id,
+    detail?.messages,
+    chatEphemeralNowMs,
+    latestAssistantMessageId,
+    hardResetChatArchiveStateForConversation,
+  ]);
 
+  const typingIndicatorVisible = pendingReplyVisible || chatAssistantRevealInProgress;
   const typingIndicatorNode = useMemo(() => {
-    if (!pendingReplyVisible) return null;
+    if (!typingIndicatorVisible) return null;
     const pendingRespondent =
       composeBotAccentId !== null
         ? bots.find((b) => b.id === composeBotAccentId)
@@ -10559,19 +12802,35 @@ function HomeContent(): React.JSX.Element {
       headerIdentity?.name ??
       DEFAULT_ASSISTANT_NAME;
     const salt = `${composeBotAccentId ?? "none"}:${detail?.messages.length ?? 0}:${pendingReplyConversationId ?? "new"}`;
-    const label = pickGeneratingLabel(displayName, salt);
+    const showFallbackCheckerboardRing =
+      chatAssistantRevealInProgress &&
+      (
+        pendingReplyLikelyFallbackProcessing ||
+        (latestAssistantMessageId !== null && fallbackMessageIds.has(latestAssistantMessageId))
+      );
+    // Keep the "gathering" phase varied, but make active typed reveal explicit.
+    const label = chatAssistantRevealInProgress
+      ? "Prism is replying..."
+      : pickGeneratingLabel(displayName, salt);
     const style = selectedComposeBotAccent
       ? ({ ["--typing-accent" as string]: selectedComposeBotAccent } as React.CSSProperties)
       : undefined;
     return (
-      <div
+      <button
+        type="button"
         className={`${styles.typingIndicator} ${
           chatEphemeralMode ? styles.typingIndicatorChatCenter : ""
+        } ${
+          chatEphemeralMode ? styles.typingIndicatorStopButton : ""
+        } ${
+          chatAssistantRevealInProgress ? styles.typingIndicatorReplyingLive : ""
+        } ${
+          showFallbackCheckerboardRing ? styles.typingIndicatorFallbackProcessing : ""
         }`}
         style={style}
-        role="status"
-        aria-live="polite"
-        aria-label={label}
+        aria-label={chatEphemeralMode ? `${label}. Tap to stop.` : label}
+        title={chatEphemeralMode ? "Stop reply" : undefined}
+        onClick={chatEphemeralMode ? handleTypingIndicatorPress : undefined}
       >
         <span>{label}</span>
         <span className={styles.typingDots} aria-hidden="true">
@@ -10579,20 +12838,29 @@ function HomeContent(): React.JSX.Element {
           <span />
           <span />
         </span>
-      </div>
+      </button>
     );
   }, [
     pendingReplyVisible,
+    chatAssistantRevealInProgress,
     composeBotAccentId,
     bots,
     headerIdentity?.name,
     detail?.messages.length,
     pendingReplyConversationId,
+    pendingReplyLikelyFallbackProcessing,
+    latestAssistantMessageId,
+    fallbackMessageIds,
+    view,
     selectedComposeBotAccent,
     chatEphemeralMode,
+    handleTypingIndicatorPress,
   ]);
   const sandboxSummaryIndicatorNode = useMemo(() => {
-    if (!sandboxSummaryBusy || view !== "sandbox" || pendingReplyVisible) return null;
+    if (view !== "sandbox") return null;
+    const showCompactionSpinner = sandboxSummaryBusy && !pendingReplyVisible;
+    if (!showCompactionSpinner) return null;
+    const label = "Summarizing conversation context";
     const style = selectedComposeBotAccent
       ? ({ ["--typing-accent" as string]: selectedComposeBotAccent } as React.CSSProperties)
       : undefined;
@@ -10602,9 +12870,10 @@ function HomeContent(): React.JSX.Element {
         style={style}
         role="status"
         aria-live="polite"
-        aria-label="Summarizing conversation context."
+        aria-label={label}
       >
         <span className={styles.summarySpinnerWheel} aria-hidden="true" />
+        <span>{label}</span>
       </div>
     );
   }, [
@@ -10930,6 +13199,14 @@ function HomeContent(): React.JSX.Element {
     },
     [emptyStateLensVisible, lensThumbXPct, homeRainbowVars]
   );
+  const showCanvasBotSwitchLoading =
+    view === "sandbox" &&
+    !pendingIncognito &&
+    !pendingReplyVisible &&
+    activeConversationIsEmpty &&
+    Boolean(selectedBotId) &&
+    (canvasBotSwitchTransitioning || sandboxBotStatusBusy);
+  const showCanvasBotSwitchOverlay = canvasBotSwitchOverlayPhase !== "hidden";
   // Hero override is drag-only — the Prism triangle replaces a bot glyph
   // only while the user is actively pressing/touching the slider thumb.
   // When a bot is committed, the lens unmounts and the bot accent takes
@@ -10984,14 +13261,17 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (view !== "chat") return;
-    // Chat is Prism-only: clear any carried bot selection/override state.
+    const privateChatSelected = detail?.incognito === true || pendingIncognito;
+    // Keep bot state while private chat is armed/active. Only reset to Prism
+    // defaults for normal (non-private) Chat mode.
+    if (privateChatSelected) return;
     if (selectedBotId !== null) {
       setSelectedBotId(null);
     }
     if (chatBotOverride !== undefined) {
       setChatBotOverride(undefined);
     }
-  }, [view, selectedBotId, chatBotOverride]);
+  }, [view, detail, pendingIncognito, selectedBotId, chatBotOverride]);
 
   // Empty-state picker (Chat + Sandbox) renders bots in color order so
   // the unfiltered grid trends toward a color-wheel/color-square map.
@@ -11122,24 +13402,231 @@ function HomeContent(): React.JSX.Element {
     };
   }, []);
 
-  // Keep the latest message pinned to the bottom of the stream. Fires when:
-  //   - a new conversation is loaded (detail?.id change)
-  //   - a message is added, optimistically or from the server (length change)
-  //   - the visible typing indicator toggles on/off
+  // Auto-scroll for Chat mode while a reply is streaming or revealing.
+  // Each animation frame ease scrollTop toward the bottom of the content
+  // by a fixed fraction of the remaining distance. That gives a natural
+  // ease-out (steps shrink as we approach), and when new tokens push the
+  // bottom further down the loop catches up automatically.
+  //
+  // Manual scroll-up and interruption pause the follow via the shared
+  // `chatAutoscrollArmedByConversationRef` flag; we do not detect those
+  // states inside the rAF loop so layout reflow can never trip us.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    if (!chatEphemeralMode) return;
+    if (!typingIndicatorVisible) return;
+    const conversationId = detail?.id;
+    if (!conversationId) return;
+
+    const EASE_FACTOR = 0.32;
+    const MIN_STEP_PX = 0.6;
+    const REST_THRESHOLD_PX = 0.5;
+
+    let frame = 0;
+    const tick = (): void => {
+      frame = window.requestAnimationFrame(tick);
+
+      const scrollEl = messagesScrollRef.current;
+      if (!scrollEl) return;
+      if (chatAutoscrollArmedByConversationRef.current.get(conversationId) === false) return;
+
+      const maxScrollTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
+      const delta = maxScrollTop - scrollEl.scrollTop;
+      if (delta <= REST_THRESHOLD_PX) return;
+
+      const stepPx = Math.max(MIN_STEP_PX, delta * EASE_FACTOR);
+      const nextTop = Math.min(maxScrollTop, scrollEl.scrollTop + stepPx);
+      // Tag this write as programmatic so the onScroll handler does not
+      // interpret reflow-induced drops as a manual upward scroll.
+      chatProgrammaticScrollUntilMsRef.current = Date.now() + 80;
+      scrollEl.scrollTop = nextTop;
+    };
+
+    frame = window.requestAnimationFrame(tick);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [chatEphemeralMode, detail?.id, typingIndicatorVisible]);
+  useEffect(() => {
+    if (!chatEphemeralMode || !detail?.id || detail.messages.length === 0) return;
+    if (!latestUserMessageId) return;
+    const fadeKey = `${detail.id}:${latestUserMessageId}`;
+    if (!chatUserMessageFadeStartByKeyRef.current.has(fadeKey)) {
+      chatUserMessageFadeStartByKeyRef.current.set(fadeKey, Date.now());
+    }
+    const key = `${detail.id}:${latestUserMessageId}`;
+    if (chatLastPinnedUserMessageKeyRef.current === key) return;
+    chatLastPinnedUserMessageKeyRef.current = key;
+    setChatArchiveRevealForConversation(detail.id, false);
+    setChatArchiveLoadingForConversation(detail.id, false);
+    const loadingTimer = chatArchiveLoadTimerByConversationRef.current.get(detail.id);
+    if (loadingTimer !== undefined) {
+      window.clearTimeout(loadingTimer);
+      chatArchiveLoadTimerByConversationRef.current.delete(detail.id);
+    }
+    chatArchivePullPxByConversationRef.current.set(detail.id, 0);
+    chatArchiveParagraphQuotaByConversationRef.current.set(detail.id, 0);
+    chatArchiveInertiaVelocityByConversationRef.current.set(detail.id, 0);
+    const activeFrame = chatArchiveInertiaFrameByConversationRef.current.get(detail.id);
+    if (activeFrame !== undefined) {
+      window.cancelAnimationFrame(activeFrame);
+      chatArchiveInertiaFrameByConversationRef.current.delete(detail.id);
+    }
+    chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+    requestAnimationFrame(() => {
+      const scrollRoot = messagesScrollRef.current;
+      if (!scrollRoot) return;
+      const target = findMessageRowById(scrollRoot, latestUserMessageId);
+      if (!target) return;
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const useSmoothQuestionScroll = latestUserMessageAsQuestion && !prefersReducedMotion;
+      chatProgrammaticScrollUntilMsRef.current = Date.now() + (useSmoothQuestionScroll ? 900 : 180);
+      const topAnchorOffsetPx = 2;
+      const top = Math.max(0, target.offsetTop - topAnchorOffsetPx);
+      scrollRoot.scrollTo({ top, behavior: useSmoothQuestionScroll ? "smooth" : "auto" });
+      chatLastScrollTopByConversationRef.current.set(detail.id, top);
+      chatLastScrollHeightByConversationRef.current.set(detail.id, scrollRoot.scrollHeight);
+    });
   }, [
+    chatEphemeralMode,
     detail?.id,
     detail?.messages.length,
+    latestUserMessageId,
+    latestUserMessageAsQuestion,
+    setChatArchiveLoadingForConversation,
+    setChatArchiveRevealForConversation,
+  ]);
+  useEffect(() => {
+    if (!chatEphemeralMode || !detail?.id) return;
+    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
+    if (!revealArchived) return;
+    const revealAnchor =
+      chatArchiveAnchorMessageByConversationRef.current.get(detail.id) ?? null;
+    if (revealAnchor === latestUserMessageId) return;
+    // New user turn supersedes prior archive-reveal context.
+    hardResetChatArchiveStateForConversation(detail.id);
+  }, [
+    chatEphemeralMode,
+    detail?.id,
+    latestUserMessageId,
+    hardResetChatArchiveStateForConversation,
+  ]);
+  useEffect(() => {
+    if (!chatEphemeralMode || !detail?.id) return;
+    if (latestMessageRole !== "assistant") return;
+    // Only re-arm when the assistant message follows a fresh user turn.
+    // Skip arming when it's an interruption follow-up (preceded by another
+    // assistant message) so the cut-off position stays put.
+    const messages = detail.messages;
+    const previousMessage = messages.length >= 2 ? messages[messages.length - 2] : null;
+    if (!previousMessage || previousMessage.role !== "user") return;
+    // Keep the sent user row pinned first, then allow follow-scroll once
+    // assistant streaming starts and the pin lock window has elapsed.
+    const waitMs = Math.max(0, chatProgrammaticScrollUntilMsRef.current - Date.now());
+    const timer = window.setTimeout(() => {
+      chatAutoscrollArmedByConversationRef.current.set(detail.id, true);
+    }, waitMs);
+    return () => window.clearTimeout(timer);
+  }, [chatEphemeralMode, detail?.id, latestMessageRole, detail?.messages, detail?.messages.length]);
+  useEffect(() => {
+    if (!chatEphemeralMode || !detail?.id || !latestUserMessageId) return;
+    if (latestMessageRole !== "assistant") return;
+    if (pendingReplyVisible || chatAssistantRevealInProgress) return;
+    const fadeKey = `${detail.id}:${latestUserMessageId}`;
+    if (chatUserAnchorFadeStartByKeyRef.current.has(fadeKey)) return;
+    chatUserAnchorFadeStartByKeyRef.current.set(
+      fadeKey,
+      Date.now() + CHAT_MODE_USER_ANCHOR_FADE_DELAY_MS
+    );
+  }, [
+    chatAssistantRevealInProgress,
+    chatEphemeralMode,
+    detail?.id,
+    latestMessageRole,
+    latestUserMessageId,
     pendingReplyVisible,
+  ]);
+  useEffect(() => {
+    if (!chatEphemeralMode || !detail?.id || detail.messages.length === 0) return;
+    if (chatLastRestoredConversationIdRef.current === detail.id) return;
+    chatLastRestoredConversationIdRef.current = detail.id;
+    setChatArchiveRevealForConversation(detail.id, false);
+    setChatArchiveLoadingForConversation(detail.id, false);
+    const loadingTimer = chatArchiveLoadTimerByConversationRef.current.get(detail.id);
+    if (loadingTimer !== undefined) {
+      window.clearTimeout(loadingTimer);
+      chatArchiveLoadTimerByConversationRef.current.delete(detail.id);
+    }
+    chatArchivePullPxByConversationRef.current.set(detail.id, 0);
+    chatArchiveParagraphQuotaByConversationRef.current.set(detail.id, 0);
+    chatArchiveInertiaVelocityByConversationRef.current.set(detail.id, 0);
+    const activeFrame = chatArchiveInertiaFrameByConversationRef.current.get(detail.id);
+    if (activeFrame !== undefined) {
+      window.cancelAnimationFrame(activeFrame);
+      chatArchiveInertiaFrameByConversationRef.current.delete(detail.id);
+    }
+    chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+    requestAnimationFrame(() => {
+      const scrollRoot = messagesScrollRef.current;
+      if (!scrollRoot) return;
+      const latestUser = [...detail.messages].reverse().find((msg) => msg.role === "user");
+      const latestAssistant = [...detail.messages].reverse().find((msg) => msg.role === "assistant");
+      const targetMessage = latestUser ?? latestAssistant;
+      if (!targetMessage) return;
+      const target = findMessageRowById(scrollRoot, targetMessage.id);
+      if (!target) return;
+      target.scrollIntoView({
+        behavior: "auto",
+        block: targetMessage.role === "user" ? "start" : "center",
+      });
+    });
+  }, [
+    chatEphemeralMode,
+    detail?.id,
+    detail?.messages,
+    setChatArchiveLoadingForConversation,
+    setChatArchiveRevealForConversation,
   ]);
   useEffect(() => {
     if (!chatEphemeralMode || !detail?.id) {
       chatMessageFirstSeenAtRef.current.clear();
+      chatCancelledRevealTokenCountByKeyRef.current.clear();
+      chatInterruptCountByConversationRef.current.clear();
+      chatLastInterruptionLineByConversationRef.current.clear();
+      chatUserMessageFadeStartByKeyRef.current.clear();
+      chatUserAnchorFadeStartByKeyRef.current.clear();
+      chatMessageOffscreenSinceRef.current.clear();
+      chatLastScrollTopByConversationRef.current.clear();
+      chatLastScrollHeightByConversationRef.current.clear();
+      chatArchivePullPxByConversationRef.current.clear();
+      chatArchiveParagraphQuotaByConversationRef.current.clear();
+      for (const timer of chatArchiveLoadTimerByConversationRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      chatArchiveLoadTimerByConversationRef.current.clear();
+      chatArchiveLoadingByConversationRef.current.clear();
+      for (const frame of chatArchiveInertiaFrameByConversationRef.current.values()) {
+        window.cancelAnimationFrame(frame);
+      }
+      chatArchiveInertiaFrameByConversationRef.current.clear();
+      chatArchiveInertiaVelocityByConversationRef.current.clear();
       return;
     }
     // Strict ephemerality is anchored to first render in the active chat view.
     chatMessageFirstSeenAtRef.current.clear();
+    chatCancelledRevealTokenCountByKeyRef.current.clear();
+    chatInterruptCountByConversationRef.current.delete(detail.id);
+    chatLastInterruptionLineByConversationRef.current.delete(detail.id);
+    const activeConversationPrefix = `${detail.id}:`;
+    for (const fadeKey of chatUserMessageFadeStartByKeyRef.current.keys()) {
+      if (!fadeKey.startsWith(activeConversationPrefix)) {
+        chatUserMessageFadeStartByKeyRef.current.delete(fadeKey);
+      }
+    }
+    for (const fadeKey of chatUserAnchorFadeStartByKeyRef.current.keys()) {
+      if (!fadeKey.startsWith(activeConversationPrefix)) {
+        chatUserAnchorFadeStartByKeyRef.current.delete(fadeKey);
+      }
+    }
     setChatEphemeralNowMs(Date.now());
   }, [chatEphemeralMode, detail?.id]);
   useEffect(() => {
@@ -11152,16 +13639,28 @@ function HomeContent(): React.JSX.Element {
     };
   }, [chatEphemeralMode, detail?.id]);
   useEffect(() => {
-    if (!pendingReply) return;
-    if (!detail || latestMessageRole !== "assistant") return;
-    // Hard-stop typing as soon as a fresh assistant row appears for the
-    // pending turn, even if post-send refresh work is still underway.
-    if (detail.messages.length <= pendingReplyStartMessageCount) return;
-    setPendingReply(false);
-    setPendingReplyConversationId(null);
-    setPendingReplyIsNewConversation(false);
-  }, [pendingReply, detail, latestMessageRole, pendingReplyStartMessageCount]);
-
+    if (!chatEphemeralMode || !detail?.id) return;
+    if (pendingReplyVisible) return;
+    const source = detail.messages;
+    let latestAssistant: Message | null = null;
+    for (let i = source.length - 1; i >= 0; i -= 1) {
+      if (source[i]?.role === "assistant") {
+        latestAssistant = source[i]!;
+        break;
+      }
+    }
+    if (!latestAssistant) return;
+    const temporalKey = `${detail.id}:${latestAssistant.id}`;
+    if (chatCompletedRevealKeysRef.current.has(temporalKey)) return;
+    if (chatCancelledRevealTokenCountByKeyRef.current.has(temporalKey)) return;
+    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(temporalKey);
+    if (firstSeenAt === undefined) return;
+    const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistant));
+    const revealDurationMs = resolveRevealDurationMsForTokens(revealTokens);
+    if (chatEphemeralNowMs - firstSeenAt >= revealDurationMs) {
+      chatCompletedRevealKeysRef.current.add(temporalKey);
+    }
+  }, [chatEphemeralMode, chatEphemeralNowMs, detail?.id, detail?.messages, pendingReplyVisible]);
   useEffect(() => {
     if (viewportWidth > PICKER_MOBILE_BREAKPOINT) {
       setMobileFocusedMessageId(null);
@@ -11193,39 +13692,30 @@ function HomeContent(): React.JSX.Element {
     return () => window.clearInterval(timer);
   }, [memoryToasts.length, pausedMemoryToastIds]);
 
-  // Every entrance into Sandbox lands on a fresh, empty chat. Sandbox
-  // is a playground — users expect each visit to start from zero, not
-  // resume whatever thread was last open. Fires on:
-  //   • Hub → Sandbox transitions (Hub tile click).
-  //   • Direct URL loads at `/?view=sandbox` (effect runs on mount).
-  //   • Chat → Sandbox via URL / back-forward nav.
-  // Clicking a conversation row IN the Sandbox sidebar does NOT re-fire
-  // this effect — `view` stays "sandbox" while `refreshConversation`
-  // repopulates detail/selectedId — so loading past chats still works
-  // as expected. Chat mode is intentionally unaffected: its bot and
-  // privacy flags are conversation-level commitments, so remembering
-  // the last open thread is the right default there.
+  // Every entrance into Sandbox or Chat lands on a fresh, empty surface.
+  // Both modes should open clean, with no prior thread rendered until the
+  // user starts (or explicitly opens) a conversation in that mode.
+  // Fires on:
+  //   • Hub → Sandbox / Chat transitions (Hub tile click).
+  //   • Direct URL loads at `/?view=sandbox` or `/?view=chat`.
+  //   • Cross-mode hops via URL / back-forward nav.
+  //
+  // Clicking a conversation row inside a mode sidebar does NOT re-fire this
+  // effect — `view` stays the same while `refreshConversation` repopulates
+  // `detail` / `selectedId` — so manual thread-open still works.
   useEffect(() => {
-    if (view !== "sandbox") return;
+    if (view !== "sandbox" && view !== "chat") return;
     setSelectedId(null);
     setDetail(null);
     setSessionOpinion(null);
     setBotOpinion(null);
     setSelectedBotId(null);
+    if (view === "chat") {
+      setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
+      chatSummaryRefreshMarkerRef.current = null;
+    }
     setError(null);
   }, [view]);
-
-  useEffect(() => {
-    if (view !== "chat") return;
-    if (chatAutoRestoreSuppressed) return;
-    if (pendingReplyVisible) return;
-    if (detail?.id) return;
-    const latestChatConversation = conversations.find(
-      (conversation) => conversation.mode === "chat" && !conversation.incognito
-    );
-    if (!latestChatConversation?.id) return;
-    void refreshConversation(latestChatConversation.id);
-  }, [view, pendingReplyVisible, detail?.id, conversations, chatAutoRestoreSuppressed]);
 
   useEffect(() => {
     if (view === "chat") return;
@@ -11274,10 +13764,9 @@ function HomeContent(): React.JSX.Element {
           `/api/conversations/${encodeURIComponent(activeConversationId)}/summary?mode=chat`
         );
         if (cancelled) return;
+        const trimmedSummary = result.summary?.trim() ?? "";
         setChatStartupSummary(
-          result.summary && result.summary.trim().length > 0
-            ? result.summary.trim()
-            : DEFAULT_CHAT_STARTUP_SUMMARY
+          trimmedSummary.length > 0 ? trimmedSummary : DEFAULT_CHAT_STARTUP_SUMMARY
         );
       } catch {
         if (cancelled) return;
@@ -11299,16 +13788,154 @@ function HomeContent(): React.JSX.Element {
   ]);
 
   useEffect(() => {
+    if (canvasBotSwitchOverlayHideTimerRef.current) {
+      clearTimeout(canvasBotSwitchOverlayHideTimerRef.current);
+      canvasBotSwitchOverlayHideTimerRef.current = null;
+    }
+    if (showCanvasBotSwitchLoading) {
+      setCanvasBotSwitchOverlayPhase("enter");
+      return;
+    }
+    setCanvasBotSwitchOverlayPhase((current) =>
+      current === "hidden" ? "hidden" : "exit"
+    );
+    canvasBotSwitchOverlayHideTimerRef.current = window.setTimeout(() => {
+      setCanvasBotSwitchOverlayPhase("hidden");
+      if (pendingCanvasBotUnfoldRef.current) {
+        setCanvasBotSwitchUnfoldSeed((current) => current + 1);
+        pendingCanvasBotUnfoldRef.current = false;
+      }
+      canvasBotSwitchOverlayHideTimerRef.current = null;
+    }, 180);
+    return () => {
+      if (canvasBotSwitchOverlayHideTimerRef.current) {
+        clearTimeout(canvasBotSwitchOverlayHideTimerRef.current);
+        canvasBotSwitchOverlayHideTimerRef.current = null;
+      }
+    };
+  }, [showCanvasBotSwitchLoading]);
+
+  useEffect(() => {
+    if (view !== "sandbox") {
+      setSandboxBotStatusBusy(false);
+      setCanvasBotSwitchTransitioning(false);
+      setCanvasBotSwitchOverlayPhase("hidden");
+      canvasBotSwitchTransitionStartedAtRef.current = null;
+      pendingCanvasBotUnfoldRef.current = false;
+      setSandboxBotStatusSummary(null);
+      setSandboxBotStatusSummaryBotId(null);
+      sandboxBotStatusRefreshMarkerRef.current = null;
+      return;
+    }
+    // Bot-status copy renders in the empty-state hero/purpose area only.
+    // Skip fetches while an active thread is open to avoid invisible work.
+    if (detail?.id && detail.id !== "pending") {
+      setSandboxBotStatusBusy(false);
+      setCanvasBotSwitchTransitioning(false);
+      setCanvasBotSwitchOverlayPhase("hidden");
+      canvasBotSwitchTransitionStartedAtRef.current = null;
+      pendingCanvasBotUnfoldRef.current = false;
+      return;
+    }
+    if (pendingIncognito) {
+      setSandboxBotStatusBusy(false);
+      setCanvasBotSwitchTransitioning(false);
+      setCanvasBotSwitchOverlayPhase("hidden");
+      canvasBotSwitchTransitionStartedAtRef.current = null;
+      pendingCanvasBotUnfoldRef.current = false;
+      setSandboxBotStatusSummary(null);
+      setSandboxBotStatusSummaryBotId(null);
+      sandboxBotStatusRefreshMarkerRef.current = null;
+      return;
+    }
+    if (!selectedBotId) {
+      setSandboxBotStatusBusy(false);
+      setCanvasBotSwitchTransitioning(false);
+      setCanvasBotSwitchOverlayPhase("hidden");
+      canvasBotSwitchTransitionStartedAtRef.current = null;
+      pendingCanvasBotUnfoldRef.current = false;
+      setSandboxBotStatusSummary(null);
+      setSandboxBotStatusSummaryBotId(null);
+      sandboxBotStatusRefreshMarkerRef.current = null;
+      return;
+    }
+    const refreshMarker = `${selectedBotId}:${selectedId ?? "home"}:${conversations.length}`;
+    if (sandboxBotStatusRefreshMarkerRef.current === refreshMarker) return;
+    sandboxBotStatusRefreshMarkerRef.current = refreshMarker;
+    let cancelled = false;
+    const loadSandboxBotStatus = async () => {
+      const startedAt = Date.now();
+      setSandboxBotStatusBusy(true);
+      try {
+        const result = await api<{ summary: string | null }>(
+          `/api/bots/${encodeURIComponent(selectedBotId)}/summary?mode=sandbox`
+        );
+        if (cancelled) return;
+        const summary =
+          typeof result.summary === "string" && result.summary.trim().length > 0
+            ? result.summary.trim()
+            : null;
+        setSandboxBotStatusSummary(summary);
+        setSandboxBotStatusSummaryBotId(summary ? selectedBotId : null);
+      } catch {
+        if (cancelled) return;
+        setSandboxBotStatusSummary(null);
+        setSandboxBotStatusSummaryBotId(null);
+      } finally {
+        const transitionStartedAt =
+          canvasBotSwitchTransitionStartedAtRef.current ?? startedAt;
+        const elapsed = Date.now() - transitionStartedAt;
+        const remaining = Math.max(0, CANVAS_BOT_SWITCH_MIN_LOADING_MS - elapsed);
+        if (remaining > 0) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(() => resolve(), remaining);
+          });
+        }
+        if (!cancelled) {
+          setSandboxBotStatusBusy(false);
+          setCanvasBotSwitchTransitioning(false);
+          canvasBotSwitchTransitionStartedAtRef.current = null;
+        }
+      }
+    };
+    void loadSandboxBotStatus();
+    return () => {
+      cancelled = true;
+      setSandboxBotStatusBusy(false);
+    };
+  }, [
+    CANVAS_BOT_SWITCH_MIN_LOADING_MS,
+    view,
+    detail?.id,
+    pendingIncognito,
+    selectedBotId,
+    selectedId,
+    conversations.length,
+  ]);
+
+  useEffect(() => {
     const activeConversationId = view === "hub" ? null : selectedId;
     const previous = titleRefreshSelectionRef.current;
+    // Any sandbox thread transition can change the bot-level status recap.
+    // Reset the fetch marker so exiting/switching always triggers a fresh pull.
+    if (
+      view === "sandbox" &&
+      previous.id !== activeConversationId
+    ) {
+      sandboxBotStatusRefreshMarkerRef.current = null;
+    }
     if (previous.id && previous.id !== activeConversationId && !previous.incognito) {
       void refreshConversationTitleAfterLeave(previous.id);
+      if (previous.view === "sandbox") {
+        triggerConversationModeExitCompaction(previous.id, "sandbox");
+      }
     }
     titleRefreshSelectionRef.current = {
       id: activeConversationId,
       incognito: detail?.incognito === true,
+      view,
     };
-  }, [selectedId, detail?.incognito, view]);
+  }, [selectedId, detail?.incognito, view, triggerConversationModeExitCompaction]);
 
   useEffect(() => {
     const handlePageHide = () => {
@@ -11333,7 +13960,16 @@ function HomeContent(): React.JSX.Element {
     };
   }, [view]);
 
-  async function refreshAll() { await Promise.all([refreshConversations(), refreshSettings(), refreshMemories(), refreshBots(), refreshImages(), refreshModels()]); }
+  async function refreshAll() {
+    await Promise.all([
+      refreshConversations(),
+      refreshSettings(),
+      refreshMemories(),
+      refreshBots(),
+      refreshImages(),
+      refreshModels(),
+    ]);
+  }
   async function refreshConversations(): Promise<ConversationSummary[]> {
     const d = await api<{ conversations: ConversationSummary[] }>("/api/conversations");
     const next = d.conversations.filter(c => !c.incognito);
@@ -11423,12 +14059,27 @@ function HomeContent(): React.JSX.Element {
       typeof d.settings.secondaryOllamaHost === "string"
         ? d.settings.secondaryOllamaHost
         : "";
+    const displayName =
+      typeof d.settings.displayName === "string"
+        ? d.settings.displayName
+        : "";
+    const lenientLocalFallbackModel =
+      typeof d.settings.lenientLocalFallbackModel === "string"
+        ? d.settings.lenientLocalFallbackModel
+        : "";
     setSettings({
       ...d.settings,
+      displayName,
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
         : [],
       secondaryOllamaHost: secondaryHost,
+      lenientLocalFallbackModel,
+      devMemoriesEnabled: d.settings.devMemoriesEnabled === true,
+      devMemoriesText:
+        typeof d.settings.devMemoriesText === "string"
+          ? d.settings.devMemoriesText
+          : "",
     });
   }
   async function refreshModels() { const d = await api<{ catalog: ModelCatalog }>("/api/models"); setModelCatalog(d.catalog); }
@@ -11576,7 +14227,29 @@ function HomeContent(): React.JSX.Element {
         text: `${prefix} bot opinion: ${envelope.botOpinion.band} ${envelope.botOpinion.score}% (${envelope.botOpinion.trend})`,
       });
     }
+    if (envelope.fallbackInvocation) {
+      const invocation = envelope.fallbackInvocation;
+      lines.push({
+        kind: "summary",
+        text:
+          `${prefix} lenient fallback invoked (${invocation.trigger}). ` +
+          `${invocation.primaryProvider}:${invocation.primaryModel} -> local:${invocation.fallbackModel}`,
+      });
+    }
     return lines;
+  }
+  function captureFallbackMessageIdFromEnvelope(envelope: ChatPostEnvelope): void {
+    if (!envelope.fallbackInvocation) return;
+    const latestAssistant = [...envelope.conversation.messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    if (!latestAssistant) return;
+    setFallbackMessageIds((current) => {
+      if (current.has(latestAssistant.id)) return current;
+      const next = new Set(current);
+      next.add(latestAssistant.id);
+      return next;
+    });
   }
   async function refreshBots() { const d = await api<{ bots: Bot[] }>("/api/bots"); setBots(d.bots); }
   async function refreshImages() { const d = await api<{ images: ImageRecord[] }>("/api/images"); setImages(d.images); }
@@ -11733,13 +14406,24 @@ function HomeContent(): React.JSX.Element {
   ): Record<string, unknown> {
     const isChatMode = view === "chat";
     const privateForSend = detail?.incognito === true || pendingIncognito;
+    const privateBotIdForSend = privateForSend
+      ? chatBotOverride !== undefined
+        ? chatBotOverride
+        : selectedBotId !== null
+          ? selectedBotId
+        : detail?.id !== undefined && detail.id !== "pending"
+          ? detail.botId
+          : (detail?.botId ?? selectedBotId ?? null)
+      : undefined;
     const mode: "chat" | "sandbox" =
       isChatMode || privateForSend ? "chat" : "sandbox";
     const sandboxProviderForSend =
       privateForSend ? "local" : settings?.preferredProvider;
     const modelChoice = sandboxProviderForSend
-      ? visibleBotCustomizerModelChoice(
+      ? visibleConcreteModelChoiceForProvider(
+          modelCatalog,
           settings,
+          sandboxProviderForSend,
           chatModelChoiceByProvider[sandboxProviderForSend]
         )
       : AUTO_MODEL_CHOICE;
@@ -11762,7 +14446,12 @@ function HomeContent(): React.JSX.Element {
             },
           }
         : {}),
-      botId: mode === "sandbox" ? (selectedBotId ?? undefined) : undefined,
+      botId:
+        mode === "sandbox"
+          ? (selectedBotId ?? undefined)
+          : privateForSend
+            ? privateBotIdForSend
+            : undefined,
       ...(mode === "chat" ? { incognito: privateForSend } : {}),
       ...(privateForSend
         ? { ephemeralMessages: options.ephemeralMessages ?? detail?.messages ?? [] }
@@ -11792,6 +14481,8 @@ function HomeContent(): React.JSX.Element {
     if (cutoffIdx < 0) return;
 
     setPendingReply(true);
+    setPendingReplyStartedAtMs(Date.now());
+    setPendingReplyDenialRisk(promptLooksDenialProne(text));
     setSandboxSummaryBusy(false);
     setPendingReplyIsNewConversation(false);
     setError(null);
@@ -11807,6 +14498,8 @@ function HomeContent(): React.JSX.Element {
     let editedConversation: ConversationDetail | null = null;
     const clearPendingReplyVisuals = () => {
       setPendingReply(false);
+      setPendingReplyStartedAtMs(null);
+      setPendingReplyDenialRisk(false);
       setPendingReplyConversationId(null);
       setPendingReplyIsNewConversation(false);
     };
@@ -11825,6 +14518,7 @@ function HomeContent(): React.JSX.Element {
             })
           ),
         });
+        captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
         const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
@@ -11855,6 +14549,7 @@ function HomeContent(): React.JSX.Element {
           method: "POST",
           body: JSON.stringify(buildChatRequestBody(text)),
         });
+        captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
         const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
@@ -12012,6 +14707,26 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  // Wipes every per-user memory artifact (extracted facts, SQLite summary
+  // rows, Qdrant vectors) so the next chat starts with no recall surface.
+  // Mirrors the server-side `/api/dev/clear-session-memory` contract.
+  async function clearAllSessionMemoryFromSlashCommand(): Promise<void> {
+    try {
+      await api<{
+        deletedMemories?: number;
+        deletedSummaries?: number;
+        vectorsCleared?: boolean;
+      }>("/api/dev/clear-session-memory", { method: "POST" });
+      try {
+        await refreshMemories();
+      } catch {
+        // Best-effort UI refresh; the server is the source of truth.
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Session memory clear failed.");
+    }
+  }
+
   /** Local slash commands gated by Dev toggles (e.g. `/clear`, `/help`). */
   async function consumeDevSlashCommand(trimmedLine: string): Promise<boolean> {
     if (!devSlashCommandsEnabled) return false;
@@ -12031,8 +14746,8 @@ function HomeContent(): React.JSX.Element {
         role: "assistant",
         content:
           "**Dev slash commands** (local only)\n\n" +
-          "- `/clear` - hard-resets the active chat for testing (clears UI, conversation row, and next-send context).\n" +
-          "- `/clear -s` or `/clear --summaries` - explicitly clears stored summary context too.\n" +
+          "- `/clear` - hard-resets chat for testing. Wipes the active conversation, every extracted memory, every summary fragment (SQLite + Qdrant), and the UI.\n" +
+          "- `/clear -s` or `/clear --summaries` - same as `/clear`; the flag is kept for backwards compatibility.\n" +
           "- `/help` - shows this command list.",
         createdAt: new Date().toISOString(),
         provider: "local",
@@ -12080,7 +14795,11 @@ function HomeContent(): React.JSX.Element {
     if (clearSummaries) {
       void clearSummariesFromSlashCommand();
     }
+    // Order matters: nuke the conversation first so its messages stop
+    // referencing memories/summaries, then drop every per-user memory
+    // artifact so the next chat starts with no recall surface at all.
     void clearConversationFromSlashCommand();
+    void clearAllSessionMemoryFromSlashCommand();
     // Keep Chat mode from auto-reopening the latest saved thread until the
     // user explicitly starts or opens a conversation again.
     setChatAutoRestoreSuppressed(true);
@@ -12151,14 +14870,32 @@ function HomeContent(): React.JSX.Element {
       detail?.id && detail.id !== "pending"
         ? detail.id
         : selectedId;
+    const archiveConversationId =
+      requestConversationId ??
+      (detail?.id && detail.id !== "pending" ? detail.id : null);
+    if (view === "chat" && archiveConversationId) {
+      // Every new send starts from the compact active-turn view again.
+      hardResetChatArchiveStateForConversation(archiveConversationId);
+    }
     const requestStartedNewConversation = requestConversationId === null;
     const baselineMessageCount = detail?.messages.length ?? 0;
+    const chatRequestController = new AbortController();
+    pendingReplyAbortControllerRef.current = chatRequestController;
     const clearPendingReplyVisuals = () => {
       setPendingReply(false);
+      setPendingReplyStartedAtMs(null);
+      setPendingReplyDenialRisk(false);
       setPendingReplyConversationId(null);
       setPendingReplyIsNewConversation(false);
+      if (pendingReplyAbortControllerRef.current === chatRequestController) {
+        pendingReplyAbortControllerRef.current = null;
+      }
     };
     setPendingReply(true);
+    setPendingReplyStartedAtMs(Date.now());
+    setPendingReplyDenialRisk(
+      promptLooksDenialProne(isStarterPrompt ? "" : trimmed)
+    );
     setPendingReplyStartMessageCount(baselineMessageCount);
     setPendingReplyConversationId(requestConversationId);
     setPendingReplyIsNewConversation(requestStartedNewConversation);
@@ -12237,7 +14974,9 @@ function HomeContent(): React.JSX.Element {
             ...(forceNewConversation ? { forceNewConversation: true } : {}),
           })
         ),
+        signal: chatRequestController.signal,
       });
+      captureFallbackMessageIdFromEnvelope(d);
       pushMemoryToasts(d.memoryLearned);
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
       if (d.summaryCompaction?.mode === "sandbox" && d.summaryCompaction.triggered) {
@@ -12252,6 +14991,9 @@ function HomeContent(): React.JSX.Element {
           detailIdRef.current === requestConversationId
         : selectedIdRef.current === null && detailIdRef.current === "pending";
       if (stillViewingRequest) {
+        if (view === "chat") {
+          hardResetChatArchiveStateForConversation(d.conversation.id);
+        }
         setDetail(applyExplicitAskQuestionFallback(d.conversation));
         setSessionOpinion(d.opinion ?? null);
         setBotOpinion(d.botOpinion ?? null);
@@ -12355,6 +15097,13 @@ function HomeContent(): React.JSX.Element {
         }
       }
     } catch (err) {
+      const requestWasAborted =
+        chatRequestController.signal.aborted ||
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && /abort/i.test(err.message));
+      if (requestWasAborted) {
+        return;
+      }
       if (forceNewConversation) {
         setForceNewConversationOnNextSend(true);
       }
@@ -12621,14 +15370,13 @@ function resendUserMessage(msg: Message): void {
         const firstSeenAt =
           chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
         const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
-        const tokenTotal = Math.max(
-          1,
-          (resolveMessageDisplayContent(pendingAskQuestionAssistantMessage).match(/\S+/g) ?? [])
-            .length
+        const revealTokens = tokenizeMessageReveal(
+          resolveMessageDisplayContent(pendingAskQuestionAssistantMessage)
         );
+        const tokenTotal = Math.max(1, revealTokens.length);
         const visibleTokenCount = Math.min(
           tokenTotal,
-          Math.floor(elapsedMs / CHAT_MODE_WORD_REVEAL_MS) + 1
+          resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs)
         );
         return visibleTokenCount < tokenTotal;
       })()
@@ -12677,22 +15425,57 @@ function resendUserMessage(msg: Message): void {
     if (askQuestionComposerRevealed) return;
     const el = messagesScrollRef.current;
     if (!el) return;
+    let settleTimer: number | null = null;
     const run = (): void => {
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (dist > ASKQUESTION_BOTTOM_THRESHOLD_PX) return;
-      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      messagesEndRef.current?.scrollIntoView({
-        behavior: reduceMotion ? "auto" : "smooth",
-        block: "end",
+      const top = Math.max(
+        0,
+        el.scrollHeight - el.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
+      );
+      chatProgrammaticScrollUntilMsRef.current = Date.now() + 200;
+      el.scrollTo({
+        top,
+        behavior: "auto",
       });
+      settleTimer = window.setTimeout(() => {
+        chatProgrammaticScrollUntilMsRef.current = Date.now() + 120;
+        el.scrollTop = Math.max(
+          0,
+          el.scrollHeight - el.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
+        );
+      }, 120);
     };
     requestAnimationFrame(() => {
       requestAnimationFrame(run);
     });
+    return () => {
+      if (settleTimer !== null) window.clearTimeout(settleTimer);
+    };
   }, [
     pendingAskQuestionInteractiveKey,
     askQuestionComposerRevealed,
   ]);
+  const askQuestionTailSpaceActive =
+    pendingAskQuestionInteractiveKey !== null &&
+    !askQuestionComposerRevealed;
+  useEffect(() => {
+    if (!askQuestionTailSpaceActive) return;
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const settle = (): void => {
+      chatProgrammaticScrollUntilMsRef.current = Date.now() + 140;
+      el.scrollTop = Math.max(
+        0,
+        el.scrollHeight - el.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
+      );
+    };
+    settle();
+    const t1 = window.setTimeout(settle, 120);
+    const t2 = window.setTimeout(settle, 300);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [askQuestionTailSpaceActive]);
 
   useEffect(() => {
     if (!pendingAskQuestionInteractiveKey || askQuestionComposerRevealed) return;
@@ -12707,18 +15490,59 @@ function resendUserMessage(msg: Message): void {
   }, [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed]);
 
   function handleMessagesPaneScroll(event: React.UIEvent<HTMLDivElement>): void {
-    const _unused = event;
+    if (!chatEphemeralMode || !detail?.id) return;
+    const el = event.currentTarget;
+    const previousScrollTop = chatLastScrollTopByConversationRef.current.get(detail.id);
+    const previousScrollHeight = chatLastScrollHeightByConversationRef.current.get(detail.id);
+    // Anything below this threshold is treated as scroll noise (reflow,
+    // browser sub-pixel rounding, font-curve transitions). Real user
+    // upward scrolls from a touchpad or wheel are an order of magnitude
+    // larger than this.
+    const MANUAL_SCROLL_UP_THRESHOLD_PX = 12;
+    const scrollDrop =
+      previousScrollTop !== undefined ? previousScrollTop - el.scrollTop : 0;
+    const heightDrop =
+      previousScrollHeight !== undefined ? previousScrollHeight - el.scrollHeight : 0;
+    // If the scroll area shrunk between events (e.g. the streaming-reply
+    // font shrank a notch and pulled the bottom up), the matching scroll
+    // drop is reflow, not a user gesture. Allow a small +2px slack for
+    // sub-pixel rounding.
+    const probableReflow = heightDrop > 0 && scrollDrop <= heightDrop + 2;
+    const scrolledUp =
+      previousScrollTop !== undefined &&
+      scrollDrop > MANUAL_SCROLL_UP_THRESHOLD_PX &&
+      !probableReflow;
+    const userInitiatedScroll = Date.now() > chatProgrammaticScrollUntilMsRef.current;
+    if (scrolledUp && userInitiatedScroll) {
+      chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+    }
+    chatLastScrollTopByConversationRef.current.set(detail.id, el.scrollTop);
+    chatLastScrollHeightByConversationRef.current.set(detail.id, el.scrollHeight);
+    if (!scrolledUp) return;
+    const hasArchivedMessages = latestUserMessageIndex > 0;
+    if (!hasArchivedMessages) return;
+    const atTop = el.scrollTop <= CHAT_MODE_ARCHIVE_REVEAL_SCROLL_THRESHOLD_PX;
+    if (!atTop) return;
+    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
+    const loadingArchived = chatArchiveLoadingByConversationRef.current.get(detail.id) === true;
+    if (!revealArchived && !loadingArchived) {
+      startChatArchiveLoadForConversation(detail.id, latestUserMessageId);
+    }
   }
   function preventChatModeThreadScroll(
     event: React.WheelEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
   ): void {
-    if (!chatEphemeralMode) return;
+    if (!chatEphemeralMode || !detail?.id) return;
+    if (!("deltaY" in event) || event.deltaY >= -0.5) return;
+    if (latestUserMessageIndex <= 0) return;
+    const scrollRoot = messagesScrollRef.current;
+    if (!scrollRoot || scrollRoot.scrollTop > CHAT_MODE_ARCHIVE_REVEAL_SCROLL_THRESHOLD_PX) return;
+    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
+    const loadingArchived = chatArchiveLoadingByConversationRef.current.get(detail.id) === true;
+    if (revealArchived || loadingArchived) return;
     event.preventDefault();
+    startChatArchiveLoadForConversation(detail.id, latestUserMessageId);
   }
-
-  const askQuestionTailSpaceActive =
-    askQuestionInteractive &&
-    !askQuestionComposerRevealed;
 
   function resetComposerHistoryCursor(): void {
     composerHistoryIndexRef.current = null;
@@ -12765,6 +15589,64 @@ function resendUserMessage(msg: Message): void {
     });
   }
 
+  function submitDebugComposerEcho(): void {
+    const trimmed = debugComposerDraft.trim();
+    if (!trimmed || pendingReply || view !== "chat") return;
+    if (chatAutoRestoreSuppressed) {
+      setChatAutoRestoreSuppressed(false);
+    }
+    if (forceNewConversationOnNextSend) {
+      setForceNewConversationOnNextSend(false);
+    }
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    setConversationStarterPrompts(null);
+    setChatStartupSummary(null);
+    chatSummaryRefreshMarkerRef.current = null;
+    setError(null);
+    setDebugComposerDraft("");
+    const fallbackBotId = selectedBotId ?? null;
+    const fallbackBot = fallbackBotId
+      ? bots.find((bot) => bot.id === fallbackBotId) ?? null
+      : null;
+    const nowIso = new Date().toISOString();
+    const debugAssistantMessage: Message = {
+      id: `debug-echo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      role: "assistant",
+      content: trimmed,
+      createdAt: nowIso,
+      provider: "local",
+      model: "dev/debug-echo",
+      botName: activeBot?.name ?? fallbackBot?.name ?? DEFAULT_ASSISTANT_NAME,
+      botColor: activeBot?.color ?? fallbackBot?.color ?? undefined,
+      botGlyph: activeBot?.glyph ?? fallbackBot?.glyph ?? undefined,
+      moodKey: "neutral",
+      moodConfidence: 1,
+    };
+    setDetail((current) => {
+      const conversationBotId = current?.botId ?? fallbackBotId;
+      const conversationBot = conversationBotId
+        ? bots.find((bot) => bot.id === conversationBotId) ?? null
+        : null;
+      const nextBotId = conversationBotId;
+      const nextBotColor = conversationBot?.color ?? null;
+      const baseMessages = current?.messages ?? [];
+      return {
+        id: current?.id ?? "pending",
+        title: current?.title ?? "New chat",
+        botId: nextBotId,
+        incognito: current?.incognito ?? pendingIncognito,
+        lastBotId: nextBotId,
+        lastBotColor: nextBotColor,
+        hasAssistantReply: true,
+        messages: [...baseMessages, debugAssistantMessage],
+      };
+    });
+    setChatEphemeralNowMs(Date.now());
+  }
+
   const primeStarterComposer = useCallback((value: string) => {
     if (value.trim().length === 0 && (!detail || detail.messages.length === 0)) {
       setComposerPrimed(true);
@@ -12794,6 +15676,7 @@ function resendUserMessage(msg: Message): void {
   function handleComposerKeyDown(e: React.KeyboardEvent<HTMLFormElement>) {
     const target = e.target;
     if (!(target instanceof HTMLElement)) return;
+    if (target.closest("[data-debug-composer='true']")) return;
     const fromMarkdownEditor = target.closest("[data-markdown-cm-host='true']") !== null;
     const fromPlainTextarea = target instanceof HTMLTextAreaElement;
     if (!fromMarkdownEditor && !fromPlainTextarea) return;
@@ -12855,29 +15738,18 @@ function resendUserMessage(msg: Message): void {
     const privateStarterBotId = privateMode
       ? chatBotOverride !== undefined
         ? chatBotOverride
+        : selectedBotId !== null
+          ? selectedBotId
         : detail?.id !== undefined && detail.id !== "pending"
           ? detail.botId
           : (detail?.botId ?? selectedBotId ?? null)
       : null;
     const starterBotId = privateMode ? privateStarterBotId : normalStarterBotId;
-    // A selected Chat-mode bot should leave the picker surface immediately;
-    // the real saved conversation is still created by the first send.
-    const draftConversation: ConversationDetail | null =
-      !privateMode && starterBotId
-        ? {
-            id: "pending",
-            title: "New chat",
-            botId: starterBotId,
-            incognito: false,
-            lastBotId: starterBotId,
-            lastBotColor: bots.find((bot) => bot.id === starterBotId)?.color ?? null,
-            hasAssistantReply: false,
-            messages: [],
-          }
-        : null;
     setConversationStarterPrompts(null);
     setSelectedId(null);
-    setDetail(draftConversation);
+    // Sandbox "New chat" should return to bot selection without pre-creating
+    // a pending thread. The next send/starter action creates the chat.
+    setDetail(null);
     setSelectedBotId(starterBotId);
     setChatBotOverride(undefined);
     closeEmptyStateBotSearch();
@@ -13192,8 +16064,36 @@ function resendUserMessage(msg: Message): void {
     setModelRevealMessageId(null);
   }, []);
 
+  function clampContextMenuPosition(
+    x: number,
+    y: number,
+    estimatedWidth: number,
+    estimatedHeight: number
+  ): { x: number; y: number } {
+    const minX = CONTEXT_MENU_VIEWPORT_MARGIN_PX;
+    const minY = CONTEXT_MENU_VIEWPORT_MARGIN_PX;
+    const maxX = Math.max(
+      minX,
+      window.innerWidth - estimatedWidth - CONTEXT_MENU_VIEWPORT_MARGIN_PX
+    );
+    const maxY = Math.max(
+      minY,
+      window.innerHeight - estimatedHeight - CONTEXT_MENU_VIEWPORT_MARGIN_PX
+    );
+    return {
+      x: Math.min(Math.max(x, minX), maxX),
+      y: Math.min(Math.max(y, minY), maxY),
+    };
+  }
+
   const openBotContextMenu = useCallback((bot: Bot, x: number, y: number) => {
-    setBotContextMenu({ botId: bot.id, x, y });
+    const clamped = clampContextMenuPosition(
+      x,
+      y,
+      BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
+      BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX
+    );
+    setBotContextMenu({ botId: bot.id, x: clamped.x, y: clamped.y });
     closeMessageContextOverlay();
     setChatOverflowMenuOpen(false);
   }, [closeMessageContextOverlay]);
@@ -13269,10 +16169,11 @@ function resendUserMessage(msg: Message): void {
     };
   }, [botContextMenu, closeBotContextMenu]);
 
-  // Mobile spotlight: backdrop is visually present but ignores pointer-events so the
-  // focused bubble stays tappable; we dismiss on taps outside bubble + menu.
+  // Keep the dim backdrop visual, but let pointer events hit underlying
+  // messages so right-click/tap can immediately retarget the context menu.
+  // Dismissal is handled centrally by outside-click capture.
   useEffect(() => {
-    if (!mobileFocusedMessageId || !messageContextMenu) return;
+    if (!messageContextMenu) return;
     const onPointerDownCapture = (event: PointerEvent) => {
       if (!isPrimaryPointerDismissal(event)) return;
       const node = event.target as Node | null;
@@ -13288,7 +16189,7 @@ function resendUserMessage(msg: Message): void {
     document.addEventListener("pointerdown", onPointerDownCapture, true);
     return () =>
       document.removeEventListener("pointerdown", onPointerDownCapture, true);
-  }, [mobileFocusedMessageId, messageContextMenu, closeMessageContextOverlay]);
+  }, [messageContextMenu, closeMessageContextOverlay]);
 
   const openMessageContextMenu = useCallback(
     (
@@ -13300,13 +16201,28 @@ function resendUserMessage(msg: Message): void {
         mobileActivate?: boolean;
       }
     ) => {
-      const anchor: MessageMenuAnchor = opts?.anchor ?? "center";
+      const anchor: MessageMenuAnchor = opts?.anchor ?? "pointer";
       const minY = anchor === "below" ? 64 : 96;
       const maxY = anchor === "below" ? window.innerHeight - 120 : window.innerHeight - 96;
+      const pointerPosition =
+        anchor === "pointer"
+          ? clampContextMenuPosition(
+              x,
+              y,
+              MESSAGE_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
+              MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT_PX
+            )
+          : null;
+      const resolvedX = pointerPosition
+        ? pointerPosition.x
+        : Math.min(Math.max(x, 88), window.innerWidth - 88);
+      const resolvedY = pointerPosition
+        ? pointerPosition.y
+        : Math.min(Math.max(y, minY), maxY);
       setMessageContextMenu({
         message: msg,
-        x: Math.min(Math.max(x, 88), window.innerWidth - 88),
-        y: Math.min(Math.max(y, minY), maxY),
+        x: resolvedX,
+        y: resolvedY,
         anchor,
       });
       setContextFocusedMessageId(msg.id);
@@ -13615,25 +16531,13 @@ function resendUserMessage(msg: Message): void {
     const target = event.target;
     if (!(target instanceof Element)) return;
     const interactiveTarget = target.closest(
-      "button, input, textarea, select, a, [role='button'], [data-starter-bot-affordance='true']"
+      "button, input, textarea, select, a, [role='button'], [data-starter-bot-affordance='true'], [data-bot-picker-frame='true']"
     );
     if (interactiveTarget) return;
-    if (selectedBotId !== null) {
-      resetEmptyStateBotSelection();
-      return;
-    }
-    if (hueFilterCenter !== null) {
-      setEmptyStateSearchOpen(false);
-      setEmptyStateBotNameFilter("");
-      startBotPickerReturnToAll();
-    }
+    // Intentionally no-op: empty canvas clicks should not change directory/state.
   }, [
     detail,
-    hueFilterCenter,
     pendingIncognito,
-    resetEmptyStateBotSelection,
-    selectedBotId,
-    startBotPickerReturnToAll,
   ]);
 
   const openEmptyStateBotSearch = useCallback(() => {
@@ -13684,7 +16588,15 @@ function resendUserMessage(msg: Message): void {
   }, [closeEmptyStateBotSearch, focusDraftInput]);
 
   const commitEmptyStateBotSelection = useCallback((botId: string) => {
+    if (selectedBotId === botId) {
+      focusDraftInput();
+      return;
+    }
     cancelPendingEmptyStateSearchOpen();
+    setCanvasBotSwitchOverlayPhase("enter");
+    canvasBotSwitchTransitionStartedAtRef.current = Date.now();
+    pendingCanvasBotUnfoldRef.current = true;
+    setCanvasBotSwitchTransitioning(true);
     // Committing a bot exits visible lens mode, but keeps the current
     // filtered/zoomed bot view intact. `emptyStateLensVisible` hides the
     // slider while `shellStyle` lets the selected bot own the interface
@@ -13693,7 +16605,7 @@ function resendUserMessage(msg: Message): void {
     setEmptyStateSearchOpen(false);
     setEmptyStateBotNameFilter("");
     focusDraftInput();
-  }, [cancelPendingEmptyStateSearchOpen, focusDraftInput]);
+  }, [cancelPendingEmptyStateSearchOpen, focusDraftInput, selectedBotId]);
 
   const openEmptyStateBotSearchFromTyping = useCallback((typedCharacter: string) => {
     cancelPendingEmptyStateSearchOpen();
@@ -14218,6 +17130,47 @@ function resendUserMessage(msg: Message): void {
     return () => document.removeEventListener("keydown", handleKey);
   }, [isPanelBotDeleteModalOpen]);
 
+  const isSweepConfirmModalOpen = sweepConfirmOpen;
+  useEffect(() => {
+    if (!isSweepConfirmModalOpen) {
+      const prev = preSweepConfirmModalFocusRef.current;
+      preSweepConfirmModalFocusRef.current = null;
+      if (prev && typeof prev.focus === "function" && document.contains(prev)) {
+        queueMicrotask(() => {
+          try { prev.focus({ preventScroll: true }); } catch { /* ignore */ }
+        });
+      }
+      return;
+    }
+    const active = document.activeElement;
+    preSweepConfirmModalFocusRef.current =
+      active instanceof HTMLElement ? active : null;
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setSweepConfirmOpen(false);
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isSweepConfirmModalOpen]);
+
+  useEffect(() => {
+    if (!sweepUndoToast) return;
+    const remainingMs = Math.max(0, sweepUndoToast.expiresAt - Date.now());
+    if (remainingMs <= 0) {
+      setSweepUndoToast(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setSweepUndoToast((current) =>
+        current?.batchId === sweepUndoToast.batchId ? null : current
+      );
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [sweepUndoToast]);
+
   useEffect(() => {
     if (!devToolsOpen) return;
     function handleKey(event: KeyboardEvent) {
@@ -14446,6 +17399,80 @@ function resendUserMessage(msg: Message): void {
     }
   }
 
+  async function runConversationSweepActionConfirmed(): Promise<void> {
+    if (sweepBusy) return;
+    setError(null);
+    setSweepBusy(true);
+    try {
+      const sweepResult = await api<ConversationSweepResponse>("/api/conversations/sweep", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: view === "chat" ? "chat" : "sandbox",
+        }),
+      });
+      const expiresAtMs = sweepResult.undoExpiresAt
+        ? Date.parse(sweepResult.undoExpiresAt)
+        : NaN;
+      if (sweepResult.batchId && Number.isFinite(expiresAtMs)) {
+        setSweepUndoToast({
+          batchId: sweepResult.batchId,
+          expiresAt: expiresAtMs,
+        });
+      } else {
+        setSweepUndoToast(null);
+      }
+      const nextConversations = await refreshConversations();
+      if (
+        detailIdRef.current &&
+        !nextConversations.some((conversation) => conversation.id === detailIdRef.current)
+      ) {
+        setSelectedId(null);
+        setDetail(null);
+        setSessionOpinion(null);
+        setBotOpinion(null);
+      }
+      await refreshOpenMemoryViews();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sweep action failed.");
+    } finally {
+      setSweepBusy(false);
+    }
+  }
+
+  async function undoConversationSweepFromToast(batchId: string): Promise<void> {
+    if (sweepBusy) return;
+    setError(null);
+    setSweepBusy(true);
+    try {
+      await api("/api/conversations/sweep/undo", {
+        method: "POST",
+        body: JSON.stringify({ batchId }),
+      });
+      setSweepUndoToast((current) => (current?.batchId === batchId ? null : current));
+      const nextConversations = await refreshConversations();
+      if (
+        detailIdRef.current &&
+        !nextConversations.some((conversation) => conversation.id === detailIdRef.current)
+      ) {
+        setSelectedId(null);
+        setDetail(null);
+        setSessionOpinion(null);
+        setBotOpinion(null);
+      }
+      await refreshOpenMemoryViews();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Undo sweep failed.");
+    } finally {
+      setSweepBusy(false);
+    }
+  }
+
+  function requestConversationSweepAction(): void {
+    if (sweepBusy) return;
+    if (!hasSweepEligibleConversations) return;
+    setSweepConfirmOpen(true);
+  }
+
   function buildRandomBotDraft(name = randomBotName()) {
     return {
       name,
@@ -14506,8 +17533,18 @@ function resendUserMessage(msg: Message): void {
     setPanelError(null);
     setPanelNotice(null);
     const createdBotName = newBotName.trim();
-    const localModel = visibleBotCustomizerModelChoice(settings, newBotLocalModel);
-    const onlineModel = visibleBotCustomizerModelChoice(settings, newBotOnlineModel);
+    const localModel = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      "local",
+      newBotLocalModel
+    );
+    const onlineModel = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      "openai",
+      newBotOnlineModel
+    );
     try {
       await api("/api/bots", {
         method: "POST",
@@ -14883,6 +17920,36 @@ function resendUserMessage(msg: Message): void {
     }
   }
 
+  async function devToolsSaveDevMemories() {
+    if (!settings) {
+      setDevToolsMessage("Settings are still loading. Try again in a moment.");
+      return;
+    }
+    setDevToolsBusy(true);
+    setDevToolsMessage(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          devMemoriesEnabled: settings.devMemoriesEnabled,
+          devMemoriesText: settings.devMemoriesText,
+        }),
+      });
+      await refreshSettings();
+      setDevToolsMessage(
+        settings.devMemoriesEnabled
+          ? "Dev memories saved and enabled."
+          : "Dev memories saved (currently disabled)."
+      );
+    } catch (err) {
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Saving dev memories failed."
+      );
+    } finally {
+      setDevToolsBusy(false);
+    }
+  }
+
   // Distribute random seed memories across every bot the user owns. Used
   // when the Memories panel is showing the All-memories view, so the
   // bubble cluster has something to chew on without having to wire each
@@ -15111,8 +18178,18 @@ function resendUserMessage(msg: Message): void {
     const rawStoredPrompt = bot.system_prompt ?? "";
     const { fields: seededProfile } = parseStoredBotPrompt(rawStoredPrompt);
     const normalizedStoredPrompt = serializeStoredBotPrompt(seededProfile, seededName);
-    const seededLocalModel = normalizeModelChoice(bot.local_model ?? bot.model);
-    const seededOnlineModel = normalizeModelChoice(bot.online_model);
+    const seededLocalModel = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      "local",
+      bot.local_model ?? bot.model
+    );
+    const seededOnlineModel = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      "openai",
+      bot.online_model
+    );
     const seededOnlineEnabled = bot.online_enabled !== 0;
     const seededDeleteProtected = bot.delete_protected === 1;
     const seededTemperature = normalizeBotTemperature(bot.temperature);
@@ -16015,44 +19092,9 @@ function resendUserMessage(msg: Message): void {
         <button
           type="button"
           className={`${styles.headerIconButton} ${styles.composeUtilityButton}`}
-          onClick={resetChatHeaderToSpotlight}
-          aria-label="Open Spotlight search"
-          title="Open Spotlight search"
-        >
-          <SearchGlyph />
-        </button>
-        <button
-          type="button"
-          className={`${styles.headerIconButton} ${styles.composeUtilityButton}`}
-          onClick={handleHeaderHubClick}
-          aria-label="Back to Hub"
-          title="Back to Hub"
-        >
-          <HomeGlyph />
-        </button>
-        <button
-          type="button"
-          className={`${styles.themeToggleButton} ${styles.composeUtilityButton}`}
-          onClick={() => void cycleThemeMode()}
-          aria-label={
-            effectiveThemeMode === "system"
-              ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-              : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-          }
-          data-title={
-            effectiveThemeMode === "system"
-              ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-              : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-          }
-        >
-          <ThemeGlyph mode={effectiveThemeMode} />
-        </button>
-        <button
-          type="button"
-          className={`${styles.headerIconButton} ${styles.composeUtilityButton}`}
           onClick={sendRandomConversationNudge}
           aria-label="Send random suggested prompt"
-          title="Send random suggested prompt"
+          data-glyph-tooltip="Send random suggested prompt"
           disabled={pendingReply}
         >
           <BotGlyph name="dice" size={16} strokeWidth={1.85} />
@@ -16066,8 +19108,18 @@ function resendUserMessage(msg: Message): void {
   async function saveBot(id: string) {
     const trimmedName = newBotName.trim();
     if (!trimmedName) return;
-    const localModel = visibleBotCustomizerModelChoice(settings, newBotLocalModel);
-    const onlineModel = visibleBotCustomizerModelChoice(settings, newBotOnlineModel);
+    const localModel = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      "local",
+      newBotLocalModel
+    );
+    const onlineModel = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      "openai",
+      newBotOnlineModel
+    );
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
@@ -16179,6 +19231,7 @@ function resendUserMessage(msg: Message): void {
               : "This web surface is available after pairing through the Prism iOS or Mac client."}
           </p>
         </div>
+        <GlyphTooltipLayer />
       </main>
     );
   }
@@ -16195,7 +19248,8 @@ function resendUserMessage(msg: Message): void {
           className={styles.messageContextBackdrop}
           aria-label="Close message actions"
           data-msg-focus-overlay={mobileFocusedMessageId ? "true" : undefined}
-          onClick={() => closeMessageContextOverlay()}
+          tabIndex={-1}
+          aria-hidden="true"
         />
         <div
           ref={messageActionsMenuRef}
@@ -16388,6 +19442,11 @@ function resendUserMessage(msg: Message): void {
                   ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
                   : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
               }
+              data-glyph-tooltip={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+              }
             >
               <ThemeGlyph mode={effectiveThemeMode} />
             </button>
@@ -16401,6 +19460,7 @@ function resendUserMessage(msg: Message): void {
           {error && <p className={styles.error}>{error}</p>}
         </form>
       </div>
+      <GlyphTooltipLayer />
     </main>
   );
 
@@ -16414,7 +19474,7 @@ function resendUserMessage(msg: Message): void {
         className={styles.conversationDelete}
         data-delete-affordance="true"
         aria-label={`Delete ${c.title}`}
-        title="Delete chat"
+        data-glyph-tooltip="Delete chat"
         onClick={(e) => {
           e.stopPropagation();
           void deleteConversation(c.id);
@@ -16455,10 +19515,52 @@ function resendUserMessage(msg: Message): void {
           armDelete(DELETE_ALL_KEY);
         }}
         aria-label="Delete all chats"
-        title="Delete all chats"
+        data-glyph-tooltip="Delete all chats"
       >
         <span className={styles.conversationDeleteAllButtonGlyph}>
           <IconTrash />
+        </span>
+      </button>
+    );
+  };
+
+  const renderConversationSweepButton = (): React.JSX.Element => {
+    const actionLabel = hasSweepEligibleConversations
+      ? "Sweep chats"
+      : "Need at least 2 chats in one bot group";
+    return (
+      <button
+        type="button"
+        className={styles.conversationSweepButton}
+        aria-label={actionLabel}
+        data-glyph-tooltip={actionLabel}
+        disabled={sweepBusy || !hasSweepEligibleConversations}
+        onClick={(event) => {
+          event.stopPropagation();
+          requestConversationSweepAction();
+        }}
+      >
+        <span className={styles.conversationSweepButtonGlyph}>
+          <IconSparkles />
+        </span>
+      </button>
+    );
+  };
+
+  const renderConversationSpotlightButton = (): React.JSX.Element => {
+    return (
+      <button
+        type="button"
+        className={styles.conversationSpotlightButton}
+        aria-label="Open Spotlight search"
+        data-glyph-tooltip="Open Spotlight search"
+        onClick={(event) => {
+          event.stopPropagation();
+          resetChatHeaderToSpotlight();
+        }}
+      >
+        <span className={styles.conversationSpotlightButtonGlyph}>
+          <SearchGlyph />
         </span>
       </button>
     );
@@ -16560,7 +19662,11 @@ function resendUserMessage(msg: Message): void {
             ? `Confirm delete ${group.name} conversations`
             : `Delete ${group.name} conversations`
         }
-        title={isArmedSingle ? undefined : `Delete ${group.name} chats`}
+        data-glyph-tooltip={
+          isArmedSingle
+            ? `Confirm delete ${group.name} conversations`
+            : `Delete ${group.name} chats`
+        }
         onClick={(event) => {
           event.stopPropagation();
           if (isArmedSingle) {
@@ -16878,6 +19984,85 @@ function resendUserMessage(msg: Message): void {
     );
   };
 
+  const renderSweepConfirmModal = () => {
+    if (!sweepConfirmOpen) return null;
+    const title = "Sweep chats?";
+    const body = "This archives current chats into one summary per bot group. You'll get a short-lived Undo toast right after.";
+    const confirmLabel = "Sweep chats";
+    return (
+      <div
+        className={styles.deleteAllModalBackdrop}
+        data-delete-affordance="true"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setSweepConfirmOpen(false);
+        }}
+      >
+        <div
+          className={styles.deleteAllModalPanel}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="sweep-confirm-title"
+          aria-describedby="sweep-confirm-desc"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <h2 id="sweep-confirm-title" className={styles.deleteAllModalTitle}>
+            {title}
+          </h2>
+          <p id="sweep-confirm-desc" className={styles.deleteAllModalBody}>
+            {body}
+          </p>
+          <div className={styles.deleteAllModalActions}>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              ref={(node) => {
+                if (node) queueMicrotask(() => {
+                  try { node.focus({ preventScroll: true }); } catch { /* ignore */ }
+                });
+              }}
+              onClick={() => setSweepConfirmOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={styles.deleteAllModalConfirm}
+              onClick={() => {
+                setSweepConfirmOpen(false);
+                void runConversationSweepActionConfirmed();
+              }}
+            >
+              {confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSweepUndoToast = () => {
+    if (!sweepUndoToast) return null;
+    const remainingMs = Math.max(0, sweepUndoToast.expiresAt - Date.now());
+    const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+    return (
+      <div className={styles.sweepUndoToast} role="status" aria-live="polite">
+        <span className={styles.sweepUndoToastCopy}>
+          Sweep complete. Undo available for {remainingSeconds}s.
+        </span>
+        <button
+          type="button"
+          className={styles.sweepUndoToastButton}
+          disabled={sweepBusy}
+          onClick={() => {
+            void undoConversationSweepFromToast(sweepUndoToast.batchId);
+          }}
+        >
+          Undo
+        </button>
+      </div>
+    );
+  };
+
   const renderMemoryToasts = () => {
     if (memoryToasts.length === 0) return null;
     const visible = memoryToasts.slice(0, MEMORY_TOAST_VISIBLE_LIMIT);
@@ -16928,13 +20113,25 @@ function resendUserMessage(msg: Message): void {
    *  Desktop renders inline in the chat header bar.
    *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
   const renderChatOverflowGear = (): React.JSX.Element | null => {
-    const showSettingsOnly = !detail && !activeBot && view !== "chat";
-    const showChatThemeButton = view === "chat";
+    const sandboxDefaultBotView =
+      view !== "chat" && !privateChatActive && selectedBotId === null && !activeBot;
+    const showSettingsOnly =
+      !detail &&
+      !activeBot &&
+      view !== "chat" &&
+      !defaultConversationUsesPrismIdentity &&
+      !sandboxDefaultBotView;
+    const showChatModeStyleButtons = view === "chat" || sandboxDefaultBotView;
+    const showToolbarMemoriesButton = view === "chat" || view === "sandbox";
+    const showChatThemeButton = view === "chat" || view === "sandbox";
+    const showSandboxHubButton = view === "chat" || view === "sandbox";
     const gearHidden = sidebarOpen || panel !== null;
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
     const canBotActions = Boolean(activeBot);
-    const canMemoryActions = Boolean(activeBot || defaultConversationUsesPrismIdentity);
-    const canExport = Boolean((detail && selectedId) || activeBot);
+    const canMemoryActions = Boolean(
+      activeBot || defaultConversationUsesPrismIdentity || sandboxDefaultBotView
+    );
+    const canExport = Boolean(detail && selectedId);
     const selectedBotCanDelete = Boolean(activeBot && activeBot.delete_protected !== 1);
     const canDelete = Boolean((detail && selectedId) || selectedBotCanDelete);
     const headerActionsDisabled =
@@ -16973,20 +20170,10 @@ function resendUserMessage(msg: Message): void {
       closeMenu();
       if (detail && selectedId) {
         void exportChat();
-        return;
-      }
-      if (activeBot) {
-        void exportBotProfile(activeBot);
       }
     };
-    const exportTitle =
-      detail && selectedId
-        ? "Export chat as Markdown"
-        : activeBot
-          ? "Export bot profile as .bot (JSON)"
-          : "Export";
-    const exportButtonText =
-      detail && selectedId ? "Export chat" : activeBot ? "Export bot" : "Export";
+    const exportTitle = "Export chat as Markdown";
+    const exportButtonText = "Export chat";
     const handleDelete = () => {
       if (!deleteArmed) {
         armDelete(HEADER_DELETE_KEY);
@@ -17060,6 +20247,15 @@ function resendUserMessage(msg: Message): void {
         node: React.ReactElement<React.ButtonHTMLAttributes<HTMLButtonElement>>,
       ): React.ReactElement => {
         const existingStyle = node.props.style ?? {};
+        const progress = totalCount > 1 ? index / (totalCount - 1) : 0;
+        const accentStrength = Math.round(84 - progress * 62);
+        const surfaceStrength = 100 - accentStrength;
+        const borderAccentStrength = Math.round(64 - progress * 12);
+        const borderLineStrength = 100 - borderAccentStrength;
+        const hoverAccentStrength = Math.min(92, accentStrength + 12);
+        const hoverSurfaceStrength = 100 - hoverAccentStrength;
+        const textBlackStrength = Math.round(68 + progress * 22);
+        const textAccentStrength = 100 - textBlackStrength;
         // CSS reads `--accordion-index` + `--accordion-count` to compute the
         // per-button stagger delay for both open and close directions.
         // Cast lets us attach a CSS custom property without TS rejecting the key.
@@ -17067,6 +20263,14 @@ function resendUserMessage(msg: Message): void {
           ...existingStyle,
           "--accordion-index": index,
           "--accordion-count": totalCount,
+          "--accordion-accent-strength": `${accentStrength}%`,
+          "--accordion-surface-strength": `${surfaceStrength}%`,
+          "--accordion-text-black-strength": `${textBlackStrength}%`,
+          "--accordion-text-accent-strength": `${textAccentStrength}%`,
+          "--accordion-border-accent-strength": `${borderAccentStrength}%`,
+          "--accordion-border-line-strength": `${borderLineStrength}%`,
+          "--accordion-hover-accent-strength": `${hoverAccentStrength}%`,
+          "--accordion-hover-surface-strength": `${hoverSurfaceStrength}%`,
         } as React.CSSProperties;
         return cloneElement(node, {
           style: styleWithIndex,
@@ -17087,7 +20291,7 @@ function resendUserMessage(msg: Message): void {
           <span className={styles.chatHeaderActionText}>Settings</span>
         </button>,
       );
-      if (view === "sandbox") {
+      if (showChatModeStyleButtons) {
         accordionButtons.push(
           <button
             key="images"
@@ -17119,9 +20323,9 @@ function resendUserMessage(msg: Message): void {
             key="opinions"
             type="button"
             className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled}
+            disabled={headerActionsDisabled || privateChatActive}
             onClick={handleOpinions}
-            title="Conversation tone"
+            title={privateChatActive ? "Unavailable in private chats" : "Conversation tone"}
           >
             <span className={styles.chatHeaderActionText}>Tone</span>
           </button>,
@@ -17141,15 +20345,15 @@ function resendUserMessage(msg: Message): void {
           </button>,
         );
       }
-      if (!showSettingsOnly && view !== "chat") {
+      if (!showSettingsOnly && view !== "chat" && canExport) {
         accordionButtons.push(
           <button
             key="export"
             type="button"
             className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled || !canExport}
+            disabled={headerActionsDisabled || !canExport || privateChatActive}
             onClick={handleExport}
-            title={exportTitle}
+            title={privateChatActive ? "Unavailable in private chats" : exportTitle}
           >
             <span className={styles.chatHeaderActionText}>{exportButtonText}</span>
           </button>,
@@ -17161,10 +20365,10 @@ function resendUserMessage(msg: Message): void {
             className={`${styles.chatHeaderAction} ${
               deleteArmed ? styles.chatHeaderActionDanger : ""
             }`}
-            disabled={headerActionsDisabled || !canDelete}
+            disabled={headerActionsDisabled || !canDelete || privateChatActive}
             data-delete-affordance="true"
             aria-label={deleteLabel}
-            title={deleteLabel}
+            title={privateChatActive ? "Unavailable in private chats" : deleteLabel}
             onClick={handleDelete}
           >
             <span className={styles.chatHeaderActionText}>{deleteButtonText}</span>
@@ -17216,12 +20420,24 @@ function resendUserMessage(msg: Message): void {
                   ? "Hide conversation tools"
                   : "Show conversation tools"
               }
-              title="Conversation tools"
+              data-glyph-tooltip="Conversation tools"
               onClick={() => setChatOverflowMenuOpen(open => !open)}
             >
               <WrenchGlyph />
             </button>
           </div>
+          {showToolbarMemoriesButton ? (
+            <button
+              type="button"
+              className={styles.headerIconButton}
+              onClick={handleMemories}
+              aria-label="Memories"
+              data-glyph-tooltip="Memories"
+              disabled={headerActionsDisabled || !canMemoryActions}
+            >
+              <BookmarkGlyph />
+            </button>
+          ) : null}
           {showChatThemeButton ? (
             <button
               type="button"
@@ -17237,8 +20453,24 @@ function resendUserMessage(msg: Message): void {
                   ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
                   : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
               }
+              data-glyph-tooltip={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+              }
             >
               <ThemeGlyph mode={effectiveThemeMode} />
+            </button>
+          ) : null}
+          {showSandboxHubButton ? (
+            <button
+              type="button"
+              className={styles.headerIconButton}
+              onClick={handleHeaderHubClick}
+              aria-label="Back to Hub"
+              data-glyph-tooltip="Back to Hub"
+            >
+              <HomeGlyph />
             </button>
           ) : null}
         </div>
@@ -17257,7 +20489,7 @@ function resendUserMessage(msg: Message): void {
             aria-expanded={chatOverflowMenuOpen}
             aria-haspopup="menu"
             aria-label="Conversation tools menu"
-            title="Conversation tools"
+            data-glyph-tooltip="Conversation tools"
             onPointerDownCapture={swallowMenuPointerDown}
             onClick={(event) => {
               swallowMenuEvent(event);
@@ -17285,7 +20517,7 @@ function resendUserMessage(msg: Message): void {
             >
               Settings
             </button>
-            {view === "sandbox" && (
+            {showChatModeStyleButtons && (
               <button
                 type="button"
                 role="menuitem"
@@ -17313,15 +20545,17 @@ function resendUserMessage(msg: Message): void {
                 Memories
               </button>
             )}
-            {!showSettingsOnly && (
+            {!showSettingsOnly && view !== "chat" && canExport && (
               <button
                 type="button"
                 role="menuitem"
                 className={styles.chatOverflowMenuItem}
+                disabled={privateChatActive || !canExport}
                 onClick={(event) => {
                   swallowMenuEvent(event);
                   handleOpinions();
                 }}
+                title={privateChatActive ? "Unavailable in private chats" : "Conversation tone"}
               >
                 Tone
               </button>
@@ -17344,12 +20578,12 @@ function resendUserMessage(msg: Message): void {
                 type="button"
                 role="menuitem"
                 className={styles.chatOverflowMenuItem}
-                disabled={!canExport}
+                disabled={!canExport || privateChatActive}
                 onClick={(event) => {
                   swallowMenuEvent(event);
                   handleExport();
                 }}
-                title={exportTitle}
+                title={privateChatActive ? "Unavailable in private chats" : exportTitle}
               >
                 {exportButtonText}
               </button>
@@ -17359,10 +20593,10 @@ function resendUserMessage(msg: Message): void {
                 type="button"
                 role="menuitem"
                 className={`${styles.chatOverflowMenuItem} ${deleteArmed ? styles.chatOverflowMenuItemDanger : ""}`}
-                disabled={!canDelete}
+                disabled={!canDelete || privateChatActive}
                 data-delete-affordance="true"
                 aria-label={deleteLabel}
-                title={deleteLabel}
+                title={privateChatActive ? "Unavailable in private chats" : deleteLabel}
                 onClick={(event) => {
                   swallowMenuEvent(event);
                   handleDelete();
@@ -17374,6 +20608,21 @@ function resendUserMessage(msg: Message): void {
             </div>
           )}
         </div>
+        {showToolbarMemoriesButton ? (
+          <button
+            type="button"
+            className={styles.headerIconButton}
+            onClick={(event) => {
+              swallowMenuEvent(event);
+              handleMemories();
+            }}
+            aria-label="Memories"
+            data-glyph-tooltip="Memories"
+            disabled={headerActionsDisabled || !canMemoryActions}
+          >
+            <BookmarkGlyph />
+          </button>
+        ) : null}
         {showChatThemeButton ? (
           <button
             type="button"
@@ -17392,8 +20641,27 @@ function resendUserMessage(msg: Message): void {
                 ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
                 : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
             }
+            data-glyph-tooltip={
+              effectiveThemeMode === "system"
+                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+            }
           >
             <ThemeGlyph mode={effectiveThemeMode} />
+          </button>
+        ) : null}
+        {showSandboxHubButton ? (
+          <button
+            type="button"
+            className={styles.headerIconButton}
+            onClick={(event) => {
+              swallowMenuEvent(event);
+              handleHeaderHubClick();
+            }}
+            aria-label="Back to Hub"
+            data-glyph-tooltip="Back to Hub"
+          >
+            <HomeGlyph />
           </button>
         ) : null}
       </div>
@@ -17440,11 +20708,11 @@ function resendUserMessage(msg: Message): void {
             ? `Confirm delete ${bot.name}`
             : `Delete ${bot.name} — click to remove this bot, or press and hold to clear all bots`
         }
-        title={
+        data-glyph-tooltip={
           isProtected
             ? "Protected bot · toggle delete protection off to delete"
             : isArmedSingle
-              ? undefined
+              ? `Confirm delete ${bot.name}`
               : "Delete bot · hold for all"
         }
         onPointerDown={(e) => {
@@ -17537,7 +20805,7 @@ function resendUserMessage(msg: Message): void {
           });
         }}
         aria-label="Open developer tools"
-        title="Developer tools"
+        data-glyph-tooltip="Developer tools"
       >
         <IconKey />
       </button>
@@ -17610,6 +20878,20 @@ function resendUserMessage(msg: Message): void {
               </small>
             </span>
           </label>
+          <label className={styles.devTogglesModalOption}>
+            <input
+              type="checkbox"
+              checked={devDebugComposerEnabled}
+              onChange={(event) => persistDevDebugComposerEnabled(event.currentTarget.checked)}
+            />
+            <span>
+              <strong>Show Chat debug composer</strong>
+              <small>
+                Adds a debug-only composer above Chat mode&apos;s normal composer. Send echoes text
+                locally as an assistant reply and skips model calls.
+              </small>
+            </span>
+          </label>
           <div className={styles.deleteAllModalActions}>
             <button
               type="button"
@@ -17671,7 +20953,8 @@ function resendUserMessage(msg: Message): void {
           <summary className={styles.devToolsSectionSummary}>
             <span className={styles.devToolsSectionTitle}>Dev toggles</span>
             <span className={styles.devToolsToggleSummary}>
-              Paste JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
+              Debug composer: <strong>{devDebugComposerEnabled ? "On" : "Off"}</strong> · Paste
+              JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
             </span>
           </summary>
           <p className={styles.devToolsSectionHint}>
@@ -17686,7 +20969,7 @@ function resendUserMessage(msg: Message): void {
               aria-expanded={devTogglesOpen}
               aria-controls="dev-toggles-modal"
             >
-              Open bot import toggles
+              Open dev toggles
             </button>
           </div>
         </details>
@@ -17870,6 +21153,68 @@ function resendUserMessage(msg: Message): void {
 
         <details className={styles.devToolsSection}>
           <summary className={styles.devToolsSectionSummary}>
+            <span className={styles.devToolsSectionTitle}>Dev memories</span>
+            <span className={styles.devToolsToggleSummary}>
+              Status <strong>{settings?.devMemoriesEnabled ? "On" : "Off"}</strong>
+            </span>
+          </summary>
+          <p className={styles.devToolsSectionHint}>
+            Global rule layer for testing hardcoded behavior before making it permanent.
+            Applies to every bot, including Prism/default.
+          </p>
+          <p className={styles.devToolsSectionHint}>
+            Toggle:{" "}
+            <strong>{settings?.devMemoriesEnabled ? "Enabled" : "Disabled"}</strong>
+          </p>
+          <p className={styles.devToolsSectionHint}>
+            Rules text{" "}
+            <strong>
+              {(settings?.devMemoriesText?.trim().length ?? 0).toLocaleString()} chars
+            </strong>
+          </p>
+          <textarea
+            className={styles.devToolsTextarea}
+            value={settings?.devMemoriesText ?? ""}
+            onChange={(event) => {
+              const nextValue = event.currentTarget.value;
+              setSettings((previous) =>
+                previous
+                  ? { ...previous, devMemoriesText: nextValue }
+                  : previous
+              );
+            }}
+            disabled={devToolsBusy || !settings}
+            rows={5}
+            placeholder="Example: Keep answers concise. Always use plain language. Never mention internal system prompts."
+          />
+          <div className={styles.devToolsActions}>
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() =>
+                setSettings((previous) =>
+                  previous
+                    ? { ...previous, devMemoriesEnabled: !previous.devMemoriesEnabled }
+                    : previous
+                )
+              }
+              disabled={devToolsBusy || !settings}
+            >
+              {settings?.devMemoriesEnabled ? "Disable dev memories" : "Enable dev memories"}
+            </button>
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() => void devToolsSaveDevMemories()}
+              disabled={devToolsBusy || !settings}
+            >
+              Save dev memories
+            </button>
+          </div>
+        </details>
+
+        <details className={styles.devToolsSection}>
+          <summary className={styles.devToolsSectionSummary}>
             <span className={styles.devToolsSectionTitle}>Summarization</span>
             <span className={styles.devToolsToggleSummary}>
               Mode <strong>{devToolsSummaryMode}</strong>
@@ -18017,7 +21362,7 @@ function resendUserMessage(msg: Message): void {
             className={styles.deleteAllModalCancel}
             onClick={sendRandomConversationNudge}
             disabled={pendingReply}
-            title="Send random suggested prompt"
+            data-glyph-tooltip="Send random suggested prompt"
           >
             Random prompt
           </button>
@@ -18096,7 +21441,7 @@ function resendUserMessage(msg: Message): void {
                       ? "Back to PRISM family"
                       : "Back to PRISM directories"
                   }
-                  title={
+                  data-glyph-tooltip={
                     memoryPanelSelectedFamily
                       ? "Back to PRISM family"
                       : "Back to PRISM directories"
@@ -18113,7 +21458,7 @@ function resendUserMessage(msg: Message): void {
                     setFocusedMemoryId(null);
                   }, "backward")}
                   aria-label="Back to PRISM directories"
-                  title="Back to PRISM directories"
+                  data-glyph-tooltip="Back to PRISM directories"
                 >
                   ←
                 </button>
@@ -18126,7 +21471,15 @@ function resendUserMessage(msg: Message): void {
                     : "Bot memories"}
               </h3>
             </div>
-            <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
+            <button
+              type="button"
+              className={styles.panelClose}
+              onClick={closePanel}
+              aria-label="Close panel"
+              data-glyph-tooltip="Close panel"
+            >
+              ×
+            </button>
           </div>
           {/* Transition layer: receives the directional zoom + fade so
               the navigation reads as "drilling into" or "pulling out of"
@@ -18152,7 +21505,7 @@ function resendUserMessage(msg: Message): void {
           {memoryPanelScope === "default" && (
             <div className={styles.memoryBotHeader}>
               <span className={styles.memoryBotGlyph} aria-hidden="true">
-                <PrismTriangleMark />
+                <PrismTriangleMark className={styles.memoryBotPrismTriangle} />
               </span>
               <div>
                 <strong>Prism</strong>
@@ -18390,7 +21743,15 @@ function resendUserMessage(msg: Message): void {
         >
           <div className={styles.panelHeader}>
             <h3>Connection</h3>
-            <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
+            <button
+              type="button"
+              className={styles.panelClose}
+              onClick={closePanel}
+              aria-label="Close panel"
+              data-glyph-tooltip="Close panel"
+            >
+              ×
+            </button>
           </div>
           <div className={styles.opinionPanelBody}>
             <p className={styles.opinionPanelIntro}>
@@ -18495,9 +21856,29 @@ function resendUserMessage(msg: Message): void {
           className={`${styles.panel} ${styles.panelSettings}`}
           data-closing={panelClosing ? "true" : undefined}
         >
-          <div className={styles.panelHeader}><h3>Settings</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
+          <div className={styles.panelHeader}>
+            <h3>Settings</h3>
+            <button
+              type="button"
+              className={styles.panelClose}
+              onClick={closePanel}
+              aria-label="Close panel"
+              data-glyph-tooltip="Close panel"
+            >
+              ×
+            </button>
+          </div>
           {settings && (
             <form className={styles.form} onSubmit={saveSettings}>
+              <label>
+                What is your name?
+                <input
+                  type="text"
+                  placeholder="How should bots address you?"
+                  value={settings.displayName ?? ""}
+                  onChange={e => setSettings(p => p ? { ...p, displayName: e.target.value } : p)}
+                />
+              </label>
               <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
               <label className={styles.settingsHostField}>
                 <span className={styles.settingsHostLabel}>Second Ollama host</span>
@@ -18515,6 +21896,33 @@ function resendUserMessage(msg: Message): void {
                     {secondaryOllamaStatusText}
                   </span>
                 </span>
+              </label>
+              <label>
+                Copyright fallback model (local only)
+                <select
+                  value={settings.lenientLocalFallbackModel ?? ""}
+                  onChange={(event) =>
+                    setSettings((previous) =>
+                      previous
+                        ? {
+                            ...previous,
+                            lenientLocalFallbackModel: event.target.value,
+                          }
+                        : previous
+                    )
+                  }
+                >
+                  <option value="">Disabled</option>
+                  {includeSelectedModelOption(
+                    modelOptionsForProvider(modelCatalog, settings, "local"),
+                    settings.lenientLocalFallbackModel ?? "",
+                    "local"
+                  ).map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               {settings.hasOpenAiApiKey && (
                 <button
@@ -18813,12 +22221,16 @@ function resendUserMessage(msg: Message): void {
         // reading as "dirty" the instant edit mode opens, since the
         // picker's random seed color matches the seed we captured.
         const editPristine = editingBot ? editOriginalRef.current : null;
-        const visibleLocalModelChoice = visibleBotCustomizerModelChoice(
+        const visibleLocalModelChoice = visibleConcreteModelChoiceForProvider(
+          modelCatalog,
           settings,
+          "local",
           newBotLocalModel
         );
-        const visibleOnlineModelChoice = visibleBotCustomizerModelChoice(
+        const visibleOnlineModelChoice = visibleConcreteModelChoiceForProvider(
+          modelCatalog,
           settings,
+          "openai",
           newBotOnlineModel
         );
         const hasEditChanges = editPristine
@@ -18942,12 +22354,26 @@ function resendUserMessage(msg: Message): void {
                     void handleBotImportFileSelection(event);
                   }}
                 />
+                {!botPanelLibraryEnabled && editingBot ? (
+                  <button
+                    type="button"
+                    className={styles.panelHeaderIconButton}
+                    onClick={() => void exportBotProfile(editingBot)}
+                    disabled={busy}
+                    aria-label="Export bot profile as .bot (JSON)"
+                    data-glyph-tooltip="Export bot profile as .bot (JSON)"
+                  >
+                    <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
+                      <IconSave />
+                    </span>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className={styles.panelHeaderIconButton}
                   onClick={openImportBotModal}
                   aria-label="Import bot from .bot file"
-                  title="Import a Prism .bot export"
+                  data-glyph-tooltip="Import a Prism .bot export"
                 >
                   <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
                     <IconUpload />
@@ -18959,7 +22385,7 @@ function resendUserMessage(msg: Message): void {
                   data-delete-affordance="true"
                   disabled={!headerTrashEnabled}
                   aria-label={headerTrashAriaLabel}
-                  title={headerTrashTitle}
+                  data-glyph-tooltip={headerTrashTitle}
                   onClick={() => {
                     if (busy) return;
                     if (!editingBotId) {
@@ -18982,7 +22408,15 @@ function resendUserMessage(msg: Message): void {
                     <IconTrash />
                   </span>
                 </button>
-                <button type="button" className={styles.panelClose} onClick={closePanel}>×</button>
+                <button
+                  type="button"
+                  className={styles.panelClose}
+                  onClick={closePanel}
+                  aria-label="Close panel"
+                  data-glyph-tooltip="Close panel"
+                >
+                  ×
+                </button>
               </div>
             </div>
             {activeFieldHelp && (
@@ -19163,7 +22597,6 @@ function resendUserMessage(msg: Message): void {
                           onChange={(event) => setNewBotLocalModel(event.currentTarget.value)}
                           aria-label="Preferred offline model for this bot"
                         >
-                          <option value={AUTO_MODEL_CHOICE}>Auto</option>
                           {localModelOptions.map((model) => (
                             <option key={model.id} value={model.id}>
                               {model.label}{model.isDefault ? " (default)" : ""}
@@ -19192,7 +22625,6 @@ function resendUserMessage(msg: Message): void {
                           aria-label="Preferred online model for this bot"
                           disabled={!newBotOnlineEnabled}
                         >
-                          <option value={AUTO_MODEL_CHOICE}>Auto</option>
                           {onlineModelOptions.map((model) => (
                             <option key={model.id} value={model.id}>
                               {model.label}{model.isDefault ? " (default)" : ""}
@@ -19320,7 +22752,6 @@ function resendUserMessage(msg: Message): void {
                           onChange={(event) => setNewBotLocalModel(event.currentTarget.value)}
                           aria-label="Preferred offline model for this bot"
                         >
-                          <option value={AUTO_MODEL_CHOICE}>Auto</option>
                           {localModelOptions.map((model) => (
                             <option key={model.id} value={model.id}>
                               {model.label}{model.isDefault ? " (default)" : ""}
@@ -19337,7 +22768,6 @@ function resendUserMessage(msg: Message): void {
                           aria-label="Preferred online model for this bot"
                           disabled={!newBotOnlineEnabled}
                         >
-                          <option value={AUTO_MODEL_CHOICE}>Auto</option>
                           {onlineModelOptions.map((model) => (
                             <option key={model.id} value={model.id}>
                               {model.label}{model.isDefault ? " (default)" : ""}
@@ -19780,7 +23210,18 @@ function resendUserMessage(msg: Message): void {
             className={`${styles.panel} ${styles.panelImages}`}
             data-closing={panelClosing ? "true" : undefined}
           >
-            <div className={styles.panelHeader}><h3>Images</h3><button type="button" className={styles.panelClose} onClick={closePanel}>×</button></div>
+            <div className={styles.panelHeader}>
+              <h3>Images</h3>
+              <button
+                type="button"
+                className={styles.panelClose}
+                onClick={closePanel}
+                aria-label="Close panel"
+                data-glyph-tooltip="Close panel"
+              >
+                ×
+              </button>
+            </div>
             {canGenerate ? (
               <form className={styles.form} onSubmit={generateImg}>
                 <input required placeholder="Describe an image..." value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} />
@@ -20025,6 +23466,11 @@ function resendUserMessage(msg: Message): void {
                 ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
                 : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
             }
+            data-glyph-tooltip={
+              effectiveThemeMode === "system"
+                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+            }
           >
             <ThemeGlyph mode={effectiveThemeMode} />
           </button>
@@ -20041,6 +23487,7 @@ function resendUserMessage(msg: Message): void {
       {renderSharedPanels()}
       {renderDevToolsPanel()}
       {renderViewSwitchOverlay()}
+      <GlyphTooltipLayer />
     </main>
   );
 
@@ -20080,12 +23527,13 @@ function resendUserMessage(msg: Message): void {
             >
               <span className={styles.chatHubWordmarkStack}>
                 <PrismWordmark className={styles.hubHomeWordmark} />
-                <span className={styles.chatHubBackHint}>← BACK TO HUB</span>
               </span>
             </button>
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
-          {shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
+          {view === "chat" ? (
+            renderHeaderModelPicker()
+          ) : shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
             <h2
               className={`${styles.chatHeaderTitle} ${
                 headerTitleCollapsedForAccordion
@@ -20112,9 +23560,21 @@ function resendUserMessage(msg: Message): void {
           className={styles.messagesFrame}
           data-mode={messagesFrameMode}
           data-chat-focus={chatEphemeralMode ? "true" : undefined}
+          data-replying-live={chatEphemeralMode && typingIndicatorVisible ? "true" : undefined}
           data-private-bot={privateCustomBotActive ? "true" : undefined}
           style={messagesFrameStyle}
         >
+          {showCanvasBotSwitchOverlay ? (
+            <div
+              className={styles.messagesFrameBotSwitchLoading}
+              data-phase={canvasBotSwitchOverlayPhase}
+              role="status"
+              aria-live="polite"
+            >
+              <div className={styles.messagesFrameBotSwitchSpinner} aria-hidden="true" />
+              <p>Switching bot profile...</p>
+            </div>
+          ) : null}
           <div
             className={`${styles.messages} ${
               !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
@@ -20122,6 +23582,7 @@ function resendUserMessage(msg: Message): void {
             ref={messagesScrollRef}
             data-chat-ephemeral={chatEphemeralMode ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
+            data-replying-live={typingIndicatorVisible ? "true" : undefined}
             onScroll={handleMessagesPaneScroll}
             onWheelCapture={preventChatModeThreadScroll}
             onTouchMoveCapture={preventChatModeThreadScroll}
@@ -20130,25 +23591,9 @@ function resendUserMessage(msg: Message): void {
             <div className={styles.chatCanvasSummaryContainer}>
               <div className={styles.chatSessionSummaryBubble} role="status" aria-live="polite">
                 <div className={styles.chatSummaryBubbleContent}>
-                  <button
-                    type="button"
-                    className={styles.chatSummaryHeroInlineButton}
-                    onClick={handleHeroStartConversation}
-                    disabled={
-                      pendingReply ||
-                      !isStarterPromptAvailable(draft) ||
-                      (hueFilterCenter !== null && !activeBot)
-                    }
-                    aria-label={
-                      activeBot?.name?.trim()
-                        ? `Start conversation with ${activeBot.name.trim()}`
-                        : "Start conversation"
-                    }
-                    title={
-                      activeBot?.name?.trim()
-                        ? `Tap to have ${activeBot.name.trim()} start the conversation`
-                        : "Tap to start the conversation"
-                    }
+                  <div
+                    className={`${styles.chatSummaryHeroInlineButton} ${styles.chatSummaryHeroInlineGlyph}`}
+                    aria-hidden="true"
                   >
                     <EmptyStateIcon
                       bot={activeBot}
@@ -20158,7 +23603,7 @@ function resendUserMessage(msg: Message): void {
                       forceTrianglePreview={lensInteracting || (messagesFrameMode !== "home" && !activeBot)}
                       resolvedTheme={resolvedTheme}
                     />
-                  </button>
+                  </div>
                   <span>{chatStartupSummary}</span>
                 </div>
               </div>
@@ -20592,14 +24037,25 @@ function resendUserMessage(msg: Message): void {
               </div>
             );
           })()}
+          {chatArchiveLoadingActive ? (
+            <div className={styles.chatArchiveLoadingIndicator} role="status" aria-live="polite">
+              <span className={styles.chatArchiveLoadingSpinner} aria-hidden="true" />
+              <span>Loading earlier messages...</span>
+            </div>
+          ) : null}
           {visibleDetailMessages.map(msg => {
             const status = getMessageStatus(msg);
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
+            const userMessageManifestClassName = shouldFadeInLatestUserMessage(msg)
+              ? styles.messageUserQuestionFadeIn
+              : "";
             const chatPhaseClassName =
-              chatPhase === "manifest"
-                ? styles.messageChatManifesting
-                : "";
+              chatPhase === "dissolving"
+                ? styles.messageChatDissolving
+                : msg.role === "assistant" && chatPhase === "manifest"
+                  ? styles.messageChatManifesting
+                  : "";
             const modelLabel =
               msg.role === "assistant" && typeof msg.model === "string"
                 ? msg.model.trim()
@@ -20633,6 +24089,15 @@ function resendUserMessage(msg: Message): void {
                     )
                   } as React.CSSProperties)
                 : undefined;
+            const headingColorStyle =
+              msg.role === "assistant" && !detail?.incognito
+                ? (view === "sandbox" && msg.botColor
+                    ? resolveComplementHeadingColorVars(
+                        normalizeAccentForTheme(msg.botColor, resolvedTheme),
+                        resolvedTheme
+                      )
+                    : resolvePrismHeadingColorVars())
+                : undefined;
             const userInkStyle =
               msg.role === "user" && threadConversationAccentInk
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
@@ -20644,38 +24109,84 @@ function resendUserMessage(msg: Message): void {
                     "--message-context-accent": deriveMobileMessageFocusAccent(msg),
                   } as React.CSSProperties)
                 : undefined;
+            const latestUserAnchorFadeOpacity = resolveLatestUserAnchorFadeOpacity(msg);
+            const latestUserAnchorFadeStyle =
+              latestUserAnchorFadeOpacity !== null
+                ? ({ opacity: latestUserAnchorFadeOpacity } as React.CSSProperties)
+                : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
+            const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
+            const canceledRevealTokenCount =
+              temporalKey !== null
+                ? chatCancelledRevealTokenCountByKeyRef.current.get(temporalKey)
+                : undefined;
+            const messageRevealCancelled = typeof canceledRevealTokenCount === "number";
+            const messageRevealAlreadyCompleted =
+              temporalKey !== null &&
+              !messageRevealCancelled &&
+              chatCompletedRevealKeysRef.current.has(temporalKey);
             const forcedVisibleTokenCount =
               chatEphemeralMode &&
               msg.role === "assistant" &&
               msg.id === latestAssistantMessageId &&
               detail?.id
                 ? (() => {
-                    const temporalKey = `${detail.id}:${msg.id}`;
+                    const displayContent = resolveMessageDisplayContent(msg);
                     const firstSeenAt =
-                      chatMessageFirstSeenAtRef.current.get(temporalKey) ?? chatEphemeralNowMs;
+                      chatMessageFirstSeenAtRef.current.get(`${detail.id}:${msg.id}`) ?? chatEphemeralNowMs;
                     const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
-                    const tokenTotal = Math.max(
-                      1,
-                      (resolveMessageDisplayContent(msg).match(/\S+/g) ?? []).length
-                    );
+                    const revealTokens = tokenizeMessageReveal(displayContent);
+                    const tokenTotal = Math.max(1, revealTokens.length);
+                    if (messageRevealAlreadyCompleted) return tokenTotal;
+                    if (messageRevealCancelled) {
+                      return Math.min(
+                        tokenTotal,
+                        Math.max(1, canceledRevealTokenCount ?? 1)
+                      );
+                    }
                     return Math.min(
                       tokenTotal,
-                      Math.floor(elapsedMs / CHAT_MODE_WORD_REVEAL_MS) + 1
+                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs)
                     );
                   })()
                 : undefined;
+            const messageDisplayContent = resolveMessageDisplayContent(msg);
+            const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
+            const messageDynamicTypeStyle =
+              chatEphemeralMode
+                ? ({
+                    "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
+                      messageDisplayLineCount,
+                      msg.role === "user" ? "user" : "assistant"
+                    )}px`,
+                  } as React.CSSProperties)
+                : undefined;
+            const assistantMoodKey =
+              msg.role === "assistant" ? resolveMessageMoodKey(msg) : null;
+            const messageUsesFallbackModel = messageUsesConfiguredFallbackModel({
+              message: msg,
+              view,
+              configuredFallbackModel: configuredFallbackModelId,
+              fallbackMessageIds,
+            });
+            const showMoodTooltip =
+              msg.role === "assistant" &&
+              !chatEphemeralMode &&
+              messageContextMenu?.message.id === msg.id;
             return (
               <article
                 key={msg.id}
-                className={`${styles.message} ${chatPhaseClassName} ${
+                className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${
                   msg.role === "user" ? styles.messageUser : styles.messageAssistant
                 }`}
                 style={{
                   ...(messageStyle ?? {}),
+                  ...(headingColorStyle ?? {}),
                   ...userInkStyle,
                   ...mobileFocusAccentStyle,
+                  ...(latestUserAnchorFadeStyle ?? {}),
+                  ...messageDynamicTypeStyle,
                 }}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
                 data-msg-mobile-focus-root={
@@ -20688,13 +24199,17 @@ function resendUserMessage(msg: Message): void {
                 data-message-id={msg.id}
                 data-chat-phase={chatPhase}
                 data-message-edge={messageEdge}
+                data-chat-latest-user-anchor={
+                  chatEphemeralMode && msg.id === latestUserMessageId ? "true" : undefined
+                }
                 data-private-user-role-header={privateUserRoleHeader ? "true" : undefined}
+                data-fallback-model-used={messageUsesFallbackModel ? "true" : undefined}
                 onContextMenuCapture={event => {
                   if (chatEphemeralMode) return;
                   event.preventDefault();
                   event.stopPropagation();
                   openMessageContextMenu(msg, event.clientX, event.clientY, {
-                    anchor: "center",
+                    anchor: "pointer",
                     mobileActivate: mobileContextMenu,
                   });
                 }}
@@ -20713,6 +24228,20 @@ function resendUserMessage(msg: Message): void {
               >
                 {showMessageHeader && (
                   <h4>
+                    {msg.role === "assistant" && !chatEphemeralMode && !detail?.incognito ? (
+                      <span className={styles.messageMoodAnchor}>
+                        <MessageMoodFace
+                          moodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                          variant="classic"
+                          placement="leading"
+                        />
+                        {showMoodTooltip && assistantMoodKey ? (
+                          <span className={styles.messageMoodTooltip}>
+                            Mood: {messageMoodLabel(assistantMoodKey)}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
                     {showMessageRoleLabel && (
                       <span className={styles.messageRoleLabel}>
                         {shouldRenderPrismMessageRoleLabel(msg, detail?.incognito === true) ? (
@@ -20751,19 +24280,20 @@ function resendUserMessage(msg: Message): void {
                         </span>
                       );
                     })()}
-                    {msg.role === "assistant" && !chatEphemeralMode ? (
-                      <MessageMoodFace moodKey={resolveMessageMoodKey(msg)} />
-                    ) : null}
                   </h4>
                 )}
                 <MessageBody
                   content={msg.content}
                   assistantStripPrismToolTail={msg.role === "assistant"}
+                  messageRole={msg.role}
                   revealWordByWord={
                     assistantWordByWordMode &&
                     msg.role === "assistant" &&
-                    msg.id === latestAssistantMessageId
+                    msg.id === latestAssistantMessageId &&
+                    !messageRevealAlreadyCompleted
                   }
+                  // Use line-by-line typed reveal only while actively typing;
+                  // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatEphemeralMode}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
@@ -20837,17 +24367,6 @@ function resendUserMessage(msg: Message): void {
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
           {renderComposerChipRail()}
-          {chatEphemeralMode ? (
-            <div className={styles.chatEmotionStrip} role="status" aria-live="polite">
-              <span className={styles.chatEmotionStripMood}>
-                <MessageMoodFace moodKey={latestAssistantMood} />
-                <span className={styles.chatEmotionStripMoodText}>
-                  {latestAssistantMoodLabel}
-                </span>
-              </span>
-              <span className={styles.chatEmotionStripCaption}>Emotional weather</span>
-            </div>
-          ) : null}
         </div>
 
         <form
@@ -20893,18 +24412,63 @@ function resendUserMessage(msg: Message): void {
             </div>
           )}
           {!composerHiddenByAskQuestion ? (
-            <ComposerInput
-              ref={draftComposerRef}
-              enabled={composerMarkdownEditorEnabled}
-              value={draft}
-              placeholder="Say something..."
-              submitDisabled={composerSubmitDisabled(draft)}
-              submitLabel={composerSubmitLabel(draft)}
-              hideSubmitButton={hideMobileEmptySend}
-              onChange={handleComposerChange}
-              onValueChange={updateComposerDraft}
-              onFocus={handleComposerFocus}
-            />
+            view === "chat" ? (
+              <div className={styles.chatComposerStack}>
+                {devDebugComposerEnabled && (
+                  <div className={styles.debugComposerBox}>
+                    <div className={styles.debugComposerLabel} aria-live="polite">
+                      DEBUG COMPOSER (local echo only)
+                    </div>
+                    <div className={styles.debugComposerRow} data-debug-composer="true">
+                      <textarea
+                        value={debugComposerDraft}
+                        onChange={(event) => setDebugComposerDraft(event.currentTarget.value)}
+                        placeholder="Type text to echo as a bot reply..."
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" || event.shiftKey) return;
+                          event.preventDefault();
+                          submitDebugComposerEcho();
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={submitDebugComposerEcho}
+                        disabled={debugComposerDraft.trim().length === 0 || pendingReply}
+                      >
+                        Send debug echo
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className={styles.chatComposerRow}>
+                  <ComposerInput
+                    ref={draftComposerRef}
+                    enabled={composerMarkdownEditorEnabled}
+                    value={draft}
+                    placeholder="Say something..."
+                    submitDisabled={composerSubmitDisabled(draft)}
+                    submitLabel={composerSubmitLabel(draft)}
+                    hideSubmitButton={hideMobileEmptySend}
+                    onChange={handleComposerChange}
+                    onValueChange={updateComposerDraft}
+                    onFocus={handleComposerFocus}
+                  />
+                </div>
+              </div>
+            ) : (
+              <ComposerInput
+                ref={draftComposerRef}
+                enabled={composerMarkdownEditorEnabled}
+                value={draft}
+                placeholder="Say something..."
+                submitDisabled={composerSubmitDisabled(draft)}
+                submitLabel={composerSubmitLabel(draft)}
+                hideSubmitButton={hideMobileEmptySend}
+                onChange={handleComposerChange}
+                onValueChange={updateComposerDraft}
+                onFocus={handleComposerFocus}
+              />
+            )
           ) : null}
         </form>
         {renderMessageContextMenu()}
@@ -20915,6 +24479,8 @@ function resendUserMessage(msg: Message): void {
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
+      {renderSweepConfirmModal()}
+      {renderSweepUndoToast()}
       {renderDevToolsPanel()}
       {touchPreview && (
         <TouchPreviewBalloon
@@ -20929,6 +24495,7 @@ function resendUserMessage(msg: Message): void {
         />
       )}
       {renderViewSwitchOverlay()}
+      <GlyphTooltipLayer />
     </main>
   );
 
@@ -20960,6 +24527,8 @@ function resendUserMessage(msg: Message): void {
         onClick={() => {
           setSidebarOpen(o => !o);
         }}
+        aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
+        data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
         aria-hidden={sidebarOpen || panel !== null}
         tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
       >☰</button>
@@ -20973,7 +24542,7 @@ function resendUserMessage(msg: Message): void {
         }}
         aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
         aria-pressed={sidebarOpen}
-        title={sidebarOpen ? "Close conversations" : "Open conversations"}
+        data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
       >
         <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
       </button>
@@ -21025,7 +24594,11 @@ function resendUserMessage(msg: Message): void {
         {visibleConversations.length > 0 && (
           <div className={styles.conversationHeaderRow}>
             <span className={styles.sectionLabel}>Conversations</span>
-            {renderConversationDeleteAllButton()}
+            <div className={styles.conversationHeaderActions}>
+              {renderConversationSpotlightButton()}
+              {renderConversationSweepButton()}
+              {renderConversationDeleteAllButton()}
+            </div>
           </div>
         )}
         <ul
@@ -21069,7 +24642,6 @@ function resendUserMessage(msg: Message): void {
               {sandboxShowHubReturnWordmark ? (
                 <span className={styles.chatHubWordmarkStack}>
                   <PrismWordmark className={styles.hubHomeWordmark} />
-                  <span className={styles.chatHubBackHint}>← BACK TO HUB</span>
                 </span>
               ) : headerIdentity ? (
                 <span
@@ -21089,9 +24661,15 @@ function resendUserMessage(msg: Message): void {
                   <span className={styles.headerIdentityGlyph} aria-hidden="true">
                     <BotGlyph name={headerIdentity.glyph} size={26} strokeWidth={1.55} />
                   </span>
-                  <span className={styles.headerIdentityCopy}>
+                  <span
+                    className={`${styles.headerIdentityCopy} ${
+                      chatOverflowMenuOpen ? styles.headerIdentityCopyCollapsed : ""
+                    }`}
+                  >
                     <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
-                    <span className={styles.headerIdentityHint}>← BACK TO HUB</span>
+                    <span className={styles.headerIdentityBackToBots} aria-hidden="true">
+                      {"\u2190 back to bots"}
+                    </span>
                   </span>
                 </span>
               ) : (
@@ -21100,7 +24678,9 @@ function resendUserMessage(msg: Message): void {
             </button>
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
-          {shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
+          {view === "chat" ? (
+            renderHeaderModelPicker()
+          ) : shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
             <h2
               className={`${styles.chatHeaderTitle} ${
                 headerTitleCollapsedForAccordion
@@ -21127,9 +24707,21 @@ function resendUserMessage(msg: Message): void {
           className={styles.messagesFrame}
           data-mode={messagesFrameMode}
           data-chat-focus={chatEphemeralMode ? "true" : undefined}
+          data-replying-live={chatEphemeralMode && typingIndicatorVisible ? "true" : undefined}
           data-private-bot={privateCustomBotActive ? "true" : undefined}
           style={messagesFrameStyle}
         >
+          {showCanvasBotSwitchOverlay ? (
+            <div
+              className={styles.messagesFrameBotSwitchLoading}
+              data-phase={canvasBotSwitchOverlayPhase}
+              role="status"
+              aria-live="polite"
+            >
+              <div className={styles.messagesFrameBotSwitchSpinner} aria-hidden="true" />
+              <p>Switching bot profile...</p>
+            </div>
+          ) : null}
           <div
             className={`${styles.messages} ${
               !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
@@ -21137,6 +24729,7 @@ function resendUserMessage(msg: Message): void {
             ref={messagesScrollRef}
             data-chat-ephemeral={chatEphemeralMode ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
+            data-replying-live={typingIndicatorVisible ? "true" : undefined}
             onScroll={handleMessagesPaneScroll}
             onWheelCapture={preventChatModeThreadScroll}
             onTouchMoveCapture={preventChatModeThreadScroll}
@@ -21202,8 +24795,40 @@ function resendUserMessage(msg: Message): void {
                   : bots.length > 0
                     ? "Tap the bot's glyph to begin, or pick a bot below."
                     : "Tap the symbol above to create a bot to get started.";
+            const sandboxBotHintRecap =
+              !pendingIncognito &&
+              heroBot?.id &&
+              sandboxBotStatusSummaryBotId === heroBot.id &&
+              sandboxBotStatusSummary
+                ? sandboxBotStatusSummary
+                : "";
+            const sandboxBotStatusLoadingLabel =
+              !pendingIncognito &&
+              heroBot?.id &&
+              selectedBotId === heroBot.id &&
+              sandboxBotStatusBusy
+                ? `Getting ${heroBot.name.trim()}'s status`
+                : "";
+            const heroRecentConversations =
+              !pendingIncognito && heroBot?.id
+                ? conversations
+                    .filter((conversation) => !conversation.incognito && conversation.botId === heroBot.id)
+                    .sort(
+                      (a, b) =>
+                        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+                    )
+                    .slice(0, 8)
+                : [];
+            const heroHasChats = heroRecentConversations.length > 0;
             const hint = (() => {
               if (pendingIncognito) return `${heroStartLabel} No memories are saved.`;
+              if (!heroHasChats) {
+                if (selectedBotPromptPreview) return selectedBotPromptPreview;
+                if (descriptionPreview) return descriptionPreview;
+                return heroStartLabel;
+              }
+              if (sandboxBotStatusLoadingLabel) return sandboxBotStatusLoadingLabel;
+              if (sandboxBotHintRecap) return sandboxBotHintRecap;
               if (selectedBotPromptPreview) return selectedBotPromptPreview;
               if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
               return heroStartLabel;
@@ -21254,21 +24879,16 @@ function resendUserMessage(msg: Message): void {
               heroBot && !heroStartDisabled
                 ? "TAP THE SYMBOL TO START THE CHAT"
                 : null;
-            const heroRecentConversations =
-              !pendingIncognito && heroBot?.id
-                ? conversations
-                    .filter((conversation) => !conversation.incognito && conversation.botId === heroBot.id)
-                    .sort(
-                      (a, b) =>
-                        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-                    )
-                    .slice(0, 8)
-                : [];
             const shouldShowHeroNudge =
               !heroStartDisabled &&
               !emptyStateSearchActive &&
               !suppressHeroCopy &&
               !pendingReply;
+            const shouldAnimateBotSwitchUnfold =
+              canvasBotSwitchUnfoldSeed > 0 &&
+              !pendingIncognito &&
+              Boolean(heroBot?.id) &&
+              selectedBotId === heroBot?.id;
             return (
               <div
                 className={emptyStateClassName}
@@ -21298,7 +24918,9 @@ function resendUserMessage(msg: Message): void {
                 {emptyStateSearchActive ? renderEmptyStateBotSearch() : null}
                 {!emptyStateSearchActive && (!suppressHeroCopy || heroRecentConversations.length > 0) ? (
                   <div
+                    key={`empty-state-band-${heroBot?.id ?? "default"}-${canvasBotSwitchUnfoldSeed}`}
                     className={styles.emptyStateInfoBand}
+                    data-unfold={shouldAnimateBotSwitchUnfold ? "true" : undefined}
                     data-empty-state-band-emphasis={heroBot ? "bot" : "default"}
                   >
                     {!suppressHeroCopy ? (
@@ -21324,12 +24946,24 @@ function resendUserMessage(msg: Message): void {
                               <p className={styles.emptyStateHeroCue}>{heroStartCue}</p>
                             ) : null}
                           </div>
-                          <p className={styles.emptyStateHint}>{hint}</p>
+                          <p className={styles.emptyStateHint}>
+                            {sandboxBotStatusLoadingLabel ? (
+                              <span className={styles.emptyStateHintLoading}>
+                                <span className={styles.summarySpinnerWheel} aria-hidden="true" />
+                                <span>{hint}</span>
+                              </span>
+                            ) : (
+                              hint
+                            )}
+                          </p>
                         </div>
                       </div>
                     ) : null}
                     {heroRecentConversations.length > 0 ? (
-                      <div className={styles.emptyStateRecentRailWrap}>
+                      <div
+                        className={styles.emptyStateRecentRailWrap}
+                        data-unfold={shouldAnimateBotSwitchUnfold ? "true" : undefined}
+                      >
                         <p className={styles.emptyStateRecentRailLabel}>
                           Recent with {heroBot?.name?.trim() ?? "this bot"}
                         </p>
@@ -21607,14 +25241,25 @@ function resendUserMessage(msg: Message): void {
               </div>
             );
           })()}
+          {chatArchiveLoadingActive ? (
+            <div className={styles.chatArchiveLoadingIndicator} role="status" aria-live="polite">
+              <span className={styles.chatArchiveLoadingSpinner} aria-hidden="true" />
+              <span>Loading earlier messages...</span>
+            </div>
+          ) : null}
           {visibleDetailMessages.map(msg => {
             const status = getMessageStatus(msg);
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
+            const userMessageManifestClassName = shouldFadeInLatestUserMessage(msg)
+              ? styles.messageUserQuestionFadeIn
+              : "";
             const chatPhaseClassName =
-              chatPhase === "manifest"
-                ? styles.messageChatManifesting
-                : "";
+              chatPhase === "dissolving"
+                ? styles.messageChatDissolving
+                : msg.role === "assistant" && chatPhase === "manifest"
+                  ? styles.messageChatManifesting
+                  : "";
             const modelLabel =
               msg.role === "assistant" && typeof msg.model === "string"
                 ? msg.model.trim()
@@ -21651,6 +25296,12 @@ function resendUserMessage(msg: Message): void {
             const messageStyle = normalizedBotColor
               ? ({ "--message-accent": normalizedBotColor } as React.CSSProperties)
               : undefined;
+            const headingColorStyle =
+              msg.role === "assistant" && !detail?.incognito
+                ? (view === "sandbox" && normalizedBotColor
+                    ? resolveComplementHeadingColorVars(normalizedBotColor, resolvedTheme)
+                    : resolvePrismHeadingColorVars())
+                : undefined;
             const userInkStyle =
               msg.role === "user" && threadConversationAccentInk
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
@@ -21662,38 +25313,84 @@ function resendUserMessage(msg: Message): void {
                     "--message-context-accent": deriveMobileMessageFocusAccent(msg),
                   } as React.CSSProperties)
                 : undefined;
+            const latestUserAnchorFadeOpacity = resolveLatestUserAnchorFadeOpacity(msg);
+            const latestUserAnchorFadeStyle =
+              latestUserAnchorFadeOpacity !== null
+                ? ({ opacity: latestUserAnchorFadeOpacity } as React.CSSProperties)
+                : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
+            const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
+            const canceledRevealTokenCount =
+              temporalKey !== null
+                ? chatCancelledRevealTokenCountByKeyRef.current.get(temporalKey)
+                : undefined;
+            const messageRevealCancelled = typeof canceledRevealTokenCount === "number";
+            const messageRevealAlreadyCompleted =
+              temporalKey !== null &&
+              !messageRevealCancelled &&
+              chatCompletedRevealKeysRef.current.has(temporalKey);
             const forcedVisibleTokenCount =
               chatEphemeralMode &&
               msg.role === "assistant" &&
               msg.id === latestAssistantMessageId &&
               detail?.id
                 ? (() => {
-                    const temporalKey = `${detail.id}:${msg.id}`;
+                    const displayContent = resolveMessageDisplayContent(msg);
                     const firstSeenAt =
-                      chatMessageFirstSeenAtRef.current.get(temporalKey) ?? chatEphemeralNowMs;
+                      chatMessageFirstSeenAtRef.current.get(`${detail.id}:${msg.id}`) ?? chatEphemeralNowMs;
                     const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
-                    const tokenTotal = Math.max(
-                      1,
-                      (resolveMessageDisplayContent(msg).match(/\S+/g) ?? []).length
-                    );
+                    const revealTokens = tokenizeMessageReveal(displayContent);
+                    const tokenTotal = Math.max(1, revealTokens.length);
+                    if (messageRevealAlreadyCompleted) return tokenTotal;
+                    if (messageRevealCancelled) {
+                      return Math.min(
+                        tokenTotal,
+                        Math.max(1, canceledRevealTokenCount ?? 1)
+                      );
+                    }
                     return Math.min(
                       tokenTotal,
-                      Math.floor(elapsedMs / CHAT_MODE_WORD_REVEAL_MS) + 1
+                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs)
                     );
                   })()
                 : undefined;
+            const messageDisplayContent = resolveMessageDisplayContent(msg);
+            const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
+            const messageDynamicTypeStyle =
+              chatEphemeralMode
+                ? ({
+                    "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
+                      messageDisplayLineCount,
+                      msg.role === "user" ? "user" : "assistant"
+                    )}px`,
+                  } as React.CSSProperties)
+                : undefined;
+            const assistantMoodKey =
+              msg.role === "assistant" ? resolveMessageMoodKey(msg) : null;
+            const messageUsesFallbackModel = messageUsesConfiguredFallbackModel({
+              message: msg,
+              view,
+              configuredFallbackModel: configuredFallbackModelId,
+              fallbackMessageIds,
+            });
+            const showMoodTooltip =
+              msg.role === "assistant" &&
+              !chatEphemeralMode &&
+              messageContextMenu?.message.id === msg.id;
             return (
               <article
                 key={msg.id}
-                className={`${styles.message} ${chatPhaseClassName} ${
+                className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${
                   msg.role === "user" ? styles.messageUser : styles.messageAssistant
                 }`}
                 style={{
                   ...(messageStyle ?? {}),
+                  ...(headingColorStyle ?? {}),
                   ...userInkStyle,
                   ...mobileFocusAccentStyle,
+                  ...(latestUserAnchorFadeStyle ?? {}),
+                  ...messageDynamicTypeStyle,
                 }}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
                 data-msg-mobile-focus-root={
@@ -21706,13 +25403,17 @@ function resendUserMessage(msg: Message): void {
                 data-message-id={msg.id}
                 data-chat-phase={chatPhase}
                 data-message-edge={messageEdge}
+                data-chat-latest-user-anchor={
+                  chatEphemeralMode && msg.id === latestUserMessageId ? "true" : undefined
+                }
                 data-private-user-role-header={privateUserRoleHeader ? "true" : undefined}
+                data-fallback-model-used={messageUsesFallbackModel ? "true" : undefined}
                 onContextMenuCapture={event => {
                   if (chatEphemeralMode) return;
                   event.preventDefault();
                   event.stopPropagation();
                   openMessageContextMenu(msg, event.clientX, event.clientY, {
-                    anchor: "center",
+                    anchor: "pointer",
                     mobileActivate: mobileContextMenu,
                   });
                 }}
@@ -21731,6 +25432,20 @@ function resendUserMessage(msg: Message): void {
               >
                 {showMessageHeader && (
                   <h4>
+                    {msg.role === "assistant" && !chatEphemeralMode && !detail?.incognito ? (
+                      <span className={styles.messageMoodAnchor}>
+                        <MessageMoodFace
+                          moodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                          variant="classic"
+                          placement="leading"
+                        />
+                        {showMoodTooltip && assistantMoodKey ? (
+                          <span className={styles.messageMoodTooltip}>
+                            Mood: {messageMoodLabel(assistantMoodKey)}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
                     {showMessageRoleLabel && (
                       <span className={styles.messageRoleLabel}>
                         {shouldRenderPrismMessageRoleLabel(msg, detail?.incognito === true) ? (
@@ -21766,19 +25481,20 @@ function resendUserMessage(msg: Message): void {
                         )}
                       </span>
                     )}
-                    {msg.role === "assistant" && !chatEphemeralMode ? (
-                      <MessageMoodFace moodKey={resolveMessageMoodKey(msg)} />
-                    ) : null}
                   </h4>
                 )}
                 <MessageBody
                   content={msg.content}
                   assistantStripPrismToolTail={msg.role === "assistant"}
+                  messageRole={msg.role}
                   revealWordByWord={
                     assistantWordByWordMode &&
                     msg.role === "assistant" &&
-                    msg.id === latestAssistantMessageId
+                    msg.id === latestAssistantMessageId &&
+                    !messageRevealAlreadyCompleted
                   }
+                  // Use line-by-line typed reveal only while actively typing;
+                  // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatEphemeralMode}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
@@ -21854,17 +25570,6 @@ function resendUserMessage(msg: Message): void {
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
           {renderComposerChipRail()}
-          {chatEphemeralMode ? (
-            <div className={styles.chatEmotionStrip} role="status" aria-live="polite">
-              <span className={styles.chatEmotionStripMood}>
-                <MessageMoodFace moodKey={latestAssistantMood} />
-                <span className={styles.chatEmotionStripMoodText}>
-                  {latestAssistantMoodLabel}
-                </span>
-              </span>
-              <span className={styles.chatEmotionStripCaption}>Emotional weather</span>
-            </div>
-          ) : null}
         </div>
 
         <form
@@ -21991,8 +25696,10 @@ function resendUserMessage(msg: Message): void {
               const isLocal = settings?.preferredProvider !== "openai";
               const modelProvider: Provider = isLocal ? "local" : "openai";
               const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-              const visibleModelChoice = visibleBotCustomizerModelChoice(
+              const visibleModelChoice = visibleConcreteModelChoiceForProvider(
+                modelCatalog,
                 settings,
+                modelProvider,
                 rawModelChoice
               );
               const modelOptions = includeSelectedModelOption(
@@ -22049,6 +25756,8 @@ function resendUserMessage(msg: Message): void {
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
+      {renderSweepConfirmModal()}
+      {renderSweepUndoToast()}
       {renderDevToolsPanel()}
       {touchPreview && (
         <TouchPreviewBalloon
@@ -22063,6 +25772,7 @@ function resendUserMessage(msg: Message): void {
         />
       )}
       {renderViewSwitchOverlay()}
+      <GlyphTooltipLayer />
     </main>
   );
 }
