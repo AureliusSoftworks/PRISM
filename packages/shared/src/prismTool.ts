@@ -25,14 +25,33 @@ export interface AskQuestionPayload {
   options: AskQuestionOption[];
 }
 
+export type StoredMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained";
+
+export interface StoredAssistantMoodPayload {
+  key: StoredMoodKey;
+  confidence?: number;
+}
+
+export interface StoredAssistantToolEnvelope {
+  v: 1;
+  askQuestion?: AskQuestionPayload;
+  mood?: StoredAssistantMoodPayload;
+}
+
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
-export type StoredAssistantToolPayload = AskQuestionPayload;
+export type StoredAssistantToolPayload = AskQuestionPayload | StoredAssistantToolEnvelope;
 
 export interface ParsedAssistantTurn {
   /** Text shown in the transcript and fed back into the LLM prompt. */
   displayContent: string;
   /** Parsed AskQuestion when the envelope was valid and complete. */
   askQuestion?: AskQuestionPayload;
+}
+
+export interface ParsedStoredAssistantToolPayload {
+  askQuestion?: AskQuestionPayload;
+  moodKey?: StoredMoodKey;
+  moodConfidence?: number;
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -206,35 +225,116 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
 export function parseStoredToolPayload(
   raw: string | null | undefined
 ): AskQuestionPayload | undefined {
-  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  return parseStoredAssistantToolPayload(raw).askQuestion;
+}
+
+/** Deserialize stored `messages.tool_payload` into AskQuestion + mood metadata. */
+export function parseStoredAssistantToolPayload(
+  raw: string | null | undefined
+): ParsedStoredAssistantToolPayload {
+  if (typeof raw !== "string" || !raw.trim()) return {};
   try {
-    return normalizeAskQuestionEnvelope(JSON.parse(raw) as unknown);
+    const parsed = JSON.parse(raw) as unknown;
+    const normalizedAsk = normalizeAskQuestionEnvelope(parsed);
+    if (normalizedAsk) {
+      return { askQuestion: normalizedAsk };
+    }
+    if (!parsed || typeof parsed !== "object") return {};
+    const row = parsed as Record<string, unknown>;
+    const askQuestion = normalizeAskQuestionEnvelope(row.askQuestion);
+    const moodRow = row.mood;
+    let moodKey: StoredMoodKey | undefined;
+    let moodConfidence: number | undefined;
+    if (moodRow && typeof moodRow === "object") {
+      const moodRecord = moodRow as Record<string, unknown>;
+      const key = typeof moodRecord.key === "string" ? moodRecord.key.trim() : "";
+      if (
+        key === "joyful" ||
+        key === "warm" ||
+        key === "neutral" ||
+        key === "guarded" ||
+        key === "strained"
+      ) {
+        moodKey = key;
+      }
+      const confidenceRaw = moodRecord.confidence;
+      if (typeof confidenceRaw === "number" && Number.isFinite(confidenceRaw)) {
+        moodConfidence = Math.max(0, Math.min(1, confidenceRaw));
+      }
+    }
+    return {
+      ...(askQuestion ? { askQuestion } : {}),
+      ...(moodKey ? { moodKey } : {}),
+      ...(moodConfidence !== undefined ? { moodConfidence } : {}),
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
 export function hydrateAssistantMessageParts(args: {
   content: string;
   toolPayload: string | null | undefined;
-}): { content: string; askQuestion?: AskQuestionPayload } {
-  const storedAsk = parseStoredToolPayload(args.toolPayload);
+}): {
+  content: string;
+  askQuestion?: AskQuestionPayload;
+  moodKey?: StoredMoodKey;
+  moodConfidence?: number;
+} {
+  const stored = parseStoredAssistantToolPayload(args.toolPayload);
   if (!assistantContentHasPrismToolFraming(args.content)) {
     return {
       content: args.content,
-      ...(storedAsk ? { askQuestion: storedAsk } : {}),
+      ...(stored.askQuestion ? { askQuestion: stored.askQuestion } : {}),
+      ...(stored.moodKey ? { moodKey: stored.moodKey } : {}),
+      ...(stored.moodConfidence !== undefined
+        ? { moodConfidence: stored.moodConfidence }
+        : {}),
     };
   }
   const reparsed = parseAssistantPrismTools(args.content);
-  const askQuestion = storedAsk ?? reparsed.askQuestion;
+  const askQuestion = stored.askQuestion ?? reparsed.askQuestion;
   return {
     content: reparsed.displayContent,
     ...(askQuestion ? { askQuestion } : {}),
+    ...(stored.moodKey ? { moodKey: stored.moodKey } : {}),
+    ...(stored.moodConfidence !== undefined
+      ? { moodConfidence: stored.moodConfidence }
+      : {}),
   };
 }
 
 
 /// Serialize validated AskQuestion for SQLite `messages.tool_payload`.
 export function serializeAskQuestionTool(payload: AskQuestionPayload): string {
+  return JSON.stringify(payload);
+}
+
+export function serializeAssistantToolPayload(args: {
+  askQuestion?: AskQuestionPayload;
+  moodKey?: StoredMoodKey;
+  moodConfidence?: number;
+}): string | null {
+  const hasAsk = args.askQuestion !== undefined;
+  const hasMood = args.moodKey !== undefined;
+  if (!hasAsk && !hasMood) return null;
+  if (hasAsk && !hasMood) {
+    return serializeAskQuestionTool(args.askQuestion!);
+  }
+  const payload: StoredAssistantToolEnvelope = {
+    v: 1,
+    ...(args.askQuestion ? { askQuestion: args.askQuestion } : {}),
+    ...(args.moodKey
+      ? {
+          mood: {
+            key: args.moodKey,
+            ...(typeof args.moodConfidence === "number" &&
+            Number.isFinite(args.moodConfidence)
+              ? { confidence: Math.max(0, Math.min(1, args.moodConfidence)) }
+              : {}),
+          },
+        }
+      : {}),
+  };
   return JSON.stringify(payload);
 }

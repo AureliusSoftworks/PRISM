@@ -44,6 +44,7 @@ import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type Ba
 import { generateImage } from "./image-provider.ts";
 import {
   clearThreadCompactions,
+  getLatestThreadDisplaySummary,
   getLatestThreadSummary,
   getThreadCompactionDebug,
   summarizeThreadCompact,
@@ -639,6 +640,10 @@ function buildRoutes(): RouteDefinition[] {
         return {
           ...shared,
           content: assembled.content,
+          ...(assembled.moodKey ? { moodKey: assembled.moodKey } : {}),
+          ...(assembled.moodConfidence !== undefined
+            ? { moodConfidence: assembled.moodConfidence }
+            : {}),
           ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
         };
       });
@@ -734,7 +739,8 @@ function buildRoutes(): RouteDefinition[] {
       const debug = getThreadCompactionDebug(db, userId, conversationId, mode);
       json(ctx.res, 200, {
         ok: true,
-        summary: getLatestThreadSummary(db, userId, conversationId, mode),
+        summary: getLatestThreadDisplaySummary(db, userId, conversationId, mode),
+        internalSummary: getLatestThreadSummary(db, userId, conversationId, mode),
         latestSummaryAt: debug.latestSummaryAt,
       });
     }),
@@ -920,15 +926,13 @@ function buildRoutes(): RouteDefinition[] {
       const message = starterPrompt ? "" : readString(body.message, "message");
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
+      const forceNewConversation = body.forceNewConversation === true;
       const sessionEnding = body.sessionEnding === true;
-      // Three-valued parse so the server can distinguish:
+      // Three-valued parse used by Sandbox callers:
       //   - absent key           → leave conversation's bot alone
       //   - explicit null        → switch to Default persona (no bot)
       //   - string               → switch to that specific bot
-      // The Chat-mode client ALWAYS sends botId (string or null) so a
-      // mid-thread dropdown flip either persists a new bot or demotes
-      // the conversation back to Default. Sandbox callers still omit
-      // the key for the no-bot case; they get the legacy behavior.
+      // Chat mode is locked to default Prism and ignores this field.
       const botId: string | null | undefined =
         typeof body.botId === "string"
           ? body.botId
@@ -1072,6 +1076,7 @@ function buildRoutes(): RouteDefinition[] {
             botOverrides,
             mode,
             sessionEnding,
+            forceNewConversation,
           },
           conversationId
         );

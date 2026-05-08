@@ -30,12 +30,17 @@ export {
   assistantContentHasPrismToolFraming,
   hydrateAssistantMessageParts,
   parseAssistantPrismTools,
+  parseStoredAssistantToolPayload,
   parseStoredToolPayload,
+  serializeAssistantToolPayload,
   serializeAskQuestionTool,
   type AskQuestionOption,
   type AskQuestionPayload,
   type ParsedAssistantTurn,
+  type ParsedStoredAssistantToolPayload,
+  type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
+  type StoredMoodKey,
 } from "./prismTool.js";
 
 export {
@@ -93,6 +98,10 @@ export interface ChatMessage {
   botColor?: string;
   /** Bot's associated glyph identifier (opaque key looked up in the client's glyph registry). */
   botGlyph?: string;
+  /** Lightweight emotional cue for assistant-message mood rendering. */
+  moodKey?: BotMoodKey;
+  /** Optional confidence (0-1) for tuning and diagnostics. */
+  moodConfidence?: number;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
   askQuestion?: AskQuestionPayload;
 }
@@ -229,6 +238,8 @@ export interface SandboxRuntimeControls {
 
 export interface ChatRequestPayload {
   conversationId?: string;
+  /** When true, bypass "reuse latest chat" and start a fresh conversation row. */
+  forceNewConversation?: boolean;
   message: string;
   starterPrompt?: boolean;
   mode?: ChatMode;
@@ -260,6 +271,7 @@ export interface StarterChatExtras {
 
 export type OpinionBand = "guarded" | "warming" | "trusting";
 export type OpinionTrend = "up" | "down" | "steady";
+export type BotMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained";
 
 export interface SessionOpinion {
   score: number;

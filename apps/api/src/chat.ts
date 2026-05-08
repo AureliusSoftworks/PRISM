@@ -31,6 +31,7 @@ import {
 } from "./memory-summarizer.ts";
 import type {
   AskQuestionPayload,
+  BotMoodKey,
   BotOpinion,
   BotOpinionBand,
   BotOpinionBoundaryLevel,
@@ -46,7 +47,7 @@ import {
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   parseAssistantPrismTools,
-  serializeAskQuestionTool,
+  serializeAssistantToolPayload,
 } from "@localai/shared";
 
 const config = getAppConfig();
@@ -128,11 +129,20 @@ const POSITIVE_PHRASES = [
   "thank you",
   "thanks",
   "please",
+  "nice",
+  "great",
+  "good job",
+  "well done",
+  "love this",
+  "awesome",
   "appreciate",
   "i understand",
   "that makes sense",
   "good point",
   "help me understand",
+  "you are cool",
+  "you're cool",
+  "kind words",
 ];
 const NEGATIVE_PHRASES = [
   "stupid",
@@ -142,6 +152,8 @@ const NEGATIVE_PHRASES = [
   "dumb",
   "you are wrong",
   "hate this",
+  "you suck",
+  "suck",
 ];
 const BRUSQUE_PHRASES = ["do it", "just do it", "whatever", "hurry up", "now"];
 const REPAIR_PHRASES = [
@@ -153,12 +165,41 @@ const REPAIR_PHRASES = [
   "let me rephrase",
   "i'll slow down",
   "i will slow down",
+  "just kidding",
+  "just joking",
+  "i was joking",
+  "kidding",
+];
+const ASSISTANT_WARM_PHRASES = [
+  "thank you",
+  "i can help",
+  "happy to",
+  "glad to",
+  "great question",
+  "we can",
+  "let's",
+  "you can",
+  "i understand",
+];
+const ASSISTANT_STRAINED_PHRASES = [
+  "can't",
+  "cannot",
+  "i won't",
+  "not able",
+  "unable",
+  "i refuse",
+  "won't do that",
 ];
 
 type OpinionEvaluation = {
   delta: number;
   reason: string;
   trend: OpinionTrend;
+};
+
+type MoodEvaluation = {
+  key: BotMoodKey;
+  confidence: number;
 };
 
 type BotOpinionRow = {
@@ -328,6 +369,76 @@ function evaluateBotOpinionTurn(message: string, existing?: BotOpinion | null): 
     repair,
     trend: "steady",
     reason: "No long-term relationship shift this turn.",
+  };
+}
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function scoreToMoodKey(score: number): BotMoodKey {
+  if (score >= 74) return "joyful";
+  if (score >= 58) return "warm";
+  if (score <= 28) return "strained";
+  if (score <= 44) return "guarded";
+  return "neutral";
+}
+
+function evaluateAssistantLanguageSignal(content: string): { warmHits: number; strainHits: number } {
+  const normalized = normalizeOpinionText(content);
+  if (!normalized) {
+    return { warmHits: 0, strainHits: 0 };
+  }
+  return {
+    warmHits: countPhraseHits(normalized, ASSISTANT_WARM_PHRASES),
+    strainHits: countPhraseHits(normalized, ASSISTANT_STRAINED_PHRASES),
+  };
+}
+
+function evaluateAssistantMood(args: {
+  assistantContent: string;
+  toneDelta?: number;
+  sessionOpinion?: SessionOpinion | null;
+  botOpinion?: BotOpinion | null;
+  repairSignal?: boolean;
+}): MoodEvaluation {
+  const { warmHits, strainHits } = evaluateAssistantLanguageSignal(args.assistantContent);
+  const sessionScore = args.sessionOpinion?.score ?? OPINION_SCORE_BASELINE;
+  const botScore = args.botOpinion?.score ?? OPINION_SCORE_BASELINE;
+  const toneDelta = args.toneDelta ?? 0;
+  const repairBoost = args.repairSignal ? 6 : 0;
+  const trendBias =
+    args.sessionOpinion?.trend === "up"
+      ? 3
+      : args.sessionOpinion?.trend === "down"
+        ? -4
+        : 0;
+  const weightedScore = Math.round(
+    OPINION_SCORE_BASELINE +
+      toneDelta * 5 +
+      (sessionScore - OPINION_SCORE_BASELINE) * 0.14 +
+      (botScore - OPINION_SCORE_BASELINE) * 0.18 +
+      warmHits * 4.8 -
+      strainHits * 5.4 +
+      trendBias +
+      repairBoost
+  );
+  let score = clampOpinionScore(weightedScore);
+  // Prioritize immediate turn tone so hard negatives and clear repairs visibly diverge.
+  if (toneDelta >= 5 || args.repairSignal) {
+    score = Math.max(score, 60);
+  } else if (toneDelta <= -6) {
+    score = Math.min(score, 34);
+  }
+  const confidence = clampUnit(
+    0.32 +
+      Math.abs(score - OPINION_SCORE_BASELINE) / OPINION_SCORE_MAX +
+      Math.min(0.18, Math.abs(toneDelta) * 0.02) +
+      Math.min(0.2, (warmHits + strainHits) * 0.04)
+  );
+  return {
+    key: scoreToMoodKey(score),
+    confidence: Number(confidence.toFixed(2)),
   };
 }
 
@@ -773,6 +884,8 @@ export interface UserChatSettings {
    */
   mode?: ChatMode;
   sessionEnding?: boolean;
+  /** When true, skip automatic latest-chat reuse and force a new conversation row. */
+  forceNewConversation?: boolean;
 }
 
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
@@ -1646,6 +1759,10 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
     return {
       ...base,
       content: assembled.content,
+      ...(assembled.moodKey ? { moodKey: assembled.moodKey } : {}),
+      ...(assembled.moodConfidence !== undefined
+        ? { moodConfidence: assembled.moodConfidence }
+        : {}),
       ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
     };
   });
@@ -2157,7 +2274,8 @@ export async function processChatMessage(
   const effectiveProvider = settings.preferredProvider;
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
-  const activeBotId = settings.botId;
+  // Defense in depth: Chat mode always uses default Prism persona.
+  const activeBotId = mode === "chat" ? null : settings.botId;
   const activeMemoryBotId =
     typeof activeBotId === "string" && activeBotId.trim().length > 0
       ? activeBotId.trim()
@@ -2217,6 +2335,17 @@ export async function processChatMessage(
     const assistantDisplay = isStarterPrompt
       ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
       : assistantDisplayRaw;
+    const turnEvaluation = isStarterPrompt
+      ? undefined
+      : evaluateUserTurnOpinion(message);
+    const repairSignal = isStarterPrompt
+      ? false
+      : hasRepairSignal(normalizeOpinionText(message));
+    const assistantMood = evaluateAssistantMood({
+      assistantContent: assistantDisplay,
+      toneDelta: turnEvaluation?.delta,
+      repairSignal,
+    });
     const modelUsed =
       settings.botOverrides?.model?.trim() ||
       (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
@@ -2232,6 +2361,8 @@ export async function processChatMessage(
       createdAt: assistantCreatedAt,
       provider: provider.name,
       model: modelUsed,
+      moodKey: assistantMood.key,
+      moodConfidence: assistantMood.confidence,
       ...(activeBotName ? { botName: activeBotName } : {}),
       ...(askQuestionForTurn ? { askQuestion: askQuestionForTurn } : {}),
     };
@@ -2289,7 +2420,7 @@ export async function processChatMessage(
           const score = clampOpinionScore(OPINION_SCORE_BASELINE + evaluation.delta);
           return buildOpinion(
             score,
-            evaluation.trend,
+            turnEvaluation?.trend ?? evaluation.trend,
             evaluation.reason,
             [evaluation.reason],
             assistantCreatedAt
@@ -2306,7 +2437,7 @@ export async function processChatMessage(
   }
 
   let activeConversationId = conversationId;
-  if (mode === "chat" && !incognitoForTurn) {
+  if (mode === "chat" && !incognitoForTurn && settings.forceNewConversation !== true) {
     const latestChatConversation = db
       .prepare(
         `SELECT id
@@ -2415,6 +2546,12 @@ export async function processChatMessage(
     memoryLines = pipelineResult.memoryLines;
   }
 
+  const existingSessionOpinion = readSessionOpinion(
+    db,
+    userId,
+    activeConversationId,
+    activeBotId
+  );
   const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
   const promptMessages = buildPromptMessages({
     botSystemPrompt: settings.botSystemPrompt,
@@ -2460,10 +2597,24 @@ export async function processChatMessage(
   const assistantDisplay = isStarterPrompt
     ? enforceStarterOpeningQuestion(assistantDisplayRaw, memoryLines)
     : assistantDisplayRaw;
-  const toolPayloadStored =
-    askQuestionForTurn !== undefined
-      ? serializeAskQuestionTool(askQuestionForTurn)
-      : null;
+  const turnEvaluation = isStarterPrompt
+    ? undefined
+    : evaluateUserTurnOpinion(message);
+  const repairSignal = isStarterPrompt
+    ? false
+    : hasRepairSignal(normalizeOpinionText(message));
+  const assistantMood = evaluateAssistantMood({
+    assistantContent: assistantDisplay,
+    toneDelta: turnEvaluation?.delta,
+    sessionOpinion: existingSessionOpinion,
+    botOpinion: existingBotOpinion,
+    repairSignal,
+  });
+  const toolPayloadStored = serializeAssistantToolPayload({
+    askQuestion: askQuestionForTurn,
+    moodKey: assistantMood.key,
+    moodConfidence: assistantMood.confidence,
+  });
   const modelUsed =
     settings.botOverrides?.model?.trim() ||
     (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);

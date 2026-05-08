@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
   RECENT_WINDOW_SIZE,
+  getLatestThreadDisplaySummary,
   getLatestThreadSummary,
   summarizeThreadCompact,
 } from "../memory-summarizer.ts";
@@ -244,6 +245,39 @@ describe("summarizeThreadCompact", () => {
       .get() as { summary: string } | undefined;
     assert.match(row?.summary ?? "", /manual-summary/);
   });
+
+  it("retains persisted transcript rows after chat-mode compaction", async () => {
+    const db = createTestDb();
+    const { provider } = stubProvider("chat-mode-summary");
+    seedMessages(db, "user-1", "conv-1", RECENT_WINDOW_SIZE + 3, Date.now());
+
+    const beforeCount = (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND conversation_id = ?")
+        .get("user-1", "conv-1") as { n: number }
+    ).n;
+    assert.equal(beforeCount, RECENT_WINDOW_SIZE + 3);
+
+    const result = await summarizeThreadCompact(db, provider, "user-1", "conv-1", {
+      mode: "chat",
+      reason: "manual",
+      force: true,
+    });
+    assert.equal(result.triggered, true);
+
+    const afterCount = (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND conversation_id = ?")
+        .get("user-1", "conv-1") as { n: number }
+    ).n;
+    assert.equal(
+      afterCount,
+      beforeCount,
+      "chat-mode compaction should preserve transcript rows for persisted chat history"
+    );
+    const displaySummary = getLatestThreadDisplaySummary(db, "user-1", "conv-1", "chat");
+    assert.equal(displaySummary, "chat-mode-summary");
+  });
 });
 
 describe("getLatestThreadSummary", () => {
@@ -297,6 +331,30 @@ describe("getLatestThreadSummary", () => {
       getLatestThreadSummary(db, "user-2", "conv-1"),
       null,
       "must not surface another user's summary even on a matching conversation_id"
+    );
+  });
+});
+
+describe("getLatestThreadDisplaySummary", () => {
+  it("falls back to internal summary for legacy rows without displaySummary", () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "s1",
+      "user-1",
+      "conv-1",
+      JSON.stringify({
+        v: 1,
+        kind: "thread_compact",
+        mode: "chat",
+        summary: "legacy technical summary",
+      }),
+      new Date().toISOString()
+    );
+    assert.equal(
+      getLatestThreadDisplaySummary(db, "user-1", "conv-1", "chat"),
+      "legacy technical summary"
     );
   });
 });

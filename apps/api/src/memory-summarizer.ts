@@ -21,6 +21,7 @@ const FACT_EXTRACTION_PROMPT = `You are a memory extraction assistant. Given a c
  * Qdrant and never surfaced in the sidebar.
  */
 const ROLLING_COMPACT_PROMPT = `You are compacting an ongoing conversation thread so the model can keep threading it even after older turns roll out of its live context window. You will receive an optional prior summary followed by a block of earlier messages. Produce ONE short dense paragraph (4-8 sentences) that preserves, in rough order of importance: (1) names, roles, entities, and project/file references; (2) concrete decisions, agreements, or commitments; (3) the user's stated preferences and constraints; (4) the emotional arc or intent of the conversation so far. Write in third person, present tense. Omit pleasantries and narration. Never quote messages verbatim. Respond with ONLY the paragraph — no preamble, no bullets, no "Summary:" prefix.`;
+const CHAT_VISIBLE_RECAP_PROMPT = `Rewrite the technical summary into a warm, natural recap for the user. Focus on the user's asks and goals first. Mention what the assistant helped with briefly, only as supporting context. Write in first person assistant voice and second person user voice, present tense. Keep it to 1-2 sentences, conversational, and grounded in "right now" continuity. Start naturally (for example: "We were just talking about..."). Do not use markdown, bullets, or labels.`;
 
 /**
  * How many most-recent messages stay verbatim in the live prompt window.
@@ -36,6 +37,7 @@ type EncodedSummaryRecord = {
   v: 1;
   kind: typeof SUMMARY_KIND_CHAT_FACTS | typeof SUMMARY_KIND_THREAD_COMPACT;
   summary: string;
+  displaySummary?: string;
   mode?: ChatMode;
   reason?: "milestone" | "mode_exit" | "manual";
   createdAt?: string;
@@ -80,6 +82,10 @@ function decodeSummaryRecord(payload: string): EncodedSummaryRecord | null {
           kind: SUMMARY_KIND_THREAD_COMPACT,
           mode,
           summary: parsed.summary.trim(),
+          displaySummary:
+            typeof parsed.displaySummary === "string" && parsed.displaySummary.trim().length > 0
+              ? parsed.displaySummary.trim()
+              : undefined,
           reason: parsed.reason,
           createdAt: parsed.createdAt,
         };
@@ -321,6 +327,31 @@ export async function summarizeThreadCompact(
   if (!compact || compact.trim().length === 0) {
     return { triggered: false };
   }
+  let displaySummary: string | undefined;
+  if (mode === "chat") {
+    try {
+      const recapRaw = await auxiliaryProvider.generateResponse([
+        { role: "system", content: CHAT_VISIBLE_RECAP_PROMPT },
+        { role: "user", content: compact.trim() },
+      ]);
+      const recap = recapRaw.trim();
+      if (recap.length > 0) {
+        displaySummary = recap;
+      }
+    } catch {
+      // Fallback below keeps chat UI resilient even if recap rewrite fails.
+    }
+    if (!displaySummary) {
+      const firstSentence = compact
+        .replace(/\s+/g, " ")
+        .trim()
+        .split(/(?<=[.!?])\s+/)[0]
+        ?.trim();
+      displaySummary = firstSentence && firstSentence.length > 0
+        ? `We were just talking about this: ${firstSentence}`
+        : "We were just in the middle of your conversation, and I can pick it right back up.";
+    }
+  }
 
   const summaryId = randomId(12);
   const now = new Date().toISOString();
@@ -335,11 +366,14 @@ export async function summarizeThreadCompact(
       kind: SUMMARY_KIND_THREAD_COMPACT,
       mode,
       summary: compact.trim(),
+      ...(displaySummary ? { displaySummary } : {}),
       reason,
       createdAt: now,
     }),
     now
   );
+  // Chat-mode now persists conversation transcripts by default, matching
+  // normal saved Prism conversation behavior.
   return { triggered: true, latestSummary: compact.trim(), latestSummaryAt: now };
 }
 
@@ -367,6 +401,32 @@ export function getLatestThreadSummary(
     if (decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) continue;
     const decodedMode = decoded.mode === "chat" ? "chat" : "sandbox";
     if (decodedMode !== mode) continue;
+    return decoded.summary;
+  }
+  return null;
+}
+
+export function getLatestThreadDisplaySummary(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  mode: ChatMode = "sandbox"
+): string | null {
+  const rows = db
+    .prepare(
+      "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 25"
+    )
+    .all(userId, conversationId) as Array<{ summary?: string }>;
+  for (const row of rows) {
+    if (typeof row.summary !== "string") continue;
+    const decoded = decodeSummaryRecord(row.summary);
+    if (!decoded) continue;
+    if (decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) continue;
+    const decodedMode = decoded.mode === "chat" ? "chat" : "sandbox";
+    if (decodedMode !== mode) continue;
+    if (mode === "chat") {
+      return decoded.displaySummary ?? decoded.summary;
+    }
     return decoded.summary;
   }
   return null;
