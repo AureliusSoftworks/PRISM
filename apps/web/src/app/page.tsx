@@ -11070,6 +11070,11 @@ function HomeContent(): React.JSX.Element {
   // bottom of the scroll area moves up by a few pixels on its own).
   const chatLastScrollHeightByConversationRef = useRef<Map<string, number>>(new Map());
   const chatAutoscrollArmedByConversationRef = useRef<Map<string, boolean>>(new Map());
+  // True for any conversation where the user interrupted a streaming reply.
+  // Survives the brief loop unmount/remount around the "...interrupted again."
+  // follow-up so the cut-off text stays where the user paused it. Cleared
+  // when the user sends another message.
+  const chatScrollPinnedByConversationRef = useRef<Map<string, boolean>>(new Map());
   const chatMessageFirstSeenAtRef = useRef<Map<string, number>>(new Map());
   const chatCancelledRevealTokenCountByKeyRef = useRef<Map<string, number>>(new Map());
   const chatInterruptCountByConversationRef = useRef<Map<string, number>>(new Map());
@@ -12699,8 +12704,10 @@ function HomeContent(): React.JSX.Element {
     chatCompletedRevealKeysRef.current.add(revealKey);
     // Freeze auto-scroll so the cut-off text stays where the user paused
     // it. The "...interrupted again." follow-up will appear in flow without
-    // the cinematic dolly chasing the new content's tail.
+    // the dolly chasing the new content's tail. The pinned flag survives
+    // the loop's brief unmount/remount around the follow-up message.
     chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+    chatScrollPinnedByConversationRef.current.set(detail.id, true);
     const nextInterruptCount =
       (chatInterruptCountByConversationRef.current.get(detail.id) ?? 0) + 1;
     chatInterruptCountByConversationRef.current.set(detail.id, nextInterruptCount);
@@ -13408,14 +13415,24 @@ function HomeContent(): React.JSX.Element {
   // ease-out (steps shrink as we approach), and when new tokens push the
   // bottom further down the loop catches up automatically.
   //
-  // Manual scroll-up and interruption pause the follow via the shared
-  // `chatAutoscrollArmedByConversationRef` flag; we do not detect those
-  // states inside the rAF loop so layout reflow can never trip us.
+  // The loop self-arms when typing starts so we never depend on a separate
+  // deferred arm effect. Manual scroll-up sets `armed=false` via the
+  // existing onScroll handler; interruption sets `armed=false` directly.
   useEffect(() => {
     if (!chatEphemeralMode) return;
     if (!typingIndicatorVisible) return;
     const conversationId = detail?.id;
     if (!conversationId) return;
+
+    // If the user interrupted the previous reply for this conversation,
+    // stay frozen until they send a fresh message.
+    if (chatScrollPinnedByConversationRef.current.get(conversationId) === true) {
+      chatAutoscrollArmedByConversationRef.current.set(conversationId, false);
+      return;
+    }
+    // Arm the conversation as soon as a reply is in flight. Existing
+    // disarm signals (user scroll-up, interruption) will turn this off.
+    chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
 
     const EASE_FACTOR = 0.32;
     const MIN_STEP_PX = 0.6;
@@ -13472,6 +13489,9 @@ function HomeContent(): React.JSX.Element {
       chatArchiveInertiaFrameByConversationRef.current.delete(detail.id);
     }
     chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+    // Fresh user turn clears any prior interruption pin so auto-scroll
+    // resumes for the upcoming reply.
+    chatScrollPinnedByConversationRef.current.delete(detail.id);
     requestAnimationFrame(() => {
       const scrollRoot = messagesScrollRef.current;
       if (!scrollRoot) return;
@@ -13515,7 +13535,10 @@ function HomeContent(): React.JSX.Element {
     if (latestMessageRole !== "assistant") return;
     // Only re-arm when the assistant message follows a fresh user turn.
     // Skip arming when it's an interruption follow-up (preceded by another
-    // assistant message) so the cut-off position stays put.
+    // assistant message) so the cut-off position stays put. We snapshot
+    // the messages list once at mount time; deps are scoped to the latest
+    // assistant message id so streaming tokens within the same message
+    // don't re-cancel the arming timer.
     const messages = detail.messages;
     const previousMessage = messages.length >= 2 ? messages[messages.length - 2] : null;
     if (!previousMessage || previousMessage.role !== "user") return;
@@ -13526,7 +13549,7 @@ function HomeContent(): React.JSX.Element {
       chatAutoscrollArmedByConversationRef.current.set(detail.id, true);
     }, waitMs);
     return () => window.clearTimeout(timer);
-  }, [chatEphemeralMode, detail?.id, latestMessageRole, detail?.messages, detail?.messages.length]);
+  }, [chatEphemeralMode, detail?.id, latestMessageRole, latestAssistantMessageId]);
   useEffect(() => {
     if (!chatEphemeralMode || !detail?.id || !latestUserMessageId) return;
     if (latestMessageRole !== "assistant") return;
