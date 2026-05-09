@@ -10,6 +10,9 @@ type DirectMemoryRow = {
   conversation_id: string | null;
   bot_id: string | null;
   confidence: number;
+  category: "general" | "user" | "bot_relation";
+  tier: "short_term" | "long_term";
+  durability: number | null;
   source: "direct";
   certainty: number | null;
   source_message_ids: string;
@@ -135,9 +138,12 @@ function loadDirectMemoryCandidates(
   userKey: Buffer
 ): DirectMemoryCandidate[] {
   const rows = db.prepare(`
-    SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at
+    SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at
     FROM memories
-    WHERE user_id = ? AND bot_id = ? AND source = 'direct'
+    WHERE user_id = ?
+      AND bot_id = ?
+      AND source = 'direct'
+      AND COALESCE(tier, 'short_term') != 'long_term'
     ORDER BY created_at DESC
     LIMIT ?
   `).all(userId, botId, INFERENCE_LOOKBACK_LIMIT) as DirectMemoryRow[];
@@ -378,6 +384,8 @@ export async function inferAndStoreBotMemories(
         botId,
         text: merge.text,
         confidence: merge.certainty,
+        category: parents[0]?.row.category ?? "user",
+        durability: Math.max(...parents.map((parent) => parent.row.durability ?? 0.5)),
         source: "inferred",
         certainty: merge.certainty,
         sourceMessageIds: sourceMessageIdUnion(parents),

@@ -61,6 +61,9 @@ function createChatTestDb(): DatabaseSync {
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
       confidence REAL NOT NULL,
+      category TEXT NOT NULL DEFAULT 'user',
+      tier TEXT NOT NULL DEFAULT 'short_term',
+      durability REAL NOT NULL DEFAULT 0.5,
       source TEXT NOT NULL DEFAULT 'direct',
       certainty REAL,
       source_message_ids TEXT NOT NULL DEFAULT '[]',
@@ -1360,7 +1363,14 @@ describe("processChatMessage AskQuestion tool", () => {
     ).get("assistant") as { content: string; tool_payload: string };
 
     assert.equal(row.content, "Turn here softly.");
-    assert.deepEqual(JSON.parse(row.tool_payload), askPayload);
+    const storedToolPayload = JSON.parse(row.tool_payload) as {
+      v?: number;
+      askQuestion?: typeof askPayload;
+      mood?: { key?: string; confidence?: number };
+    };
+    assert.equal(storedToolPayload.v, 1);
+    assert.deepEqual(storedToolPayload.askQuestion, askPayload);
+    assert.equal(typeof storedToolPayload.mood?.key, "string");
   });
 
   it("skips AskQuestion payload when options are not synthesized", async () => {
@@ -2057,10 +2067,11 @@ describe("processChatMessage conversational memory cues", () => {
       "conversation-1",
       "bot-1",
       [{ text: "You love pistachios.", confidence: 0.92 }],
-      userKey
+      userKey,
+      { durability: 0.4 }
     );
     db.prepare(
-      "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
     ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 
     const result = await processChatMessage(
@@ -2095,10 +2106,11 @@ describe("processChatMessage conversational memory cues", () => {
       "conversation-1",
       "bot-1",
       [{ text: "You prefer coffee.", confidence: 0.92 }],
-      userKey
+      userKey,
+      { durability: 0.4 }
     );
     db.prepare(
-      "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
     ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 
     const result = await processChatMessage(

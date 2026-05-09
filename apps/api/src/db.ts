@@ -2,7 +2,14 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { UserProfile, Conversation, ChatMessage, UserMemory } from "@localai/shared";
+import type {
+  ChatMessage,
+  Conversation,
+  MemoryCategory,
+  MemoryTier,
+  UserMemory,
+  UserProfile,
+} from "@localai/shared";
 
 export interface DbUserRecord {
   id: string;
@@ -22,6 +29,7 @@ export interface DbUserRecord {
   preferredOnlineModel: string | null;
   lenientLocalFallbackModel: string | null;
   secondaryOllamaHost: string | null;
+  composerWritingAssist: number;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
   openAiKeyTag: string | null;
@@ -36,6 +44,9 @@ export interface DbMemoryRecord {
   iv: string;
   tag: string;
   confidence: number;
+  category: MemoryCategory;
+  tier: MemoryTier;
+  durability: number;
   source: "direct" | "inferred" | "compiled";
   certainty: number | null;
   sourceMessageIds: string;
@@ -79,6 +90,7 @@ export function createDatabase(): DatabaseSync {
       preferred_online_model TEXT,
       lenient_local_fallback_model TEXT,
       secondary_ollama_host TEXT,
+      composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
       openai_key_ciphertext TEXT,
@@ -148,6 +160,9 @@ export function createDatabase(): DatabaseSync {
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
       confidence REAL NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      tier TEXT NOT NULL DEFAULT 'short_term',
+      durability REAL NOT NULL DEFAULT 0.5,
       source TEXT NOT NULL DEFAULT 'direct',
       certainty REAL,
       source_message_ids TEXT NOT NULL DEFAULT '[]',
@@ -296,6 +311,12 @@ export function createDatabase(): DatabaseSync {
   if (!hasLenientLocalFallbackModel) {
     db.exec("ALTER TABLE users ADD COLUMN lenient_local_fallback_model TEXT;");
   }
+  const hasComposerWritingAssist = userColumns.some(
+    (column) => column.name === "composer_writing_assist"
+  );
+  if (!hasComposerWritingAssist) {
+    db.exec("ALTER TABLE users ADD COLUMN composer_writing_assist INTEGER NOT NULL DEFAULT 1;");
+  }
   db.exec(`
     UPDATE users
     SET last_active_at = COALESCE(last_active_at, created_at)
@@ -410,6 +431,24 @@ export function createDatabase(): DatabaseSync {
   if (!hasMemorySourceMessageIdsColumn) {
     db.exec("ALTER TABLE memories ADD COLUMN source_message_ids TEXT NOT NULL DEFAULT '[]';");
   }
+  const hasMemoryCategoryColumn = memoryColumns.some(
+    (column) => column.name === "category"
+  );
+  if (!hasMemoryCategoryColumn) {
+    db.exec("ALTER TABLE memories ADD COLUMN category TEXT NOT NULL DEFAULT 'general';");
+  }
+  const hasMemoryTierColumn = memoryColumns.some(
+    (column) => column.name === "tier"
+  );
+  if (!hasMemoryTierColumn) {
+    db.exec("ALTER TABLE memories ADD COLUMN tier TEXT NOT NULL DEFAULT 'short_term';");
+  }
+  const hasMemoryDurabilityColumn = memoryColumns.some(
+    (column) => column.name === "durability"
+  );
+  if (!hasMemoryDurabilityColumn) {
+    db.exec("ALTER TABLE memories ADD COLUMN durability REAL NOT NULL DEFAULT 0.5;");
+  }
   db.exec(`
     UPDATE memories
     SET source = COALESCE(source, 'direct')
@@ -424,6 +463,86 @@ export function createDatabase(): DatabaseSync {
     UPDATE memories
     SET source_message_ids = '[]'
     WHERE source_message_ids IS NULL OR source_message_ids = '';
+  `);
+  db.exec(`
+    UPDATE memories
+    SET category = CASE
+      WHEN lower(COALESCE(category, '')) IN ('general', 'user', 'bot_relation')
+        THEN lower(category)
+      WHEN lower(COALESCE(category, '')) = 'bot-relation'
+        THEN 'bot_relation'
+      WHEN bot_id IS NULL
+        THEN 'user'
+      ELSE 'general'
+    END
+    WHERE category IS NULL
+       OR trim(category) = ''
+       OR lower(category) NOT IN ('general', 'user', 'bot_relation');
+  `);
+  db.exec(`
+    UPDATE memories
+    SET category = 'user'
+    WHERE bot_id IS NULL
+      AND category = 'general';
+  `);
+  db.exec(`
+    UPDATE memories
+    SET tier = CASE
+      WHEN lower(COALESCE(tier, '')) IN ('short_term', 'long_term')
+        THEN lower(tier)
+      WHEN (
+          ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.95
+        )
+        OR (
+          ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.9
+          AND COALESCE(durability, 0.5) >= 0.5
+        )
+        OR (
+          COALESCE(durability, 0.5) >= 0.72
+          AND ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.78
+        )
+        THEN 'long_term'
+      ELSE 'short_term'
+    END
+    WHERE tier IS NULL
+       OR trim(tier) = ''
+       OR lower(tier) NOT IN ('short_term', 'long_term');
+  `);
+  db.exec(`
+    UPDATE memories
+    SET tier = 'long_term'
+    WHERE (
+      (
+        ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.95
+      )
+       OR (
+        ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.9
+        AND COALESCE(durability, 0.5) >= 0.5
+      )
+       OR (
+        COALESCE(durability, 0.5) >= 0.72
+        AND ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.78
+      )
+    )
+      AND tier = 'short_term';
+  `);
+  db.exec(`
+    UPDATE memories
+    SET tier = 'short_term'
+    WHERE NOT (
+        (
+          ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.95
+        )
+        OR (
+          ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.9
+          AND COALESCE(durability, 0.5) >= 0.5
+        )
+        OR (
+          COALESCE(durability, 0.5) >= 0.72
+          AND ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.78
+        )
+      )
+      AND tier = 'long_term';
   `);
 
   // Migrate existing DBs to the bots.color and bots.glyph columns used
@@ -573,6 +692,9 @@ export function mapMemoryRow(row: DbMemoryRecord, text: string): UserMemory {
     userId: row.userId,
     createdAt: row.createdAt,
     confidence: row.confidence,
+    category: row.category,
+    tier: row.tier,
+    durability: row.durability,
     source: row.source,
     certainty: row.certainty ?? row.confidence,
     sourceMessageIds: parseMemorySourceMessageIds(row.sourceMessageIds),

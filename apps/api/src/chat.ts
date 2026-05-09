@@ -3,8 +3,10 @@ import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
 import {
   analyzeMemoryIntent,
+  demoteMemoryToShortTerm,
   deleteMemoryById,
   findMemoryByCue,
+  memoryQualifiesLongTerm,
   persistMemoryCandidates,
   retrieveRecentMemoriesForStarter,
   retrieveRelevantMemories,
@@ -40,6 +42,8 @@ import type {
   ChatMessage,
   ChatMode,
   Conversation,
+  MemoryCategory,
+  MemoryTier,
   OpinionBand,
   OpinionTrend,
   SessionOpinion,
@@ -86,8 +90,11 @@ export interface ProcessChatMessageResult {
       botId: string | null;
       conversationId?: string;
       confidence: number;
+      category?: MemoryCategory;
+      tier?: MemoryTier;
       source?: "direct" | "inferred" | "compiled";
       certainty?: number;
+      durability?: number;
       sourceMessageIds?: string[];
       validationStatus?: MemoryValidationStatus;
       originalText?: string;
@@ -99,8 +106,11 @@ export interface ProcessChatMessageResult {
       botId: string | null;
       conversationId?: string;
       confidence: number;
+      category?: MemoryCategory;
+      tier?: MemoryTier;
       source?: "direct" | "inferred" | "compiled";
       certainty?: number;
+      durability?: number;
       sourceMessageIds?: string[];
     }>;
     rejected: Array<{
@@ -2219,6 +2229,24 @@ function botOpinionPromptContext(opinion: BotOpinion | null): string | null {
   ].join("\n");
 }
 
+function isLongTermMemory(memory: { tier?: MemoryTier; confidence: number; certainty?: number; durability?: number }): boolean {
+  return memory.tier === "long_term" || memoryQualifiesLongTerm(memory.confidence, memory.certainty, memory.durability);
+}
+
+function messageAllowsLongTermDemotion(message: string): boolean {
+  return /\b(?:actually|correction|scratch that|changed my mind|not true|not right|wrong|i was joking|just joking|i was kidding|just kidding|that thing i told you earlier)\b/i.test(message);
+}
+
+function longTermMemoryClarificationPrompt(memoryText: string): string {
+  return [
+    "Long-term memory protection:",
+    `The user asked to forget this protected long-term memory: "${memoryText}".`,
+    "Do not treat it as deleted yet. Reply in a gently confused way, starting from the idea that you thought they had said this.",
+    "Ask whether they still want you to weaken this memory back into short-term uncertainty.",
+    "Append one Prism AskQuestion tool block with exactly three options: confirm weakening, explain the contradiction, or keep the memory.",
+  ].join("\n");
+}
+
 function readSessionOpinion(
   db: DatabaseSync,
   userId: string,
@@ -2316,6 +2344,7 @@ function buildPromptMessages(args: {
   botOpinion?: BotOpinion | null;
   threadSummary?: string | null;
   memoryLines: string[];
+  memoryClarification?: string | null;
   chatHistory: ChatMessage[];
   userMessage: string;
   askQuestionMode: "off" | "explicit" | "continuation";
@@ -2365,6 +2394,12 @@ function buildPromptMessages(args: {
       content:
         "Continue the active AskQuestion flow from the prior turn. " +
         "For this turn, ask exactly ONE follow-up multiple-choice question, keep exactly three options, and append one valid Prism AskQuestion tool block after your prose.",
+    });
+  }
+  if (args.memoryClarification && args.memoryClarification.trim().length > 0) {
+    promptMessages.push({
+      role: "system",
+      content: args.memoryClarification.trim(),
     });
   }
   if (args.threadSummary && args.threadSummary.trim().length > 0) {
@@ -2608,6 +2643,7 @@ export async function processChatMessage(
       botOpinion: null,
       threadSummary: null,
       memoryLines: [],
+      memoryClarification: null,
       chatHistory: history,
       userMessage: promptUserMessage,
       askQuestionMode,
@@ -2823,6 +2859,7 @@ export async function processChatMessage(
     )
     .all(activeConversationId, userId, RECENT_WINDOW_SIZE) as MessageRow[];
   const history = hydrateMessages(historyRowsDesc.slice().reverse());
+  const memoryIntent = !isStarterPrompt ? analyzeMemoryIntent(message) : null;
   const continueAskQuestion =
     !isStarterPrompt &&
     !explicitAskQuestionRequest &&
@@ -2868,6 +2905,35 @@ export async function processChatMessage(
     activeBotId
   );
   const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
+  let memoryClarification: string | null = null;
+  const longTermRetractionTargets = new Map<string, Awaited<ReturnType<typeof findMemoryByCue>>>();
+  if (
+    !skipPersonalFacts &&
+    !isStarterPrompt &&
+    memoryIntent &&
+    (memoryIntent.kind === "retract" || memoryIntent.kind === "correct")
+  ) {
+    for (const cuePhrase of memoryIntent.cuePhrases) {
+      const target = await findMemoryByCue(
+        db,
+        userId,
+        activeConversationId,
+        activeMemoryBotId,
+        cuePhrase,
+        userKey
+      );
+      longTermRetractionTargets.set(cuePhrase, target);
+      if (
+        target &&
+        isLongTermMemory(target) &&
+        target.conversationId !== activeConversationId &&
+        !messageAllowsLongTermDemotion(message)
+      ) {
+        memoryClarification = longTermMemoryClarificationPrompt(target.text);
+        break;
+      }
+    }
+  }
   const promptMessages = buildPromptMessages({
     botSystemPrompt: settings.botSystemPrompt,
     userDisplayName: settings.userDisplayName,
@@ -2876,9 +2942,10 @@ export async function processChatMessage(
     botOpinion: existingBotOpinion,
     threadSummary,
     memoryLines,
+    memoryClarification,
     chatHistory: history,
     userMessage: promptUserMessage,
-    askQuestionMode,
+    askQuestionMode: memoryClarification ? "explicit" : askQuestionMode,
   });
 
   let userMessageId: string | null = null;
@@ -3089,7 +3156,6 @@ export async function processChatMessage(
   // while explicit conversational cues ("save that globally", "forget X")
   // are honored even when the global auto-memory toggle is off.
   let memoryLearned: ProcessChatMessageResult["memoryLearned"];
-  const memoryIntent = !isStarterPrompt ? analyzeMemoryIntent(message) : null;
   const shouldProcessExplicitMemory =
     memoryIntent !== null &&
     (memoryIntent.kind !== "create" || memoryIntent.scope === "global" || memoryIntent.explicit);
@@ -3107,23 +3173,46 @@ export async function processChatMessage(
         ? memoryIntent.cuePhrases
         : [];
     for (const cuePhrase of cuePhrases) {
-      const target = await findMemoryByCue(
-        db,
-        userId,
-        activeConversationId,
-        activeMemoryBotId,
-        cuePhrase,
-        userKey
+      const target = longTermRetractionTargets.has(cuePhrase)
+        ? longTermRetractionTargets.get(cuePhrase)
+        : await findMemoryByCue(
+            db,
+            userId,
+            activeConversationId,
+            activeMemoryBotId,
+            cuePhrase,
+            userKey
+          );
+      const shouldDeleteLongTerm = Boolean(
+        target &&
+        isLongTermMemory(target) &&
+        target.conversationId === activeConversationId
       );
-      if (target && deleteMemoryById(db, userId, target.id)) {
+      const shouldDemoteLongTerm = Boolean(
+        target &&
+        isLongTermMemory(target) &&
+        !shouldDeleteLongTerm &&
+        messageAllowsLongTermDemotion(message)
+      );
+      const changed = target
+        ? shouldDeleteLongTerm
+          ? deleteMemoryById(db, userId, target.id, { allowLongTerm: true })
+          : shouldDemoteLongTerm
+          ? demoteMemoryToShortTerm(db, userId, target.id)
+          : deleteMemoryById(db, userId, target.id)
+        : false;
+      if (target && changed) {
         retractedMemories.push({
           id: target.id,
           text: target.text,
           botId: target.botId ?? null,
           conversationId: target.conversationId,
-          confidence: target.confidence,
+          confidence: shouldDemoteLongTerm ? 0.34 : target.confidence,
+          category: target.category,
+          tier: shouldDemoteLongTerm ? "short_term" : target.tier,
           source: target.source,
           certainty: target.certainty,
+          durability: target.durability,
           sourceMessageIds: target.sourceMessageIds,
         });
       }
@@ -3170,8 +3259,11 @@ export async function processChatMessage(
             botId: memory.botId ?? null,
             conversationId: memory.conversationId,
             confidence: memory.confidence,
+            category: memory.category,
+            tier: memory.tier,
             source: memory.source,
             certainty: memory.certainty,
+            durability: memory.durability,
             sourceMessageIds: memory.sourceMessageIds,
             ...(validationMatch
               ? {

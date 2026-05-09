@@ -1,9 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, encryptJson, randomId } from "./security.ts";
 import { embedTextLocal, fallbackEmbedding } from "./providers.ts";
-import type { UserMemory } from "@localai/shared";
+import type { MemoryCategory, MemoryTier, UserMemory } from "@localai/shared";
 import type { MemoryCandidate } from "./memory-extraction.ts";
-import { analyzeMemoryIntent, extractMemoryCandidates } from "./memory-extraction.ts";
+import {
+  analyzeMemoryIntent,
+  classifyMemoryCategory,
+  estimateMemoryDurability,
+  extractMemoryCandidates,
+} from "./memory-extraction.ts";
 
 export { analyzeMemoryIntent, extractMemoryCandidates };
 
@@ -17,6 +22,9 @@ interface DevSeedMemoryOptions {
   random?: () => number;
   source?: "direct" | "inferred" | "compiled";
   certainty?: number;
+  category?: MemoryCategory;
+  tier?: MemoryTier;
+  durability?: number;
 }
 
 type MemoryRow = {
@@ -28,6 +36,9 @@ type MemoryRow = {
   iv: string;
   tag: string;
   confidence: number;
+  category: MemoryCategory;
+  tier: MemoryTier;
+  durability: number | null;
   source: "direct" | "inferred" | "compiled";
   certainty: number | null;
   source_message_ids: string;
@@ -37,6 +48,9 @@ type MemoryRow = {
 interface PersistMemoryOptions {
   source?: "direct" | "inferred" | "compiled";
   certainty?: number;
+  category?: MemoryCategory;
+  tier?: MemoryTier;
+  durability?: number;
   sourceMessageIds?: string[];
 }
 
@@ -45,6 +59,9 @@ interface RestoreMemoryOptions {
   botId?: string | null;
   text: string;
   confidence?: number;
+  category?: MemoryCategory;
+  tier?: MemoryTier;
+  durability?: number;
   source?: "direct" | "inferred" | "compiled";
   certainty?: number;
   sourceMessageIds?: string[];
@@ -53,6 +70,7 @@ interface RestoreMemoryOptions {
 interface StoredMemoryWithEmbedding extends UserMemory {
   source: "direct" | "inferred" | "compiled";
   certainty: number;
+  durability: number;
   sourceMessageIds: string[];
   embedding: number[];
 }
@@ -90,6 +108,12 @@ const CULMINATION_MIN_SIMILARITY = 0.55;
 const CULMINATION_CONTRADICTION_SIMILARITY = 0.78;
 const CULMINATION_LOOKBACK_LIMIT = 80;
 const CULMINATION_MAX_DETAILS = 4;
+export const LONG_TERM_MEMORY_SCORE = 0.95;
+const LONG_TERM_HIGH_TRUTH_SCORE = 0.9;
+const LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH = 0.5;
+const LONG_TERM_DURABILITY_PROMOTION = 0.72;
+const LONG_TERM_DURABILITY_TRUTH_FLOOR = 0.78;
+export const DEMOTED_LONG_TERM_CONFIDENCE = 0.34;
 const MEMORY_TARGET_LOOKBACK_LIMIT = 20;
 const MEMORY_TARGET_SCORE_THRESHOLD = 0.55;
 const SAME_CONVERSATION_MEMORY_BOOST = 0.05;
@@ -122,6 +146,87 @@ const DEV_SEED_MEMORY_TEXTS = [
   "The user enjoys compact panels that still breathe on mobile.",
   "The user likes developer tools that seed realistic test data.",
 ] as const;
+
+export function normalizeMemoryCategory(
+  category: MemoryCategory | string | null | undefined,
+  text = ""
+): MemoryCategory {
+  if (category === "general" || category === "user" || category === "bot_relation") {
+    return category;
+  }
+  return classifyMemoryCategory(text);
+}
+
+function clampMemoryDurability(durability: number): number {
+  return Math.max(0, Math.min(1, durability));
+}
+
+export function memoryTierForConfidence(confidence: number): MemoryTier {
+  return memoryQualifiesLongTerm(confidence, confidence, 0)
+    ? "long_term"
+    : "short_term";
+}
+
+export function normalizeMemoryDurability(
+  durability: number | null | undefined,
+  text = ""
+): number {
+  const estimated = estimateMemoryDurability(text);
+  if (typeof durability === "number" && Number.isFinite(durability)) {
+    return clampMemoryDurability(Math.max(durability, estimated));
+  }
+  return estimated;
+}
+
+function explicitMemoryDurability(durability: number | undefined): number | undefined {
+  return typeof durability === "number" && Number.isFinite(durability)
+    ? clampMemoryDurability(durability)
+    : undefined;
+}
+
+function memoryTruthScore(confidence: number, certainty = confidence): number {
+  const safeConfidence = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0;
+  const safeCertainty = Number.isFinite(certainty) ? Math.max(0, Math.min(1, certainty)) : safeConfidence;
+  return (safeConfidence + safeCertainty) / 2;
+}
+
+export function memoryLongTermScore(
+  confidence: number,
+  certainty = confidence,
+  durability = 0
+): number {
+  const safeDurability = Number.isFinite(durability) ? Math.max(0, Math.min(1, durability)) : 0;
+  return (memoryTruthScore(confidence, certainty) + safeDurability) / 2;
+}
+
+export function memoryQualifiesLongTerm(
+  confidence: number,
+  certainty = confidence,
+  durability = 0
+): boolean {
+  const truthScore = memoryTruthScore(confidence, certainty);
+  const safeDurability = Number.isFinite(durability) ? Math.max(0, Math.min(1, durability)) : 0;
+  return (
+    truthScore >= LONG_TERM_MEMORY_SCORE ||
+    (
+      truthScore >= LONG_TERM_HIGH_TRUTH_SCORE &&
+      safeDurability >= LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH
+    ) ||
+    (safeDurability >= LONG_TERM_DURABILITY_PROMOTION && truthScore >= LONG_TERM_DURABILITY_TRUTH_FLOOR)
+  );
+}
+
+export function normalizeMemoryTier(
+  tier: MemoryTier | string | null | undefined,
+  confidence: number,
+  certainty = confidence,
+  durability = 0
+): MemoryTier {
+  if (tier === "short_term" || tier === "long_term") return tier;
+  return memoryQualifiesLongTerm(confidence, certainty, durability)
+    ? "long_term"
+    : "short_term";
+}
 
 function normalizedMemoryText(text: string): string {
   return text
@@ -355,20 +460,53 @@ export function deleteMemoriesLinkedToMessages(
 
   const placeholders = linkedIds.map(() => "?").join(", ");
   const result = db.prepare(
-    `DELETE FROM memories WHERE user_id = ? AND id IN (${placeholders})`
+    `DELETE FROM memories
+     WHERE user_id = ?
+       AND id IN (${placeholders})
+       AND COALESCE(tier, 'short_term') != 'long_term'`
   ).run(userId, ...linkedIds);
 
   return Number(result.changes ?? 0);
 }
 
+interface DeleteMemoryOptions {
+  allowLongTerm?: boolean;
+}
+
 export function deleteMemoryById(
   db: DatabaseSync,
   userId: string,
-  memoryId: string
+  memoryId: string,
+  options: DeleteMemoryOptions = {}
 ): boolean {
   const result = db
-    .prepare("DELETE FROM memories WHERE id = ? AND user_id = ?")
-    .run(memoryId, userId);
+    .prepare(
+      `DELETE FROM memories
+       WHERE id = ?
+         AND user_id = ?
+         AND (? = 1 OR COALESCE(tier, 'short_term') != 'long_term')`
+    )
+    .run(memoryId, userId, options.allowLongTerm ? 1 : 0);
+  return Number(result.changes ?? 0) > 0;
+}
+
+export function demoteMemoryToShortTerm(
+  db: DatabaseSync,
+  userId: string,
+  memoryId: string,
+  confidence = DEMOTED_LONG_TERM_CONFIDENCE
+): boolean {
+  const clampedConfidence = Math.max(0, Math.min(1, confidence));
+  const result = db
+    .prepare(
+      `UPDATE memories
+       SET tier = 'short_term',
+           confidence = ?,
+           certainty = ?
+       WHERE id = ?
+         AND user_id = ?`
+    )
+    .run(clampedConfidence, clampedConfidence, memoryId, userId);
   return Number(result.changes ?? 0) > 0;
 }
 
@@ -388,16 +526,19 @@ export async function restoreMemory(
   const id = randomId(12);
   const createdAt = new Date().toISOString();
   const confidence = options.confidence ?? options.certainty ?? 0.9;
-  const source = options.source ?? "direct";
   const certainty = options.certainty ?? confidence;
+  const category = normalizeMemoryCategory(options.category, options.text);
+  const durability = explicitMemoryDurability(options.durability) ?? normalizeMemoryDurability(undefined, options.text);
+  const tier = normalizeMemoryTier(options.tier, confidence, certainty, durability);
+  const source = options.source ?? "direct";
   const sourceMessageIds = normalizeSourceMessageIds(options.sourceMessageIds);
   const encrypted = encryptJson(
     { text: options.text, embedding } as unknown as Record<string, unknown>,
     userKey
   );
   db.prepare(`
-    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     userId,
@@ -407,6 +548,9 @@ export async function restoreMemory(
     encrypted.iv,
     encrypted.tag,
     confidence,
+    category,
+    tier,
+    durability,
     source,
     certainty,
     sourceMessageIdsJson(sourceMessageIds),
@@ -418,6 +562,9 @@ export async function restoreMemory(
     conversationId: options.conversationId ?? undefined,
     botId: options.botId ?? undefined,
     confidence,
+    category,
+    tier,
+    durability,
     source,
     certainty,
     sourceMessageIds,
@@ -462,6 +609,9 @@ function decryptMemoryRow(row: MemoryRow, userKey: Buffer): StoredMemoryWithEmbe
     conversationId: row.conversation_id ?? undefined,
     botId: row.bot_id ?? undefined,
     confidence: row.confidence,
+    category: normalizeMemoryCategory(row.category, decrypted.text),
+    tier: normalizeMemoryTier(row.tier, row.confidence, row.certainty ?? row.confidence, row.durability ?? undefined),
+    durability: normalizeMemoryDurability(row.durability, decrypted.text),
     source: row.source,
     certainty: row.certainty ?? row.confidence,
     sourceMessageIds: parseSourceMessageIds(row.source_message_ids),
@@ -479,16 +629,16 @@ function loadSameScopeDirectMemories(
 ): StoredMemoryWithEmbedding[] {
   const rows = botId
     ? db.prepare(`
-        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
         FROM memories
-        WHERE user_id = ? AND bot_id = ? AND source = 'direct'
+        WHERE user_id = ? AND bot_id = ? AND source = 'direct' AND COALESCE(tier, 'short_term') != 'long_term'
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, botId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[]
     : db.prepare(`
-        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
         FROM memories
-        WHERE user_id = ? AND bot_id IS NULL AND source = 'direct'
+        WHERE user_id = ? AND bot_id IS NULL AND source = 'direct' AND COALESCE(tier, 'short_term') != 'long_term'
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[];
@@ -557,8 +707,8 @@ async function resolveMemoryCulmination(
   );
 
   db.prepare(`
-    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'compiled', ?, ?, ?)
+    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'compiled', ?, ?, ?)
   `).run(
     id,
     userId,
@@ -568,6 +718,9 @@ async function resolveMemoryCulmination(
     encrypted.iv,
     encrypted.tag,
     confidence,
+    normalizeMemoryCategory(newMemory.category, compiledText),
+    normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability),
+    newMemory.durability,
     confidence,
     sourceMessageIdsJson(sourceMessageIds),
     createdAt
@@ -576,7 +729,10 @@ async function resolveMemoryCulmination(
   const deletedIds = new Set(aligned.map((memory) => memory.id));
   const placeholders = [...deletedIds].map(() => "?").join(", ");
   db.prepare(
-    `DELETE FROM memories WHERE user_id = ? AND id IN (${placeholders})`
+    `DELETE FROM memories
+     WHERE user_id = ?
+       AND id IN (${placeholders})
+       AND COALESCE(tier, 'short_term') != 'long_term'`
   ).run(userId, ...deletedIds);
 
   return {
@@ -587,6 +743,9 @@ async function resolveMemoryCulmination(
       conversationId,
       botId: botId ?? undefined,
       confidence,
+      category: normalizeMemoryCategory(newMemory.category, compiledText),
+      tier: normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability),
+      durability: newMemory.durability,
       source: "compiled",
       certainty: confidence,
       sourceMessageIds,
@@ -606,8 +765,8 @@ export async function persistMemoryCandidates(
   options: PersistMemoryOptions = {}
 ): Promise<UserMemory[]> {
   const insertMemory = db.prepare(`
-    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let stored: UserMemory[] = [];
   const source = options.source ?? "direct";
@@ -624,6 +783,12 @@ export async function persistMemoryCandidates(
     const encrypted = encryptJson(payload as unknown as Record<string, unknown>, userKey);
     const id = randomId(12);
     const createdAt = new Date().toISOString();
+    const category = normalizeMemoryCategory(options.category ?? candidate.category, candidate.text);
+    const certainty = options.certainty ?? candidate.confidence;
+    const durability =
+      explicitMemoryDurability(options.durability) ??
+      normalizeMemoryDurability(candidate.durability, candidate.text);
+    const tier = normalizeMemoryTier(options.tier, candidate.confidence, certainty, durability);
     insertMemory.run(
       id,
       userId,
@@ -633,8 +798,11 @@ export async function persistMemoryCandidates(
       encrypted.iv,
       encrypted.tag,
       candidate.confidence,
+      category,
+      tier,
+      durability,
       source,
-      options.certainty ?? candidate.confidence,
+      certainty,
       sourceMessageIdsJson(sourceMessageIds),
       createdAt
     );
@@ -644,8 +812,11 @@ export async function persistMemoryCandidates(
       conversationId,
       botId: botId ?? undefined,
       confidence: candidate.confidence,
+      category,
+      tier,
+      durability,
       source,
-      certainty: options.certainty ?? candidate.confidence,
+      certainty,
       sourceMessageIds,
       createdAt,
       text: candidate.text,
@@ -685,8 +856,8 @@ export function createDevSeedMemories(
   }
 
   const insertMemory = db.prepare(`
-    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at)
-    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at)
+    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
   `);
   const baseTime = Date.now();
   const targets = devSeedMemoryTargets(count, botIds, options);
@@ -703,6 +874,8 @@ export function createDevSeedMemories(
         embedding: fallbackEmbedding(text),
       };
       const encrypted = encryptJson(payload as unknown as Record<string, unknown>, userKey);
+      const confidence = 0.62 + (index % 7) * 0.05;
+      const durability = explicitMemoryDurability(options.durability) ?? normalizeMemoryDurability(undefined, text);
       insertMemory.run(
         randomId(12),
         userId,
@@ -710,9 +883,12 @@ export function createDevSeedMemories(
         encrypted.ciphertext,
         encrypted.iv,
         encrypted.tag,
-        0.62 + (index % 7) * 0.05,
+        confidence,
+        options.category ?? "user",
+        options.tier ?? normalizeMemoryTier(undefined, confidence, options.certainty ?? confidence, durability),
+        durability,
         options.source ?? "direct",
-        options.certainty ?? (0.62 + (index % 7) * 0.05),
+        options.certainty ?? confidence,
         new Date(baseTime + index).toISOString()
       );
     }
@@ -816,14 +992,14 @@ export async function findMemoryByCue(
     : null;
   const rows: MemoryRow[] = normalizedBotId
     ? db.prepare(`
-        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
         FROM memories
         WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?)
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, normalizedBotId, MEMORY_TARGET_LOOKBACK_LIMIT) as MemoryRow[]
     : db.prepare(`
-        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
         FROM memories
         WHERE user_id = ? AND (bot_id IS NULL OR source = 'compiled')
         ORDER BY created_at DESC
@@ -873,12 +1049,12 @@ export async function retrieveRelevantMemories(
   const rows: MemoryRow[] = normalizedBotId
     ? db
         .prepare(
-          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
         )
         .all(userId, normalizedBotId) as MemoryRow[]
     : db
         .prepare(
-          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR source = 'compiled') ORDER BY created_at DESC LIMIT 100"
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR source = 'compiled') ORDER BY created_at DESC LIMIT 100"
         )
         .all(userId) as MemoryRow[];
   const queryEmbedding = await embedWithFallback(query);
@@ -909,12 +1085,12 @@ export function retrieveRecentMemoriesForStarter(
   const rows: MemoryRow[] = normalizedBotId
     ? db
         .prepare(
-          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
         )
         .all(userId, normalizedBotId) as MemoryRow[]
     : db
         .prepare(
-          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR source = 'compiled') ORDER BY created_at DESC LIMIT 100"
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR source = 'compiled') ORDER BY created_at DESC LIMIT 100"
         )
         .all(userId) as MemoryRow[];
 

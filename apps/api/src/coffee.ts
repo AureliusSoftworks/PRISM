@@ -1,13 +1,13 @@
 /**
- * Coffee mode — group chat for 2-5 reactive bots.
+ * Coffee mode — timed live sessions for 2-5 reactive bots.
  *
  * v0 architecture (per the Hub Modes Roadmap, Phase 1):
  *   1. The user picks 2-5 bots from their library when starting a Coffee
- *      thread (per-thread one-off picker).
- *   2. Each user message triggers a small router LLM call that picks ONE
- *      bot from the group based on personality + recent conversation
- *      context. The router runs on the local auxiliary model so it does
- *      not consume online quota.
+ *      session (per-session one-off picker).
+ *   2. Each user or timed autonomous turn triggers a small router LLM call
+ *      that picks ONE bot from the group based on personality + recent
+ *      conversation context. The router runs on the local auxiliary model
+ *      so it does not consume online quota.
  *   3. The picked bot then replies through the user's selected provider
  *      using its own system prompt, identity, and generation overrides.
  *   4. Memory is thread-scoped only (no cross-thread bot memory writes
@@ -36,6 +36,8 @@ import { composeBotSystemPrompt } from "./bots.ts";
 import type {
   ChatMessage,
   Conversation,
+  CoffeeArrivalScenario,
+  CoffeeSessionCreateResponse,
   CoffeeTurnResponse,
 } from "@localai/shared";
 
@@ -81,8 +83,12 @@ export interface CoffeeTurnSettings {
 
 export interface CoffeeTurnInput {
   conversationId?: string;
-  groupBotIds?: string[];
+  groupBotIds?: Array<string | null>;
   message: string;
+}
+
+export interface CoffeeSessionCreateInput {
+  groupBotIds?: Array<string | null>;
 }
 
 /**
@@ -114,6 +120,40 @@ export function normalizeCoffeeGroupBotIds(raw: unknown): string[] {
     throw new Error(`Coffee groups max out at ${COFFEE_GROUP_MAX_SIZE} bots.`);
   }
   return trimmed;
+}
+
+export function normalizeCoffeeSeatBotIds(raw: unknown): Array<string | null> {
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `Coffee groups need ${COFFEE_GROUP_MIN_SIZE}-${COFFEE_GROUP_MAX_SIZE} bots.`
+    );
+  }
+  const rawUniqueIds = new Set(
+    raw.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .map((value) => value.trim())
+  );
+  if (rawUniqueIds.size > COFFEE_GROUP_MAX_SIZE) {
+    throw new Error(`Coffee groups max out at ${COFFEE_GROUP_MAX_SIZE} bots.`);
+  }
+  const seats = raw.slice(0, COFFEE_GROUP_MAX_SIZE).map((value) =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : null
+  );
+  while (seats.length < COFFEE_GROUP_MAX_SIZE) seats.push(null);
+  const seen = new Set<string>();
+  const deduped = seats.map((id) => {
+    if (!id) return null;
+    if (seen.has(id)) return null;
+    seen.add(id);
+    return id;
+  });
+  const occupied = deduped.filter((id): id is string => typeof id === "string");
+  if (occupied.length < COFFEE_GROUP_MIN_SIZE) {
+    throw new Error(`Pick at least ${COFFEE_GROUP_MIN_SIZE} bots for a Coffee chat.`);
+  }
+  if (occupied.length > COFFEE_GROUP_MAX_SIZE) {
+    throw new Error(`Coffee groups max out at ${COFFEE_GROUP_MAX_SIZE} bots.`);
+  }
+  return deduped;
 }
 
 /**
@@ -198,9 +238,10 @@ export function buildRouterPrompt(args: {
     : `No bot has spoken yet in this thread.`;
 
   const systemContent = [
-    "You are the silent moderator of a casual group chat ('Coffee mode').",
-    "There are several bots in this group, each with a distinct personality.",
-    "After each user message you choose EXACTLY ONE bot from the group to respond next, based on which bot's personality and interests best match the conversation.",
+    "You are the silent moderator of Coffee Mode, a calm live conversation around an ambiguous coffee table inside PRISM.",
+    "There are several bots in this group, each with a distinct personality. They may speak to the user or to each other.",
+    "For each table moment, choose EXACTLY ONE bot from the group to respond next, based on which bot's personality, interests, and relationship to the recent conversation make them the most natural speaker.",
+    "The bots should never talk over each other. Choose one voice and leave room for natural pauses.",
     "Output requirements:",
     "  - Reply with a single line of valid JSON only.",
     `  - Schema: {"botId": "<one of the listed ids>", "reason": "<one short sentence>"}`,
@@ -232,11 +273,11 @@ export function buildRouterPrompt(args: {
   }
   messages.push({
     role: "user",
-    content: `[user] ${userMessage}`,
+    content: `[table focus] ${userMessage}`,
   });
   messages.push({
     role: "system",
-    content: "Choose the next speaker. Reply with the JSON object only.",
+    content: "Choose the next speaker at the coffee table. Reply with the JSON object only.",
   });
 
   return messages;
@@ -301,6 +342,26 @@ export function pickFallbackSpeaker(
 }
 
 /**
+ * Resolve an optional director-mode speaker request.
+ *
+ * When present, the requested bot must be part of the frozen Coffee group.
+ * Returning `null` means "no director pick; use the normal router".
+ */
+export function pickDirectedSpeaker(
+  group: CoffeeBotProfile[],
+  requestedBotId: string | null | undefined
+): CoffeeBotProfile | null {
+  if (requestedBotId === null || requestedBotId === undefined) return null;
+  const botId = requestedBotId.trim();
+  if (!botId) return null;
+  const speaker = group.find((bot) => bot.id === botId);
+  if (!speaker) {
+    throw new Error("That bot is not seated at this Coffee table.");
+  }
+  return speaker;
+}
+
+/**
  * Build the speaker LLM prompt for the picked bot. Lighter than
  * `buildPromptMessages` in chat.ts — Coffee skips Prism tool appendix
  * (no AskQuestion in v0), opinion plumbing, dev memories, and starter
@@ -323,11 +384,14 @@ function buildSpeakerPrompt(args: {
     .map((bot) => `- ${bot.name}`);
 
   const groupContextLines = [
-    "You are participating in a casual group chat ('Coffee mode') with the user and the following other bots:",
+    "You are sitting at Coffee Mode: an ambiguous coffee shop table inside PRISM.",
+    "You are genuinely glad to have a quiet place to talk with the user and the other bots.",
+    "You are participating in a live group conversation with the user and the following other bots:",
     ...peerLines,
     "",
     "Stay in character. Respond as yourself only — do NOT speak on behalf of the other bots, do NOT include their names as speakers, and do NOT prefix your reply with your own name.",
-    "Keep replies conversational and concise unless the user invites depth.",
+    "You may react directly to what another bot just said, ask them a question, agree, disagree, or gently shift the topic when that fits your personality.",
+    "Keep replies conversational and concise. Leave room for another bot or the user to respond after a natural pause.",
   ];
 
   const messages: ProviderMessage[] = [];
@@ -356,7 +420,7 @@ function buildSpeakerPrompt(args: {
       content: `[${speakerLabel}] ${item.content}`,
     });
   }
-  messages.push({ role: "user", content: `[user] ${userMessage}` });
+  messages.push({ role: "user", content: `[table focus] ${userMessage}` });
   return messages;
 }
 
@@ -471,9 +535,21 @@ function generateCoffeeTitle(message: string, group: CoffeeBotProfile[]): string
   if (trimmed.length > 0) {
     return trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed;
   }
-  // Fall back to a participant list when the user starts with a blank message.
+  // Fall back to a participant list when the session starts before any message.
   const names = group.map((bot) => bot.name).join(", ");
-  return names.length > 42 ? `${names.slice(0, 39)}...` : `Coffee with ${names}`;
+  const title = `Coffee with ${names}`;
+  return title.length > 42 ? `${title.slice(0, 39)}...` : title;
+}
+
+function pickArrivalScenario(seed: string): CoffeeArrivalScenario {
+  let hash = 0;
+  for (const char of seed) hash = (hash + char.charCodeAt(0)) % 997;
+  const scenarios: CoffeeArrivalScenario[] = [
+    "user-first",
+    "partial-table-in-progress",
+    "full-table-present",
+  ];
+  return scenarios[hash % scenarios.length] ?? "user-first";
 }
 
 function buildConversationResponse(args: {
@@ -482,6 +558,7 @@ function buildConversationResponse(args: {
   lastSpeakerBotId: string | null;
 }): Conversation {
   const { row, messages, lastSpeakerBotId } = args;
+  const seatBotIds = parseStoredCoffeeSeatBotIds(row.bot_group_ids);
   const groupIds = parseStoredBotGroupIds(row.bot_group_ids);
   return {
     id: row.id,
@@ -490,6 +567,7 @@ function buildConversationResponse(args: {
     mode: "coffee",
     botId: row.bot_id ?? null,
     ...(groupIds.length > 0 ? { botGroupIds: groupIds } : {}),
+    ...(seatBotIds.some((id) => id !== null) ? { coffeeSeatBotIds: seatBotIds } : {}),
     incognito: row.incognito === 1,
     lastBotId: lastSpeakerBotId,
     lastBotColor: messages.length > 0 ? findLastAssistantColor(messages) : null,
@@ -523,6 +601,49 @@ function parseStoredBotGroupIds(raw: string | null): string[] {
   }
 }
 
+function parseStoredCoffeeSeatBotIds(raw: string | null): Array<string | null> {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    if (parsed.some((value) => value === null)) {
+      const seats = parsed.slice(0, COFFEE_GROUP_MAX_SIZE).map((value) =>
+        typeof value === "string" && value.length > 0 ? value : null
+      );
+      while (seats.length < COFFEE_GROUP_MAX_SIZE) seats.push(null);
+      return seats;
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function loadCoffeeConversationGroup(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string
+): { row: ConversationRow; groupIds: string[]; group: CoffeeBotProfile[] } {
+  const row = loadConversationRow(db, userId, conversationId);
+  if (!row) {
+    throw new Error("Conversation not found for this user.");
+  }
+  if (row.conversation_mode !== "coffee") {
+    throw new Error("This conversation is not a Coffee thread.");
+  }
+  const groupIds = parseStoredBotGroupIds(row.bot_group_ids);
+  if (groupIds.length < COFFEE_GROUP_MIN_SIZE) {
+    throw new Error(
+      "This Coffee thread is missing its bot group; please start a new chat."
+    );
+  }
+  return {
+    row,
+    groupIds,
+    group: loadCoffeeGroupProfiles(db, userId, groupIds),
+  };
+}
+
 /**
  * Build a `LlmProvider` for the speaker bot, honoring per-bot online
  * gating (a bot with `online_enabled = 0` always falls back to local).
@@ -551,6 +672,158 @@ function pickSpeakerModel(
   return speaker.onlineModel ?? speaker.defaultModel ?? undefined;
 }
 
+export function createCoffeeConversation(
+  db: DatabaseSync,
+  userId: string,
+  input: CoffeeSessionCreateInput
+): CoffeeSessionCreateResponse {
+  const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
+  const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
+  const group = loadCoffeeGroupProfiles(db, userId, groupIds);
+  const now = new Date().toISOString();
+  const conversationId = randomId(12);
+  db.prepare(
+    `INSERT INTO conversations
+       (id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito, created_at, updated_at)
+     VALUES (?, ?, ?, 'coffee', NULL, ?, 0, ?, ?)`
+  ).run(
+    conversationId,
+    userId,
+    generateCoffeeTitle("", group),
+    JSON.stringify(seatBotIds),
+    now,
+    now
+  );
+  const row = loadConversationRow(db, userId, conversationId);
+  if (!row) {
+    throw new Error("Failed to create Coffee conversation.");
+  }
+  return {
+    conversation: buildConversationResponse({
+      row,
+      messages: [],
+      lastSpeakerBotId: null,
+    }),
+    arrivalScenario: pickArrivalScenario(conversationId),
+  };
+}
+
+async function generateCoffeeBotReply(args: {
+  db: DatabaseSync;
+  userId: string;
+  row: ConversationRow;
+  group: CoffeeBotProfile[];
+  tableFocus: string;
+  settings: CoffeeTurnSettings;
+  directedSpeakerBotId?: string;
+}): Promise<CoffeeTurnResponse> {
+  const { db, userId, row, group, tableFocus, settings, directedSpeakerBotId } = args;
+  const history = loadMessages(db, userId, row.id, COFFEE_HISTORY_WINDOW);
+  const lastSpeakerBotId = loadLastSpeakerBotId(db, userId, row.id);
+  const directedSpeaker = pickDirectedSpeaker(group, directedSpeakerBotId);
+  let pickedBotId: string;
+  let routerReason: string;
+  if (directedSpeaker) {
+    pickedBotId = directedSpeaker.id;
+    routerReason = `Director mode picked ${directedSpeaker.name}.`;
+  } else {
+    const routerProvider = getAuxiliaryProvider();
+    const routerMessages = buildRouterPrompt({
+      group,
+      history,
+      userMessage: tableFocus,
+      lastSpeakerBotId,
+    });
+    try {
+      const routerRaw = await routerProvider.generateResponse(routerMessages, {
+        temperature: ROUTER_TEMPERATURE,
+        maxTokens: ROUTER_MAX_TOKENS,
+      });
+      const parsed = parseRouterResponse(
+        routerRaw,
+        group.map((bot) => bot.id)
+      );
+      if (parsed) {
+        pickedBotId = parsed.botId;
+        routerReason = parsed.reason;
+      } else {
+        const fallback = pickFallbackSpeaker(group, lastSpeakerBotId);
+        pickedBotId = fallback.id;
+        routerReason = ROUTER_FALLBACK_REASON;
+      }
+    } catch {
+      const fallback = pickFallbackSpeaker(group, lastSpeakerBotId);
+      pickedBotId = fallback.id;
+      routerReason = "Router error (fell back to round-robin)";
+    }
+  }
+
+  const speaker = group.find((bot) => bot.id === pickedBotId) ?? group[0]!;
+  const { provider: speakerProvider, effectiveProvider } = pickSpeakerProvider(
+    speaker,
+    settings.preferredProvider,
+    settings.openAiApiKey,
+    settings.secondaryOllamaHost
+  );
+  const speakerOptions: GenerateOptions = {};
+  const speakerModel = pickSpeakerModel(speaker, effectiveProvider);
+  if (speakerModel) speakerOptions.model = speakerModel;
+  if (typeof speaker.temperature === "number") {
+    speakerOptions.temperature = speaker.temperature;
+  }
+  if (typeof speaker.maxTokens === "number") {
+    speakerOptions.maxTokens = speaker.maxTokens;
+  }
+  const speakerMessages = buildSpeakerPrompt({
+    speaker,
+    group,
+    history,
+    userMessage: tableFocus,
+    userDisplayName: settings.userDisplayName,
+  });
+  const speakerReply = await speakerProvider.generateResponse(
+    speakerMessages,
+    speakerOptions
+  );
+  const replyText = typeof speakerReply === "string" ? speakerReply.trim() : "";
+  if (!replyText) {
+    throw new Error("Speaker bot returned an empty reply.");
+  }
+
+  const assistantNow = new Date().toISOString();
+  const assistantMessageId = randomId(12);
+  db.prepare(
+    `INSERT INTO messages
+       (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at)
+     VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)`
+  ).run(
+    assistantMessageId,
+    row.id,
+    userId,
+    replyText,
+    effectiveProvider,
+    speakerModel ?? null,
+    speaker.id,
+    assistantNow
+  );
+  db.prepare(
+    "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+  ).run(assistantNow, row.id, userId);
+
+  const refreshedRow = loadConversationRow(db, userId, row.id) ?? row;
+  const finalHistory = loadMessages(db, userId, refreshedRow.id, COFFEE_HISTORY_WINDOW);
+  const finalLastSpeakerBotId = loadLastSpeakerBotId(db, userId, refreshedRow.id);
+  return {
+    conversation: buildConversationResponse({
+      row: refreshedRow,
+      messages: finalHistory,
+      lastSpeakerBotId: finalLastSpeakerBotId,
+    }),
+    speakerBotId: speaker.id,
+    routerReason,
+  };
+}
+
 /**
  * Main Coffee turn entrypoint.
  *
@@ -574,20 +847,10 @@ export async function processCoffeeTurn(
   let groupIds: string[];
 
   if (input.conversationId) {
-    conversationRow = loadConversationRow(db, userId, input.conversationId);
-    if (!conversationRow) {
-      throw new Error("Conversation not found for this user.");
-    }
-    if (conversationRow.conversation_mode !== "coffee") {
-      throw new Error("This conversation is not a Coffee thread.");
-    }
-    groupIds = parseStoredBotGroupIds(conversationRow.bot_group_ids);
-    if (groupIds.length < COFFEE_GROUP_MIN_SIZE) {
-      throw new Error(
-        "This Coffee thread is missing its bot group; please start a new chat."
-      );
-    }
-    group = loadCoffeeGroupProfiles(db, userId, groupIds);
+    const loaded = loadCoffeeConversationGroup(db, userId, input.conversationId);
+    conversationRow = loaded.row;
+    groupIds = loaded.groupIds;
+    group = loaded.group;
   } else {
     groupIds = normalizeCoffeeGroupBotIds(input.groupBotIds);
     group = loadCoffeeGroupProfiles(db, userId, groupIds);
@@ -617,121 +880,38 @@ export async function processCoffeeTurn(
      VALUES (?, ?, ?, 'user', ?, NULL, ?)`
   ).run(userMessageId, conversationRow.id, userId, message, now);
 
-  // 2. Load recent history (now includes the new user message).
-  const history = loadMessages(
+  return generateCoffeeBotReply({
     db,
     userId,
-    conversationRow.id,
-    COFFEE_HISTORY_WINDOW
-  );
-  // Strip the new user message from the "prior history" window since the
-  // prompt builders attach it explicitly as the latest turn.
-  const priorHistory = history.slice(0, history.length - 1);
-  // The router's "prefer variety" hint reads the most recent assistant
-  // bot_id straight from the DB (it's not part of the public ChatMessage
-  // shape, so we go to the source rather than smuggle it through).
-  const lastSpeakerBotId = loadLastSpeakerBotId(db, userId, conversationRow.id);
-
-  // 3. Router LLM picks the next speaker.
-  const routerProvider = getAuxiliaryProvider();
-  const routerMessages = buildRouterPrompt({
+    row: conversationRow,
     group,
-    history: priorHistory,
-    userMessage: message,
-    lastSpeakerBotId,
+    tableFocus: message,
+    settings,
   });
-  let pickedBotId: string;
-  let routerReason: string;
-  try {
-    const routerRaw = await routerProvider.generateResponse(routerMessages, {
-      temperature: ROUTER_TEMPERATURE,
-      maxTokens: ROUTER_MAX_TOKENS,
-    });
-    const parsed = parseRouterResponse(
-      routerRaw,
-      group.map((bot) => bot.id)
-    );
-    if (parsed) {
-      pickedBotId = parsed.botId;
-      routerReason = parsed.reason;
-    } else {
-      const fallback = pickFallbackSpeaker(group, lastSpeakerBotId);
-      pickedBotId = fallback.id;
-      routerReason = ROUTER_FALLBACK_REASON;
-    }
-  } catch {
-    const fallback = pickFallbackSpeaker(group, lastSpeakerBotId);
-    pickedBotId = fallback.id;
-    routerReason = "Router error (fell back to round-robin)";
-  }
+}
 
-  const speaker = group.find((bot) => bot.id === pickedBotId) ?? group[0]!;
-
-  // 4. Speaker LLM produces the reply.
-  const { provider: speakerProvider, effectiveProvider } = pickSpeakerProvider(
-    speaker,
-    settings.preferredProvider,
-    settings.openAiApiKey,
-    settings.secondaryOllamaHost
-  );
-  const speakerOptions: GenerateOptions = {};
-  const speakerModel = pickSpeakerModel(speaker, effectiveProvider);
-  if (speakerModel) speakerOptions.model = speakerModel;
-  if (typeof speaker.temperature === "number") {
-    speakerOptions.temperature = speaker.temperature;
-  }
-  if (typeof speaker.maxTokens === "number") {
-    speakerOptions.maxTokens = speaker.maxTokens;
-  }
-  const speakerMessages = buildSpeakerPrompt({
-    speaker,
-    group,
-    history: priorHistory,
-    userMessage: message,
-    userDisplayName: settings.userDisplayName,
-  });
-  const speakerReply = await speakerProvider.generateResponse(
-    speakerMessages,
-    speakerOptions
-  );
-  const replyText = typeof speakerReply === "string" ? speakerReply.trim() : "";
-  if (!replyText) {
-    throw new Error("Speaker bot returned an empty reply.");
-  }
-
-  // 5. Persist the assistant message + bump the conversation timestamp.
-  const assistantNow = new Date().toISOString();
-  const assistantMessageId = randomId(12);
-  db.prepare(
-    `INSERT INTO messages
-       (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at)
-     VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)`
-  ).run(
-    assistantMessageId,
-    conversationRow.id,
+export async function processCoffeeAutonomousTurn(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  settings: CoffeeTurnSettings,
+  directedSpeakerBotId?: string
+): Promise<CoffeeTurnResponse> {
+  const { row, group } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const history = loadMessages(db, userId, row.id, COFFEE_HISTORY_WINDOW);
+  const latest = history[history.length - 1];
+  const tableFocus = latest
+    ? latest.role === "assistant" && latest.botName
+      ? `${latest.botName} just said: ${latest.content}`
+      : latest.content
+    : "The user has just arrived at the PRISM coffee table. Begin naturally, as if everyone is settling in with coffee.";
+  return generateCoffeeBotReply({
+    db,
     userId,
-    replyText,
-    effectiveProvider,
-    speakerModel ?? null,
-    speaker.id,
-    assistantNow
-  );
-  db.prepare(
-    "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
-  ).run(assistantNow, conversationRow.id, userId);
-
-  const refreshedRow = loadConversationRow(db, userId, conversationRow.id) ?? conversationRow;
-  const finalHistory = loadMessages(db, userId, refreshedRow.id, COFFEE_HISTORY_WINDOW);
-  const finalLastSpeakerBotId = loadLastSpeakerBotId(db, userId, refreshedRow.id);
-  const conversation = buildConversationResponse({
-    row: refreshedRow,
-    messages: finalHistory,
-    lastSpeakerBotId: finalLastSpeakerBotId,
+    row,
+    group,
+    tableFocus,
+    settings,
+    directedSpeakerBotId,
   });
-
-  return {
-    conversation,
-    speakerBotId: speaker.id,
-    routerReason,
-  };
 }

@@ -23,6 +23,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     preferredProvider: "local",
     providerLocked: 0,
     autoMemory: 1,
+    composerWritingAssist: 1,
     hiddenBotModelIds: "[]",
     preferredLocalModel: null,
     preferredOnlineModel: null,
@@ -149,6 +150,37 @@ describe("resolveNextSettings — autoMemory", () => {
 
   it("keeps the stored value when the field is missing", () => {
     assert.equal(resolveNextSettings({}, baseline({ autoMemory: 1 })).autoMemory, 1);
+  });
+});
+
+describe("resolveNextSettings — composerWritingAssist", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { composerWritingAssist: false },
+        baseline({ composerWritingAssist: 1 })
+      ).composerWritingAssist,
+      0
+    );
+    assert.equal(
+      resolveNextSettings(
+        { composerWritingAssist: true },
+        baseline({ composerWritingAssist: 0 })
+      ).composerWritingAssist,
+      1
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ composerWritingAssist: 0 });
+    assert.equal(resolveNextSettings({}, current).composerWritingAssist, 0);
+    assert.equal(
+      resolveNextSettings(
+        { composerWritingAssist: "true" as unknown as boolean },
+        current
+      ).composerWritingAssist,
+      0
+    );
   });
 });
 
@@ -430,12 +462,14 @@ describe("resolveNextSettings — independence", () => {
       preferredProvider: "openai",
       providerLocked: 1,
       autoMemory: 0,
+      composerWritingAssist: 0,
     });
     const next = resolveNextSettings({ theme: "system" }, current);
     assert.equal(next.theme, "system");
     assert.equal(next.preferredProvider, "openai");
     assert.equal(next.providerLocked, 1);
     assert.equal(next.autoMemory, 0);
+    assert.equal(next.composerWritingAssist, 0);
     assert.deepEqual(next.openAiKeyIntent, { action: "keep" });
   });
 

@@ -124,12 +124,18 @@ export interface Conversation {
   botId: string | null;
   /**
    * Coffee-only — ordered list of 2-5 bot ids that participate in this
-   * group conversation. Captured once when the Coffee thread is created
-   * (per-thread one-off picker) and frozen for the conversation. The
-   * router LLM picks which one of these speaks next on each turn.
+   * live session. Captured once when the Coffee thread is created and
+   * frozen for the conversation. The router LLM picks which one of these
+   * speaks next on each turn.
    * Always undefined for `chat` and `sandbox` mode rows.
    */
   botGroupIds?: string[];
+  /**
+   * Coffee-only — fixed five-seat table layout. Entries are bot ids or null
+   * for an empty chair. This preserves visual seat placement separately from
+   * the compact participant list above.
+   */
+  coffeeSeatBotIds?: Array<string | null>;
   /**
    * Private chat marker — once `true`, accent styling is suppressed to
    * grayscale, the thread stays client-held, and nothing is written to
@@ -179,14 +185,23 @@ export interface UserMemory {
   botId?: string;
   createdAt: string;
   confidence: number;
+  /** What this memory is about, used for memory-panel organization. */
+  category?: MemoryCategory;
+  /** Short-term memories can be rewritten/removed; long-term memories must be demoted first. */
+  tier?: MemoryTier;
   /** Origin of this memory item. */
   source?: "direct" | "inferred" | "compiled";
   /** Separate certainty channel for inferred/compiled assumptions. */
   certainty?: number;
+  /** How likely this memory is to remain useful across future chats. */
+  durability?: number;
   /** Message ids this memory was derived from, used for edit/revert cleanup. */
   sourceMessageIds?: string[];
   text: string;
 }
+
+export type MemoryCategory = "general" | "user" | "bot_relation";
+export type MemoryTier = "short_term" | "long_term";
 
 export type MemoryValidationStatus = "approved" | "auto_fixed";
 
@@ -217,11 +232,10 @@ export interface MemoryValidationEvent {
  * - `"sandbox"`: the full command-center. Cross-session memory is disabled
  *   entirely here — the rolling message window IS the thread's memory. The
  *   `incognito` flag is ignored for Sandbox requests.
- * - `"coffee"`: group chat for 2-5 reactive bots. Each user turn triggers a
- *   router LLM pick (which bot speaks next based on personality + context),
- *   then that bot replies through the standard chat pipeline. Memory is
- *   thread-scoped only (mirrors Sandbox's rolling compaction) — no
- *   cross-thread per-bot memory writes in v0.
+ * - `"coffee"`: timed live conversation for 2-5 reactive bots. User turns and
+ *   autonomous timed turns trigger a router LLM pick (which bot speaks next
+ *   based on personality + context), then that bot replies through the Coffee
+ *   pipeline. Memory is thread-scoped only in the first pass.
  *
  * Defaults to `"sandbox"` on the server when omitted, so pre-`mode` clients
  * keep the previous cross-session memory behavior.
@@ -331,8 +345,11 @@ export interface ChatResponsePayload extends StarterChatExtras {
       botId: string | null;
       conversationId?: string;
       confidence: number;
+      category?: MemoryCategory;
+      tier?: MemoryTier;
       source?: "direct" | "inferred" | "compiled";
       certainty?: number;
+      durability?: number;
       sourceMessageIds?: string[];
       validationStatus?: MemoryValidationStatus;
       originalText?: string;
@@ -344,8 +361,11 @@ export interface ChatResponsePayload extends StarterChatExtras {
       botId: string | null;
       conversationId?: string;
       confidence: number;
+      category?: MemoryCategory;
+      tier?: MemoryTier;
       source?: "direct" | "inferred" | "compiled";
       certainty?: number;
+      durability?: number;
       sourceMessageIds?: string[];
     }>;
     rejected?: Array<{
@@ -368,16 +388,49 @@ export interface ConversationSummaryDebug {
   messagesSinceLastCompaction: number;
 }
 
+export type CoffeeArrivalScenario =
+  | "user-first"
+  | "partial-table-in-progress"
+  | "full-table-present";
+
+/** Request body for `POST /api/coffee/sessions`. */
+export interface CoffeeSessionCreateRequest {
+  /** Fixed five-seat table layout; null entries are empty chairs. */
+  groupBotIds: Array<string | null>;
+}
+
+/** Response body for `POST /api/coffee/sessions`. */
+export interface CoffeeSessionCreateResponse {
+  conversation: Conversation;
+  /** Opening setup used by the client arrival animation. */
+  arrivalScenario: CoffeeArrivalScenario;
+}
+
+/** Request body for `POST /api/coffee/sessions/:id/continue`. */
+export interface CoffeeContinueRequest {
+  /**
+   * Per-request provider override for the next bot reply. Per-bot online
+   * gating still wins — a bot with `online_enabled=0` falls back to local.
+   */
+  preferredProvider?: "local" | "openai";
+  /**
+   * Optional director-mode pick. When present, the server asks this seated bot
+   * to speak instead of running the automatic speaker router.
+   */
+  directedSpeakerBotId?: string;
+}
+
 /** Request body for `POST /api/coffee/turn`. */
 export interface CoffeeTurnRequest {
-  /** Existing Coffee conversation id, or omitted for the first turn (server creates a new row). */
+  /** Existing Coffee conversation id, or omitted for legacy first-turn creation. */
   conversationId?: string;
   /**
-   * Ordered list of 2-5 bot ids in this group. Required when starting a
-   * new conversation; ignored on subsequent turns (server uses the group
-   * stored on the conversation row).
+   * Ordered list of 2-5 bot ids, or a fixed five-seat layout with null empty
+   * seats. Required only for legacy first-turn creation; ignored on subsequent
+   * turns (server uses the group stored on the conversation row). New clients
+   * should create a Coffee session first via `POST /api/coffee/sessions`.
    */
-  groupBotIds?: string[];
+  groupBotIds?: Array<string | null>;
   /**
    * Per-request provider override (matches the Sandbox `/api/chat`
    * `preferredProvider` semantics). When present, replaces the user's

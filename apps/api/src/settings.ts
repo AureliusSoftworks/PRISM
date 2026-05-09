@@ -34,6 +34,7 @@ export interface CurrentSettings {
   preferredProvider: Provider;
   providerLocked: number;
   autoMemory: number;
+  composerWritingAssist: number;
   hiddenBotModelIds: string;
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
@@ -49,6 +50,7 @@ export interface NextSettings {
   preferredProvider: Provider;
   providerLocked: number;
   autoMemory: number;
+  composerWritingAssist: number;
   hiddenBotModelIds: string[];
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
@@ -256,6 +258,10 @@ export function resolveNextSettings(
     typeof body.autoMemory === "boolean"
       ? Number(body.autoMemory)
       : current.autoMemory;
+  const composerWritingAssist =
+    typeof body.composerWritingAssist === "boolean"
+      ? Number(body.composerWritingAssist)
+      : current.composerWritingAssist;
   const hiddenBotModelIds = readHiddenBotModelIds(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
@@ -304,6 +310,7 @@ export function resolveNextSettings(
     preferredProvider,
     providerLocked,
     autoMemory,
+    composerWritingAssist,
     hiddenBotModelIds,
     preferredLocalModel,
     preferredOnlineModel,

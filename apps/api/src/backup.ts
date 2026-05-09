@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, encryptJson } from "./security.ts";
+import { normalizeMemoryTier } from "./memory.ts";
 
 export interface BackupSnapshot {
   version: 1;
@@ -29,6 +30,9 @@ export interface BackupSnapshot {
     conversationId?: string;
     botId?: string;
     confidence: number;
+    category?: "general" | "user" | "bot_relation";
+    tier?: "short_term" | "long_term";
+    durability?: number;
     payload: Record<string, unknown>;
     createdAt: string;
   }>;
@@ -120,13 +124,16 @@ export function exportUserSnapshot(
 
   const memories = db
     .prepare(
-      "SELECT id, conversation_id, bot_id, confidence, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC"
+      "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC"
     )
     .all(userId) as Array<{
     id: string;
     conversation_id: string | null;
     bot_id: string | null;
     confidence: number;
+    category: "general" | "user" | "bot_relation";
+    tier: "short_term" | "long_term";
+    durability: number | null;
     ciphertext: string;
     iv: string;
     tag: string;
@@ -142,6 +149,9 @@ export function exportUserSnapshot(
       conversationId: memory.conversation_id ?? undefined,
       botId: memory.bot_id ?? undefined,
       confidence: memory.confidence,
+      category: memory.category,
+      tier: memory.tier,
+      durability: memory.durability ?? undefined,
       createdAt: memory.created_at,
       payload: decryptJson(
         {
@@ -170,8 +180,8 @@ export function importUserSnapshot(
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMemory = db.prepare(`
-    INSERT OR REPLACE INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const conversation of snapshot.conversations) {
@@ -225,6 +235,9 @@ export function importUserSnapshot(
       encrypted.iv,
       encrypted.tag,
       memory.confidence,
+      memory.category ?? "user",
+      memory.tier ?? normalizeMemoryTier(undefined, memory.confidence, memory.confidence, memory.durability ?? 0.5),
+      memory.durability ?? 0.5,
       memory.createdAt
     );
   }

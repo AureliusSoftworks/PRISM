@@ -1,6 +1,10 @@
+import type { MemoryCategory } from "@localai/shared";
+
 export interface MemoryCandidate {
   text: string;
   confidence: number;
+  category?: MemoryCategory;
+  durability?: number;
 }
 
 export interface MemoryRetractionCue {
@@ -127,6 +131,55 @@ const LEADING_APOLOGY_PREFIX_PATTERN =
 const TASK_REQUEST_PREFIX_PATTERN =
   /^(?:please\s+)?(?:write|draft|compose|create|make|generate|summarize|summarise|explain|help|help\s+me|give\s+me|show\s+me|tell\s+me|find|search|look\s+up|translate|rewrite|edit|review|fix|debug|build|plan)\b/i;
 
+const BOT_RELATION_PATTERN =
+  /\b(?:other bots?|another bot|bots?\s+(?:talk|interact|respond|remember|know|argue|agree)|bot-to-bot|coffee\s+session|group\s+chat)\b/i;
+
+const USER_FACT_PATTERN =
+  /^(?:you|your|the user|user)\b|\b(?:you do not want me|you don't want me|you like|you love|you enjoy|you prefer|you dislike|you want|you need|your favorite)\b/i;
+
+const FOUNDATIONAL_MEMORY_PATTERNS = [
+  /\b(?:always|never|do not|don't|like|likes|love|loves|enjoy|enjoys|prefer|prefers|favorite|favourite|need|needs|want|wants|value|values|care about|cares about)\b/i,
+  /\b(?:identity|personality|character|believes?|principles?|boundary|boundaries|comfort|safe|safety)\b/i,
+  /\b(?:sees|treats|uses|understands)\s+.+\s+as\s+/i,
+  /\b(?:born|founded|created|developed|built|grew|became|known for|signature|method|career|company|inc\.?|workshops?|instructors?|instructional|materials?|art supplies)\b/i,
+] as const;
+
+/**
+ * Lightweight category inference for the memory browser. The text remains the
+ * source of truth; categories are only organizational labels.
+ */
+export function classifyMemoryCategory(text: string): MemoryCategory {
+  const normalized = text.trim();
+  if (BOT_RELATION_PATTERN.test(normalized)) return "bot_relation";
+  if (USER_FACT_PATTERN.test(normalized)) return "user";
+  return "general";
+}
+
+export function estimateMemoryDurability(text: string, explicit = false): number {
+  const normalized = text.trim();
+  if (!normalized) return 0.25;
+  let score = explicit ? 0.88 : 0.46;
+  const durablePatternHits = FOUNDATIONAL_MEMORY_PATTERNS.reduce(
+    (count, pattern) => count + (pattern.test(normalized) ? 1 : 0),
+    0
+  );
+  if (USER_FACT_PATTERN.test(normalized)) score += 0.16;
+  if (BOT_RELATION_PATTERN.test(normalized)) score += 0.18;
+  if (durablePatternHits > 0) {
+    score += Math.min(0.44, durablePatternHits * 0.24);
+  }
+  if (
+    /\b(?:remember|don't forget|do not forget|keep in mind|make a note)\b/i.test(normalized) ||
+    /\b[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,3}\b/.test(normalized)
+  ) {
+    score += 0.3;
+  }
+  if (/\b(?:currently|today|right now|this moment|for now|temporarily|seems|might|maybe|probably)\b/i.test(normalized)) {
+    score -= 0.22;
+  }
+  return Number(Math.max(0.1, Math.min(1, score)).toFixed(2));
+}
+
 /**
  * Normalize a raw user statement into a concise second-person memory line.
  * Strips conversational cue prefixes (e.g. "Don't forget that") and rewrites
@@ -248,7 +301,12 @@ function extractMemoryCandidatesFromLines(lines: string[]): MemoryCandidate[] {
       : Math.min(0.95, 0.55 + cleanLine.length / 220);
     const text = rewriteMemoryText(cleanLine);
     if (text.length === 0) continue;
-    candidates.push({ text, confidence: Number(confidence.toFixed(2)) });
+    candidates.push({
+      text,
+      confidence: Number(confidence.toFixed(2)),
+      category: classifyMemoryCategory(text),
+      durability: estimateMemoryDurability(text, hasHighConfidenceCue),
+    });
   }
   return candidates.slice(0, 3);
 }

@@ -15,12 +15,18 @@ import { buildHealthResponse } from "./health.ts";
 import { consumePairingCode, createPairingCode } from "./pairing.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
-import { processCoffeeTurn } from "./coffee.ts";
+import {
+  createCoffeeConversation,
+  processCoffeeAutonomousTurn,
+  processCoffeeTurn,
+} from "./coffee.ts";
 import {
   createDevSeedMemories,
+  demoteMemoryToShortTerm,
   deleteMemoryById,
   deleteOrphanedBotMemories,
   filterConflictingMemories,
+  normalizeMemoryDurability,
   restoreMemory
 } from "./memory.ts";
 import { inferAndStoreBotMemories } from "./memory-inference.ts";
@@ -49,7 +55,7 @@ import {
   resolveNextSettings,
 } from "./settings.ts";
 import { normalizeMemoryDisplayText } from "./memory-validation.ts";
-import { buildModelCatalog, checkLocalModelHostStatus, getAuxiliaryProvider } from "./providers.ts";
+import { buildModelCatalog, checkLocalModelHostStatus, getAuxiliaryProvider, selectProvider } from "./providers.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
@@ -89,6 +95,9 @@ const backupAdapter = new LocalOnlyBackupAdapter();
 const LOCAL_OWNER_EMAIL = "prism-owner@local.prism";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
 const memoryInferenceCheckedAtByScope = new Map<string, string>();
+const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
+const COMPOSER_CLEANUP_SYSTEM_PROMPT =
+  "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
 
 interface UserDbRow {
   id: string;
@@ -103,6 +112,7 @@ interface UserDbRow {
   preferred_provider: "local" | "openai";
   provider_locked: number;
   auto_memory: number;
+  composer_writing_assist: number;
   auto_switch_model: number;
   hidden_bot_model_ids: string;
   preferred_local_model: string | null;
@@ -213,7 +223,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, hidden_bot_model_ids, preferred_local_model, preferred_online_model, lenient_local_fallback_model, secondary_ollama_host, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, preferred_local_model, preferred_online_model, lenient_local_fallback_model, secondary_ollama_host, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -275,6 +285,35 @@ function readOptionalString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function readComposerCleanupText(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("Composer text is required.");
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Composer text is required.");
+  }
+  if (trimmed.length > COMPOSER_CLEANUP_MAX_INPUT_CHARS) {
+    throw new Error("Composer text is too long to clean up at once.");
+  }
+  return trimmed;
+}
+
+function normalizeComposerCleanupResponse(raw: string, original: string): string {
+  const cleaned = raw.trim();
+  if (!cleaned) {
+    throw new Error("Writing cleanup returned an empty result.");
+  }
+  const fenced = cleaned.match(/^```(?:\w+)?\s*\n([\s\S]*?)\n```$/);
+  const unwrapped = fenced?.[1]?.trim() ?? cleaned;
+  if (!unwrapped) {
+    throw new Error("Writing cleanup returned an empty result.");
+  }
+  return unwrapped.length > COMPOSER_CLEANUP_MAX_INPUT_CHARS
+    ? original
+    : unwrapped;
+}
+
 function clampConnectionScore(value: number): number {
   if (!Number.isFinite(value)) return 50;
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -308,6 +347,21 @@ function parseConversationBotGroupIds(raw: string | null | undefined): string[] 
     return parsed.filter(
       (value): value is string => typeof value === "string" && value.length > 0
     );
+  } catch {
+    return [];
+  }
+}
+
+function parseConversationCoffeeSeatBotIds(raw: string | null | undefined): Array<string | null> {
+  if (!raw || typeof raw !== "string") return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || !parsed.some((value) => value === null)) return [];
+    const seats = parsed.slice(0, 5).map((value) =>
+      typeof value === "string" && value.length > 0 ? value : null
+    );
+    while (seats.length < 5) seats.push(null);
+    return seats;
   } catch {
     return [];
   }
@@ -768,6 +822,7 @@ function buildRoutes(): RouteDefinition[] {
             ? "coffee"
             : "sandbox";
       const botGroupIdsOut = parseConversationBotGroupIds(conversation.bot_group_ids);
+      const coffeeSeatBotIdsOut = parseConversationCoffeeSeatBotIds(conversation.bot_group_ids);
       json(ctx.res, 200, {
         ok: true,
         conversation: {
@@ -776,6 +831,7 @@ function buildRoutes(): RouteDefinition[] {
           mode: conversationModeOut,
           botId: conversation.bot_id ?? null,
           ...(botGroupIdsOut.length > 0 ? { botGroupIds: botGroupIdsOut } : {}),
+          ...(coffeeSeatBotIdsOut.length > 0 ? { coffeeSeatBotIds: coffeeSeatBotIdsOut } : {}),
           incognito: conversation.incognito === 1,
           lastBotId: conversation.last_bot_id ?? null,
           lastBotColor: conversation.last_bot_color ?? null,
@@ -1041,6 +1097,68 @@ function buildRoutes(): RouteDefinition[] {
       });
       json(ctx.res, 200, { ok: true, botOpinion });
     }),
+    route("POST", "/api/composer/cleanup", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const text = readComposerCleanupText(body.text);
+      const user = getUserRow(userId);
+      if (user.composer_writing_assist === 0) {
+        throw new Error("Composer writing assistance is disabled in Settings.");
+      }
+
+      const forceLocal = body.forceLocal === true;
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      let effectiveProvider = forceLocal ? "local" : user.preferred_provider;
+      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
+      const resolvedAuto = resolveAutoModel({
+        provider: effectiveProvider,
+        explicitModelOverride: null,
+        botPreferredModel:
+          effectiveProvider === "local"
+            ? readOptionalString(user.preferred_local_model)
+            : readOptionalString(user.preferred_online_model),
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+      });
+      effectiveProvider = resolvedAuto.provider;
+
+      const provider = selectProvider(
+        effectiveProvider,
+        openAiApiKey,
+        user.secondary_ollama_host
+      );
+      const maxTokens = Math.min(1800, Math.max(160, Math.ceil(text.length / 2)));
+      try {
+        const raw = await provider.generateResponse(
+          [
+            { role: "system", content: COMPOSER_CLEANUP_SYSTEM_PROMPT },
+            { role: "user", content: text },
+          ],
+          {
+            model: resolvedAuto.model,
+            temperature: 0.05,
+            maxTokens,
+          }
+        );
+        const cleanedText = normalizeComposerCleanupResponse(raw, text);
+        json(ctx.res, 200, {
+          ok: true,
+          text: cleanedText,
+          changed: cleanedText !== text,
+          provider: effectiveProvider,
+          model: resolvedAuto.model,
+        });
+      } catch (error) {
+        if (resolvedAuto.usedRequiredLocalFallback) {
+          throw new Error(
+            `Prism Server setup problem: the required primary ${REQUIRED_PRIMARY_LOCAL_MODEL_ID} model is unavailable. Install it in Ollama, then try again.`
+          );
+        }
+        throw error;
+      }
+    }),
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -1074,21 +1192,19 @@ function buildRoutes(): RouteDefinition[] {
       // Per-request provider override so a fresh sidebar switch takes effect
       // immediately, even if the settings PATCH is still in flight.
       const requestedProvider =
-        mode === "sandbox" &&
+        (mode === "sandbox" || incognito) &&
         (body.preferredProvider === "openai" || body.preferredProvider === "local")
           ? body.preferredProvider
           : undefined;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
-      if (incognito) {
-        effectiveProvider = "local";
-      }
       const effectiveBotId = botId;
       const explicitModelOverride =
         mode === "sandbox" ? readOptionalString(body.modelOverride) : null;
       if (
         mode === "chat" &&
+        !incognito &&
         (
           body.preferredProvider !== undefined ||
           body.modelOverride !== undefined
@@ -1230,10 +1346,55 @@ function buildRoutes(): RouteDefinition[] {
         ...(conversationStarters ? { conversationStarters } : {}),
       });
     }),
-    // Coffee mode (group chat for 2-5 reactive bots). Lives on its own
+    // Coffee mode (timed live sessions for 3-5 reactive bots). Lives on its own
     // endpoint rather than inside /api/chat so the lighter coffee
     // pipeline (router LLM + per-bot reply, no cross-thread memory) can
     // evolve independently of the heavier Chat/Sandbox flow.
+    route("POST", "/api/coffee/sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const groupBotIds = Array.isArray(body.groupBotIds)
+        ? body.groupBotIds
+        : undefined;
+      const result = createCoffeeConversation(db, userId, { groupBotIds });
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/continue", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
+      const directedSpeakerBotId =
+        typeof body.directedSpeakerBotId === "string"
+          ? body.directedSpeakerBotId
+          : undefined;
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const result = await processCoffeeAutonomousTurn(
+        db,
+        userId,
+        ctx.params.id,
+        {
+          preferredProvider: effectiveProvider,
+          openAiApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          userDisplayName: user.display_name,
+        },
+        directedSpeakerBotId
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
+      });
+    }),
     route("POST", "/api/coffee/turn", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -1319,6 +1480,9 @@ function buildRoutes(): RouteDefinition[] {
         conversation_id: string | null;
         bot_id: string | null;
         confidence: number;
+        category: "general" | "user" | "bot_relation";
+        tier: "short_term" | "long_term";
+        durability: number | null;
         source: "direct" | "inferred" | "compiled";
         certainty: number | null;
         source_message_ids: string;
@@ -1330,24 +1494,24 @@ function buildRoutes(): RouteDefinition[] {
       const rows = botId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId, botId) as MemoryRow[]
         : scope === "default"
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId) as MemoryRow[]
         : conversationId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId, conversationId) as MemoryRow[]
         : db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId) as MemoryRow[];
       const memoryCountRows = db
@@ -1373,15 +1537,20 @@ function buildRoutes(): RouteDefinition[] {
           },
           userKey
         ) as { text?: string };
+        const text = normalizeMemoryDisplayText(payload.text ?? "");
+        const durability = normalizeMemoryDurability(row.durability, text);
         return {
           id: row.id,
           conversationId: row.conversation_id ?? undefined,
           botId: row.bot_id ?? undefined,
           confidence: row.confidence,
+          category: row.category,
+          tier: row.tier,
+          durability,
           source: row.source,
           certainty: row.certainty ?? row.confidence,
           sourceMessageIds: parseSourceMessageIds(row.source_message_ids),
-          text: normalizeMemoryDisplayText(payload.text ?? ""),
+          text,
           createdAt: row.created_at
         };
       });
@@ -1407,8 +1576,23 @@ function buildRoutes(): RouteDefinition[] {
       const source = requestedSource === "inferred" || requestedSource === "compiled"
         ? requestedSource
         : "direct";
+      const requestedCategory = readOptionalString(body.category);
+      const category =
+        requestedCategory === "user" || requestedCategory === "bot_relation"
+          ? requestedCategory
+          : requestedCategory === "general"
+            ? "general"
+            : undefined;
+      const requestedTier = readOptionalString(body.tier);
+      const tier =
+        requestedTier === "long_term" || requestedTier === "short_term"
+          ? requestedTier
+          : undefined;
       const requestedCertainty = typeof body.certainty === "number" && Number.isFinite(body.certainty)
         ? Math.max(0, Math.min(1, body.certainty))
+        : undefined;
+      const requestedDurability = typeof body.durability === "number" && Number.isFinite(body.durability)
+        ? Math.max(0, Math.min(1, body.durability))
         : undefined;
       const botIds = requestedBotId
         ? (
@@ -1427,6 +1611,9 @@ function buildRoutes(): RouteDefinition[] {
       const created = createDevSeedMemories(db, userId, userKey, count, botIds, {
         randomizeAcrossBots: !requestedBotId,
         source,
+        category,
+        tier,
+        durability: requestedDurability,
         certainty: requestedCertainty,
       });
       json(ctx.res, 200, { ok: true, created });
@@ -1496,6 +1683,18 @@ function buildRoutes(): RouteDefinition[] {
         requestedSource === "inferred" || requestedSource === "compiled"
           ? requestedSource
           : "direct";
+      const requestedCategory = readOptionalString(body.category);
+      const category =
+        requestedCategory === "user" || requestedCategory === "bot_relation"
+          ? requestedCategory
+          : requestedCategory === "general"
+            ? "general"
+            : undefined;
+      const requestedTier = readOptionalString(body.tier);
+      const tier =
+        requestedTier === "long_term" || requestedTier === "short_term"
+          ? requestedTier
+          : undefined;
       const confidence =
         typeof body.confidence === "number" && Number.isFinite(body.confidence)
           ? Math.max(0, Math.min(1, body.confidence))
@@ -1504,6 +1703,10 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.certainty === "number" && Number.isFinite(body.certainty)
           ? Math.max(0, Math.min(1, body.certainty))
           : confidence;
+      const durability =
+        typeof body.durability === "number" && Number.isFinite(body.durability)
+          ? Math.max(0, Math.min(1, body.durability))
+          : undefined;
       const sourceMessageIds = Array.isArray(body.sourceMessageIds)
         ? body.sourceMessageIds.filter((value): value is string => typeof value === "string")
         : [];
@@ -1512,15 +1715,29 @@ function buildRoutes(): RouteDefinition[] {
         botId,
         conversationId,
         confidence,
+        category,
+        tier,
+        durability,
         source,
         certainty,
         sourceMessageIds,
       });
       json(ctx.res, 200, { ok: true, memory });
     }),
+    route("POST", "/api/memories/:id/demote", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const confidence =
+        typeof body.confidence === "number" && Number.isFinite(body.confidence)
+          ? Math.max(0, Math.min(1, body.confidence))
+          : undefined;
+      const demoted = demoteMemoryToShortTerm(db, userId, ctx.params.id, confidence);
+      json(ctx.res, 200, { ok: true, demoted });
+    }),
     route("DELETE", "/api/memories/:id", async (ctx) => {
       const userId = requireAuth(ctx);
-      const deleted = deleteMemoryById(db, userId, ctx.params.id);
+      const allowLongTerm = ctx.query.get("allowLongTerm") === "true";
+      const deleted = deleteMemoryById(db, userId, ctx.params.id, { allowLongTerm });
       json(ctx.res, 200, { ok: true, deleted });
     }),
     route("PATCH", "/api/messages/:id", async (ctx) => {
@@ -1578,6 +1795,7 @@ function buildRoutes(): RouteDefinition[] {
           preferredProvider: user.preferred_provider,
           providerLocked: Boolean(user.provider_locked),
           autoMemory: Boolean(user.auto_memory),
+          composerWritingAssist: user.composer_writing_assist !== 0,
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           preferredLocalModel: user.preferred_local_model ?? "",
           preferredOnlineModel: user.preferred_online_model ?? "",
@@ -1633,6 +1851,7 @@ function buildRoutes(): RouteDefinition[] {
         preferredProvider: user.preferred_provider,
         providerLocked: user.provider_locked,
         autoMemory: user.auto_memory,
+        composerWritingAssist: user.composer_writing_assist,
         hiddenBotModelIds: user.hidden_bot_model_ids,
         preferredLocalModel: user.preferred_local_model,
         preferredOnlineModel: user.preferred_online_model,
@@ -1661,7 +1880,7 @@ function buildRoutes(): RouteDefinition[] {
       // another migration.
       db.prepare(`
         UPDATE users
-        SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, hidden_bot_model_ids = ?,
+        SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?,
             preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, secondary_ollama_host = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
@@ -1672,6 +1891,7 @@ function buildRoutes(): RouteDefinition[] {
         next.preferredProvider,
         next.providerLocked,
         next.autoMemory,
+        next.composerWritingAssist,
         JSON.stringify(next.hiddenBotModelIds),
         next.preferredLocalModel,
         next.preferredOnlineModel,

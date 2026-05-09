@@ -69,6 +69,7 @@ const HEADER_DELETE_KEY = "__header__";
 // `pendingDeleteKey` slot so the existing auto-disarm / outside-click /
 // Escape behaviour applies to it without any extra wiring.
 const DELETE_ALL_KEY = "__delete_all__";
+const DELETE_ALL_COFFEE_SESSIONS_KEY = "__delete_all_coffee_sessions__";
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 const CONVERSATION_GROUP_ORDER_STORAGE_KEY = "prism_conversation_group_order";
@@ -1810,7 +1811,7 @@ function selectedRowTextColor(
 
 type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
-type PanelView = null | "settings" | "bots" | "images" | "memories" | "opinions";
+type PanelView = null | "settings" | "bots" | "images" | "memories";
 type MemoryPanelScope = "bot" | "default" | "session" | "all";
 type ClientAccessState = "checking" | "allowed" | "blocked";
 const AUTO_TITLE_REFRESH_DELAYS_MS = [1500, 4000, 8000] as const;
@@ -1829,6 +1830,37 @@ type View = "hub" | "chat" | "sandbox" | "coffee";
 // `normalizeCoffeeGroupBotIds` validator agree on what's acceptable.
 const COFFEE_GROUP_MIN_SIZE_CLIENT = 2;
 const COFFEE_GROUP_MAX_SIZE_CLIENT = 5;
+const COFFEE_SESSION_DURATION_MS = 4 * 60 * 1000;
+const COFFEE_REPLY_DELAY_MIN_MS = 4000;
+const COFFEE_REPLY_DELAY_MAX_MS = 8000;
+const COFFEE_ARRIVAL_STEP_MS = 850;
+const COFFEE_ARRIVAL_SETTLE_MS = 900;
+const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
+const COFFEE_CUP_ROTATION_BIAS_DEGREES = 45;
+
+function emptyCoffeeSeatBotIds(): Array<string | null> {
+  return Array.from({ length: COFFEE_GROUP_MAX_SIZE_CLIENT }, () => null);
+}
+
+function coffeeSeatsFromBotIds(botIds: readonly string[] | undefined): Array<string | null> {
+  const seats = emptyCoffeeSeatBotIds();
+  for (let index = 0; index < Math.min(seats.length, botIds?.length ?? 0); index += 1) {
+    seats[index] = botIds?.[index] ?? null;
+  }
+  return seats;
+}
+
+function coffeeCupRotationBias(seed: string): string {
+  const unit = stableUnitValue(seed);
+  const degrees = Math.round((unit * 2 - 1) * COFFEE_CUP_ROTATION_BIAS_DEGREES);
+  return `${degrees}deg`;
+}
+
+type CoffeeArrivalScenario =
+  | "user-first"
+  | "partial-table-in-progress"
+  | "full-table-present";
+type CoffeeSessionPhase = "selecting" | "preview" | "arriving" | "live" | "finished";
 
 interface CoffeeConversationMessage {
   id: string;
@@ -1845,7 +1877,15 @@ interface CoffeeConversationState {
   id: string;
   title: string;
   mode?: "coffee";
+  botId?: string | null;
   botGroupIds?: string[];
+  coffeeSeatBotIds?: Array<string | null>;
+  incognito?: boolean;
+  lastBotId?: string | null;
+  lastBotColor?: string | null;
+  hasAssistantReply?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
   messages: CoffeeConversationMessage[];
 }
 
@@ -1854,9 +1894,12 @@ interface ConversationSummary {
   id: string;
   title: string;
   updatedAt: string;
-  mode?: "chat" | "sandbox";
+  createdAt?: string;
+  mode?: "chat" | "sandbox" | "coffee";
   /** Bot locked to this chat when it was first created; `null` = default grayscale persona. */
   botId: string | null;
+  /** Coffee-only bot lineup frozen when the Coffee Session starts. */
+  botGroupIds?: string[];
   /** Private chat flag — drives the sidebar privacy marker and, when opened, the grayscale-shell override. */
   incognito: boolean;
   /** Bot id of the most recent assistant message; null for Default-last OR no-reply-yet (disambiguate via hasAssistantReply). */
@@ -2096,7 +2139,7 @@ function parseChatModeHashHeadingLine(line: string): { level: 1 | 2 | 3; text: s
   const hashes = match[1] ?? "";
   const rawText = (match[2] ?? "").trim();
   if (rawText.length === 0) return null;
-  const level = Math.min(5, Math.max(1, hashes.length)) as 1 | 2 | 3 | 4 | 5;
+  const level = Math.min(3, Math.max(1, hashes.length)) as 1 | 2 | 3;
   return { level, text: rawText };
 }
 
@@ -3036,29 +3079,10 @@ function opinionTrendDescription(trend: SessionOpinion["trend"]): string {
   return "Nothing needs fixing; the tone is holding steady.";
 }
 
-function opinionNextStep(trend: SessionOpinion["trend"]): string {
-  if (trend === "up") {
-    return "Keep giving context and asking clearly; that rhythm is working.";
-  }
-  if (trend === "down") {
-    return "A little warmth or extra context will help the exchange feel steadier.";
-  }
-  return "Nothing needs fixing; continue naturally.";
-}
-
 function opinionScoreCaption(score: number): string {
   if (score >= 68) return "High ease";
   if (score <= 34) return "Low ease";
   return "Middle ease";
-}
-
-function visibleOpinionReasons(opinion: SessionOpinion): string[] {
-  const normalizedLastReason = opinion.lastReason.trim().toLowerCase();
-  const reasons = opinion.recentReasons.filter(reason => {
-    const normalizedReason = reason.trim().toLowerCase();
-    return normalizedReason.length > 0 && normalizedReason !== normalizedLastReason;
-  });
-  return reasons.slice(0, 3);
 }
 
 function botOpinionBandTitle(band: BotOpinion["band"]): string {
@@ -3067,35 +3091,14 @@ function botOpinionBandTitle(band: BotOpinion["band"]): string {
   if (band === "careful") return "Careful";
   return "Open";
 }
-
-function botOpinionBandDescription(opinion: BotOpinion): string {
-  if (opinion.band === "bonded") {
-    return "This bot relationship feels deeply safe and collaborative.";
-  }
-  if (opinion.band === "wounded") {
-    return "This bot relationship needs repair and slower, more respectful exchanges.";
-  }
-  if (opinion.band === "careful") {
-    return "This bot is still willing to help, but the relationship is moving carefully.";
-  }
-  return "This bot relationship feels open and workable.";
-}
-
-function botOpinionRepairGuidance(opinion: BotOpinion): string {
-  if (opinion.boundaryLevel === "firm") {
-    return "Repair helps most here: slow down, clarify intent, or acknowledge rough wording.";
-  }
-  if (opinion.boundaryLevel === "gentle") {
-    return "Warmth, context, and clear requests will help this bot relax again.";
-  }
-  return "Keep treating this bot with curiosity and care.";
-}
 interface ConversationDetail {
   id: string;
   title: string;
-  mode?: "chat" | "sandbox";
+  mode?: "chat" | "sandbox" | "coffee";
   /** Bot locked to this conversation at start. Null = PRISM Default / no custom bot. */
   botId: string | null;
+  /** Coffee-only bot lineup frozen when the Coffee Session starts. */
+  botGroupIds?: string[];
   /** Private chat flag — saved chats read it from storage; private sessions receive it from the ephemeral API response. */
   incognito: boolean;
   /** Bot id of the most recent assistant message; null for Default-last OR no-reply-yet. */
@@ -3163,6 +3166,7 @@ interface UserSettings {
   preferredProvider: Provider;
   providerLocked: boolean;
   autoMemory: boolean;
+  composerWritingAssist: boolean;
   hiddenBotModelIds: string[];
   hasOpenAiApiKey: boolean;
   ollamaModel: string;
@@ -3208,10 +3212,16 @@ interface UserMemory {
   createdAt: string;
   confidence: number;
   text: string;
+  category?: MemoryCategory;
+  tier?: MemoryTier;
   source?: "direct" | "inferred" | "compiled";
   certainty?: number;
+  durability?: number;
   sourceMessageIds?: string[];
 }
+
+type MemoryCategory = "general" | "user" | "bot_relation";
+type MemoryTier = "short_term" | "long_term";
 
 type MemoryValidationStatus = "approved" | "auto_fixed";
 type MemoryValidationReasonCode =
@@ -3232,8 +3242,11 @@ interface MemoryEventPayload {
   botId: string | null;
   conversationId?: string;
   confidence: number;
+  category?: MemoryCategory;
+  tier?: MemoryTier;
   source?: "direct" | "inferred" | "compiled";
   certainty?: number;
+  durability?: number;
   sourceMessageIds?: string[];
   validationStatus?: MemoryValidationStatus;
   originalText?: string;
@@ -3306,8 +3319,11 @@ interface Bot {
 interface BotExportMemory {
   text: string;
   confidence?: number;
+  category?: MemoryCategory;
+  tier?: MemoryTier;
   source?: "direct" | "inferred" | "compiled";
   certainty?: number;
+  durability?: number;
   sourceMessageIds?: string[];
 }
 
@@ -4306,6 +4322,11 @@ const MEMORY_BUBBLE_MIN_SIZE = 82;
 const MEMORY_BUBBLE_MAX_SIZE = 136;
 const MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE = 38;
 const MEMORY_UNCERTAIN_BUBBLE_MAX_SIZE = 68;
+const LONG_TERM_MEMORY_CATEGORIES: Array<{ id: MemoryCategory; label: string }> = [
+  { id: "general", label: "General" },
+  { id: "user", label: "About you" },
+  { id: "bot_relation", label: "Other bots" },
+];
 
 function memoryConfidenceValue(memory: UserMemory): number {
   return Number.isFinite(memory.confidence) ? Math.max(0, Math.min(1, memory.confidence)) : 0.5;
@@ -4327,6 +4348,58 @@ function memoryBubbleSignalValue(memory: UserMemory): number {
   return Number.isFinite(memory.certainty)
     ? Math.max(0, Math.min(1, memory.certainty as number))
     : memoryConfidenceValue(memory);
+}
+
+function estimateMemoryDurabilityForDisplay(text: string): number {
+  const normalized = text.trim();
+  if (!normalized) return 0.25;
+  let score = 0.46;
+  if (/^(?:you|your|the user|user)\b|\b(?:you do not want me|you don't want me|you like|you love|you enjoy|you prefer|you dislike|you want|you need|your favorite)\b/i.test(normalized)) {
+    score += 0.16;
+  }
+  if (/\b(?:other bots?|another bot|bots?\s+(?:talk|interact|respond|remember|know|argue|agree)|bot-to-bot|coffee\s+session|group\s+chat)\b/i.test(normalized)) {
+    score += 0.18;
+  }
+  const durablePatternHits = [
+    /\b(?:always|never|do not|don't|like|likes|love|loves|enjoy|enjoys|prefer|prefers|favorite|favourite|need|needs|want|wants|value|values|care about|cares about)\b/i,
+    /\b(?:identity|personality|character|believes?|principles?|boundary|boundaries|comfort|safe|safety)\b/i,
+    /\b(?:sees|treats|uses|understands)\s+.+\s+as\s+/i,
+    /\b(?:born|founded|created|developed|built|grew|became|known for|signature|method|career|company|inc\.?|workshops?|instructors?|instructional|materials?|art supplies)\b/i,
+  ].reduce((count, pattern) => count + (pattern.test(normalized) ? 1 : 0), 0);
+  if (durablePatternHits > 0) {
+    score += Math.min(0.44, durablePatternHits * 0.24);
+  }
+  if (/\b(?:remember|don't forget|do not forget|keep in mind|make a note)\b/i.test(normalized) || /\b[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,3}\b/.test(normalized)) {
+    score += 0.3;
+  }
+  if (/\b(?:currently|today|right now|this moment|for now|temporarily|seems|might|maybe|probably)\b/i.test(normalized)) {
+    score -= 0.22;
+  }
+  return Math.max(0.1, Math.min(1, score));
+}
+
+function memoryTier(memory: UserMemory): MemoryTier {
+  const confidence = Number.isFinite(memory.confidence) ? Math.max(0, Math.min(1, memory.confidence)) : 0;
+  const certainty = Number.isFinite(memory.certainty) ? Math.max(0, Math.min(1, memory.certainty as number)) : confidence;
+  const estimatedDurability = estimateMemoryDurabilityForDisplay(memory.text);
+  const storedDurability = Number.isFinite(memory.durability)
+    ? Math.max(0, Math.min(1, memory.durability as number))
+    : 0;
+  const durability = Math.max(storedDurability, estimatedDurability);
+  const truthScore = (confidence + certainty) / 2;
+  return memory.tier === "long_term" ||
+    truthScore >= 0.95 ||
+    (truthScore >= 0.9 && durability >= 0.5) ||
+    (durability >= 0.72 && truthScore >= 0.78)
+    ? "long_term"
+    : "short_term";
+}
+
+function memoryCategory(memory: UserMemory): MemoryCategory {
+  if (memory.category === "general" || memory.category === "user" || memory.category === "bot_relation") {
+    return memory.category;
+  }
+  return memory.botId ? "general" : "user";
 }
 
 function stableUnitValue(seed: string): number {
@@ -4824,6 +4897,30 @@ function SearchGlyph(): React.ReactElement {
     <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="7" cy="7" r="4.5" />
       <path d="M10.5 10.5 14 14" />
+    </svg>
+  );
+}
+
+function MessageBubbleGlyph(): React.ReactElement {
+  return (
+    <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3.25 3.75h9.5a1.5 1.5 0 0 1 1.5 1.5v4.5a1.5 1.5 0 0 1-1.5 1.5H7.4L4 13.6v-2.35h-.75a1.5 1.5 0 0 1-1.5-1.5v-4.5a1.5 1.5 0 0 1 1.5-1.5Z" />
+      <path d="M5 6.5h6M5 8.75h3.5" />
+    </svg>
+  );
+}
+
+function CoffeeAutoplayGlyph({ paused }: { paused: boolean }): React.ReactElement {
+  return (
+    <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
+      {paused ? (
+        <path d="M5.25 3.5 12 8l-6.75 4.5Z" fill="currentColor" stroke="none" />
+      ) : (
+        <>
+          <path d="M5.25 3.5v9" />
+          <path d="M10.75 3.5v9" />
+        </>
+      )}
     </svg>
   );
 }
@@ -9125,7 +9222,7 @@ function MarkdownCodeBlock({
   children,
 }: MarkdownCodeBlockProps): React.JSX.Element {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
-  const resetTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const resetTimerRef = useRef<number | null>(null);
   const blockRef = useRef<HTMLPreElement | null>(null);
   const codeRef = useRef<HTMLElement | null>(null);
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
@@ -9542,6 +9639,7 @@ interface ComposerInputProps {
   enabled: boolean;
   value: string;
   placeholder: string;
+  writingAssistEnabled: boolean;
   submitDisabled: boolean;
   submitLabel: string;
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
@@ -9989,6 +10087,7 @@ interface DesktopMarkdownComposerHandle {
 interface DesktopMarkdownComposerProps {
   value: string;
   placeholder: string;
+  writingAssistEnabled: boolean;
   onValueChange: (value: string) => void;
   onFocus: () => void;
   submitDisabled: boolean;
@@ -10002,6 +10101,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     {
       value,
       placeholder,
+      writingAssistEnabled,
       onValueChange,
       onFocus,
       submitDisabled,
@@ -10045,9 +10145,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         editorProps: {
           attributes: {
             class: styles.markdownTiptapContent,
-            spellcheck: "true",
-            autocorrect: "on",
-            autocapitalize: "sentences",
+            spellcheck: writingAssistEnabled ? "true" : "false",
+            autocorrect: writingAssistEnabled ? "on" : "off",
+            autocapitalize: writingAssistEnabled ? "sentences" : "none",
             enterkeyhint: "send",
             lang: "en",
             "aria-multiline": "true",
@@ -10103,6 +10203,14 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       },
       [placeholder]
     );
+
+    useEffect(() => {
+      const root = editor?.view.dom;
+      if (!root) return;
+      root.setAttribute("spellcheck", writingAssistEnabled ? "true" : "false");
+      root.setAttribute("autocorrect", writingAssistEnabled ? "on" : "off");
+      root.setAttribute("autocapitalize", writingAssistEnabled ? "sentences" : "none");
+    }, [editor, writingAssistEnabled]);
 
     useEffect(() => {
       editorRef.current = editor;
@@ -10210,6 +10318,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     enabled,
     value,
     placeholder,
+    writingAssistEnabled,
     submitDisabled,
     submitLabel,
     onChange,
@@ -10253,6 +10362,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           ref={wysiwygRef}
           value={value}
           placeholder={placeholder}
+          writingAssistEnabled={writingAssistEnabled}
           onValueChange={onValueChange}
           onFocus={onFocus}
           submitDisabled={submitDisabled}
@@ -10269,9 +10379,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             onChange={onChange}
             onFocus={onFocus}
             placeholder={placeholder}
-            spellCheck
-            autoCorrect="on"
-            autoCapitalize="sentences"
+            spellCheck={writingAssistEnabled}
+            autoCorrect={writingAssistEnabled ? "on" : "off"}
+            autoCapitalize={writingAssistEnabled ? "sentences" : "none"}
             enterKeyHint="send"
             lang="en"
           />
@@ -10816,6 +10926,7 @@ function HomeContent(): React.JSX.Element {
   const [botOpinion, setBotOpinion] = useState<BotOpinion | null>(null);
   const [draft, setDraft] = useState("");
   const [debugComposerDraft, setDebugComposerDraft] = useState("");
+  const [composerCleanupBusy, setComposerCleanupBusy] = useState(false);
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
   const composerHistoryIndexRef = useRef<number | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -10848,6 +10959,7 @@ function HomeContent(): React.JSX.Element {
   const [memoryPanelScope, setMemoryPanelScope] = useState<MemoryPanelScope>("bot");
   const [memoryPanelBotId, setMemoryPanelBotId] = useState<string | null>(null);
   const [memoryPanelSelectedFamily, setMemoryPanelSelectedFamily] = useState<PrismGroupId | null>(null);
+  const [longTermMemoryCategory, setLongTermMemoryCategory] = useState<MemoryCategory>("general");
   const [focusedMemoryId, setFocusedMemoryId] = useState<string | null>(null);
   // Phase + direction drive the cinematic zoom + fade between memory
   // directory levels. We keep them as separate state so React can apply
@@ -12246,10 +12358,8 @@ function HomeContent(): React.JSX.Element {
   const headerTitleCollapsedForAccordion =
     chatOverflowMenuOpen && viewportWidth > PHONE_MENU_BREAKPOINT;
   const renderProviderModeToggle = (extraClassName = ""): React.ReactNode => {
-    const privateLocked = privateChatActive;
     const isLocal = settings?.preferredProvider === "local";
-    const displayLocal = privateLocked ? true : isLocal;
-    const providerDisabled = !settings || privateLocked;
+    const providerDisabled = !settings;
     return (
       <div
         className={`${styles.modeControl} ${
@@ -12266,36 +12376,32 @@ function HomeContent(): React.JSX.Element {
             void switchProvider(isLocal ? "openai" : "local");
           }}
           aria-label={
-            privateLocked
-              ? "Response mode: Local. Private chats are offline-only."
-              : displayLocal
-                ? "Response mode: Local. Click to switch to Online."
-                : "Response mode: Online. Click to switch to Local."
+            isLocal
+              ? "Response mode: Local. Click to switch to Online."
+              : "Response mode: Online. Click to switch to Local."
           }
-          aria-pressed={!displayLocal}
+          aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
           title={
-            privateLocked
-              ? "Private chats are offline-only."
-              : displayLocal
-                ? "Switch to Online"
-                : "Switch to Local"
+            isLocal
+              ? "Switch to Online"
+              : "Switch to Local"
           }
           disabled={providerDisabled}
         >
           <span
             className={`${styles.modeThumb} ${
-              displayLocal ? styles.modeThumbLocal : styles.modeThumbOnline
+              isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
             }`}
           >
             <span
               className={`${styles.providerDot} ${
-                displayLocal ? styles.providerDotLocal : styles.providerDotOnline
+                isLocal ? styles.providerDotLocal : styles.providerDotOnline
               }`}
               aria-hidden="true"
             />
             <span className={styles.modeThumbLabel}>
-              {displayLocal ? "LOCAL" : "ONLINE"}
+              {isLocal ? "LOCAL" : "ONLINE"}
             </span>
           </span>
         </button>
@@ -13173,6 +13279,150 @@ function HomeContent(): React.JSX.Element {
   }, [conversationListScrollTop, resolvedTheme]);
 
   const panelColorHarmonyActive = bots.length >= BOT_PANEL_COLOR_HARMONY_MIN_BOTS;
+  // ── Coffee mode hooks ──
+  // Keep these with the rest of HomeContent's top-level state/memos so
+  // React's hook order stays stable across auth, hub, and mode returns.
+  const [coffeeSelectedSeatBotIds, setCoffeeSelectedSeatBotIds] =
+    useState<Array<string | null>>(() => emptyCoffeeSeatBotIds());
+  const [coffeeConversation, setCoffeeConversation] =
+    useState<CoffeeConversationState | null>(null);
+  const [coffeeSelectedSessionId, setCoffeeSelectedSessionId] = useState<string | null>(null);
+  const [coffeeSearch, setCoffeeSearch] = useState("");
+  const [coffeeDraft, setCoffeeDraft] = useState<string>("");
+  const [coffeeBusy, setCoffeeBusy] = useState<boolean>(false);
+  const [coffeeAutoBusy, setCoffeeAutoBusy] = useState<boolean>(false);
+  const [coffeeAutoplayPaused, setCoffeeAutoplayPaused] = useState<boolean>(false);
+  const [coffeeError, setCoffeeError] = useState<string | null>(null);
+  const [coffeeRouterReason, setCoffeeRouterReason] = useState<string | null>(null);
+  const [coffeeTranscriptOpen, setCoffeeTranscriptOpen] = useState(false);
+  const [coffeeTranscriptClosing, setCoffeeTranscriptClosing] = useState(false);
+  const [coffeeSessionPhase, setCoffeeSessionPhase] =
+    useState<CoffeeSessionPhase>("selecting");
+  const [, setCoffeeArrivalScenario] =
+    useState<CoffeeArrivalScenario>("user-first");
+  const [coffeeArrivedBotIds, setCoffeeArrivedBotIds] = useState<string[]>([]);
+  const [coffeeSessionEndsAtMs, setCoffeeSessionEndsAtMs] = useState<number | null>(null);
+  const coffeeArrivalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coffeeLoopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coffeeTranscriptCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coffeeTurnAbortRef = useRef<AbortController | null>(null);
+  const coffeeContinueAbortRef = useRef<AbortController | null>(null);
+  const coffeeAutoplayPausedRef = useRef(false);
+  const clearCoffeeTranscriptCloseTimer = (): void => {
+    if (coffeeTranscriptCloseTimerRef.current) {
+      clearTimeout(coffeeTranscriptCloseTimerRef.current);
+      coffeeTranscriptCloseTimerRef.current = null;
+    }
+  };
+  const openCoffeeTranscript = (): void => {
+    clearCoffeeTranscriptCloseTimer();
+    setCoffeeTranscriptClosing(false);
+    setCoffeeTranscriptOpen(true);
+  };
+  const closeCoffeeTranscript = (options: { animate?: boolean } = {}): void => {
+    clearCoffeeTranscriptCloseTimer();
+    if (!options.animate) {
+      setCoffeeTranscriptClosing(false);
+      setCoffeeTranscriptOpen(false);
+      return;
+    }
+    setCoffeeTranscriptClosing(true);
+    coffeeTranscriptCloseTimerRef.current = setTimeout(() => {
+      setCoffeeTranscriptOpen(false);
+      setCoffeeTranscriptClosing(false);
+      coffeeTranscriptCloseTimerRef.current = null;
+    }, COFFEE_TRANSCRIPT_CLOSE_MS);
+  };
+  useEffect(() => {
+    return () => {
+      if (coffeeTranscriptCloseTimerRef.current) {
+        clearTimeout(coffeeTranscriptCloseTimerRef.current);
+        coffeeTranscriptCloseTimerRef.current = null;
+      }
+    };
+  }, []);
+  useEffect(() => {
+    coffeeAutoplayPausedRef.current = coffeeAutoplayPaused;
+  }, [coffeeAutoplayPaused]);
+  // Per-request provider override (mirrors the Sandbox toggle). The
+  // user can flip it inside the Coffee shell without touching their
+  // global setting; once they manually toggle, we stop syncing from
+  // their saved preference for the rest of the session so a global
+  // change made elsewhere doesn't quietly stomp the in-shell choice.
+  const [coffeeProvider, setCoffeeProvider] = useState<"local" | "openai">("local");
+  const [coffeeProviderTouched, setCoffeeProviderTouched] = useState<boolean>(false);
+  useEffect(() => {
+    if (coffeeProviderTouched) return;
+    if (user?.preferredProvider === "openai" || user?.preferredProvider === "local") {
+      setCoffeeProvider(user.preferredProvider);
+    }
+  }, [user?.preferredProvider, coffeeProviderTouched]);
+  // Whenever we leave Coffee view, drop transient live-room state. The
+  // persisted Coffee Sessions remain in the conversation list via
+  // `conversation_mode = 'coffee'`.
+  useEffect(() => {
+    if (view !== "coffee") {
+      setCoffeeConversation(null);
+      setCoffeeSelectedSessionId(null);
+      setCoffeeSelectedSeatBotIds(emptyCoffeeSeatBotIds());
+      setCoffeeSearch("");
+      setCoffeeDraft("");
+      setCoffeeBusy(false);
+      setCoffeeAutoBusy(false);
+      coffeeAutoplayPausedRef.current = false;
+      setCoffeeAutoplayPaused(false);
+      setCoffeeError(null);
+      setCoffeeRouterReason(null);
+      clearCoffeeTranscriptCloseTimer();
+      setCoffeeTranscriptClosing(false);
+      setCoffeeTranscriptOpen(false);
+      setCoffeeSessionPhase("selecting");
+      setCoffeeArrivedBotIds([]);
+      setCoffeeSessionEndsAtMs(null);
+    }
+  }, [view]);
+  const coffeeBotsLibrary = useMemo(
+    () =>
+      [...bots]
+        .filter((bot) => bot.chat_enabled === 1)
+        .sort((a, b) =>
+          compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
+        ),
+    [bots, resolvedTheme, panelColorHarmonyActive]
+  );
+  const coffeeSessions = useMemo(
+    () =>
+      conversations
+        .filter((conversation) => conversation.mode === "coffee" && !conversation.incognito)
+        .slice()
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [conversations]
+  );
+  const coffeeBotsById = useMemo(
+    () => new Map(coffeeBotsLibrary.map((bot) => [bot.id, bot])),
+    [coffeeBotsLibrary]
+  );
+  const coffeeSelectedBotIds = useMemo(
+    () => coffeeSelectedSeatBotIds.filter((id): id is string => typeof id === "string"),
+    [coffeeSelectedSeatBotIds]
+  );
+  useEffect(
+    () => () => {
+      if (coffeeArrivalTimerRef.current) {
+        clearTimeout(coffeeArrivalTimerRef.current);
+        coffeeArrivalTimerRef.current = null;
+      }
+      if (coffeeLoopTimerRef.current) {
+        clearTimeout(coffeeLoopTimerRef.current);
+        coffeeLoopTimerRef.current = null;
+      }
+      coffeeTurnAbortRef.current?.abort();
+      coffeeContinueAbortRef.current?.abort();
+      coffeeTurnAbortRef.current = null;
+      coffeeContinueAbortRef.current = null;
+    },
+    []
+  );
   const sortedPanelBots = useMemo(
     () => [...bots].sort((a, b) => (
       compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
@@ -14241,6 +14491,7 @@ function HomeContent(): React.JSX.Element {
     setSettings({
       ...d.settings,
       displayName,
+      composerWritingAssist: d.settings.composerWritingAssist !== false,
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
         : [],
@@ -14588,14 +14839,13 @@ function HomeContent(): React.JSX.Element {
       : undefined;
     const mode: "chat" | "sandbox" =
       isChatMode || privateForSend ? "chat" : "sandbox";
-    const sandboxProviderForSend =
-      privateForSend ? "local" : settings?.preferredProvider;
-    const modelChoice = sandboxProviderForSend
+    const providerForSend = settings?.preferredProvider;
+    const modelChoice = providerForSend
       ? visibleConcreteModelChoiceForProvider(
           modelCatalog,
           settings,
-          sandboxProviderForSend,
-          chatModelChoiceByProvider[sandboxProviderForSend]
+          providerForSend,
+          chatModelChoiceByProvider[providerForSend]
         )
       : AUTO_MODEL_CHOICE;
     const modelOverride =
@@ -14627,7 +14877,8 @@ function HomeContent(): React.JSX.Element {
       ...(privateForSend
         ? { ephemeralMessages: options.ephemeralMessages ?? detail?.messages ?? [] }
         : {}),
-      preferredProvider: mode === "sandbox" ? sandboxProviderForSend : undefined,
+      preferredProvider:
+        mode === "sandbox" || privateForSend ? providerForSend : undefined,
       ...(modelOverride ? { modelOverride } : {}),
     };
   }
@@ -15321,21 +15572,33 @@ function HomeContent(): React.JSX.Element {
     void sendMessage(syntheticSubmit, { draftOverride: chip.sendValue ?? chip.label });
   }
 
-function resendUserMessage(msg: Message): void {
-  if (msg.role !== "user") return;
-  const resendText = msg.content.trim();
-  if (resendText.length === 0) return;
-  closeMessageContextOverlay();
-  // Force normal send mode if an edit draft was active.
-  setEditingMessageId(null);
-  setEditingOriginalText("");
-  const syntheticSubmit = {
-    preventDefault: () => {
-      /* no-op — used so sendMessage can share the submit pathway */
-    },
-  } as React.FormEvent<HTMLFormElement>;
-  void sendMessage(syntheticSubmit, { draftOverride: resendText });
-}
+  function resendUserMessage(msg: Message): void {
+    if (msg.role !== "user") return;
+    const resendText = msg.content.trim();
+    if (resendText.length === 0) return;
+    closeMessageContextOverlay();
+    // Force normal send mode if an edit draft was active.
+    setEditingMessageId(null);
+    setEditingOriginalText("");
+    // Sandbox: rewind from this user message so the visible thread AND the
+    // server-side conversation both drop everything after it before the
+    // resend lands as a fresh turn. This piggybacks on the Edit pipeline
+    // (rewind → /api/chat) with the same text, so message rows and
+    // thread-scoped memory summaries are truncated in lockstep with the UI.
+    // Chat mode keeps its append-duplicate behavior here because chat
+    // history is the user's persistent record — only Sandbox treats Resend
+    // as a "rewind to this point" gesture.
+    if (view === "sandbox") {
+      void performMessageEdit(msg.id, resendText);
+      return;
+    }
+    const syntheticSubmit = {
+      preventDefault: () => {
+        /* no-op — used so sendMessage can share the submit pathway */
+      },
+    } as React.FormEvent<HTMLFormElement>;
+    void sendMessage(syntheticSubmit, { draftOverride: resendText });
+  }
 
   function randomChatNudgeFromContext(): string {
     const activeBotId =
@@ -15833,6 +16096,68 @@ function resendUserMessage(msg: Message): void {
     updateComposerDraft(e.currentTarget.value);
   }
 
+  async function cleanupComposerDraft(): Promise<void> {
+    const currentDraft = draft;
+    if (
+      currentDraft.trim().length === 0 ||
+      composerCleanupBusy ||
+      pendingReply ||
+      settings?.composerWritingAssist === false
+    ) {
+      return;
+    }
+    setComposerCleanupBusy(true);
+    setError(null);
+    try {
+      const response = await api<{
+        text: string;
+        changed?: boolean;
+        provider?: Provider;
+        model?: string;
+      }>("/api/composer/cleanup", {
+        method: "POST",
+        body: JSON.stringify({
+          text: currentDraft,
+          forceLocal: settings?.preferredProvider === "local",
+        }),
+      });
+      if (typeof response.text !== "string" || response.text.trim().length === 0) {
+        throw new Error("Writing cleanup returned an empty draft.");
+      }
+      updateComposerDraft(response.text);
+      requestAnimationFrame(() => draftComposerRef.current?.focus());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Writing cleanup failed.");
+    } finally {
+      setComposerCleanupBusy(false);
+    }
+  }
+
+  function renderComposerWritingAssistAction(): React.ReactNode {
+    if (
+      composerHiddenByAskQuestion ||
+      settings?.composerWritingAssist === false ||
+      draft.trim().length === 0
+    ) {
+      return null;
+    }
+    const disabled = composerCleanupBusy || pendingReply;
+    return (
+      <div className={styles.composeWritingAssistRow}>
+        <button
+          type="button"
+          className={styles.composeWritingAssistButton}
+          onClick={() => void cleanupComposerDraft()}
+          disabled={disabled}
+          aria-busy={composerCleanupBusy ? "true" : undefined}
+          title="Clean up spelling and grammar without sending the message."
+        >
+          {composerCleanupBusy ? "Cleaning..." : "Fix spelling & grammar"}
+        </button>
+      </div>
+    );
+  }
+
   function handleComposerFocus() {
     setComposerFocused(true);
   }
@@ -16155,7 +16480,7 @@ function resendUserMessage(msg: Message): void {
     setMemoryToasts((current) => current.filter((item) => item.id !== toast.id));
     if (toast.kind === "rejected") return;
     if (toast.kind === "created") {
-      await api(`/api/memories/${toast.memory.id}`, { method: "DELETE" });
+      await api(`/api/memories/${encodeURIComponent(toast.memory.id)}?allowLongTerm=true`, { method: "DELETE" });
     } else {
       await api("/api/memories/restore", {
         method: "POST",
@@ -16164,8 +16489,11 @@ function resendUserMessage(msg: Message): void {
           botId: toast.memory.botId,
           conversationId: toast.memory.conversationId,
           confidence: toast.memory.confidence,
+          category: toast.memory.category,
+          tier: toast.memory.tier,
           source: toast.memory.source,
           certainty: toast.memory.certainty,
+          durability: toast.memory.durability,
           sourceMessageIds: toast.memory.sourceMessageIds ?? [],
         }),
       });
@@ -16195,7 +16523,16 @@ function resendUserMessage(msg: Message): void {
   }
 
   async function deleteMemory(id: string) {
-    await api(`/api/memories/${id}`, { method: "DELETE" });
+    await api(`/api/memories/${encodeURIComponent(id)}`, { method: "DELETE" });
+    setFocusedMemoryId((current) => (current === id ? null : current));
+    await refreshOpenMemoryViews();
+  }
+
+  async function demoteLongTermMemory(id: string) {
+    await api(`/api/memories/${encodeURIComponent(id)}/demote`, {
+      method: "POST",
+      body: JSON.stringify({ confidence: 0.34 }),
+    });
     setFocusedMemoryId((current) => (current === id ? null : current));
     await refreshOpenMemoryViews();
   }
@@ -16466,20 +16803,26 @@ function resendUserMessage(msg: Message): void {
       memories?: Array<{
         text?: string;
         confidence?: number;
+        category?: MemoryCategory;
+        tier?: MemoryTier;
         source?: "direct" | "inferred" | "compiled";
         certainty?: number;
+        durability?: number;
         sourceMessageIds?: string[];
       }>;
     }>(`/api/memories?botId=${encodeURIComponent(bot.id)}`);
     const memories: BotExportMemory[] = (memoryResult.memories ?? [])
-      .filter((memory): memory is { text: string; confidence?: number; source?: "direct" | "inferred" | "compiled"; certainty?: number; sourceMessageIds?: string[] } =>
+      .filter((memory): memory is { text: string; confidence?: number; category?: MemoryCategory; tier?: MemoryTier; source?: "direct" | "inferred" | "compiled"; certainty?: number; durability?: number; sourceMessageIds?: string[] } =>
         typeof memory.text === "string" && memory.text.trim().length > 0
       )
       .map((memory) => ({
         text: memory.text.trim(),
         confidence: memory.confidence,
+        category: memory.category,
+        tier: memory.tier,
         source: memory.source,
         certainty: memory.certainty,
+        durability: memory.durability,
         sourceMessageIds: Array.isArray(memory.sourceMessageIds) ? memory.sourceMessageIds : [],
       }));
     const exportPayload = {
@@ -16614,8 +16957,18 @@ function resendUserMessage(msg: Message): void {
               : "direct",
           confidence:
             typeof memory.confidence === "number" ? memory.confidence : undefined,
+          category:
+            memory.category === "general" || memory.category === "user" || memory.category === "bot_relation"
+              ? memory.category
+              : undefined,
+          tier:
+            memory.tier === "long_term" || memory.tier === "short_term"
+              ? memory.tier
+              : undefined,
           certainty:
             typeof memory.certainty === "number" ? memory.certainty : undefined,
+          durability:
+            typeof memory.durability === "number" ? memory.durability : undefined,
           sourceMessageIds: Array.isArray(memory.sourceMessageIds)
             ? memory.sourceMessageIds
             : [],
@@ -17139,7 +17492,11 @@ function resendUserMessage(msg: Message): void {
     // inline "Are you sure?" pill feel snappy would instead pull the
     // modal out from under the user mid-read. We skip auto-disarm for
     // them and rely on Cancel / backdrop / Esc to dismiss explicitly.
-    if (key === DELETE_ALL_KEY || key === DELETE_ALL_BOTS_KEY) return;
+    if (
+      key === DELETE_ALL_KEY ||
+      key === DELETE_ALL_COFFEE_SESSIONS_KEY ||
+      key === DELETE_ALL_BOTS_KEY
+    ) return;
     pendingDeleteTimerRef.current = setTimeout(() => {
       setPendingDeleteKey(null);
       pendingDeleteTimerRef.current = null;
@@ -17235,6 +17592,7 @@ function resendUserMessage(msg: Message): void {
   // identically from the keyboard / screen-reader side.
   const isDeleteAllActive =
     pendingDeleteKey === DELETE_ALL_KEY ||
+    pendingDeleteKey === DELETE_ALL_COFFEE_SESSIONS_KEY ||
     pendingDeleteKey === DELETE_ALL_BOTS_KEY;
   useEffect(() => {
     if (!isDeleteAllActive) {
@@ -17567,6 +17925,38 @@ function resendUserMessage(msg: Message): void {
       setSessionOpinion(previousSessionOpinion);
       setBotOpinion(previousBotOpinion);
       setError(err instanceof Error ? err.message : "Delete all failed.");
+    }
+  }
+
+  async function deleteAllCoffeeSessions() {
+    setCoffeeError(null);
+    setError(null);
+    disarmDelete();
+    const coffeeSessionIds = coffeeSessions.map((session) => session.id);
+    if (coffeeSessionIds.length === 0) return;
+    const coffeeSessionIdSet = new Set(coffeeSessionIds);
+    try {
+      await Promise.all(
+        coffeeSessionIds.map((sessionId) =>
+          api(`/api/conversations/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
+        )
+      );
+      if (
+        (coffeeConversation && coffeeSessionIdSet.has(coffeeConversation.id)) ||
+        (coffeeSelectedSessionId && coffeeSessionIdSet.has(coffeeSelectedSessionId))
+      ) {
+        resetCoffeeToPicker();
+      }
+      if (selectedId && coffeeSessionIdSet.has(selectedId)) {
+        setSelectedId(null);
+        setDetail(null);
+        setSessionOpinion(null);
+        setBotOpinion(null);
+      }
+      await refreshConversations();
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Delete Coffee Sessions failed.");
+      await refreshConversations().catch(() => undefined);
     }
   }
 
@@ -17983,7 +18373,7 @@ function resendUserMessage(msg: Message): void {
       } else {
         await refreshConversation(conversationId);
       }
-      openRightPanel("opinions");
+      openConversationMemoriesPanel();
       setDevToolsMessage(`Connection set to ${preset.label}.`);
     } catch (err) {
       try { await refreshConversation(conversationId); } catch { /* best-effort refresh */ }
@@ -18018,7 +18408,7 @@ function resendUserMessage(msg: Message): void {
       if (result.botOpinion) {
         setBotOpinion(result.botOpinion);
       }
-      openRightPanel("opinions");
+      openConversationMemoriesPanel();
       setDevToolsMessage(`Bot opinion set to ${preset.label}.`);
     } catch (err) {
       setDevToolsMessage(
@@ -18450,15 +18840,49 @@ function resendUserMessage(msg: Message): void {
     openRightPanel("memories");
   }
 
+  function openConversationMemoriesPanel() {
+    const targetBotId = detail?.hasAssistantReply
+      ? detail.lastBotId
+      : detail?.botId ?? selectedBotId ?? activeBot?.id ?? null;
+    const targetBot = targetBotId
+      ? bots.find((candidate) => candidate.id === targetBotId) ?? null
+      : null;
+    if (targetBot) {
+      openMemoriesPanelForBot(targetBot);
+      return;
+    }
+    openDefaultMemoriesPanel();
+  }
+
   function handleHeaderHubClick() {
     navigateToView("hub");
   }
 
-  function handleSandboxHeaderHomeClick() {
-    if (view !== "sandbox") {
-      navigateToView("hub");
-      return;
+  function resetCurrentModeStartSurface(): void {
+    setConversationStarterPrompts(null);
+    setSelectedId(null);
+    setDetail(null);
+    setSelectedBotId(null);
+    setChatBotOverride(undefined);
+    closeEmptyStateBotSearch();
+    if (hueFilterCenter !== null) {
+      startBotPickerReturnToAll();
+    } else {
+      setHueFilterCenter(null);
     }
+    if (view === "chat") {
+      setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
+      chatSummaryRefreshMarkerRef.current = null;
+    }
+  }
+
+  function handleChatHeaderWordmarkClick() {
+    if (view !== "chat") return;
+    resetCurrentModeStartSurface();
+  }
+
+  function handleSandboxHeaderWordmarkClick() {
+    if (view !== "sandbox") return;
     if (detail) {
       const spotlightBotId =
         chatBotOverride !== undefined
@@ -18478,20 +18902,13 @@ function resendUserMessage(msg: Message): void {
       return;
     }
     if (!pendingReplyVisible && selectedBotId !== null) {
-      setConversationStarterPrompts(null);
-      setSelectedId(null);
-      setDetail(null);
-      setSelectedBotId(null);
-      setChatBotOverride(undefined);
-      closeEmptyStateBotSearch();
-      if (hueFilterCenter !== null) {
-        startBotPickerReturnToAll();
-      } else {
-        setHueFilterCenter(null);
-      }
+      resetCurrentModeStartSurface();
       return;
     }
-    navigateToView("hub");
+    closeEmptyStateBotSearch();
+    if (hueFilterCenter !== null) {
+      startBotPickerReturnToAll();
+    }
   }
 
   function renderProfileCard(): React.JSX.Element {
@@ -18877,9 +19294,35 @@ function resendUserMessage(msg: Message): void {
     () => (
       memoryPanelScope === "all"
         ? []
-        : botMemories
+        : botMemories.filter((memory) => memoryTier(memory) === "short_term")
     ),
     [memoryPanelScope, botMemories]
+  );
+
+  const visibleLongTermMemories = useMemo(
+    () => (
+      memoryPanelScope === "all"
+        ? []
+        : botMemories.filter((memory) => memoryTier(memory) === "long_term")
+    ),
+    [memoryPanelScope, botMemories]
+  );
+
+  const longTermMemoryCounts = useMemo(() => {
+    const counts: Record<MemoryCategory, number> = {
+      general: 0,
+      user: 0,
+      bot_relation: 0,
+    };
+    for (const memory of visibleLongTermMemories) {
+      counts[memoryCategory(memory)] += 1;
+    }
+    return counts;
+  }, [visibleLongTermMemories]);
+
+  const selectedLongTermMemories = useMemo(
+    () => visibleLongTermMemories.filter((memory) => memoryCategory(memory) === longTermMemoryCategory),
+    [longTermMemoryCategory, visibleLongTermMemories]
   );
 
   const memoryBubbleLayoutById = useMemo(() => {
@@ -19074,6 +19517,15 @@ function resendUserMessage(msg: Message): void {
     () => visibleMemoryBubbles.find((memory) => memory.id === focusedMemoryId) ?? null,
     [focusedMemoryId, visibleMemoryBubbles]
   );
+
+  useEffect(() => {
+    if (visibleLongTermMemories.length === 0) return;
+    if (longTermMemoryCounts[longTermMemoryCategory] > 0) return;
+    const nextCategory = LONG_TERM_MEMORY_CATEGORIES.find(
+      (category) => longTermMemoryCounts[category.id] > 0
+    )?.id;
+    if (nextCategory) setLongTermMemoryCategory(nextCategory);
+  }, [longTermMemoryCategory, longTermMemoryCounts, visibleLongTermMemories.length]);
 
   useEffect(() => {
     if (memoryPanelScope !== "bot" && memoryPanelScope !== "default") {
@@ -19538,55 +19990,6 @@ function resendUserMessage(msg: Message): void {
       </div>
     );
   }
-
-  // ── Coffee mode hooks ──
-  // Declared here so they run on every render of HomeContent BEFORE
-  // any conditional early returns (auth gate, hub branch, etc.).
-  // Helpers/handlers + the renderCoffeeShell closure live further
-  // down next to the `if (view === "coffee") return ...` gate.
-  const [coffeeSelectedBotIds, setCoffeeSelectedBotIds] = useState<string[]>([]);
-  const [coffeeConversation, setCoffeeConversation] =
-    useState<CoffeeConversationState | null>(null);
-  const [coffeeDraft, setCoffeeDraft] = useState<string>("");
-  const [coffeeBusy, setCoffeeBusy] = useState<boolean>(false);
-  const [coffeeError, setCoffeeError] = useState<string | null>(null);
-  const [coffeeRouterReason, setCoffeeRouterReason] = useState<string | null>(null);
-  // Per-request provider override (mirrors the Sandbox toggle). The
-  // user can flip it inside the Coffee shell without touching their
-  // global setting; once they manually toggle, we stop syncing from
-  // their saved preference for the rest of the session so a global
-  // change made elsewhere doesn't quietly stomp the in-shell choice.
-  const [coffeeProvider, setCoffeeProvider] = useState<"local" | "openai">("local");
-  const [coffeeProviderTouched, setCoffeeProviderTouched] = useState<boolean>(false);
-  useEffect(() => {
-    if (coffeeProviderTouched) return;
-    if (user?.preferredProvider === "openai" || user?.preferredProvider === "local") {
-      setCoffeeProvider(user.preferredProvider);
-    }
-  }, [user?.preferredProvider, coffeeProviderTouched]);
-  // Whenever we leave Coffee view, drop the in-progress thread so a
-  // re-entry from the Hub starts fresh on the picker. (We don't persist
-  // Coffee threads in the sidebar in v0; a future round can wire them
-  // through `listConversationSummaries` once the visual treatment lands.)
-  useEffect(() => {
-    if (view !== "coffee") {
-      setCoffeeConversation(null);
-      setCoffeeSelectedBotIds([]);
-      setCoffeeDraft("");
-      setCoffeeBusy(false);
-      setCoffeeError(null);
-      setCoffeeRouterReason(null);
-    }
-  }, [view]);
-  const coffeeBotsLibrary = useMemo(
-    () =>
-      [...bots]
-        .filter((bot) => bot.chat_enabled === 1)
-        .sort((a, b) =>
-          compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
-        ),
-    [bots, resolvedTheme, panelColorHarmonyActive]
-  );
 
   // ── Auth screen ──
   if (!user) return (
@@ -20056,8 +20459,9 @@ function resendUserMessage(msg: Message): void {
   // Escape: handled globally in the same effect, so any focus target can cancel.
   const renderDeleteAllModal = () => {
     const isChats = pendingDeleteKey === DELETE_ALL_KEY;
+    const isCoffeeSessions = pendingDeleteKey === DELETE_ALL_COFFEE_SESSIONS_KEY;
     const isBots = pendingDeleteKey === DELETE_ALL_BOTS_KEY;
-    if (!isChats && !isBots) return null;
+    if (!isChats && !isCoffeeSessions && !isBots) return null;
     // One component, two modes. The sidebar Conversations × targets
     // conversations; the bot hold targets bots. We derive every
     // user-visible string + the confirm action from the armed key so both
@@ -20066,15 +20470,29 @@ function resendUserMessage(msg: Message): void {
     const protectedBotCount = isBots
       ? bots.filter((bot) => bot.delete_protected === 1).length
       : 0;
-    const count = isChats ? conversations.length : Math.max(0, bots.length - protectedBotCount);
+    const count = isChats
+      ? conversations.length
+      : isCoffeeSessions
+        ? coffeeSessions.length
+        : Math.max(0, bots.length - protectedBotCount);
     const noun = isChats
       ? count === 1 ? "conversation" : "conversations"
+      : isCoffeeSessions
+        ? count === 1 ? "Coffee Session" : "Coffee Sessions"
       : count === 1 ? "bot" : "bots";
-    const title = isChats ? "Delete all chats?" : "Delete all unprotected bots?";
+    const title = isChats
+      ? "Delete all chats?"
+      : isCoffeeSessions
+        ? "Delete all Coffee Sessions?"
+        : "Delete all unprotected bots?";
     const body = isChats
       ? count === 1
         ? "This will permanently remove your only conversation."
         : `This will permanently remove all ${count} conversations.`
+      : isCoffeeSessions
+        ? count === 1
+          ? "This will permanently remove your only Coffee Session."
+          : `This will permanently remove all ${count} Coffee Sessions.`
       : count === 1
         ? "This will permanently remove your only unprotected bot."
         : `This will permanently remove all ${count} unprotected ${noun}.`;
@@ -20082,9 +20500,12 @@ function resendUserMessage(msg: Message): void {
     // the two scopes have different "untouched" surfaces.
     const coda = isChats
       ? " Images and memories stay."
+      : isCoffeeSessions
+        ? " Other chats, bots, images, and memories stay."
       : `${protectedBotCount > 0 ? " Protected bots will be kept." : ""} Chats using deleted bots stay (they fall back to Default).`;
     const onConfirm = () => {
       if (isChats) void deleteAllConversations();
+      else if (isCoffeeSessions) void deleteAllCoffeeSessions();
       else void deleteAllBots();
     };
     return (
@@ -20327,7 +20748,7 @@ function resendUserMessage(msg: Message): void {
     );
   };
 
-  /** Conversation tools — Settings / Memories / Edit bot / Opinions / Export / Delete.
+  /** Conversation tools — Settings / Memories / Edit bot / Export / Delete.
    *  Desktop renders inline in the chat header bar.
    *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
   const renderChatOverflowGear = (): React.JSX.Element | null => {
@@ -20379,10 +20800,6 @@ function resendUserMessage(msg: Message): void {
     const handleEditBot = () => {
       closeMenu();
       openActiveBotCustomizer();
-    };
-    const handleOpinions = () => {
-      closeMenu();
-      openRightPanel("opinions");
     };
     const handleExport = () => {
       closeMenu();
@@ -20534,18 +20951,6 @@ function resendUserMessage(msg: Message): void {
             title={activeBot ? "Bot memories" : "Default Prism memories"}
           >
             <span className={styles.chatHeaderActionText}>Memories</span>
-          </button>,
-        );
-        accordionButtons.push(
-          <button
-            key="opinions"
-            type="button"
-            className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled || privateChatActive}
-            onClick={handleOpinions}
-            title={privateChatActive ? "Unavailable in private chats" : "Conversation tone"}
-          >
-            <span className={styles.chatHeaderActionText}>Tone</span>
           </button>,
         );
       }
@@ -20747,21 +21152,6 @@ function resendUserMessage(msg: Message): void {
                 }}
               >
                 Images
-              </button>
-            )}
-            {!showSettingsOnly && view !== "chat" && canExport && (
-              <button
-                type="button"
-                role="menuitem"
-                className={styles.chatOverflowMenuItem}
-                disabled={privateChatActive || !canExport}
-                onClick={(event) => {
-                  swallowMenuEvent(event);
-                  handleOpinions();
-                }}
-                title={privateChatActive ? "Unavailable in private chats" : "Conversation tone"}
-              >
-                Tone
               </button>
             )}
             {!showSettingsOnly && canBotActions && (
@@ -21600,7 +21990,65 @@ function resendUserMessage(msg: Message): void {
     );
   };
 
-  // ── Shared right-hand panels (Settings / Bots / Images / Opinions) ──
+  const renderMemoryConnectionMeter = (): React.JSX.Element => {
+    if (!sessionOpinion) {
+      return (
+        <section
+          className={styles.memoryConnectionMeter}
+          data-empty="true"
+          aria-label="Connection tone"
+        >
+          <div className={styles.memoryConnectionGauge} aria-hidden="true">
+            <span />
+          </div>
+          <div className={styles.memoryConnectionCopy}>
+            <span className={styles.opinionEyebrow}>Connection</span>
+            <strong>Connection read is warming up</strong>
+            <p>Send a message to generate the first tone read for this chat.</p>
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <section
+        className={styles.memoryConnectionMeter}
+        data-band={sessionOpinion.band}
+        data-trend={sessionOpinion.trend}
+        style={
+          {
+            "--opinion-score": `${sessionOpinion.score}%`,
+          } as React.CSSProperties
+        }
+        aria-label={`${opinionBandTitle(sessionOpinion.band)} connection, ${sessionOpinion.score} percent, ${opinionScoreCaption(sessionOpinion.score)}`}
+      >
+        <div className={styles.memoryConnectionGauge} aria-hidden="true">
+          <span />
+        </div>
+        <div className={styles.memoryConnectionCopy}>
+          <div className={styles.memoryConnectionHeader}>
+            <span className={styles.opinionEyebrow}>Connection</span>
+            <strong>
+              {opinionBandTitle(sessionOpinion.band)} · {sessionOpinion.score}%
+            </strong>
+          </div>
+          <p>{opinionBandDescription(sessionOpinion.band)}</p>
+          <small>{opinionTrendDescription(sessionOpinion.trend)}</small>
+          {botOpinion && memoryPanelScope !== "all" ? (
+            <div
+              className={styles.memoryConnectionBotLine}
+              data-band={botOpinion.band}
+            >
+              <span>{memoryPanelScope === "default" ? "With Prism" : "With this bot"}</span>
+              <strong>{botOpinionBandTitle(botOpinion.band)} · {botOpinion.score}%</strong>
+            </div>
+          ) : null}
+        </div>
+      </section>
+    );
+  };
+
+  // ── Shared right-hand panels (Settings / Bots / Images / Memories) ──
   // Both the Chat shell and the Sandbox shell reach these drawers
   // via the sidebar footer. Extracted into a single helper so the
   // surfaces stay in lockstep — a fix to the Bots panel shouldn't need
@@ -21739,9 +22187,10 @@ function resendUserMessage(msg: Message): void {
                 ? `${selectedMemoryFamilyDirectory?.letter ?? "?"} family: each orb is a bot; orbit dots indicate saved memories.`
                 : "PRISM directories and your shared Prism memory. Tap to drill in."
               : memoryPanelScope === "default"
-                ? "Prism also reflects on patterns it notices across your bots. Uncertain memories appear as smaller unlabeled bubbles."
-                : "Memories this bot has gathered across chats. Uncertain memories appear as smaller unlabeled bubbles."}
+                ? "Prism short-term memories float here; protected long-term memories stack below by category."
+                : "Short-term memories float here; protected long-term memories stack below by category."}
           </p>
+          {memoryPanelScope === "bot" ? renderMemoryConnectionMeter() : null}
           {memoryPanelScope === "all" && !memoryPanelSelectedFamily ? (
             <div className={styles.memoryBubbleCloud} role="list" aria-label="PRISM memory directories">
               <button
@@ -21859,81 +22308,131 @@ function resendUserMessage(msg: Message): void {
                 <p>Add or recolor bots in this PRISM category to populate it.</p>
               </div>
             )
-          ) : visibleMemoryBubbles.length > 0 ? (
-            <ul
-              className={styles.memoryBubbleCloud}
-              onClick={(event) => {
-                if (event.target === event.currentTarget) {
-                  setFocusedMemoryId(null);
-                }
-              }}
-            >
-              {visibleMemoryBubbles.map((memory) => {
-                const layout = memoryBubbleLayoutById.get(memory.id);
-                const uncertain = layout?.uncertain ?? false;
-                const selected = focusedMemoryId === memory.id;
-                const dimmed = Boolean(focusedMemoryId && !selected);
-                const inferred = isAssumptionMemory(memory);
-                const signalPercent = Math.round(memoryBubbleSignalValue(memory) * 100);
-                return (
-                  <li
-                    key={`memory:${memoryPhysicsSeed}:${memory.id}`}
-                    className={styles.memoryBubble}
-                    data-clickable="true"
-                    data-memory-uncertain={uncertain ? "true" : undefined}
-                    data-memory-selected={selected ? "true" : undefined}
-                    data-memory-dimmed={dimmed ? "true" : undefined}
-                    data-memory-inferred={inferred ? "true" : undefined}
-                    data-memory-physics-id={`memory:${memory.id}`}
-                    style={{
-                      ...layout?.style,
-                      ...(inferred
-                        ? { "--memory-assumption-opacity": assumptionMemoryOpacity(memory) } as React.CSSProperties
-                        : {}),
-                    }}
-                    title={memory.text}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`${memory.text}. ${inferred ? "Certainty" : "Confidence"} ${signalPercent} percent.`}
-                    onClick={() => {
-                      setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
-                    }}
-                  >
-                    {selected ? (
-                      <span className={styles.memoryBubbleScore}>
-                        {signalPercent}%
-                      </span>
-                    ) : uncertain ? (
-                      <span className={styles.memoryUncertainCore} aria-hidden="true" />
-                    ) : (
-                      <p>{memory.text}</p>
-                    )}
-                  </li>
-                );
-              })}
-              {selectedVisibleMemory && (
-                <li className={styles.memoryFullProseCard} role="status" aria-live="polite">
-                  <strong>{isAssumptionMemory(selectedVisibleMemory) ? "Assumption" : "Memory"}</strong>
-                  <p>{selectedVisibleMemory.text}</p>
-                  <button
-                    type="button"
-                    className={styles.memoryFullProseDeleteButton}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void deleteMemory(selectedVisibleMemory.id);
-                    }}
-                    aria-label={`Delete memory: ${selectedVisibleMemory.text}`}
-                  >
-                    Delete memory
-                  </button>
-                </li>
+          ) : visibleMemoryBubbles.length > 0 || visibleLongTermMemories.length > 0 ? (
+            <div className={styles.memoryPanelMemoryStacks}>
+              {visibleMemoryBubbles.length > 0 ? (
+                <ul
+                  className={styles.memoryBubbleCloud}
+                  onClick={(event) => {
+                    if (event.target === event.currentTarget) {
+                      setFocusedMemoryId(null);
+                    }
+                  }}
+                >
+                  {visibleMemoryBubbles.map((memory) => {
+                    const layout = memoryBubbleLayoutById.get(memory.id);
+                    const uncertain = layout?.uncertain ?? false;
+                    const selected = focusedMemoryId === memory.id;
+                    const dimmed = Boolean(focusedMemoryId && !selected);
+                    const inferred = isAssumptionMemory(memory);
+                    const signalPercent = Math.round(memoryBubbleSignalValue(memory) * 100);
+                    return (
+                      <li
+                        key={`memory:${memoryPhysicsSeed}:${memory.id}`}
+                        className={styles.memoryBubble}
+                        data-clickable="true"
+                        data-memory-uncertain={uncertain ? "true" : undefined}
+                        data-memory-selected={selected ? "true" : undefined}
+                        data-memory-dimmed={dimmed ? "true" : undefined}
+                        data-memory-inferred={inferred ? "true" : undefined}
+                        data-memory-physics-id={`memory:${memory.id}`}
+                        style={{
+                          ...layout?.style,
+                          ...(inferred
+                            ? { "--memory-assumption-opacity": assumptionMemoryOpacity(memory) } as React.CSSProperties
+                            : {}),
+                        }}
+                        title={memory.text}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${memory.text}. ${inferred ? "Certainty" : "Confidence"} ${signalPercent} percent.`}
+                        onClick={() => {
+                          setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
+                        }}
+                      >
+                        {selected ? (
+                          <span className={styles.memoryBubbleScore}>
+                            {signalPercent}%
+                          </span>
+                        ) : (
+                          <span className={styles.memoryUncertainCore} aria-hidden="true" />
+                        )}
+                      </li>
+                    );
+                  })}
+                  {selectedVisibleMemory && (
+                    <li className={styles.memoryFullProseCard} role="status" aria-live="polite">
+                      <strong>{isAssumptionMemory(selectedVisibleMemory) ? "Assumption" : "Memory"}</strong>
+                      <p>{selectedVisibleMemory.text}</p>
+                      <button
+                        type="button"
+                        className={styles.memoryFullProseDeleteButton}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void deleteMemory(selectedVisibleMemory.id);
+                        }}
+                        aria-label={`Delete memory: ${selectedVisibleMemory.text}`}
+                      >
+                        Delete memory
+                      </button>
+                    </li>
+                  )}
+                </ul>
+              ) : (
+                <div className={`${styles.memoryBubbleCloud} ${styles.memoryShortTermEmpty}`}>
+                  <strong>No short-term memories right now</strong>
+                  <p>Long-term memories are listed below, where they stay easier to review.</p>
+                </div>
               )}
-            </ul>
+              {visibleLongTermMemories.length > 0 && (
+                <section className={styles.longTermMemorySection} aria-label="Long-term memories">
+                  <div className={styles.longTermMemoryHeader}>
+                    <div>
+                      <strong>Long-term memories</strong>
+                      <span>Protected memories that are stable enough to matter later.</span>
+                    </div>
+                    <div className={styles.longTermMemoryTabs} role="tablist" aria-label="Long-term memory categories">
+                      {LONG_TERM_MEMORY_CATEGORIES.map((category) => (
+                        <button
+                          key={category.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={longTermMemoryCategory === category.id}
+                          data-active={longTermMemoryCategory === category.id ? "true" : undefined}
+                          onClick={() => setLongTermMemoryCategory(category.id)}
+                        >
+                          {category.label}
+                          <span>{longTermMemoryCounts[category.id]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {selectedLongTermMemories.length > 0 ? (
+                    <ul className={styles.longTermMemoryList}>
+                      {selectedLongTermMemories.map((memory) => (
+                        <li key={`long-term:${memory.id}`}>
+                          <p>{memory.text}</p>
+                          <button
+                            type="button"
+                            onClick={() => void demoteLongTermMemory(memory.id)}
+                            aria-label={`Move long-term memory back to short-term: ${memory.text}`}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className={styles.longTermMemoryEmpty}>No long-term memories in this category yet.</p>
+                  )}
+                </section>
+              )}
+            </div>
           ) : (
             <div className={styles.memoryEmptyState}>
               <strong>No memories yet</strong>
@@ -21950,123 +22449,6 @@ function resendUserMessage(msg: Message): void {
           )}
           </div>
           {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-        </div>
-      )}
-
-      {/* ── Opinions panel ── */}
-      {panel === "opinions" && (
-        <div
-          className={`${styles.panel} ${styles.panelOpinions}`}
-          data-band={sessionOpinion?.band}
-          data-trend={sessionOpinion?.trend}
-          data-closing={panelClosing ? "true" : undefined}
-        >
-          <div className={styles.panelHeader}>
-            <h3>Connection</h3>
-            <button
-              type="button"
-              className={styles.panelClose}
-              onClick={closePanel}
-              aria-label="Close panel"
-              data-glyph-tooltip="Close panel"
-            >
-              ×
-            </button>
-          </div>
-          <div className={styles.opinionPanelBody}>
-            <p className={styles.opinionPanelIntro}>
-              A soft read on how this exchange feels right now. It is context, not a grade.
-            </p>
-            {sessionOpinion ? (
-              (() => {
-                const recentReasons = visibleOpinionReasons(sessionOpinion);
-                return (
-                  <>
-                    <section className={styles.opinionStateCard} aria-label="Current connection tone">
-                      <div
-                        className={styles.opinionOrbShell}
-                        data-band={sessionOpinion.band}
-                        data-trend={sessionOpinion.trend}
-                        style={
-                          {
-                            "--opinion-score": `${sessionOpinion.score}%`,
-                          } as React.CSSProperties
-                        }
-                        aria-label={`${opinionBandTitle(sessionOpinion.band)} connection, ${sessionOpinion.score} percent`}
-                      >
-                        <span className={styles.opinionOrbRing} aria-hidden="true" />
-                        <span className={styles.opinionOrbRing} aria-hidden="true" />
-                        <span className={styles.opinionOrbRing} aria-hidden="true" />
-                        <div className={styles.opinionOrbCore}>
-                          <strong>{opinionBandTitle(sessionOpinion.band)}</strong>
-                          <small>{sessionOpinion.score}% · {opinionScoreCaption(sessionOpinion.score)}</small>
-                        </div>
-                      </div>
-                      <div className={styles.opinionStateText}>
-                        <span className={styles.opinionEyebrow}>Current feel</span>
-                        <strong>{opinionBandDescription(sessionOpinion.band)}</strong>
-                        <p>{opinionTrendDescription(sessionOpinion.trend)}</p>
-                      </div>
-                    </section>
-                    {botOpinion && (
-                      <section
-                        className={styles.botOpinionCard}
-                        data-band={botOpinion.band}
-                        data-boundary={botOpinion.boundaryLevel}
-                        aria-label="Long-term relationship with this bot"
-                      >
-                        <div className={styles.opinionSummaryHeader}>
-                          <span>With this bot</span>
-                          <strong data-trend={botOpinion.trend}>
-                            {botOpinionBandTitle(botOpinion.band)} · {botOpinion.score}%
-                          </strong>
-                        </div>
-                        <p>{botOpinionBandDescription(botOpinion)}</p>
-                        <small>{botOpinion.lastReason}</small>
-                        <div className={styles.opinionGuidance}>
-                          <span>Repair path</span>
-                          <p>{botOpinionRepairGuidance(botOpinion)}</p>
-                        </div>
-                      </section>
-                    )}
-                    <section className={styles.opinionSummary} aria-label="Latest tone shift">
-                      <div className={styles.opinionSummaryHeader}>
-                        <span>What changed?</span>
-                        <strong data-trend={sessionOpinion.trend}>{opinionTrendLabel(sessionOpinion.trend)}</strong>
-                      </div>
-                      <p>{sessionOpinion.lastReason}</p>
-                      <small>
-                        Last updated{" "}
-                        {new Date(sessionOpinion.updatedAt).toLocaleTimeString([], {
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
-                      </small>
-                    </section>
-                    <section className={styles.opinionGuidance} aria-label="What helps next">
-                      <span>What helps next?</span>
-                      <p>{opinionNextStep(sessionOpinion.trend)}</p>
-                    </section>
-                    {recentReasons.length > 0 && (
-                      <section className={styles.opinionRecentSection} aria-label="Recent tone shifts">
-                        <span className={styles.opinionEyebrow}>Recent shifts</span>
-                        <ul className={styles.opinionReasonList}>
-                          {recentReasons.map((reason, index) => (
-                            <li key={`${reason}-${index}`}>{reason}</li>
-                          ))}
-                        </ul>
-                      </section>
-                    )}
-                  </>
-                );
-              })()
-            ) : (
-              <div className={styles.opinionEmptyState}>
-                <strong>Connection read is warming up</strong>
-                <p>Send a message to generate the first tone read for this chat.</p>
-              </div>
-            )}
-                  </div>
         </div>
       )}
 
@@ -22155,6 +22537,19 @@ function resendUserMessage(msg: Message): void {
                 </button>
               )}
               <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
+              <label
+                className={styles.checkbox}
+                title="Uses your browser's built-in spell check, grammar hints, and autocorrect when available."
+              >
+                <input
+                  type="checkbox"
+                  checked={settings.composerWritingAssist}
+                  onChange={e =>
+                    setSettings(p => p ? { ...p, composerWritingAssist: e.target.checked } : p)
+                  }
+                />
+                Composer spelling & grammar
+              </label>
               <button
                 type="button"
                 className={styles.settingsInfoButton}
@@ -22577,7 +22972,7 @@ function resendUserMessage(msg: Message): void {
                 {!botPanelLibraryEnabled && editingBot ? (
                   <button
                     type="button"
-                    className={styles.panelHeaderIconButton}
+                    className={`${styles.panelHeaderIconButton} ${styles.panelHeaderSaveButton}`}
                     onClick={() => void exportBotProfile(editingBot)}
                     disabled={busy}
                     aria-label="Export bot profile as .bot (JSON)"
@@ -22590,7 +22985,7 @@ function resendUserMessage(msg: Message): void {
                 ) : null}
                 <button
                   type="button"
-                  className={styles.panelHeaderIconButton}
+                  className={`${styles.panelHeaderIconButton} ${styles.panelHeaderImportButton}`}
                   onClick={openImportBotModal}
                   aria-label="Import bot from .bot file"
                   data-glyph-tooltip="Import a Prism .bot export"
@@ -23494,40 +23889,342 @@ function resendUserMessage(msg: Message): void {
     coffeeSelectedBotIds.length <= COFFEE_GROUP_MAX_SIZE_CLIENT;
   const toggleCoffeeBot = (botId: string) => {
     setCoffeeError(null);
-    setCoffeeSelectedBotIds((current) => {
-      if (current.includes(botId)) {
-        return current.filter((id) => id !== botId);
+    setCoffeeSelectedSeatBotIds((current) => {
+      const existingIndex = current.findIndex((id) => id === botId);
+      if (existingIndex >= 0) {
+        return current.map((id, index) => (index === existingIndex ? null : id));
       }
-      if (current.length >= COFFEE_GROUP_MAX_SIZE_CLIENT) return current;
-      return [...current, botId];
+      const emptyIndexes = current
+        .map((id, index) => (id === null ? index : -1))
+        .filter((index) => index >= 0);
+      if (emptyIndexes.length === 0) return current;
+      const nextSeatIndex = emptyIndexes[Math.floor(Math.random() * emptyIndexes.length)] ?? emptyIndexes[0]!;
+      return current.map((id, index) => (index === nextSeatIndex ? botId : id));
     });
+  };
+  const clearCoffeeLoopTimer = () => {
+    if (coffeeLoopTimerRef.current) {
+      clearTimeout(coffeeLoopTimerRef.current);
+      coffeeLoopTimerRef.current = null;
+    }
+  };
+  const clearCoffeeArrivalTimer = () => {
+    if (coffeeArrivalTimerRef.current) {
+      clearTimeout(coffeeArrivalTimerRef.current);
+      coffeeArrivalTimerRef.current = null;
+    }
+  };
+  const abortCoffeeRequests = () => {
+    coffeeTurnAbortRef.current?.abort();
+    coffeeContinueAbortRef.current?.abort();
+    coffeeTurnAbortRef.current = null;
+    coffeeContinueAbortRef.current = null;
+  };
+  const setCoffeeAutoplayPausedValue = (paused: boolean) => {
+    coffeeAutoplayPausedRef.current = paused;
+    setCoffeeAutoplayPaused(paused);
+  };
+  const coffeeBotVisualStyle = (bot: Bot | null | undefined): React.CSSProperties => {
+    const accent = bot?.color
+      ? normalizeAccentForTheme(bot.color, resolvedTheme)
+      : "#f5f5f5";
+    return {
+      "--coffee-bot-color": accent,
+      "--coffee-bot-text": pickReadableText(accent),
+    } as React.CSSProperties;
+  };
+  const coffeeSeatVisualStyle = (
+    bot: Bot,
+    seatIndex: number,
+    layoutIndex: number,
+    seatCount: number
+  ): React.CSSProperties => {
+    const sessionSeed = coffeeConversation?.id ?? coffeeSelectedSessionId ?? "draft";
+    return {
+      ...coffeeBotVisualStyle(bot),
+      "--coffee-cup-rotation-bias": coffeeCupRotationBias(
+        `${sessionSeed}:${bot.id}:${seatIndex}:${layoutIndex}:${seatCount}`
+      ),
+    } as React.CSSProperties;
+  };
+  const coffeeBotSubtitle = (bot: Bot): string => {
+    const clean = bot.system_prompt.replace(/\s+/g, " ").trim();
+    if (!clean) return "Coffee guest";
+    return clean.length > 54 ? `${clean.slice(0, 51)}...` : clean;
+  };
+  const coffeeSessionBots = (session: Pick<ConversationSummary, "botGroupIds">): Bot[] =>
+    (session.botGroupIds ?? [])
+      .map((botId) => coffeeBotsById.get(botId))
+      .filter((bot): bot is Bot => Boolean(bot));
+  const coffeeActiveBotIds = coffeeConversation?.botGroupIds ?? coffeeSelectedBotIds;
+  const coffeeActiveSeatBotIds =
+    coffeeConversation?.coffeeSeatBotIds ??
+    (coffeeConversation
+      ? coffeeSeatsFromBotIds(coffeeConversation.botGroupIds)
+      : coffeeSelectedSeatBotIds);
+  const coffeeSearchTerm = coffeeSearch.trim().toLowerCase();
+  const coffeeFilteredBots = coffeeBotsLibrary.filter((bot) => {
+    if (!coffeeSearchTerm) return true;
+    return (
+      bot.name.toLowerCase().includes(coffeeSearchTerm) ||
+      bot.system_prompt.toLowerCase().includes(coffeeSearchTerm)
+    );
+  });
+  const resetCoffeeToPicker = () => {
+    clearCoffeeArrivalTimer();
+    clearCoffeeLoopTimer();
+    abortCoffeeRequests();
+    setCoffeeConversation(null);
+    setCoffeeSelectedSessionId(null);
+    setCoffeeSelectedSeatBotIds(emptyCoffeeSeatBotIds());
+    setCoffeeDraft("");
+    setCoffeeBusy(false);
+    setCoffeeAutoBusy(false);
+    setCoffeeAutoplayPausedValue(false);
+    setCoffeeError(null);
+    setCoffeeRouterReason(null);
+    closeCoffeeTranscript();
+    setCoffeeArrivedBotIds([]);
+    setCoffeeSessionEndsAtMs(null);
+    setCoffeeSessionPhase("selecting");
+  };
+  const scheduleCoffeeAutonomousTurn = (
+    conversationId: string,
+    endsAtMs = coffeeSessionEndsAtMs,
+    ignoreDraft = false
+  ) => {
+    clearCoffeeLoopTimer();
+    if (!endsAtMs || Date.now() >= endsAtMs) {
+      setCoffeeSessionPhase("finished");
+      return;
+    }
+    if (coffeeAutoplayPausedRef.current) return;
+    if (!ignoreDraft && coffeeDraft.trim().length > 0) return;
+    const delay =
+      COFFEE_REPLY_DELAY_MIN_MS +
+      Math.floor(Math.random() * (COFFEE_REPLY_DELAY_MAX_MS - COFFEE_REPLY_DELAY_MIN_MS));
+    const scheduledEndsAtMs = endsAtMs;
+    coffeeLoopTimerRef.current = setTimeout(() => {
+      void continueCoffeeSession(conversationId, scheduledEndsAtMs);
+    }, delay);
+  };
+  const startCoffeeArrivalSequence = (
+    conversation: CoffeeConversationState,
+    scenario: CoffeeArrivalScenario
+  ) => {
+    const botIds = conversation.botGroupIds ?? [];
+    clearCoffeeArrivalTimer();
+    clearCoffeeLoopTimer();
+    setCoffeeArrivalScenario(scenario);
+    setCoffeeSessionPhase("arriving");
+    const initialCount =
+      scenario === "full-table-present"
+        ? botIds.length
+        : scenario === "partial-table-in-progress"
+          ? Math.min(2, botIds.length)
+          : 0;
+    setCoffeeArrivedBotIds(botIds.slice(0, initialCount));
+    let nextIndex = initialCount;
+    const advance = () => {
+      if (nextIndex < botIds.length) {
+        nextIndex += 1;
+        setCoffeeArrivedBotIds(botIds.slice(0, nextIndex));
+        coffeeArrivalTimerRef.current = setTimeout(advance, COFFEE_ARRIVAL_STEP_MS);
+        return;
+      }
+      coffeeArrivalTimerRef.current = setTimeout(() => {
+        const endsAt = Date.now() + COFFEE_SESSION_DURATION_MS;
+        setCoffeeSessionEndsAtMs(endsAt);
+        setCoffeeSessionPhase("live");
+        scheduleCoffeeAutonomousTurn(conversation.id, endsAt, true);
+      }, COFFEE_ARRIVAL_SETTLE_MS);
+    };
+    coffeeArrivalTimerRef.current = setTimeout(advance, COFFEE_ARRIVAL_STEP_MS);
+  };
+  const createCoffeeSession = async (
+    options: { startArrival?: boolean } = {}
+  ): Promise<CoffeeConversationState | null> => {
+    if (coffeeBusy) return null;
+    if (!coffeeSelectionValid) {
+      setCoffeeError(
+        `Pick ${COFFEE_GROUP_MIN_SIZE_CLIENT}-${COFFEE_GROUP_MAX_SIZE_CLIENT} bots before starting.`
+      );
+      return null;
+    }
+    const shouldStartArrival = options.startArrival ?? true;
+    setCoffeeBusy(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{
+        ok: true;
+        conversation: CoffeeConversationState;
+        arrivalScenario: CoffeeArrivalScenario;
+      }>("/api/coffee/sessions", {
+        method: "POST",
+        body: JSON.stringify({ groupBotIds: coffeeSelectedSeatBotIds }),
+      });
+      setCoffeeConversation(response.conversation);
+      setCoffeeSelectedSessionId(response.conversation.id);
+      setCoffeeSelectedSeatBotIds(
+        response.conversation.coffeeSeatBotIds ??
+          coffeeSeatsFromBotIds(response.conversation.botGroupIds ?? coffeeSelectedBotIds)
+      );
+      setCoffeeAutoplayPausedValue(false);
+      if (!shouldStartArrival) {
+        setCoffeeArrivedBotIds(response.conversation.botGroupIds ?? []);
+        setCoffeeSessionEndsAtMs(null);
+        setCoffeeSessionPhase("live");
+        await refreshConversations();
+        return response.conversation;
+      }
+      await refreshConversations();
+      startCoffeeArrivalSequence(response.conversation, response.arrivalScenario);
+      return response.conversation;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to start Coffee Session.");
+      setCoffeeSessionPhase("selecting");
+      return null;
+    } finally {
+      setCoffeeBusy(false);
+    }
+  };
+  const openCoffeeSession = async (conversationId: string) => {
+    if (coffeeBusy || coffeeAutoBusy) return;
+    clearCoffeeArrivalTimer();
+    clearCoffeeLoopTimer();
+    abortCoffeeRequests();
+    setCoffeeBusy(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{ ok: true; conversation: CoffeeConversationState }>(
+        `/api/conversations/${encodeURIComponent(conversationId)}`
+      );
+      if (response.conversation.mode !== "coffee") {
+        throw new Error("That is not a Coffee Session.");
+      }
+      const groupIds = response.conversation.botGroupIds ?? [];
+      setCoffeeConversation(response.conversation);
+      setCoffeeSelectedSessionId(response.conversation.id);
+      setCoffeeSelectedSeatBotIds(
+        response.conversation.coffeeSeatBotIds ?? coffeeSeatsFromBotIds(groupIds)
+      );
+      setCoffeeArrivedBotIds(groupIds);
+      closeCoffeeTranscript();
+      setCoffeeSessionEndsAtMs(null);
+      setCoffeeSessionPhase("preview");
+      setCoffeeAutoplayPausedValue(false);
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to open Coffee Session.");
+    } finally {
+      setCoffeeBusy(false);
+    }
+  };
+  const joinPreviewedCoffeeSession = () => {
+    if (!coffeeConversation || coffeeSessionPhase !== "preview") return;
+    clearCoffeeArrivalTimer();
+    clearCoffeeLoopTimer();
+    abortCoffeeRequests();
+    const groupIds = coffeeConversation.botGroupIds ?? [];
+    const endsAt = Date.now() + COFFEE_SESSION_DURATION_MS;
+    setCoffeeArrivedBotIds(groupIds);
+    setCoffeeSessionEndsAtMs(endsAt);
+    setCoffeeSessionPhase("live");
+    closeCoffeeTranscript();
+    setCoffeeAutoplayPausedValue(false);
+    scheduleCoffeeAutonomousTurn(coffeeConversation.id, endsAt, true);
+  };
+  const continueCoffeeSession = async (
+    conversationId = coffeeConversation?.id,
+    endsAtOverride = coffeeSessionEndsAtMs,
+    directedSpeakerBotId?: string
+  ) => {
+    if (!conversationId || coffeeBusy || coffeeAutoBusy) return;
+    if (endsAtOverride && Date.now() >= endsAtOverride) {
+      setCoffeeSessionPhase("finished");
+      return;
+    }
+    clearCoffeeLoopTimer();
+    setCoffeeAutoBusy(true);
+    setCoffeeError(null);
+    const abortController = new AbortController();
+    coffeeContinueAbortRef.current = abortController;
+    try {
+      const response = await api<{
+        ok: true;
+        conversation: CoffeeConversationState;
+        speakerBotId: string;
+        routerReason?: string;
+      }>(`/api/coffee/sessions/${encodeURIComponent(conversationId)}/continue`, {
+        method: "POST",
+        body: JSON.stringify({
+          preferredProvider: coffeeProvider,
+          ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
+        }),
+        signal: abortController.signal,
+      });
+      setCoffeeConversation(response.conversation);
+      setCoffeeRouterReason(response.routerReason ?? null);
+      await refreshConversations();
+      if (!coffeeAutoplayPausedRef.current) {
+        scheduleCoffeeAutonomousTurn(response.conversation.id, endsAtOverride, true);
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setCoffeeError(err instanceof Error ? err.message : "Failed to continue Coffee Session.");
+    } finally {
+      if (coffeeContinueAbortRef.current === abortController) {
+        coffeeContinueAbortRef.current = null;
+      }
+      setCoffeeAutoBusy(false);
+    }
+  };
+  const toggleCoffeeAutoplay = () => {
+    if (!coffeeConversation || coffeeSessionPhase === "finished") return;
+    setCoffeeAutoplayPaused((current) => {
+      const nextPaused = !current;
+      coffeeAutoplayPausedRef.current = nextPaused;
+      if (nextPaused) {
+        clearCoffeeLoopTimer();
+        coffeeContinueAbortRef.current?.abort();
+        setCoffeeAutoBusy(false);
+      } else if (coffeeSessionPhase === "live") {
+        const endsAt = coffeeSessionEndsAtMs ?? Date.now() + COFFEE_SESSION_DURATION_MS;
+        setCoffeeSessionEndsAtMs(endsAt);
+        scheduleCoffeeAutonomousTurn(coffeeConversation.id, endsAt, true);
+      }
+      return nextPaused;
+    });
+  };
+  const triggerDirectedCoffeeTurn = async (botId: string) => {
+    if (!coffeeConversation || !coffeeAutoplayPaused || coffeeSessionPhase !== "live") return;
+    await continueCoffeeSession(coffeeConversation.id, coffeeSessionEndsAtMs, botId);
   };
   const sendCoffeeTurn = async () => {
     const trimmed = coffeeDraft.trim();
     if (!trimmed) return;
     if (coffeeBusy) return;
-    if (!coffeeConversation) {
-      if (!coffeeSelectionValid) {
-        setCoffeeError(
-          `Pick ${COFFEE_GROUP_MIN_SIZE_CLIENT}-${COFFEE_GROUP_MAX_SIZE_CLIENT} bots before starting.`
-        );
-        return;
-      }
+    clearCoffeeLoopTimer();
+    let activeConversation = coffeeConversation;
+    let activeEndsAt = coffeeSessionEndsAtMs;
+    if (!activeConversation) {
+      activeConversation = await createCoffeeSession({ startArrival: false });
+      if (!activeConversation) return;
+      activeEndsAt = Date.now() + COFFEE_SESSION_DURATION_MS;
+      setCoffeeSessionEndsAtMs(activeEndsAt);
+    } else if (coffeeSessionPhase === "preview") {
+      abortCoffeeRequests();
+      const groupIds = activeConversation.botGroupIds ?? [];
+      activeEndsAt = Date.now() + COFFEE_SESSION_DURATION_MS;
+      setCoffeeArrivedBotIds(groupIds);
+      setCoffeeSessionEndsAtMs(activeEndsAt);
+      setCoffeeSessionPhase("live");
+      setCoffeeAutoplayPausedValue(false);
     }
     setCoffeeBusy(true);
     setCoffeeError(null);
+    const abortController = new AbortController();
+    coffeeTurnAbortRef.current = abortController;
     try {
-      const body = coffeeConversation
-        ? {
-            conversationId: coffeeConversation.id,
-            message: trimmed,
-            preferredProvider: coffeeProvider,
-          }
-        : {
-            groupBotIds: coffeeSelectedBotIds,
-            message: trimmed,
-            preferredProvider: coffeeProvider,
-          };
       const response = await api<{
         ok: true;
         conversation: CoffeeConversationState;
@@ -23535,157 +24232,218 @@ function resendUserMessage(msg: Message): void {
         routerReason?: string;
       }>("/api/coffee/turn", {
         method: "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          conversationId: activeConversation.id,
+          message: trimmed,
+          preferredProvider: coffeeProvider,
+        }),
+        signal: abortController.signal,
       });
       setCoffeeConversation(response.conversation);
+      setCoffeeSelectedSessionId(response.conversation.id);
       setCoffeeRouterReason(response.routerReason ?? null);
       setCoffeeDraft("");
+      await refreshConversations();
+      if (coffeeSessionPhase !== "finished") {
+        const endsAt = activeEndsAt ?? Date.now() + COFFEE_SESSION_DURATION_MS;
+        setCoffeeSessionEndsAtMs(endsAt);
+        setCoffeeSessionPhase("live");
+        scheduleCoffeeAutonomousTurn(response.conversation.id, endsAt, true);
+      }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setCoffeeError(err instanceof Error ? err.message : "Failed to send.");
     } finally {
+      if (coffeeTurnAbortRef.current === abortController) {
+        coffeeTurnAbortRef.current = null;
+      }
       setCoffeeBusy(false);
     }
   };
+  const stopActiveCoffeeSession = () => {
+    clearCoffeeArrivalTimer();
+    clearCoffeeLoopTimer();
+    abortCoffeeRequests();
+    setCoffeeBusy(false);
+    setCoffeeAutoBusy(false);
+    setCoffeeAutoplayPausedValue(false);
+    setCoffeeSessionEndsAtMs(null);
+  };
+  const returnToCoffeeStart = () => {
+    resetCoffeeToPicker();
+  };
   const exitCoffeeToHub = () => {
+    stopActiveCoffeeSession();
     navigateToView("hub");
   };
-  const renderCoffeeShell = (): React.JSX.Element => {
-    const conversationActive = coffeeConversation !== null;
+  const exitCoffeeSessionToSelectedView = () => {
+    if (!coffeeConversation) {
+      resetCoffeeToPicker();
+      return;
+    }
+    const groupIds = coffeeConversation.botGroupIds ?? [];
+    clearCoffeeArrivalTimer();
+    clearCoffeeLoopTimer();
+    abortCoffeeRequests();
+    setCoffeeBusy(false);
+    setCoffeeAutoBusy(false);
+    setCoffeeAutoplayPausedValue(false);
+    setCoffeeError(null);
+    setCoffeeSelectedSessionId(coffeeConversation.id);
+    setCoffeeSelectedSeatBotIds(
+      coffeeConversation.coffeeSeatBotIds ?? coffeeSeatsFromBotIds(groupIds)
+    );
+    setCoffeeArrivedBotIds(groupIds);
+    closeCoffeeTranscript();
+    setCoffeeSessionEndsAtMs(null);
+    setCoffeeSessionPhase("preview");
+  };
+  const deleteCoffeeSession = async (sessionId: string) => {
+    if (coffeeConversation?.id === sessionId || coffeeSelectedSessionId === sessionId) {
+      resetCoffeeToPicker();
+    }
+    await deleteConversation(sessionId);
+  };
+  const renderCoffeeSessionRow = (session: ConversationSummary): React.JSX.Element => {
+    const sessionBots = coffeeSessionBots(session);
+    const selected = session.id === coffeeSelectedSessionId;
     return (
-      <main
-        className={`${styles.authLayout} ${themeClass} ${styles.coffeeShell}`}
-        onContextMenu={handleAppContextMenu}
-      >
-        <header className={styles.coffeeHeader}>
-          <button
-            type="button"
-            className={styles.coffeeHubButton}
-            onClick={exitCoffeeToHub}
-            aria-label="Back to Hub"
-            title="Back to Hub"
-          >
-            <PrismWordmarkWithVersion size="sm" className={styles.hubHomeWordmark} />
-          </button>
-          <h2 className={styles.coffeeTitle}>
-            {conversationActive
-              ? coffeeConversation?.title || "Coffee"
-              : "Coffee"}
-          </h2>
-          <div
-            className={styles.coffeeProviderToggle}
-            role="group"
-            aria-label="Provider for the next reply"
-          >
+      <li key={session.id} className={styles.coffeeSessionRow} data-current={selected ? "true" : undefined}>
+        <button
+          type="button"
+          className={styles.coffeeSessionDeleteButton}
+          aria-label={`Delete ${session.title}`}
+          title="Delete Coffee Session"
+          onClick={(event) => {
+            event.stopPropagation();
+            void deleteCoffeeSession(session.id);
+          }}
+        >
+          ×
+        </button>
+        <button
+          type="button"
+          className={styles.coffeeSessionButton}
+          disabled={selected}
+          aria-current={selected ? "page" : undefined}
+          onClick={() => void openCoffeeSession(session.id)}
+        >
+          <span className={styles.coffeeSessionDots} aria-hidden="true">
+            {sessionBots.slice(0, COFFEE_GROUP_MAX_SIZE_CLIENT).map((bot) => (
+              <span
+                key={bot.id}
+                className={styles.coffeeSessionDot}
+                style={coffeeBotVisualStyle(bot)}
+              />
+            ))}
+          </span>
+          <span className={styles.coffeeSessionTitle}>{session.title}</span>
+          <span className={styles.coffeeSessionMeta}>
+            {(session.botGroupIds?.length ?? sessionBots.length) || 0} bots ·{" "}
+            {new Date(session.updatedAt).toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            })}
+          </span>
+        </button>
+      </li>
+    );
+  };
+  const renderCoffeeBotPill = (bot: Bot): React.JSX.Element => {
+    const selected = coffeeSelectedBotIds.includes(bot.id);
+    const disabled =
+      !selected &&
+      coffeeSelectedBotIds.length >= COFFEE_GROUP_MAX_SIZE_CLIENT;
+    return (
+      <li key={bot.id}>
+        <button
+          type="button"
+          className={styles.coffeeBotPill}
+          data-selected={selected ? "true" : undefined}
+          disabled={disabled}
+          aria-pressed={selected}
+          style={coffeeBotVisualStyle(bot)}
+          onClick={() => toggleCoffeeBot(bot.id)}
+        >
+          <span className={styles.coffeeBotPillGlyph} aria-hidden="true">
+            <BotGlyph name={bot.glyph} size={18} strokeWidth={2} />
+          </span>
+          <span className={styles.coffeeBotPillText}>
+            <span className={styles.coffeeBotPillName}>{bot.name}</span>
+            <span className={styles.coffeeBotPillSubtitle}>{coffeeBotSubtitle(bot)}</span>
+          </span>
+        </button>
+      </li>
+    );
+  };
+  const renderCoffeeTranscriptPanel = (): React.JSX.Element | null => {
+    if (!coffeeConversation) return null;
+    return (
+      <>
+        <div
+          className={`${styles.panelOverlay} ${styles.coffeeTranscriptOverlay}`}
+          data-closing={coffeeTranscriptClosing ? "true" : undefined}
+          onClick={(event) => {
+            if (event.button !== 0 || event.ctrlKey) return;
+            closeCoffeeTranscript({ animate: true });
+          }}
+          aria-hidden="true"
+        />
+        <aside
+          className={styles.coffeeTranscriptPanel}
+          data-closing={coffeeTranscriptClosing ? "true" : undefined}
+          aria-label="Coffee Session transcript"
+        >
+          <header className={styles.coffeeTranscriptHeader}>
+            <div>
+              <span className={styles.sectionLabel}>Table Talk</span>
+              <p>{coffeeConversation.messages.length} messages</p>
+            </div>
             <button
               type="button"
-              className={styles.coffeeProviderOption}
-              data-active={coffeeProvider === "local" ? "true" : undefined}
-              aria-pressed={coffeeProvider === "local"}
-              onClick={() => {
-                setCoffeeProvider("local");
-                setCoffeeProviderTouched(true);
-              }}
-              title="Replies route through your local Ollama models."
+              className={styles.coffeeHeaderIconButton}
+              onClick={() => closeCoffeeTranscript({ animate: true })}
+              aria-label="Close Coffee transcript"
+              title="Close Coffee transcript"
             >
-              Local
+              ×
             </button>
-            <button
-              type="button"
-              className={styles.coffeeProviderOption}
-              data-active={coffeeProvider === "openai" ? "true" : undefined}
-              aria-pressed={coffeeProvider === "openai"}
-              onClick={() => {
-                setCoffeeProvider("openai");
-                setCoffeeProviderTouched(true);
-              }}
-              title="Replies route through OpenAI (online). Per-bot online gating still wins."
-            >
-              Online
-            </button>
-          </div>
-        </header>
-
-        {!conversationActive && (
-          <section className={styles.coffeePicker}>
-            <p className={styles.coffeePickerHint}>
-              Pick {COFFEE_GROUP_MIN_SIZE_CLIENT}-{COFFEE_GROUP_MAX_SIZE_CLIENT} bots,
-              then send the first message to start the chat.
-            </p>
-            {coffeeBotsLibrary.length === 0 ? (
-              <p className={styles.coffeePickerEmpty}>
-                You don&apos;t have any chat-enabled bots yet. Open the Bots panel
-                from the Hub to create some.
-              </p>
-            ) : (
-              <ul className={styles.coffeePickerGrid} role="listbox" aria-label="Bots available for Coffee">
-                {coffeeBotsLibrary.map((bot) => {
-                  const selected = coffeeSelectedBotIds.includes(bot.id);
-                  const disabled =
-                    !selected &&
-                    coffeeSelectedBotIds.length >= COFFEE_GROUP_MAX_SIZE_CLIENT;
-                  return (
-                    <li key={bot.id}>
-                      <button
-                        type="button"
-                        className={styles.coffeePickerTile}
-                        data-selected={selected ? "true" : undefined}
-                        disabled={disabled}
-                        aria-pressed={selected}
-                        style={
-                          bot.color
-                            ? ({ "--coffee-bot-color": bot.color } as React.CSSProperties)
-                            : undefined
-                        }
-                        onClick={() => toggleCoffeeBot(bot.id)}
-                      >
-                        <span className={styles.coffeePickerTileName}>{bot.name}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <p className={styles.coffeePickerCount}>
-              {coffeeSelectedBotIds.length} of {COFFEE_GROUP_MIN_SIZE_CLIENT}-
-              {COFFEE_GROUP_MAX_SIZE_CLIENT} selected
-            </p>
-          </section>
-        )}
-
-        {conversationActive && coffeeConversation && (
+          </header>
           <section className={styles.coffeeThread} aria-live="polite">
             <ul className={styles.coffeeMessages}>
               {coffeeConversation.messages.map((message) => {
                 const isAssistant = message.role === "assistant";
                 const isUser = message.role === "user";
                 return (
-                  <li
-                    key={message.id}
-                    className={styles.coffeeMessage}
-                    data-role={message.role}
-                  >
-                    {isAssistant && (
-                      <div
-                        className={styles.coffeeMessageBotLabel}
-                        style={
-                          message.botColor
-                            ? ({ "--coffee-bot-color": message.botColor } as React.CSSProperties)
-                            : undefined
-                        }
-                      >
-                        {message.botName ?? "Bot"}
-                      </div>
-                    )}
-                    {isUser && (
-                      <div className={styles.coffeeMessageUserLabel}>You</div>
-                    )}
-                    <div className={styles.coffeeMessageContent}>
-                      {message.content}
+                <li
+                  key={message.id}
+                  className={styles.coffeeMessage}
+                  data-role={message.role}
+                >
+                  {isAssistant && (
+                    <div
+                      className={styles.coffeeMessageBotLabel}
+                      style={
+                        message.botColor
+                          ? ({
+                              "--coffee-bot-color": normalizeAccentForTheme(message.botColor, resolvedTheme),
+                            } as React.CSSProperties)
+                          : undefined
+                      }
+                    >
+                      {message.botName ?? "Bot"}
                     </div>
-                  </li>
+                  )}
+                  {isUser && (
+                    <div className={styles.coffeeMessageUserLabel}>You</div>
+                  )}
+                  <div className={styles.coffeeMessageContent}>
+                    {message.content}
+                  </div>
+                </li>
                 );
               })}
-              {coffeeBusy && (
+              {(coffeeBusy || coffeeAutoBusy) && (
                 <li
                   className={styles.coffeeMessage}
                   data-role="assistant"
@@ -23693,7 +24451,7 @@ function resendUserMessage(msg: Message): void {
                 >
                   <div className={styles.coffeeMessageBotLabel}>...</div>
                   <div className={styles.coffeeMessageContent}>
-                    Picking the next speaker.
+                    {coffeeAutoBusy ? "Someone is taking a sip before replying." : "Picking the next speaker."}
                   </div>
                 </li>
               )}
@@ -23704,7 +24462,379 @@ function resendUserMessage(msg: Message): void {
               </p>
             )}
           </section>
+        </aside>
+      </>
+    );
+  };
+  const renderCoffeeTableStage = (): React.JSX.Element => {
+    const conversationActive = coffeeConversation !== null;
+    const previewingSession = coffeeSessionPhase === "preview";
+    const arrivedBotIds = new Set(coffeeArrivedBotIds);
+    const directorTapEnabled =
+      conversationActive &&
+      coffeeAutoplayPaused &&
+      coffeeSessionPhase === "live" &&
+      !coffeeBusy &&
+      !coffeeAutoBusy;
+    const messages = coffeeConversation?.messages ?? [];
+    const centerMessage = previewingSession
+      ? null
+      : messages.length > 0
+        ? messages[messages.length - 1]
+        : null;
+    const centerSpeaker = centerMessage?.role === "assistant"
+      ? centerMessage.botName ?? "Bot"
+      : centerMessage?.role === "user"
+        ? "You"
+        : "PRISM";
+    const visibleCoffeeSeats = coffeeActiveSeatBotIds
+      .map((botId, seatIndex) => ({
+        botId,
+        seatIndex,
+        bot: botId ? coffeeBotsById.get(botId) : undefined,
+      }))
+      .filter((entry): entry is { botId: string; seatIndex: number; bot: Bot } => {
+        if (!entry.botId || !entry.bot) return false;
+        return !(
+          conversationActive &&
+          coffeeSessionPhase === "arriving" &&
+          !arrivedBotIds.has(entry.botId)
+        );
+      });
+    return (
+      <section
+        className={styles.coffeeStage}
+        data-phase={coffeeSessionPhase}
+        data-compact={coffeeSessionPhase === "selecting" ? "true" : undefined}
+        data-preview={previewingSession ? "true" : undefined}
+        aria-label="Coffee table"
+      >
+        <div className={styles.coffeeStageHeader}>
+          <div className={styles.coffeeStageStatus} aria-live="polite">
+            {coffeeSessionPhase === "arriving"
+              ? `${coffeeArrivedBotIds.length} / ${coffeeActiveBotIds.length} arrived`
+              : `${coffeeSelectedBotIds.length || coffeeActiveBotIds.length} / ${COFFEE_GROUP_MAX_SIZE_CLIENT} seats filled`}
+          </div>
+        </div>
+        <div className={styles.coffeeTableScene}>
+          <div className={styles.coffeeTableGlow} aria-hidden="true" />
+          <div className={styles.coffeeTableDisk} aria-hidden="true" />
+          <div className={styles.coffeeCenterMessage} data-empty={!centerMessage ? "true" : undefined}>
+            <span className={styles.coffeeCenterIcon} aria-hidden="true">☕</span>
+            <strong>{centerMessage ? centerSpeaker : "The table is waiting"}</strong>
+            <p>
+              {centerMessage
+                ? centerMessage.content
+                : coffeeSessionPhase === "arriving"
+                  ? "Bots will arrive one at a time."
+                : coffeeSessionPhase === "preview"
+                  ? "The bots are seated, but you have not joined the conversation yet."
+                  : "Select bots below, then start the session."}
+            </p>
+            {coffeeSessionPhase === "selecting" && (
+              <button
+                type="button"
+                className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
+                disabled={coffeeBusy || !coffeeSelectionValid}
+                onClick={() => void createCoffeeSession()}
+              >
+                {coffeeBusy ? "Preparing table..." : "Start Coffee Session →"}
+              </button>
+            )}
+            {previewingSession && (
+              <button
+                type="button"
+                className={styles.coffeeJoinSessionButton}
+                onClick={joinPreviewedCoffeeSession}
+              >
+                Join Coffee Session →
+              </button>
+            )}
+          </div>
+          {visibleCoffeeSeats.map(({ botId, seatIndex, bot }, layoutIndex) => {
+            return (
+              <button
+                type="button"
+                key={`${seatIndex}-${bot.id}`}
+                className={styles.coffeeSeat}
+                data-seat={seatIndex}
+                data-layout-seat={layoutIndex}
+                data-seat-count={visibleCoffeeSeats.length}
+                data-director-enabled={directorTapEnabled ? "true" : undefined}
+                style={coffeeSeatVisualStyle(bot, seatIndex, layoutIndex, visibleCoffeeSeats.length)}
+                disabled={!directorTapEnabled}
+                onClick={() => void triggerDirectedCoffeeTurn(bot.id)}
+                aria-label={
+                  directorTapEnabled
+                    ? `Ask ${bot.name} to speak now`
+                    : `${bot.name} at the coffee table`
+                }
+                title={
+                  directorTapEnabled
+                    ? `Tap to make ${bot.name} speak`
+                    : "Pause autoplay to direct this bot"
+                }
+              >
+                <div className={styles.coffeeSeatPlate}>
+                  <BotGlyph name={bot.glyph} size={34} strokeWidth={1.65} />
+                </div>
+                <div className={styles.coffeeCup} aria-hidden="true" />
+                <div className={styles.coffeeSeatLabel}>
+                  <span>{bot.name}</span>
+                  <small>{coffeeBotSubtitle(bot)}</small>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
+  const renderCoffeeShell = (): React.JSX.Element => {
+    const conversationActive = coffeeConversation !== null;
+    const coffeeSessionJoined = conversationActive && coffeeSessionPhase !== "preview";
+    const coffeeStageTitle = coffeeConversation?.title ?? "Start a Coffee Session";
+    const coffeeStageSubtitle =
+      coffeeSessionPhase === "selecting"
+        ? "Choose 2-5 bots to invite to the PRISM coffee table."
+        : coffeeSessionPhase === "preview"
+          ? "Previewing this table. Join when you are ready."
+          : coffeeSessionPhase === "arriving"
+            ? "PRISM is preparing the table."
+            : coffeeSessionPhase === "finished"
+              ? "The cups are empty. This Coffee Session has settled."
+              : "Listen in, join gently, or let the bots talk.";
+    const coffeeComposerEnabled = conversationActive || coffeeSelectionValid;
+    const coffeeComposerVisible = coffeeSessionPhase === "selecting" || coffeeComposerEnabled;
+    const coffeeComposerPlaceholder =
+      coffeeSessionPhase === "finished"
+        ? "This Coffee Session has ended."
+        : coffeeSessionPhase === "preview"
+          ? "Send a message to join this table..."
+          : conversationActive
+            ? "Join the table..."
+            : coffeeSelectionValid
+              ? "Send the first message to start..."
+              : `Select at least ${COFFEE_GROUP_MIN_SIZE_CLIENT} bots to start...`;
+    return (
+      <main
+        className={`${styles.appLayout} ${themeClass} ${styles.coffeeShell}`}
+        data-session-active={coffeeSessionJoined ? "true" : undefined}
+        data-transcript-open={coffeeTranscriptOpen && coffeeSessionJoined ? "true" : undefined}
+        onContextMenu={handleAppContextMenu}
+      >
+        {!coffeeSessionJoined && (
+        <aside className={styles.coffeeSidebar}>
+          <button
+            type="button"
+            className={styles.coffeeHubButton}
+            onClick={returnToCoffeeStart}
+            aria-label="Back to Coffee start"
+            title="Back to Coffee start"
+          >
+            <PrismWordmarkWithVersion size="sm" className={styles.hubHomeWordmark} />
+          </button>
+          <div className={styles.coffeeSidebarHeader}>
+            <span className={styles.sectionLabel}>Coffee Sessions</span>
+            <div className={styles.coffeeSidebarHeaderActions}>
+              <button
+                type="button"
+                className={styles.coffeeDeleteAllSessionsButton}
+                onClick={() => armDelete(DELETE_ALL_COFFEE_SESSIONS_KEY)}
+                disabled={coffeeSessions.length === 0}
+                aria-label="Delete all Coffee Sessions"
+                title={
+                  coffeeSessions.length === 0
+                    ? "No Coffee Sessions to delete"
+                    : "Delete all Coffee Sessions"
+                }
+                data-delete-affordance="true"
+              >
+                <IconTrash />
+              </button>
+              <button
+                type="button"
+                className={styles.coffeeNewSessionButton}
+                onClick={resetCoffeeToPicker}
+                aria-label="New Coffee Session"
+              >
+                +
+              </button>
+            </div>
+          </div>
+          <ul className={styles.coffeeSessionList}>
+            {coffeeSessions.length > 0 ? (
+              coffeeSessions.map(renderCoffeeSessionRow)
+            ) : (
+              <li className={styles.coffeeSessionEmpty}>
+                No Coffee Sessions yet.
+              </li>
+            )}
+          </ul>
+        </aside>
         )}
+
+        <section className={styles.coffeeMain}>
+          <header className={styles.coffeeHeader}>
+            <div className={styles.coffeeTitleBlock}>
+              <div>
+                <p className={styles.coffeeEyebrow}>Coffee Mode</p>
+                <h1 className={styles.coffeeTitle}>{coffeeStageTitle}</h1>
+                <p>{coffeeStageSubtitle}</p>
+              </div>
+            </div>
+            <div className={styles.coffeeHeaderActions}>
+              {coffeeSessionJoined && (
+                <button
+                  type="button"
+                  className={`${styles.coffeeHeaderIconButton} ${styles.coffeeDirectorButton}`}
+                  data-active={coffeeAutoplayPaused ? "true" : undefined}
+                  disabled={coffeeSessionPhase === "finished"}
+                  onClick={toggleCoffeeAutoplay}
+                  aria-pressed={coffeeAutoplayPaused}
+                  aria-label={
+                    coffeeAutoplayPaused
+                      ? "Resume automatic Coffee bot replies"
+                      : "Pause automatic Coffee bot replies"
+                  }
+                  title={
+                    coffeeAutoplayPaused
+                      ? "Resume automatic bot replies"
+                      : "Pause bot autoplay for director mode"
+                  }
+                >
+                  <CoffeeAutoplayGlyph paused={coffeeAutoplayPaused} />
+                </button>
+              )}
+              {coffeeSessionJoined ? (
+                <button
+                  type="button"
+                  className={styles.coffeeExitSessionButton}
+                  onClick={exitCoffeeSessionToSelectedView}
+                  title="Exit Coffee Session and stop autonomous replies"
+                >
+                  Exit session
+                </button>
+              ) : coffeeSessionPhase === "preview" ? (
+                <button
+                  type="button"
+                  className={styles.coffeeExitSessionButton}
+                  onClick={joinPreviewedCoffeeSession}
+                  title="Join this Coffee Session"
+                >
+                  Join session
+                </button>
+              ) : null}
+              <div
+                className={styles.coffeeProviderToggle}
+                role="group"
+                aria-label="Provider for the next reply"
+              >
+                <button
+                  type="button"
+                  className={styles.coffeeProviderOption}
+                  data-active={coffeeProvider === "local" ? "true" : undefined}
+                  aria-pressed={coffeeProvider === "local"}
+                  onClick={() => {
+                    setCoffeeProvider("local");
+                    setCoffeeProviderTouched(true);
+                  }}
+                  title="Replies route through your local Ollama models."
+                >
+                  Local
+                </button>
+                <button
+                  type="button"
+                  className={styles.coffeeProviderOption}
+                  data-active={coffeeProvider === "openai" ? "true" : undefined}
+                  aria-pressed={coffeeProvider === "openai"}
+                  onClick={() => {
+                    setCoffeeProvider("openai");
+                    setCoffeeProviderTouched(true);
+                  }}
+                  title="Replies route through OpenAI (online). Per-bot online gating still wins."
+                >
+                  Online
+                </button>
+              </div>
+              <button
+                type="button"
+                className={styles.coffeeHeaderIconButton}
+                data-active={coffeeTranscriptOpen && coffeeSessionJoined ? "true" : undefined}
+                disabled={!coffeeSessionJoined}
+                onClick={() => {
+                  if (coffeeTranscriptOpen) {
+                    closeCoffeeTranscript({ animate: true });
+                  } else {
+                    openCoffeeTranscript();
+                  }
+                }}
+                aria-pressed={coffeeTranscriptOpen && coffeeSessionJoined}
+                aria-label={coffeeTranscriptOpen && coffeeSessionJoined ? "Close Coffee transcript" : "Open Coffee transcript"}
+                title={coffeeSessionJoined ? (coffeeTranscriptOpen ? "Close Coffee transcript" : "Open Coffee transcript") : "Transcript appears after you join a Coffee Session"}
+              >
+                <MessageBubbleGlyph />
+              </button>
+              <button
+                type="button"
+                className={`${styles.themeToggleButton} ${styles.coffeeThemeButton}`}
+                onClick={() => void cycleThemeMode()}
+                aria-label={
+                  effectiveThemeMode === "system"
+                    ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                }
+                data-title={
+                  effectiveThemeMode === "system"
+                    ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+                }
+                data-glyph-tooltip={
+                  effectiveThemeMode === "system"
+                    ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+                }
+              >
+                <ThemeGlyph mode={effectiveThemeMode} />
+              </button>
+              <button
+                type="button"
+                className={styles.coffeeHeaderIconButton}
+                onClick={exitCoffeeToHub}
+                aria-label="Back to Hub"
+                title="Back to Hub"
+                data-glyph-tooltip="Back to Hub"
+              >
+                <HomeGlyph />
+              </button>
+            </div>
+          </header>
+
+          {renderCoffeeTableStage()}
+
+          {!conversationActive && (
+            <section className={styles.coffeePicker}>
+              <label className={styles.coffeeSearchBar}>
+                <span aria-hidden="true">⌕</span>
+                <input
+                  value={coffeeSearch}
+                  onChange={(event) => setCoffeeSearch(event.target.value)}
+                  placeholder="Search or add bots..."
+                  aria-label="Search bots for Coffee Session"
+                />
+              </label>
+              {coffeeBotsLibrary.length === 0 ? (
+                <p className={styles.coffeePickerEmpty}>
+                  You don&apos;t have any chat-enabled bots yet. Open the Bots panel
+                  from the Hub to create some.
+                </p>
+              ) : (
+                <ul className={styles.coffeePickerGrid} role="listbox" aria-label="Bots available for Coffee">
+                  {coffeeFilteredBots.map(renderCoffeeBotPill)}
+                </ul>
+              )}
+            </section>
+          )}
 
         {coffeeError && (
           <p className={styles.coffeeError} role="alert">
@@ -23712,47 +24842,58 @@ function resendUserMessage(msg: Message): void {
           </p>
         )}
 
-        <form
-          className={styles.coffeeComposer}
-          onSubmit={(event) => {
-            event.preventDefault();
-            void sendCoffeeTurn();
-          }}
-        >
-          <textarea
-            value={coffeeDraft}
-            onChange={(event) => setCoffeeDraft(event.target.value)}
-            placeholder={
-              conversationActive
-                ? "Say something to the group..."
-                : "What's on your mind? (Sends the first message)"
-            }
-            rows={2}
-            disabled={
-              coffeeBusy ||
-              (!conversationActive && coffeeBotsLibrary.length === 0)
-            }
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
+          {coffeeComposerVisible && (
+            <form
+              className={styles.coffeeComposer}
+              onSubmit={(event) => {
                 event.preventDefault();
+                if (!coffeeComposerEnabled) return;
                 void sendCoffeeTurn();
-              }
-            }}
-          />
-          <button
-            type="submit"
-            className={styles.coffeeSend}
-            disabled={
-              coffeeBusy ||
-              coffeeDraft.trim().length === 0 ||
-              (!conversationActive && !coffeeSelectionValid)
-            }
-          >
-            {coffeeBusy ? "Sending..." : conversationActive ? "Send" : "Start Coffee"}
-          </button>
-        </form>
+              }}
+            >
+              <textarea
+                value={coffeeDraft}
+                onChange={(event) => {
+                  setCoffeeDraft(event.target.value);
+                  if (event.target.value.trim().length > 0) {
+                    clearCoffeeLoopTimer();
+                  }
+                }}
+                placeholder={coffeeComposerPlaceholder}
+                rows={2}
+                disabled={
+                  coffeeBusy ||
+                  coffeeSessionPhase === "finished" ||
+                  !coffeeComposerEnabled
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    if (!coffeeComposerEnabled) return;
+                    void sendCoffeeTurn();
+                  }
+                }}
+              />
+              <button
+                type="submit"
+                className={styles.coffeeSend}
+                disabled={
+                  coffeeBusy ||
+                  coffeeDraft.trim().length === 0 ||
+                  coffeeSessionPhase === "finished" ||
+                  !coffeeComposerEnabled
+                }
+              >
+                {coffeeBusy ? "Sending..." : "Send"}
+              </button>
+            </form>
+          )}
+        </section>
+
+        {coffeeTranscriptOpen && coffeeSessionJoined ? renderCoffeeTranscriptPanel() : null}
 
         {renderViewSwitchOverlay()}
+        {renderDeleteAllModal()}
         <GlyphTooltipLayer />
       </main>
     );
@@ -24040,10 +25181,10 @@ function resendUserMessage(msg: Message): void {
             <button
               type="button"
               className={styles.hubHomeButton}
-              onClick={handleHeaderHubClick}
+              onClick={handleChatHeaderWordmarkClick}
               data-home-affordance="wordmark"
-              aria-label="Back to Hub"
-              title="Back to Hub"
+              aria-label="Back to Chat start"
+              title="Back to Chat start"
             >
               <span className={styles.chatHubWordmarkStack}>
                 <PrismWordmarkWithVersion
@@ -24614,7 +25755,7 @@ function resendUserMessage(msg: Message): void {
                 : undefined;
             const headingColorStyle =
               msg.role === "assistant" && !detail?.incognito
-                ? (view === "sandbox" && msg.botColor
+                ? (detail?.mode === "sandbox" && msg.botColor
                     ? resolveComplementHeadingColorVars(
                         normalizeAccentForTheme(msg.botColor, resolvedTheme),
                         resolvedTheme
@@ -24934,6 +26075,7 @@ function resendUserMessage(msg: Message): void {
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}
+          {renderComposerWritingAssistAction()}
           {!composerHiddenByAskQuestion ? (
             view === "chat" ? (
               <div className={styles.chatComposerStack}>
@@ -24969,6 +26111,7 @@ function resendUserMessage(msg: Message): void {
                     enabled={composerMarkdownEditorEnabled}
                     value={draft}
                     placeholder="Say something..."
+                    writingAssistEnabled={settings?.composerWritingAssist !== false}
                     submitDisabled={composerSubmitDisabled(draft)}
                     submitLabel={composerSubmitLabel(draft)}
                     hideSubmitButton={hideMobileEmptySend}
@@ -24984,6 +26127,7 @@ function resendUserMessage(msg: Message): void {
                 enabled={composerMarkdownEditorEnabled}
                 value={draft}
                 placeholder="Say something..."
+                writingAssistEnabled={settings?.composerWritingAssist !== false}
                 submitDisabled={composerSubmitDisabled(draft)}
                 submitLabel={composerSubmitLabel(draft)}
                 hideSubmitButton={hideMobileEmptySend}
@@ -25134,12 +26278,14 @@ function resendUserMessage(msg: Message): void {
           {renderConversationListContents()}
         </ul>
 
-        <div className={styles.sidebarFooter}>
-          <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
-          <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
-          <button type="button" onClick={() => openRightPanel("images")}>Images</button>
-          <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
-        </div>
+        {view !== "sandbox" && (
+          <div className={styles.sidebarFooter}>
+            <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
+            <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
+            <button type="button" onClick={() => openRightPanel("images")}>Images</button>
+            <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
+          </div>
+        )}
       </aside>
 
       {/* Chat */}
@@ -25152,15 +26298,15 @@ function resendUserMessage(msg: Message): void {
             <button
               type="button"
               className={styles.hubHomeButton}
-              onClick={handleSandboxHeaderHomeClick}
+              onClick={handleSandboxHeaderWordmarkClick}
               data-home-affordance={
                 sandboxShowHubReturnWordmark
                   ? "wordmark"
                   : headerIdentity ? "identity"
                   : "wordmark"
               }
-              aria-label="Back to Hub"
-              title="Back to Hub"
+              aria-label="Back to Sandbox start"
+              title="Back to Sandbox start"
             >
               {sandboxShowHubReturnWordmark ? (
                 <span className={styles.chatHubWordmarkStack}>
@@ -25207,9 +26353,7 @@ function resendUserMessage(msg: Message): void {
             </button>
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
-          {view === "chat" ? (
-            renderHeaderModelPicker()
-          ) : shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
+          {shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
             <h2
               className={`${styles.chatHeaderTitle} ${
                 headerTitleCollapsedForAccordion
@@ -25348,10 +26492,13 @@ function resendUserMessage(msg: Message): void {
                     )
                     .slice(0, 8)
                 : [];
-            const heroHasChats = heroRecentConversations.length > 0;
+            // Only swap from purpose copy to a "status" recap once the user
+            // has at least two prior chats with this bot. With a single chat,
+            // any "trend" read is statistical noise and feels presumptuous.
+            const heroHasReturningChats = heroRecentConversations.length >= 2;
             const hint = (() => {
               if (pendingIncognito) return `${heroStartLabel} No memories are saved.`;
-              if (!heroHasChats) {
+              if (!heroHasReturningChats) {
                 if (selectedBotPromptPreview) return selectedBotPromptPreview;
                 if (descriptionPreview) return descriptionPreview;
                 return heroStartLabel;
@@ -26171,10 +27318,8 @@ function resendUserMessage(msg: Message): void {
               );
             })()}
             {(() => {
-              const privateLocked = privateChatActive;
               const isLocal = settings?.preferredProvider === "local";
-              const displayLocal = privateLocked ? true : isLocal;
-              const providerDisabled = !settings || privateLocked;
+              const providerDisabled = !settings;
               return (
                 <div className={`${styles.modeControl} ${providerDisabled ? styles.modeControlLocked : ""}`}>
                   <button
@@ -26185,18 +27330,14 @@ function resendUserMessage(msg: Message): void {
                       void switchProvider(isLocal ? "openai" : "local");
                     }}
                     aria-label={
-                      privateLocked
-                        ? "Response mode: Local. Private chats are offline-only."
-                        : displayLocal
+                      isLocal
                         ? "Response mode: Local. Click to switch to Online."
                         : "Response mode: Online. Click to switch to Local."
                     }
-                    aria-pressed={!displayLocal}
+                    aria-pressed={!isLocal}
                     aria-disabled={providerDisabled}
                     title={
-                      privateLocked
-                        ? "Private chats are offline-only."
-                        : displayLocal
+                      isLocal
                         ? "Switch to Online"
                         : "Switch to Local"
                     }
@@ -26204,17 +27345,17 @@ function resendUserMessage(msg: Message): void {
                   >
                     <span
                       className={`${styles.modeThumb} ${
-                        displayLocal ? styles.modeThumbLocal : styles.modeThumbOnline
+                        isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
                       }`}
                     >
                       <span
                         className={`${styles.providerDot} ${
-                          displayLocal ? styles.providerDotLocal : styles.providerDotOnline
+                          isLocal ? styles.providerDotLocal : styles.providerDotOnline
                         }`}
                         aria-hidden="true"
                       />
                       <span className={styles.modeThumbLabel}>
-                        {displayLocal ? "LOCAL" : "ONLINE"}
+                        {isLocal ? "LOCAL" : "ONLINE"}
                       </span>
                     </span>
                   </button>
@@ -26263,12 +27404,14 @@ function resendUserMessage(msg: Message): void {
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}
+          {renderComposerWritingAssistAction()}
           {!composerHiddenByAskQuestion ? (
             <ComposerInput
               ref={draftComposerRef}
               enabled={composerMarkdownEditorEnabled}
               value={draft}
               placeholder="Ask anything..."
+              writingAssistEnabled={settings?.composerWritingAssist !== false}
               submitDisabled={composerSubmitDisabled(draft)}
               submitLabel={composerSubmitLabel(draft)}
               hideSubmitButton={hideMobileEmptySend}

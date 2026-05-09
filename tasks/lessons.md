@@ -4,6 +4,71 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-05-09 · [architecture]
+**Trigger**: `/make-bot` generated researched Bob Ross facts as compiled/inferred memories, causing known biographical facts to appear in the UI as assumptions.
+**Lesson**: For imported PRISM bot memories, reserve `source: "direct"` for researched known facts that should be durable self-knowledge. Use `compiled` only for interpretive behavioral summaries, because the web UI displays both `compiled` and `inferred` memories as assumptions.
+**Applies to**: `~/.cursor/skills/_make-bot/SKILL.md`, `~/.cursor/skills/_make-bot/import_bot.mjs`, and LocalAI memory display/import behavior.
+
+### 2026-05-09 · [UX]
+**Trigger**: Splitting bot memories into short-term bubbles plus a long-term list pushed the list below the visible Memories panel.
+**Lesson**: In the Memories panel, any stacked bubble/list layout must shrink the bubble cloud specifically inside the stacked view. Do not reuse the full-height `.memoryBubbleCloud` when another section needs to live below it.
+**Applies to**: `apps/web/src/app/page.module.css` Memories panel split layouts.
+
+### 2026-05-09 · [architecture]
+**Trigger**: Long-term memories were promoted from confidence/certainty alone, but character-defining memories can be long-term because of their content even when initially stored as assumptions.
+**Lesson**: Long-term memory promotion needs a durability axis in addition to truth scoring. Use confidence/certainty to ask "is this true?" and durability to ask "will this matter later?", with high-durability assumptions allowed to promote only when their truth score clears a safe floor.
+**Applies to**: `apps/api/src/memory.ts`, `apps/api/src/memory-extraction.ts`, `apps/api/src/db.ts`, and Memories panel tier display logic.
+
+### 2026-05-09 · [UX]
+**Trigger**: Active Coffee cup offsets were tuned repeatedly, but screenshots showed no visible movement because only the compact cup rule consumed `--coffee-cup-x/y`.
+**Lesson**: When Coffee cup placement is controlled by per-seat CSS variables, the base `.coffeeCup` rule must consume those variables too. If active cup changes appear to do nothing, check whether the selector being edited actually drives the rendered mode.
+**Applies to**: `apps/web/src/app/page.module.css` Coffee cup positioning across compact and active table views.
+
+### 2026-05-09 · [UX]
+**Trigger**: Active Coffee cup placement was corrected by copying mini/setup offsets, but the cups still floated beside bot labels instead of landing on the visible tabletop.
+**Lesson**: For active/non-compact Coffee table layouts, cup offsets must be tuned relative to the active seat orbit and pushed inward toward the table center. Do not reuse compact/setup cup offsets blindly after moving active bots closer to the table.
+**Applies to**: `apps/web/src/app/page.module.css` Coffee cup placement for `.coffeeStage:not([data-compact="true"])`.
+
+### 2026-05-09 · [UX]
+**Trigger**: The Coffee sidebar wordmark request was implemented as a jump to app-wide Chat mode, but the intended destination was the Coffee root screen at `?view=coffee`.
+**Lesson**: In Coffee Mode, the sidebar PRISM wordmark should behave as a Coffee-local reset/back affordance: stop any active Coffee timers, clear the selected/previewed session state, and return to the fresh Coffee start screen. Use the separate house icon for app-wide Hub navigation.
+**Applies to**: `apps/web/src/app/page.tsx` Coffee shell navigation and header/sidebar affordances.
+
+### 2026-05-08 · [UX]
+**Trigger**: The Coffee table's zoomed-in visual treatment kept making seat placement feel uneven and hard to tune.
+**Lesson**: Coffee Mode should default to the calmer zoomed-out table scale across selecting, preview, live, and finished states. Avoid reintroducing a separate large-table/close-up treatment unless it is paired with a full geometry pass for table disk, seat orbit, labels, cups, composer space, and transcript layout.
+**Applies to**: `apps/web/src/app/page.module.css` Coffee table scale and `apps/web/src/app/page.tsx` Coffee entry flow.
+
+### 2026-05-08 · [UX]
+**Trigger**: Coffee table seats looked uneven even after count-aware coordinates because the visible table circle was taller than the `.coffeeTableScene` positioning box; the table also appeared too high in the stage.
+**Lesson**: For non-compact Coffee table geometry, keep `.coffeeTableScene` tall enough to contain the visible table disk before tuning percentage-based seat coordinates. If the positioning box is shorter than the disk, seats will look vertically squashed and uneven no matter how the individual percentages are tweaked.
+**Applies to**: `apps/web/src/app/page.module.css` Coffee table centering and non-compact seat placement.
+
+### 2026-05-08 · [UX]
+**Trigger**: Default/non-compact Coffee table views used fixed saved seat slots, causing 2- and 4-bot sessions to look lopsided and overlap the table edge.
+**Lesson**: Coffee setup uses saved seat slots, but the large/default table should use count-aware display slots (`data-seat-count` + `data-layout-seat`) so 2-5 participants distribute evenly around the visible table. Keep setup compact geometry separate.
+**Applies to**: `apps/web/src/app/page.tsx` Coffee seat rendering and `apps/web/src/app/page.module.css` non-compact Coffee seat placement.
+
+### 2026-05-08 · [UX]
+**Trigger**: After unifying Coffee seat coordinates, the live/preview Coffee table stayed visually too high inside the stage.
+**Lesson**: For Coffee Mode, preserve seat identity separately from stage centering. If live/preview/finished tables need vertical balance, move the whole non-compact `.coffeeTableScene` layer rather than individual `.coffeeSeat[data-seat]` coordinates.
+**Applies to**: `apps/web/src/app/page.module.css` Coffee table layout across selection, live, preview, and finished phases.
+
+### 2026-05-08 · [UX]
+**Trigger**: "Exit Coffee Session should show the selected view, as if clicking the chat on the left" was misread as leaving Coffee for the app-wide Chat mode.
+**Lesson**: In Coffee Mode, "chat on the left" refers to the Coffee Sessions list inside the Coffee shell. The live session exit should stay in Coffee and return to that session's selected/preview view, not navigate to main Chat mode.
+**Applies to**: `apps/web/src/app/page.tsx` Coffee session navigation and exit behavior.
+
+### 2026-05-08 · [UX]
+**Trigger**: Coffee table cup placement was interpreted as left/right from the viewer's perspective instead of each bot's table-facing hand zones.
+**Lesson**: For Coffee table geometry, position nearby props relative to the bot's placement on the table. Cups should live in one of the two table-facing quarters of the bot circle: top seats use lower quarters, side seats use inward quarters, and bottom seats use upper quarters.
+**Applies to**: `apps/web/src/app/page.module.css` Coffee table seat/cup layout and future table-scene prop placement.
+
+### 2026-05-08 · [UX]
+**Trigger**: The compact Coffee table bottom seats were nudged lower and closer together, then the user asked to return them to the previous wider placement.
+**Lesson**: In compact Coffee table selection view, keep the bottom two bot seats wider and slightly higher (`left: 32%/68%`, `top: 78%`) so the table ring feels balanced. Do not over-compress the lower pair just to make them read as a cluster.
+**Applies to**: `apps/web/src/app/page.module.css` compact Coffee table seat geometry.
+
 ### 2026-05-04 · [UX]
 **Trigger**: Header action gradient request was misread as text-and-background gradients instead of a simple background transparency fade, then later needed text-opacity tuning for transitional contrast.
 **Lesson**: When the user asks for an opaque-to-transparent button treatment, apply transparency to the background layer first. Keep borders solid. Only adjust text opacity/color when the user explicitly calls out contrast in the transitional opacity bands.

@@ -1,11 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import {
   COFFEE_GROUP_MAX_SIZE,
   COFFEE_GROUP_MIN_SIZE,
   buildRouterPrompt,
+  createCoffeeConversation,
   normalizeCoffeeGroupBotIds,
+  normalizeCoffeeSeatBotIds,
   parseRouterResponse,
+  pickDirectedSpeaker,
   pickFallbackSpeaker,
   type CoffeeBotProfile,
 } from "../coffee.ts";
@@ -95,6 +99,101 @@ describe("normalizeCoffeeGroupBotIds", () => {
   it("throws when the input is not an array", () => {
     assert.throws(() => normalizeCoffeeGroupBotIds("bot-a" as unknown), /Coffee groups need/);
     assert.throws(() => normalizeCoffeeGroupBotIds(undefined), /Coffee groups need/);
+  });
+});
+
+describe("normalizeCoffeeSeatBotIds", () => {
+  it("preserves fixed seat positions while validating occupied seats", () => {
+    const result = normalizeCoffeeSeatBotIds([null, "bot-a", null, "bot-b", null]);
+    assert.deepEqual(result, [null, "bot-a", null, "bot-b", null]);
+  });
+});
+
+function createCoffeeTestDb(): DatabaseSync {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE conversations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
+      bot_id TEXT,
+      bot_group_ids TEXT,
+      incognito INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE bots (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      system_prompt TEXT NOT NULL DEFAULT '',
+      color TEXT,
+      glyph TEXT,
+      model TEXT,
+      local_model TEXT,
+      online_model TEXT,
+      online_enabled INTEGER NOT NULL DEFAULT 1,
+      temperature REAL DEFAULT 0.7,
+      max_tokens INTEGER DEFAULT 2048,
+      visibility TEXT NOT NULL DEFAULT 'private',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  return db;
+}
+
+function seedCoffeeBot(db: DatabaseSync, userId: string, bot: CoffeeBotProfile): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO bots (
+      id, user_id, name, system_prompt, color, glyph, model, local_model,
+      online_model, online_enabled, temperature, max_tokens, visibility,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)`
+  ).run(
+    bot.id,
+    userId,
+    bot.name,
+    bot.systemPrompt,
+    bot.color,
+    bot.glyph,
+    bot.defaultModel,
+    bot.localModel,
+    bot.onlineModel,
+    bot.onlineEnabled ? 1 : 0,
+    bot.temperature,
+    bot.maxTokens,
+    now,
+    now
+  );
+}
+
+describe("createCoffeeConversation", () => {
+  it("creates an empty Coffee session with frozen bot group ids", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const result = createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+
+    assert.equal(result.conversation.mode, "coffee");
+    assert.equal(result.conversation.botId, null);
+    assert.deepEqual(result.conversation.botGroupIds, [ALICE.id, BORIS.id]);
+    assert.deepEqual(result.conversation.coffeeSeatBotIds, [
+      ALICE.id,
+      BORIS.id,
+      null,
+      null,
+      null,
+    ]);
+    assert.equal(result.conversation.messages.length, 0);
+    assert.match(result.conversation.title, /Coffee with Alice, Boris/);
+    assert.match(result.arrivalScenario, /user-first|partial-table-in-progress|full-table-present/);
   });
 });
 
@@ -203,5 +302,25 @@ describe("pickFallbackSpeaker", () => {
 
   it("throws if the group is empty (programmer error guard)", () => {
     assert.throws(() => pickFallbackSpeaker([], null), /Coffee group is empty/);
+  });
+});
+
+describe("pickDirectedSpeaker", () => {
+  it("returns null when director mode has no requested bot", () => {
+    assert.equal(pickDirectedSpeaker([ALICE, BORIS], undefined), null);
+    assert.equal(pickDirectedSpeaker([ALICE, BORIS], null), null);
+    assert.equal(pickDirectedSpeaker([ALICE, BORIS], "  "), null);
+  });
+
+  it("returns the requested seated bot", () => {
+    const result = pickDirectedSpeaker([ALICE, BORIS], "bot-boris");
+    assert.equal(result?.id, "bot-boris");
+  });
+
+  it("rejects a bot that is not seated at the table", () => {
+    assert.throws(
+      () => pickDirectedSpeaker([ALICE, BORIS], "bot-cara"),
+      /not seated/
+    );
   });
 });
