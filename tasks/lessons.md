@@ -4,6 +4,21 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-05-10 · [architecture]
+**Trigger**: Bot-export memories written as second-person persona lines ("You remember…") were classified as **About you** (user) because inference treated any leading "You" as the human player.
+**Lesson**: Memory category inference must distinguish (a) user-preference phrasing ("You like…", "You want to…") from (b) bot persona self-narration ("You remember…", "You believe…"). Bot imports should default `category` to **general** when the export omits it. Optionally reconcile stale `user` rows when the text clearly classifies as **general** on read.
+**Applies to**: `packages/shared/src/memoryClassification.ts`, `apps/api/src/memory.ts` `normalizeMemoryCategory`, `apps/api/src/memory-extraction.ts`, `~/.cursor/skills/_make-bot/import_bot.mjs`, `apps/web/src/app/page.tsx` memory helpers.
+
+### 2026-05-10 · [UX]
+**Trigger**: Memories drawer opened immediately, then loaded the intended bot/directory afterward, briefly showing empty or stale panel content.
+**Lesson**: Right-side drawers that reuse the same panel for multiple destinations should load the intended destination before first opening. If the panel is already open and the destination changes, show an in-panel loading state instead of stale/empty content.
+**Applies to**: `apps/web/src/app/page.tsx` Memories panel open/navigation flows and `apps/web/src/app/page.module.css` Memories loading state.
+
+### 2026-05-10 · [UX]
+**Trigger**: Family drill-down in the Memories panel hid bots with zero memories, then the user clarified they should still appear as small bubbles.
+**Lesson**: PRISM family memory drill-downs should preserve roster presence. Bots with memories can scale by memory volume, but bots with zero memories should render as small subdued bubbles rather than disappearing behind an empty-state filter.
+**Applies to**: `apps/web/src/app/page.tsx` `selectedFamilyBotClusters` and `apps/web/src/app/page.module.css` source-cluster empty styling.
+
 ### 2026-05-09 · [architecture]
 **Trigger**: `/make-bot` generated researched Bob Ross facts as compiled/inferred memories, causing known biographical facts to appear in the UI as assumptions.
 **Lesson**: For imported PRISM bot memories, reserve `source: "direct"` for researched known facts that should be durable self-knowledge. Use `compiled` only for interpretive behavioral summaries, because the web UI displays both `compiled` and `inferred` memories as assumptions.
