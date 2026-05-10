@@ -4,6 +4,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-05-10 · [UX]
+**Trigger**: Sandbox focus layout reused Chat word-by-word reveal (`assistantRevealActive`) but the latest bot reply stayed truncated ("Oh," / one word) until the user sent again.
+**Lesson**: Reveal timing must stay coherent: (1) run the `chatEphemeralNowMs` interval whenever `assistantRevealActive` is true, not only `chatEphemeralMode`; (2) seed `chatMessageFirstSeenAtRef` for the latest assistant message when using reveal without Chat's temporal map — otherwise `forcedVisibleTokenCount` falls back to `?? chatEphemeralNowMs` every render and elapsed time never advances; (3) mark `chatCompletedRevealKeysRef` using the same active flag so completion logic runs in Zen.
+**Applies to**: `apps/web/src/app/page.tsx` focus layout / `assistantRevealActive` reveal plumbing.
+
 ### 2026-05-10 · [architecture]
 **Trigger**: Bot-export memories written as second-person persona lines ("You remember…") were classified as **About you** (user) because inference treated any leading "You" as the human player.
 **Lesson**: Memory category inference must distinguish (a) user-preference phrasing ("You like…", "You want to…") from (b) bot persona self-narration ("You remember…", "You believe…"). Bot imports should default `category` to **general** when the export omits it. Optionally reconcile stale `user` rows when the text clearly classifies as **general** on read.
