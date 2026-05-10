@@ -5199,6 +5199,10 @@ function persistConversationGroupOrder(userId: string, order: string[]): void {
   }
 }
 
+function sandboxZenModeStorageKey(userId: string): string {
+  return `prism_sandbox_zen_mode:${userId}`;
+}
+
 function reorderConversationGroupKeys(
   currentOrder: string[],
   draggedKey: string,
@@ -5354,6 +5358,16 @@ function BookmarkGlyph(): React.ReactElement {
   return (
     <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
       <path d="M4.25 3.25h7.5v9.5l-3.75-2.35-3.75 2.35z" />
+    </svg>
+  );
+}
+
+/** Focus / zen layout toggle (Sandbox): concentric calm mark, matches header icon weight. */
+function ZenFocusGlyph(): React.ReactElement {
+  return (
+    <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <circle cx="8" cy="8" r="1.35" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -11714,6 +11728,7 @@ function HomeContent(): React.JSX.Element {
     string | null
   >(null);
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
+  const [sandboxZenMode, setSandboxZenMode] = useState(false);
   const selectedIdRef = useRef<string | null>(null);
   const chatSummaryRefreshMarkerRef = useRef<string | null>(null);
   const sandboxBotStatusRefreshMarkerRef = useRef<string | null>(null);
@@ -13119,7 +13134,7 @@ function HomeContent(): React.JSX.Element {
     );
   };
   const renderHeaderModelPicker = (): React.ReactNode => {
-    if (view !== "chat") return null;
+    if (!effectiveChatPresentation) return null;
     const isLocal = settings?.preferredProvider !== "openai";
     const modelProvider: Provider = isLocal ? "local" : "openai";
     const rawModelChoice = chatModelChoiceByProvider[modelProvider];
@@ -13270,7 +13285,47 @@ function HomeContent(): React.JSX.Element {
     }
   }, [conversationGroupsByKey, expandedConversationGroupKey]);
 
+  useEffect(() => {
+    if (!user?.id) {
+      setSandboxZenMode(false);
+      return;
+    }
+    try {
+      if (typeof window === "undefined") return;
+      setSandboxZenMode(
+        window.localStorage.getItem(sandboxZenModeStorageKey(user.id)) === "1"
+      );
+    } catch {
+      setSandboxZenMode(false);
+    }
+  }, [user?.id]);
+
+  const setSandboxZenModePersisted = useCallback((next: boolean): void => {
+    setSandboxZenMode(next);
+    if (!user?.id) return;
+    try {
+      if (next) {
+        window.localStorage.setItem(sandboxZenModeStorageKey(user.id), "1");
+      } else {
+        window.localStorage.removeItem(sandboxZenModeStorageKey(user.id));
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }, [user?.id]);
+
   const chatEphemeralMode = view === "chat";
+  const zenPresentationActive = view === "sandbox" && sandboxZenMode;
+  const effectiveChatPresentation = view === "chat" || zenPresentationActive;
+  const chatLikeSurface = effectiveChatPresentation;
+  const assistantRevealActive = chatEphemeralMode || zenPresentationActive;
+
+  useEffect(() => {
+    if (zenPresentationActive) {
+      setSidebarOpen(false);
+    }
+  }, [zenPresentationActive]);
+
   const showPrivateConversationEmptyState =
     privateChatActive && visibleConversations.length === 0;
   const pendingReplyVisible =
@@ -13331,7 +13386,7 @@ function HomeContent(): React.JSX.Element {
       });
     }
   }, [chatEphemeralMode, detail?.id]);
-  const assistantWordByWordMode = view === "chat";
+  const assistantWordByWordMode = effectiveChatPresentation;
   const chatMessageTemporalById = useMemo(() => {
     const temporal = new Map<string, { phase: ChatMessageTemporalPhase; ageMs: number }>();
     const source = detail?.messages ?? [];
@@ -13616,7 +13671,7 @@ function HomeContent(): React.JSX.Element {
       ? detail.messages[detail.messages.length - 1]?.id ?? null
       : null;
   const chatAssistantRevealInProgress = useMemo(() => {
-    if (!chatEphemeralMode || !detail?.id || !latestAssistantMessageId) return false;
+    if (!assistantRevealActive || !detail?.id || !latestAssistantMessageId) return false;
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
     if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return false;
     if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
@@ -13629,7 +13684,7 @@ function HomeContent(): React.JSX.Element {
     const revealDurationMs = resolveRevealDurationMsForTokens(revealTokens);
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
-    chatEphemeralMode,
+    assistantRevealActive,
     detail?.id,
     detail?.messages,
     latestAssistantMessageId,
@@ -13641,7 +13696,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (
-      !chatEphemeralMode ||
+      !assistantRevealActive ||
       !chatAssistantRevealInProgress ||
       !detail?.id ||
       !latestAssistantMessageId
@@ -13757,6 +13812,7 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralNowMs,
     latestAssistantMessageId,
     hardResetChatArchiveStateForConversation,
+    assistantRevealActive,
   ]);
 
   const typingIndicatorVisible = pendingReplyVisible || chatAssistantRevealInProgress;
@@ -13779,7 +13835,7 @@ function HomeContent(): React.JSX.Element {
       );
     // Keep the "gathering" phase varied, but make active typed reveal explicit.
     const label = chatAssistantRevealInProgress
-      ? "Prism is replying..."
+      ? `${displayName} is replying…`
       : pickGeneratingLabel(displayName, salt);
     const style = selectedComposeBotAccent
       ? ({ ["--typing-accent" as string]: selectedComposeBotAccent } as React.CSSProperties)
@@ -13788,18 +13844,18 @@ function HomeContent(): React.JSX.Element {
       <button
         type="button"
         className={`${styles.typingIndicator} ${
-          chatEphemeralMode ? styles.typingIndicatorChatCenter : ""
+          chatLikeSurface ? styles.typingIndicatorChatCenter : ""
         } ${
-          chatEphemeralMode ? styles.typingIndicatorStopButton : ""
+          chatLikeSurface ? styles.typingIndicatorStopButton : ""
         } ${
           chatAssistantRevealInProgress ? styles.typingIndicatorReplyingLive : ""
         } ${
           showFallbackCheckerboardRing ? styles.typingIndicatorFallbackProcessing : ""
         }`}
         style={style}
-        aria-label={chatEphemeralMode ? `${label}. Tap to stop.` : label}
-        title={chatEphemeralMode ? "Stop reply" : undefined}
-        onClick={chatEphemeralMode ? handleTypingIndicatorPress : undefined}
+        aria-label={chatLikeSurface ? `${label}. Tap to stop.` : label}
+        title={chatLikeSurface ? "Stop reply" : undefined}
+        onClick={chatLikeSurface ? handleTypingIndicatorPress : undefined}
       >
         <span>{label}</span>
         <span className={styles.typingDots} aria-hidden="true">
@@ -13822,7 +13878,7 @@ function HomeContent(): React.JSX.Element {
     fallbackMessageIds,
     view,
     selectedComposeBotAccent,
-    chatEphemeralMode,
+    chatLikeSurface,
     handleTypingIndicatorPress,
   ]);
   const sandboxSummaryIndicatorNode = useMemo(() => {
@@ -14670,7 +14726,7 @@ function HomeContent(): React.JSX.Element {
   // deferred arm effect. Manual scroll-up sets `armed=false` via the
   // existing onScroll handler; interruption sets `armed=false` directly.
   useEffect(() => {
-    if (!chatEphemeralMode) return;
+    if (!assistantRevealActive) return;
     if (!typingIndicatorVisible) return;
     const conversationId = detail?.id;
     if (!conversationId) return;
@@ -14713,7 +14769,7 @@ function HomeContent(): React.JSX.Element {
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [chatEphemeralMode, detail?.id, typingIndicatorVisible]);
+  }, [assistantRevealActive, detail?.id, typingIndicatorVisible]);
   useEffect(() => {
     if (!chatEphemeralMode || !detail?.id || detail.messages.length === 0) return;
     if (!latestUserMessageId) return;
@@ -14904,16 +14960,26 @@ function HomeContent(): React.JSX.Element {
     setChatEphemeralNowMs(Date.now());
   }, [chatEphemeralMode, detail?.id]);
   useEffect(() => {
-    if (!chatEphemeralMode || !detail?.id) return;
+    if (!assistantRevealActive || !detail?.id) return;
     const timer = window.setInterval(() => {
       setChatEphemeralNowMs(Date.now());
     }, CHAT_MODE_EPHEMERAL_TICK_MS);
     return () => {
       window.clearInterval(timer);
     };
-  }, [chatEphemeralMode, detail?.id]);
+  }, [assistantRevealActive, detail?.id]);
+  // Chat mode seeds `chatMessageFirstSeenAtRef` inside `chatMessageTemporalById`.
+  // Sandbox focus layout uses `assistantRevealActive` without `chatEphemeralMode`,
+  // so anchor each latest-assistant reveal once; otherwise `forcedVisibleTokenCount`
+  // falls back to `chatEphemeralNowMs` every frame and elapsed time never grows.
   useEffect(() => {
-    if (!chatEphemeralMode || !detail?.id) return;
+    if (!assistantRevealActive || !detail?.id || !latestAssistantMessageId) return;
+    const temporalKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (chatMessageFirstSeenAtRef.current.has(temporalKey)) return;
+    chatMessageFirstSeenAtRef.current.set(temporalKey, Date.now());
+  }, [assistantRevealActive, detail?.id, latestAssistantMessageId]);
+  useEffect(() => {
+    if (!assistantRevealActive || !detail?.id) return;
     if (pendingReplyVisible) return;
     const source = detail.messages;
     let latestAssistant: Message | null = null;
@@ -14934,7 +15000,7 @@ function HomeContent(): React.JSX.Element {
     if (chatEphemeralNowMs - firstSeenAt >= revealDurationMs) {
       chatCompletedRevealKeysRef.current.add(temporalKey);
     }
-  }, [chatEphemeralMode, chatEphemeralNowMs, detail?.id, detail?.messages, pendingReplyVisible]);
+  }, [assistantRevealActive, chatEphemeralNowMs, detail?.id, detail?.messages, pendingReplyVisible]);
   useEffect(() => {
     if (viewportWidth > PICKER_MOBILE_BREAKPOINT) {
       setMobileFocusedMessageId(null);
@@ -16717,7 +16783,7 @@ function HomeContent(): React.JSX.Element {
       : undefined;
   const pendingAskQuestionWaitingForReveal =
     Boolean(
-      chatEphemeralMode &&
+      assistantRevealActive &&
       detail?.id &&
       pendingAskQuestionState &&
       pendingAskQuestionState.assistantMessageId === latestAssistantMessageId &&
@@ -22093,7 +22159,7 @@ function HomeContent(): React.JSX.Element {
       view !== "chat" &&
       !defaultConversationUsesPrismIdentity &&
       !sandboxDefaultBotView;
-    const showChatModeStyleButtons = view === "chat" || sandboxDefaultBotView;
+    const showChatModeStyleButtons = view === "chat" || view === "sandbox";
     const showToolbarMemoriesButton = view === "chat" || view === "sandbox";
     const showChatThemeButton = view === "chat" || view === "sandbox";
     const showSandboxHubButton = view === "chat" || view === "sandbox";
@@ -22105,7 +22171,7 @@ function HomeContent(): React.JSX.Element {
     const selectedBotCanDelete = Boolean(activeBot && activeBot.delete_protected !== 1);
     const canDelete = Boolean((detail && selectedId) || selectedBotCanDelete);
     const headerActionsDisabled =
-      view !== "chat" &&
+      !effectiveChatPresentation &&
       detail != null &&
       (!detail.hasAssistantReply || pendingReply);
     const isMobileGear = viewportWidth <= PHONE_MENU_BREAKPOINT;
@@ -22238,6 +22304,22 @@ function HomeContent(): React.JSX.Element {
               <BookmarkGlyph />
             </button>
           ) : null}
+          {view === "sandbox" ? (
+            <button
+              type="button"
+              className={styles.headerIconButton}
+              onClick={() => setSandboxZenModePersisted(!sandboxZenMode)}
+              aria-label={
+                zenPresentationActive
+                  ? "Exit focus layout"
+                  : "Focus layout — calmer Sandbox chrome"
+              }
+              aria-pressed={zenPresentationActive}
+              data-glyph-tooltip={zenPresentationActive ? "Exit focus layout" : "Focus layout"}
+            >
+              <ZenFocusGlyph />
+            </button>
+          ) : null}
           {showChatModeStyleButtons ? (
             <button
               type="button"
@@ -22348,6 +22430,19 @@ function HomeContent(): React.JSX.Element {
             >
               Settings
             </button>
+            {view === "sandbox" ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.chatOverflowMenuItem}
+                onClick={(event) => {
+                  swallowMenuEvent(event);
+                  setSandboxZenModePersisted(!sandboxZenMode);
+                }}
+              >
+                {zenPresentationActive ? "Exit focus layout" : "Focus layout"}
+              </button>
+            ) : null}
             {showChatModeStyleButtons && (
               <button
                 type="button"
@@ -26818,8 +26913,8 @@ function HomeContent(): React.JSX.Element {
         <div
           className={styles.messagesFrame}
           data-mode={messagesFrameMode}
-          data-chat-focus={chatEphemeralMode ? "true" : undefined}
-          data-replying-live={chatEphemeralMode && typingIndicatorVisible ? "true" : undefined}
+          data-chat-focus={chatLikeSurface ? "true" : undefined}
+          data-replying-live={chatLikeSurface && typingIndicatorVisible ? "true" : undefined}
           data-private-bot={privateCustomBotActive ? "true" : undefined}
           style={messagesFrameStyle}
         >
@@ -26839,7 +26934,7 @@ function HomeContent(): React.JSX.Element {
               !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
             } ${askQuestionTailSpaceActive ? styles.messagesAskQuestionTailSpace : ""}`}
             ref={messagesScrollRef}
-            data-chat-ephemeral={chatEphemeralMode ? "true" : undefined}
+            data-chat-ephemeral={chatLikeSurface ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={typingIndicatorVisible ? "true" : undefined}
             onScroll={handleMessagesPaneScroll}
@@ -27049,7 +27144,7 @@ function HomeContent(): React.JSX.Element {
                     routes to the PRISM Default persona (botId
                     omitted from the request). To go back to default
                     after arming, tap outside the picker on empty chrome. */}
-                {!pendingIncognito && pickerBots.length > 0 && view !== "chat" && (() => {
+                {!pendingIncognito && pickerBots.length > 0 && !effectiveChatPresentation && (() => {
                   const geom =
                     pickerGeom ?? pickerGeometry(
                       pickerBots.length,
@@ -27325,9 +27420,9 @@ function HomeContent(): React.JSX.Element {
                 ? "not recorded"
                 : "");
             // Chat mode stays minimal: no role/model header row above bubbles.
-            const showMessageRoleLabel = !chatEphemeralMode;
-            const showProviderTag = !chatEphemeralMode && Boolean(status);
-            const showMessageHeader = !chatEphemeralMode;
+            const showMessageRoleLabel = !chatLikeSurface;
+            const showProviderTag = !chatLikeSurface && Boolean(status);
+            const showMessageHeader = !chatLikeSurface;
             const messageEdge =
               msg.role !== "assistant"
                 ? undefined
@@ -27386,7 +27481,7 @@ function HomeContent(): React.JSX.Element {
               !messageRevealCancelled &&
               chatCompletedRevealKeysRef.current.has(temporalKey);
             const forcedVisibleTokenCount =
-              chatEphemeralMode &&
+              assistantRevealActive &&
               msg.role === "assistant" &&
               msg.id === latestAssistantMessageId &&
               detail?.id
@@ -27413,7 +27508,7 @@ function HomeContent(): React.JSX.Element {
             const messageDisplayContent = resolveMessageDisplayContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const messageDynamicTypeStyle =
-              chatEphemeralMode
+              assistantRevealActive
                 ? ({
                     "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
                       messageDisplayLineCount,
@@ -27431,7 +27526,7 @@ function HomeContent(): React.JSX.Element {
             });
             const showMoodTooltip =
               msg.role === "assistant" &&
-              !chatEphemeralMode &&
+              !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
             return (
               <article
@@ -27459,12 +27554,12 @@ function HomeContent(): React.JSX.Element {
                 data-chat-phase={chatPhase}
                 data-message-edge={messageEdge}
                 data-chat-latest-user-anchor={
-                  chatEphemeralMode && msg.id === latestUserMessageId ? "true" : undefined
+                  chatLikeSurface && msg.id === latestUserMessageId ? "true" : undefined
                 }
                 data-private-user-role-header={privateUserRoleHeader ? "true" : undefined}
                 data-fallback-model-used={messageUsesFallbackModel ? "true" : undefined}
                 onContextMenuCapture={event => {
-                  if (chatEphemeralMode) return;
+                  if (chatLikeSurface) return;
                   event.preventDefault();
                   event.stopPropagation();
                   openMessageContextMenu(msg, event.clientX, event.clientY, {
@@ -27473,7 +27568,7 @@ function HomeContent(): React.JSX.Element {
                   });
                 }}
                 onClick={(event) => {
-                  if (chatEphemeralMode) return;
+                  if (chatLikeSurface) return;
                   if (!mobileContextMenu) {
                     return;
                   }
@@ -27487,7 +27582,7 @@ function HomeContent(): React.JSX.Element {
               >
                 {showMessageHeader && (
                   <h4>
-                    {msg.role === "assistant" && !chatEphemeralMode && !detail?.incognito ? (
+                    {msg.role === "assistant" && !chatLikeSurface && !detail?.incognito ? (
                       <span className={styles.messageMoodAnchor}>
                         <MessageMoodFace
                           moodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
@@ -27553,7 +27648,7 @@ function HomeContent(): React.JSX.Element {
                   }
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
-                  renderAsEphemeralLines={chatEphemeralMode}
+                  renderAsEphemeralLines={chatLikeSurface}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                 />
@@ -27566,7 +27661,7 @@ function HomeContent(): React.JSX.Element {
                     copied
                   </span>
                 )}
-                {!chatEphemeralMode && (() => {
+                {!chatLikeSurface && (() => {
                   // Assistant bubbles: one-click "Fork here" (non-destructive
                   // branch into a new conversation). User bubbles get Edit,
                   // which rewinds from that message and sends the revised text.
@@ -27772,6 +27867,7 @@ function HomeContent(): React.JSX.Element {
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
+      data-chat-sidebar-hidden={zenPresentationActive ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onTouchStart={beginSidebarEdgeSwipe}
@@ -27779,6 +27875,8 @@ function HomeContent(): React.JSX.Element {
       onTouchEnd={endSidebarEdgeSwipe}
       onTouchCancel={endSidebarEdgeSwipe}
     >
+      {!zenPresentationActive ? (
+        <>
       {/* Mobile menu toggle — faded out while either drawer is open
           (sidebar on the left, Settings/Bots/Images panel on the right)
           so the fixed hamburger doesn't overlap the profile avatar or
@@ -27882,6 +27980,8 @@ function HomeContent(): React.JSX.Element {
           </div>
         )}
       </aside>
+        </>
+      ) : null}
 
       {/* Chat */}
       <section
@@ -27948,7 +28048,9 @@ function HomeContent(): React.JSX.Element {
             </button>
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
-          {shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
+          {chatLikeSurface ? (
+            renderHeaderModelPicker()
+          ) : shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
             <h2
               className={`${styles.chatHeaderTitle} ${
                 headerTitleCollapsedForAccordion
@@ -27974,8 +28076,8 @@ function HomeContent(): React.JSX.Element {
         <div
           className={styles.messagesFrame}
           data-mode={messagesFrameMode}
-          data-chat-focus={chatEphemeralMode ? "true" : undefined}
-          data-replying-live={chatEphemeralMode && typingIndicatorVisible ? "true" : undefined}
+          data-chat-focus={chatLikeSurface ? "true" : undefined}
+          data-replying-live={chatLikeSurface && typingIndicatorVisible ? "true" : undefined}
           data-private-bot={privateCustomBotActive ? "true" : undefined}
           style={messagesFrameStyle}
         >
@@ -27995,7 +28097,7 @@ function HomeContent(): React.JSX.Element {
               !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
             } ${askQuestionTailSpaceActive ? styles.messagesAskQuestionTailSpace : ""}`}
             ref={messagesScrollRef}
-            data-chat-ephemeral={chatEphemeralMode ? "true" : undefined}
+            data-chat-ephemeral={chatLikeSurface ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={typingIndicatorVisible ? "true" : undefined}
             onScroll={handleMessagesPaneScroll}
@@ -28235,7 +28337,7 @@ function HomeContent(): React.JSX.Element {
                     ) : null}
                   </div>
                 ) : null}
-                {!pendingIncognito && pickerBots.length > 0 && (() => {
+                {!pendingIncognito && pickerBots.length > 0 && !chatLikeSurface && (() => {
                   // Same geometry math as the Chat-mode picker: mobile
                   // stays square, desktop goes widescreen, and density
                   // stages scale from the viewport-driven frame width.
@@ -28516,9 +28618,9 @@ function HomeContent(): React.JSX.Element {
                 ? "not recorded"
                 : "");
             // Chat mode stays minimal: no role/model header row above bubbles.
-            const showMessageRoleLabel = !chatEphemeralMode;
-            const showProviderTag = !chatEphemeralMode && Boolean(status);
-            const showMessageHeader = !chatEphemeralMode;
+            const showMessageRoleLabel = !chatLikeSurface;
+            const showProviderTag = !chatLikeSurface && Boolean(status);
+            const showMessageHeader = !chatLikeSurface;
             // Push the bot's color into the assistant bubble itself so
             // the message owns the accent visually, leaving the header
             // dots free for HUMAN / LOCAL / ONLINE status only. The
@@ -28577,7 +28679,7 @@ function HomeContent(): React.JSX.Element {
               !messageRevealCancelled &&
               chatCompletedRevealKeysRef.current.has(temporalKey);
             const forcedVisibleTokenCount =
-              chatEphemeralMode &&
+              assistantRevealActive &&
               msg.role === "assistant" &&
               msg.id === latestAssistantMessageId &&
               detail?.id
@@ -28604,7 +28706,7 @@ function HomeContent(): React.JSX.Element {
             const messageDisplayContent = resolveMessageDisplayContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const messageDynamicTypeStyle =
-              chatEphemeralMode
+              assistantRevealActive
                 ? ({
                     "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
                       messageDisplayLineCount,
@@ -28622,7 +28724,7 @@ function HomeContent(): React.JSX.Element {
             });
             const showMoodTooltip =
               msg.role === "assistant" &&
-              !chatEphemeralMode &&
+              !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
             return (
               <article
@@ -28650,12 +28752,12 @@ function HomeContent(): React.JSX.Element {
                 data-chat-phase={chatPhase}
                 data-message-edge={messageEdge}
                 data-chat-latest-user-anchor={
-                  chatEphemeralMode && msg.id === latestUserMessageId ? "true" : undefined
+                  chatLikeSurface && msg.id === latestUserMessageId ? "true" : undefined
                 }
                 data-private-user-role-header={privateUserRoleHeader ? "true" : undefined}
                 data-fallback-model-used={messageUsesFallbackModel ? "true" : undefined}
                 onContextMenuCapture={event => {
-                  if (chatEphemeralMode) return;
+                  if (chatLikeSurface) return;
                   event.preventDefault();
                   event.stopPropagation();
                   openMessageContextMenu(msg, event.clientX, event.clientY, {
@@ -28664,7 +28766,7 @@ function HomeContent(): React.JSX.Element {
                   });
                 }}
                 onClick={(event) => {
-                  if (chatEphemeralMode) return;
+                  if (chatLikeSurface) return;
                   if (!mobileContextMenu) {
                     return;
                   }
@@ -28678,7 +28780,7 @@ function HomeContent(): React.JSX.Element {
               >
                 {showMessageHeader && (
                   <h4>
-                    {msg.role === "assistant" && !chatEphemeralMode && !detail?.incognito ? (
+                    {msg.role === "assistant" && !chatLikeSurface && !detail?.incognito ? (
                       <span className={styles.messageMoodAnchor}>
                         <MessageMoodFace
                           moodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
@@ -28741,7 +28843,7 @@ function HomeContent(): React.JSX.Element {
                   }
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
-                  renderAsEphemeralLines={chatEphemeralMode}
+                  renderAsEphemeralLines={chatLikeSurface}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                 />
@@ -28754,7 +28856,7 @@ function HomeContent(): React.JSX.Element {
                     copied
                   </span>
                 )}
-                {!chatEphemeralMode && (() => {
+                {!chatLikeSurface && (() => {
                   // Assistant bubbles: one-click "Fork here" (non-destructive
                   // branch into a new conversation). User bubbles get Edit,
                   // which rewinds from that message and sends the revised text.
@@ -28843,6 +28945,7 @@ function HomeContent(): React.JSX.Element {
               onInteractionChange={setLensInteracting}
             />
           )}
+          {!chatLikeSurface ? (
           <div className={styles.composeTools}>
             {(() => {
               const botHasCommenced = !!detail && detail.messages.length > 0;
@@ -28966,6 +29069,7 @@ function HomeContent(): React.JSX.Element {
               );
             })()}
           </div>
+          ) : null}
           {!composerHiddenByAskQuestion && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
               <span>Editing message. Save sends the revised text.</span>
@@ -28974,25 +29078,72 @@ function HomeContent(): React.JSX.Element {
           )}
           {renderComposerWritingAssistAction()}
           {!composerHiddenByAskQuestion ? (
-            <ComposerInput
-              ref={draftComposerRef}
-              enabled={composerMarkdownEditorEnabled}
-              value={draft}
-              placeholder="Ask anything..."
-              writingAssistEnabled={settings?.composerWritingAssist !== false}
-              submitDisabled={composerSubmitDisabled(draft)}
-              submitLabel={composerSubmitLabel(draft)}
-              hideSubmitButton={hideMobileEmptySend}
-              onChange={handleComposerChange}
-              onValueChange={updateComposerDraft}
-              onFocus={handleComposerFocus}
-            />
+            chatLikeSurface ? (
+              <div className={styles.chatComposerStack}>
+                {devDebugComposerEnabled && (
+                  <div className={styles.debugComposerBox}>
+                    <div className={styles.debugComposerLabel} aria-live="polite">
+                      DEBUG COMPOSER (local echo only)
+                    </div>
+                    <div className={styles.debugComposerRow} data-debug-composer="true">
+                      <textarea
+                        value={debugComposerDraft}
+                        onChange={(event) => setDebugComposerDraft(event.currentTarget.value)}
+                        placeholder="Type text to echo as a bot reply..."
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" || event.shiftKey) return;
+                          event.preventDefault();
+                          submitDebugComposerEcho();
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={submitDebugComposerEcho}
+                        disabled={debugComposerDraft.trim().length === 0 || pendingReply}
+                      >
+                        Send debug echo
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className={styles.chatComposerRow}>
+                  <ComposerInput
+                    ref={draftComposerRef}
+                    enabled={composerMarkdownEditorEnabled}
+                    value={draft}
+                    placeholder="Say something..."
+                    writingAssistEnabled={settings?.composerWritingAssist !== false}
+                    submitDisabled={composerSubmitDisabled(draft)}
+                    submitLabel={composerSubmitLabel(draft)}
+                    hideSubmitButton={hideMobileEmptySend}
+                    onChange={handleComposerChange}
+                    onValueChange={updateComposerDraft}
+                    onFocus={handleComposerFocus}
+                  />
+                </div>
+              </div>
+            ) : (
+              <ComposerInput
+                ref={draftComposerRef}
+                enabled={composerMarkdownEditorEnabled}
+                value={draft}
+                placeholder="Ask anything..."
+                writingAssistEnabled={settings?.composerWritingAssist !== false}
+                submitDisabled={composerSubmitDisabled(draft)}
+                submitLabel={composerSubmitLabel(draft)}
+                hideSubmitButton={hideMobileEmptySend}
+                onChange={handleComposerChange}
+                onValueChange={updateComposerDraft}
+                onFocus={handleComposerFocus}
+              />
+            )
           ) : null}
         </form>
         {renderMessageContextMenu()}
         {renderBotContextMenu()}
       </section>
 
+      {renderDevToolsButton()}
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}

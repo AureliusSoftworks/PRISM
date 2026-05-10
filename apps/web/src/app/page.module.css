@@ -563,14 +563,22 @@
 
 .authBrandLockup {
   align-items: flex-start;
+  width: 100%;
+  min-width: 0;
 }
 
+/* Fills the lockup row after the icon (`flex: 1`) so the wordmark column
+   shares the same right edge as the form. `align-items: flex-end` keeps
+   the wordmark + pill cluster on that edge; the tagline uses
+   `align-self: stretch` + `text-align: right` to span the full column. */
 .authBrandTextBlock {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  flex: 1;
   min-width: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 100%;
   padding-top: 2px;
 }
 
@@ -874,11 +882,10 @@
   margin: 2px 0 0;
   align-self: stretch;
   color: color-mix(in srgb, var(--fg-muted) 88%, var(--accent-ink) 12%);
-  font-size: 10.5px;
+  font-size: 14px;
   font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  line-height: 1.25;
+  letter-spacing: 0.05em;
   text-align: right;
 }
 
@@ -1020,8 +1027,8 @@
   }
 
   .authTagline {
-    font-size: 9.5px;
-    letter-spacing: 0.05em;
+    font-size: 12.5px;
+    letter-spacing: 0.045em;
   }
 
   .authFormHeader {
@@ -1052,7 +1059,7 @@
   }
 
   .authTagline {
-    font-size: 9px;
+    font-size: 11.5px;
   }
 }
 
@@ -8284,11 +8291,11 @@
   box-shadow:
     0 12px 28px color-mix(in srgb, #000000 24%, transparent),
     0 0 0 1px color-mix(in srgb, #ffffff 12%, transparent) inset,
-    0 0 28px color-mix(in srgb, #2fd3e3 22%, transparent),
-    0 0 34px color-mix(in srgb, #7b5cff 18%, transparent);
+    0 0 26px color-mix(in srgb, var(--typing-accent, var(--accent)) 22%, transparent),
+    0 0 38px color-mix(in srgb, var(--typing-accent, var(--accent)) 14%, transparent);
   animation:
     typingPrismBreath 1.7s ease-in-out infinite,
-    typingPrismAura 2.2s ease-in-out infinite;
+    typingBotAccentAura 2.2s ease-in-out infinite;
 }
 
 .typingIndicatorChatCenter.typingIndicatorReplyingLive::before {
@@ -8297,13 +8304,13 @@
   inset: 0;
   border-radius: inherit;
   padding: 1px;
+  /* Single-hue ring from the active bot accent (no PRISM rainbow). */
   background: conic-gradient(
-    #ff4d6d,
-    #ff9f1c 18%,
-    #b7e63a 36%,
-    #2fd3e3 56%,
-    #7b5cff 78%,
-    #ff4d6d
+    from 0deg,
+    color-mix(in srgb, var(--typing-accent, var(--accent)) 45%, transparent),
+    color-mix(in srgb, var(--typing-accent, var(--accent)) 92%, #ffffff 8%),
+    color-mix(in srgb, var(--typing-accent, var(--accent)) 55%, #000000 6%),
+    color-mix(in srgb, var(--typing-accent, var(--accent)) 45%, transparent)
   );
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
@@ -8442,20 +8449,20 @@
   }
 }
 
-@keyframes typingPrismAura {
+@keyframes typingBotAccentAura {
   0%, 100% {
     box-shadow:
       0 10px 22px color-mix(in srgb, #000000 22%, transparent),
       0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent) inset,
-      0 0 20px color-mix(in srgb, #2fd3e3 14%, transparent),
-      0 0 24px color-mix(in srgb, #7b5cff 12%, transparent);
+      0 0 20px color-mix(in srgb, var(--typing-accent, var(--accent)) 16%, transparent),
+      0 0 28px color-mix(in srgb, var(--typing-accent, var(--accent)) 10%, transparent);
   }
   50% {
     box-shadow:
       0 14px 30px color-mix(in srgb, #000000 26%, transparent),
       0 0 0 1px color-mix(in srgb, #ffffff 14%, transparent) inset,
-      0 0 32px color-mix(in srgb, #2fd3e3 26%, transparent),
-      0 0 40px color-mix(in srgb, #7b5cff 22%, transparent);
+      0 0 34px color-mix(in srgb, var(--typing-accent, var(--accent)) 28%, transparent),
+      0 0 44px color-mix(in srgb, var(--typing-accent, var(--accent)) 18%, transparent);
   }
 }
 
