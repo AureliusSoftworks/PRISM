@@ -348,7 +348,7 @@ describe("buildRouterPrompt", () => {
 });
 
 describe("buildSpeakerPrompt", () => {
-  it("includes short sweet one-paragraph and question-restraint reply guidance", () => {
+  it("includes one-clause and 48-char tabletop guidance", () => {
     const messages = buildSpeakerPrompt({
       speaker: ALICE,
       group: [ALICE, BORIS, CARA],
@@ -363,22 +363,22 @@ describe("buildSpeakerPrompt", () => {
     const systemInstruction = messages.find(
       (message) =>
         message.role === "system" &&
-        message.content.includes("Reply in exactly one paragraph")
+        message.content.includes("Coffee Mode") &&
+        message.content.includes("48 characters")
     );
     assert.ok(systemInstruction);
     assert.match(systemInstruction!.content, /no line breaks/);
-    assert.match(systemInstruction!.content, /usually one sentence/);
-    assert.match(systemInstruction!.content, /at most two short sentences/);
+    assert.match(systemInstruction!.content, /ONE clause only/);
+    assert.match(systemInstruction!.content, /No second sentence/);
     assert.match(systemInstruction!.content, /Do not end with a question by default/);
     assert.match(systemInstruction!.content, /cutting off another bot mid-sentence/);
     assert.match(systemInstruction!.content, /still warming up/);
-    assert.match(systemInstruction!.content, /Hard tabletop budget/);
-    assert.match(systemInstruction!.content, /260 characters/);
+    assert.match(systemInstruction!.content, /Hard tabletop cap/);
+    assert.match(systemInstruction!.content, /excitedly/);
 
     const userTurnInstruction = messages.at(-1);
     assert.equal(userTurnInstruction?.role, "user");
-    assert.match(userTurnInstruction!.content, /one sentence is ideal/);
-    assert.match(userTurnInstruction!.content, /Use exactly one paragraph/);
+    assert.match(userTurnInstruction!.content, /48 characters/);
     assert.match(userTurnInstruction!.content, /Do not end with a question unless/);
   });
 });
@@ -395,17 +395,17 @@ describe("clampCoffeeTableReplyText", () => {
   it("truncates oversized replies", () => {
     const filler = `${"word ".repeat(120)}`;
     const out = clampCoffeeTableReplyText(filler);
-    assert.ok(out.endsWith("…") || out.length <= 291);
+    assert.ok(out.endsWith("…") || out.length <= 48);
     assert.ok(out.length < filler.length);
   });
 
   it("prefers cutting at sentence punctuation when possible", () => {
-    const base = `${"short ".repeat(20)}`; // preamble
-    const tail = `${"reallylongtoken".repeat(12)}`; // forces length
+    const base = `${"short ".repeat(2)}`; // keep \"First fitting end.\" inside the 48-char window
+    const tail = `${"reallylongtoken".repeat(12)}`;
     const long = `${base}First fitting end. ${tail}`;
     const out = clampCoffeeTableReplyText(long);
     assert.ok(out.includes("First fitting end."), out);
-    assert.ok(out.length <= 300);
+    assert.ok(out.length <= 48);
   });
 });
 

@@ -19248,11 +19248,36 @@
   width: min(100%, 198px);
 }
 
+.coffeeTypewriter {
+  display: inline;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.coffeeTypewriterCaret {
+  display: inline-block;
+  margin-left: 1px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.55);
+  animation: coffeeTypewriterCaretBlink 0.95s step-end infinite;
+  transform: translateY(-0.05em);
+}
+
+@keyframes coffeeTypewriterCaretBlink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
 .coffeeTableTypingLine {
   --typing-accent: rgba(255, 255, 255, 0.88);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
+  width: 100%;
   min-height: 1.6em;
 }
 

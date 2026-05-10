@@ -14011,6 +14011,8 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSessionEndsAtMs, setCoffeeSessionEndsAtMs] = useState<number | null>(null);
   const [coffeeTurnRhythmState, setCoffeeTurnRhythmState] =
     useState<CoffeeTurnRhythmState>("idle");
+  /** Visible length of the pending assistant line during `tableTyping` (typewriter). */
+  const [coffeeTypewriterLength, setCoffeeTypewriterLength] = useState(0);
   const [coffeePendingSpeakerBotId, setCoffeePendingSpeakerBotId] = useState<string | null>(null);
   const [coffeePendingRevealConversation, setCoffeePendingRevealConversation] =
     useState<CoffeeConversationState | null>(null);
@@ -14023,6 +14025,9 @@ function HomeContent(): React.JSX.Element {
   const coffeeTranscriptCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Matches `randomCoffeeRevealDelayMs` for the current pending assistant line so typewriter finishes with reveal. */
+  const coffeeRevealTypingDurationMsRef = useRef(0);
+  const coffeeTypewriterRafRef = useRef<number | null>(null);
   const coffeeTurnAbortRef = useRef<AbortController | null>(null);
   const coffeeContinueAbortRef = useRef<AbortController | null>(null);
   const coffeeAutoplayPausedRef = useRef(false);
@@ -14125,6 +14130,53 @@ function HomeContent(): React.JSX.Element {
     coffeeBusy,
     coffeeAutoBusy,
   ]);
+  useEffect(() => {
+    if (coffeeTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeTypewriterRafRef.current);
+      coffeeTypewriterRafRef.current = null;
+    }
+    if (coffeeTurnRhythmState !== "tableTyping") {
+      setCoffeeTypewriterLength(0);
+      return;
+    }
+    const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
+    const last = pendingMessages[pendingMessages.length - 1];
+    if (!last || last.role !== "assistant") {
+      setCoffeeTypewriterLength(last?.content.length ?? 0);
+      return;
+    }
+    const full = last.content;
+    const charCount = full.length;
+    if (charCount === 0) {
+      setCoffeeTypewriterLength(0);
+      return;
+    }
+    const durationMs = Math.max(
+      120,
+      coffeeRevealTypingDurationMsRef.current ||
+        randomCoffeeRevealDelayMs(full)
+    );
+    setCoffeeTypewriterLength(0);
+    const startMs = performance.now();
+    const step = (now: number) => {
+      const elapsed = now - startMs;
+      const t = Math.min(1, elapsed / durationMs);
+      const nextLen = Math.min(charCount, Math.ceil(t * charCount));
+      setCoffeeTypewriterLength(nextLen);
+      if (t < 1) {
+        coffeeTypewriterRafRef.current = requestAnimationFrame(step);
+      } else {
+        coffeeTypewriterRafRef.current = null;
+      }
+    };
+    coffeeTypewriterRafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (coffeeTypewriterRafRef.current != null) {
+        cancelAnimationFrame(coffeeTypewriterRafRef.current);
+        coffeeTypewriterRafRef.current = null;
+      }
+    };
+  }, [coffeeTurnRhythmState, coffeePendingRevealConversation]);
   // Whenever we leave Coffee view, drop transient live-room state. The
   // persisted Coffee Sessions remain in the conversation list via
   // `conversation_mode = 'coffee'`.
@@ -14147,6 +14199,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeeArrivedBotIds([]);
       setCoffeeSessionEndsAtMs(null);
       setCoffeeTurnRhythmState("idle");
+      setCoffeeTypewriterLength(0);
       setCoffeePendingSpeakerBotId(null);
       setCoffeePendingRevealConversation(null);
       setCoffeeInterruptedSnippet(null);
@@ -14158,6 +14211,10 @@ function HomeContent(): React.JSX.Element {
       if (coffeeRevealTimerRef.current) {
         clearTimeout(coffeeRevealTimerRef.current);
         coffeeRevealTimerRef.current = null;
+      }
+      if (coffeeTypewriterRafRef.current != null) {
+        cancelAnimationFrame(coffeeTypewriterRafRef.current);
+        coffeeTypewriterRafRef.current = null;
       }
       if (coffeeInterruptionCueTimerRef.current) {
         clearTimeout(coffeeInterruptionCueTimerRef.current);
@@ -25229,9 +25286,14 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(coffeeRevealTimerRef.current);
       coffeeRevealTimerRef.current = null;
     }
+    if (coffeeTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeTypewriterRafRef.current);
+      coffeeTypewriterRafRef.current = null;
+    }
   };
   const resetCoffeeRhythm = () => {
     clearCoffeeRhythmTimers();
+    setCoffeeTypewriterLength(0);
     setCoffeePendingSpeakerBotId(null);
     setCoffeePendingRevealConversation(null);
     setCoffeeInterruptedSnippet(null);
@@ -25254,6 +25316,7 @@ function HomeContent(): React.JSX.Element {
     const revealDelayMs = randomCoffeeRevealDelayMs(
       pendingMessage?.role === "assistant" ? pendingMessage.content : ""
     );
+    coffeeRevealTypingDurationMsRef.current = revealDelayMs;
     const applyReveal = () => {
       setCoffeeConversation(args.conversation);
       setCoffeeSelectedSessionId(args.conversation.id);
@@ -25958,6 +26021,8 @@ function HomeContent(): React.JSX.Element {
       : centerMessage?.role === "user"
         ? "You"
         : "PRISM";
+    const tableTypingAssistantFullText =
+      pendingLatestMessage?.role === "assistant" ? pendingLatestMessage.content : "";
     const showThinkingIndicator = coffeeDraft.trim().length === 0;
     const thinkingBotId = showThinkingIndicator ? coffeePendingSpeakerBotId : null;
     const visibleCoffeeSeats = coffeeActiveSeatBotIds
@@ -26004,10 +26069,13 @@ function HomeContent(): React.JSX.Element {
               <p>
                 {tableTypingBot ? (
                   <span className={styles.coffeeTableTypingLine}>
-                    <span className={styles.typingDots} aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
+                    <span className={styles.coffeeTypewriter} aria-hidden="true">
+                      {tableTypingAssistantFullText.slice(0, coffeeTypewriterLength)}
+                      {coffeeTypewriterLength < tableTypingAssistantFullText.length ? (
+                        <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
+                          │
+                        </span>
+                      ) : null}
                     </span>
                     <span className={styles.srOnly}>{`${tableTypingBot.name} is speaking.`}</span>
                   </span>

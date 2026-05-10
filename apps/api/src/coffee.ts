@@ -62,13 +62,13 @@ export const COFFEE_GROUP_MAX_SIZE = 5;
 const COFFEE_HISTORY_WINDOW = 24;
 
 /** Hard cap so verbose models cannot flood the tabletop card (full text still in transcript tooling). */
-const COFFEE_TABLE_REPLY_MAX_CHARS = 280;
+const COFFEE_TABLE_REPLY_MAX_CHARS = 48;
 
 /**
  * Hard cap on speaker decode budget for Coffee. Per-bot overrides may be lower
- * but cannot exceed this envelope.
+ * but cannot exceed this envelope. Keep aligned with {@link COFFEE_TABLE_REPLY_MAX_CHARS}.
  */
-const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS = 96;
+const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS = 24;
 
 /** Router LLM call budget — keep low so latency stays acceptable. */
 const ROUTER_TEMPERATURE = 0.2;
@@ -872,9 +872,10 @@ export function buildSpeakerPrompt(args: {
     "Stay in character. Respond as yourself only — do NOT speak on behalf of the other bots, do NOT include their names as speakers, and do NOT prefix your reply with your own name.",
     "You may react directly to what another bot just said, agree, disagree, add one concrete thought, pause into a softer observation, or gently shift the topic when that fits your personality.",
     "The user is present, but Coffee should feel like a group conversation. Do not turn every reply back toward the user.",
-    "Keep replies short and sweet. Reply in exactly one paragraph with no line breaks, usually one sentence and at most two short sentences.",
-    "Hard tabletop budget: roughly 260 characters (~2 short sentences). Stay safely under this; longer replies are clipped for the tabletop view.",
-    "Aim for the length of a gentle table comment, not a speech. Example length: \"It's so nice to gather here together, sharing a moment of warmth and creativity.\"",
+    "Reply as one line of plain prose (no line breaks). ONE clause only — a single short utterance, like a reaction bark or one breath. No second sentence, no semicolon piles, no em dash add-ons.",
+    "Hard tabletop cap: 48 characters including spaces. Anything longer is clipped and looks broken.",
+    "Examples: \"Hey Patrick!\" \"Wild shift, huh?\" \"Yeah, I get that.\" If you're tempted to type more, stop sooner.",
+    "No asterisk stage directions (like *excitedly*), no parenthetical acting notes.",
     "Do not end with a question by default. Ask a question only when it is genuinely the most natural next move; otherwise end with a statement, observation, or small offer.",
     "Do not write as if you are cutting off another bot mid-sentence. Coffee only presents cutoffs when the app has explicit interruption metadata.",
     "Avoid long monologues; the table should feel like a shared room, not a speech.",
@@ -901,7 +902,7 @@ export function buildSpeakerPrompt(args: {
     messages.push({
       role: "system",
       content:
-        "This appears to be your first conversation with this user. Briefly introduce yourself before continuing, then ask how they prefer to be addressed.",
+        "First meeting with this user: fit a tiny self-intro plus how-they-like-to-be-addressed in the same tabletop limit — prefer one short sentence; two very short ones only if necessary.",
     });
   }
   if (history.length > 0) {
@@ -933,8 +934,8 @@ export function buildSpeakerPrompt(args: {
             "Continue the table conversation in your own voice.",
             `Latest table moment: ${userMessage}`,
             `Respond as ${speaker.name} to the latest bot, the shared topic, or a natural topic shift. Only address the user if that is truly the natural next move.`,
-            "Keep it short and sweet: one sentence is ideal, two short sentences is the ceiling.",
-            "Use exactly one paragraph. Do not end with a question unless the moment truly needs one.",
+            "Length: one clause only — hard cap 48 characters including spaces.",
+            "Do not end with a question unless the moment truly needs one.",
             "Do not include a speaker label.",
           ].join("\n"),
         }
@@ -943,8 +944,8 @@ export function buildSpeakerPrompt(args: {
           content: [
             `The user says: ${userMessage}`,
             "Reply naturally as part of the table conversation. You may answer the user directly or open the topic to another bot.",
-            "Keep it short and sweet: one sentence is ideal, two short sentences is the ceiling.",
-            "Use exactly one paragraph. Do not end with a question unless the moment truly needs one.",
+            "Length: one clause only — hard cap 48 characters including spaces.",
+            "Do not end with a question unless the moment truly needs one.",
             "Do not include a speaker label.",
           ].join("\n"),
         }
