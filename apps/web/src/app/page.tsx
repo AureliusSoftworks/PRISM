@@ -14,6 +14,7 @@ import {
   useImperativeHandle,
   forwardRef,
   useSyncExternalStore,
+  useTransition,
 } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -28,14 +29,22 @@ import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import GlyphTooltipLayer from "./GlyphTooltipLayer";
 import styles from "./page.module.css";
 import {
+  BOT_FACT_KEY_LABELS,
+  BOT_FACT_KEY_ORDER,
   BOT_VOICE_PRESET_LABELS,
+  MAX_CUSTOM_FACTS,
+  classifyMemoryCategoryFromText,
   defaultBotPurpose,
+  listBotProfileFacts,
   parseAssistantPrismTools,
   parseStoredBotPrompt,
   randomBotProfile,
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
   stripPurposeStatementPrefixes,
+  type BotCustomFact,
+  type BotFactKey,
+  type CoffeeBotSocialSnapshot,
   type BotProfileFields,
   type BotProfileScaleValue,
   type BotVoicePreset,
@@ -287,13 +296,16 @@ const DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT = 0.45;
 const PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY = "prism_dev_bot_import_paste";
 /** When set, inline developer metrics are rendered in the chat stream. */
 const PRISM_DEV_CHAT_METRICS_STORAGE_KEY = "prism_dev_chat_metrics";
-/** When set, local slash dev commands like `/clear` are enabled in composer. */
+/** When set, local slash dev commands like `/forget` are enabled in composer. */
 const PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY = "prism_dev_slash_commands";
 /** When set, Chat mode shows a local debug echo composer above the default composer. */
 const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
 /** Stores the floating dev-tools toggle button's last placed position as `{x,y}` JSON. */
 const PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY = "prism_dev_tools_button_position";
+/** Stores custom short-term memory bubble positions by scope and memory id. */
+const PRISM_MEMORY_BUBBLE_LAYOUT_STORAGE_KEY = "prism_memory_bubble_layout_v1";
 const MEMORY_RATIO_EMPTY_SIZE = 42;
+const MEMORY_FAMILY_EMPTY_BOT_SIZE = 42;
 // MIN_SIZE is the floor for any non-empty memory bubble. It must be large
 // enough to comfortably fit the bot glyph (currently 40px) plus breathing
 // room, so the smallest orbs in a dense family drill-down still read as
@@ -320,6 +332,24 @@ type SidebarEdgeSwipeState = {
   touchId: number;
   startX: number;
   startY: number;
+};
+type MemoryBubblePositionPct = { xPct: number; yPct: number };
+type MemoryBubbleLayoutByScope = Record<string, Record<string, MemoryBubblePositionPct>>;
+type MemoryBubblePositionPx = { x: number; y: number };
+type MemoryBubbleDragState = {
+  pointerId: number;
+  memoryId: string;
+  scopeKey: string;
+  startClientX: number;
+  startClientY: number;
+  cloudWidth: number;
+  cloudHeight: number;
+  boundsPx: { minX: number; maxX: number; minY: number; maxY: number };
+  positionsPx: Record<string, MemoryBubblePositionPx>;
+  radiiPx: Record<string, number>;
+  nodeById: Record<string, HTMLElement>;
+  rafId: number | null;
+  dragged: boolean;
 };
 
 type MessageMenuAnchor = "pointer" | "center" | "below";
@@ -453,6 +483,138 @@ function readStoredDevToolsButtonPosition(): DevToolsPanelPosition | null {
     // localStorage / JSON failure; fall through to default anchor.
   }
   return null;
+}
+
+function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(PRISM_MEMORY_BUBBLE_LAYOUT_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    const byScope: MemoryBubbleLayoutByScope = {};
+    for (const [scopeKey, scopeValue] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!scopeValue || typeof scopeValue !== "object") continue;
+      const byMemory: Record<string, MemoryBubblePositionPct> = {};
+      for (const [memoryId, pos] of Object.entries(scopeValue as Record<string, unknown>)) {
+        if (!pos || typeof pos !== "object") continue;
+        const candidate = pos as { xPct?: unknown; yPct?: unknown };
+        if (
+          typeof candidate.xPct === "number" &&
+          Number.isFinite(candidate.xPct) &&
+          typeof candidate.yPct === "number" &&
+          Number.isFinite(candidate.yPct)
+        ) {
+          byMemory[memoryId] = {
+            xPct: Math.max(0, Math.min(100, candidate.xPct)),
+            yPct: Math.max(0, Math.min(100, candidate.yPct)),
+          };
+        }
+      }
+      if (Object.keys(byMemory).length > 0) {
+        byScope[scopeKey] = byMemory;
+      }
+    }
+    return byScope;
+  } catch {
+    return {};
+  }
+}
+
+function persistMemoryBubbleLayouts(layouts: MemoryBubbleLayoutByScope): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      PRISM_MEMORY_BUBBLE_LAYOUT_STORAGE_KEY,
+      JSON.stringify(layouts)
+    );
+  } catch {
+    // localStorage can throw (privacy mode, quota); non-fatal.
+  }
+}
+
+function resolveMemoryBubbleCollisionsPx(
+  positionsPx: Record<string, MemoryBubblePositionPx>,
+  radiiPx: Record<string, number>,
+  boundsPx: { minX: number; maxX: number; minY: number; maxY: number },
+  draggedId: string
+): Set<string> {
+  const ids = Object.keys(positionsPx);
+  const touched = new Set<string>([draggedId]);
+  const active = new Set<string>([draggedId]);
+
+  // Localized propagation: resolve collisions from dragged bubble outward
+  // instead of running O(n^2) over the full cloud on every pointer frame.
+  for (let iter = 0; iter < 8; iter += 1) {
+    const frontier = Array.from(active);
+    active.clear();
+    let anyOverlap = false;
+    for (const aId of frontier) {
+      const a = positionsPx[aId];
+      const aRadius = radiiPx[aId] ?? 0;
+      if (!a) continue;
+      for (const bId of ids) {
+        if (aId === bId) continue;
+        const b = positionsPx[bId];
+        const bRadius = radiiPx[bId] ?? 0;
+        if (!b) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+        const minDist = aRadius + bRadius + 3.6;
+        if (dist >= minDist) continue;
+        anyOverlap = true;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const overlap = minDist - dist;
+
+        if (aId === draggedId) {
+          b.x += nx * overlap;
+          b.y += ny * overlap;
+          touched.add(bId);
+          active.add(bId);
+        } else if (bId === draggedId) {
+          a.x -= nx * overlap;
+          a.y -= ny * overlap;
+          touched.add(aId);
+          active.add(aId);
+        } else {
+          const half = overlap * 0.5;
+          a.x -= nx * half;
+          a.y -= ny * half;
+          b.x += nx * half;
+          b.y += ny * half;
+          touched.add(aId);
+          touched.add(bId);
+          active.add(aId);
+          active.add(bId);
+        }
+      }
+    }
+
+    for (const id of touched) {
+      const p = positionsPx[id];
+      const radius = radiiPx[id] ?? 0;
+      p.x = Math.max(boundsPx.minX + radius, Math.min(boundsPx.maxX - radius, p.x));
+      p.y = Math.max(boundsPx.minY + radius, Math.min(boundsPx.maxY - radius, p.y));
+    }
+    if (!anyOverlap) break;
+  }
+
+  return touched;
+}
+
+function memoryBubblePositionsPxToPctMap(
+  dragState: Pick<MemoryBubbleDragState, "positionsPx" | "cloudWidth" | "cloudHeight">
+): Record<string, MemoryBubblePositionPct> {
+  const next: Record<string, MemoryBubblePositionPct> = {};
+  for (const [id, pos] of Object.entries(dragState.positionsPx)) {
+    next[id] = {
+      xPct: Math.max(0, Math.min(100, (pos.x / dragState.cloudWidth) * 100)),
+      yPct: Math.max(0, Math.min(100, (pos.y / dragState.cloudHeight) * 100)),
+    };
+  }
+  return next;
 }
 
 interface PrismWordmarkProps {
@@ -1831,12 +1993,40 @@ type View = "hub" | "chat" | "sandbox" | "coffee";
 const COFFEE_GROUP_MIN_SIZE_CLIENT = 2;
 const COFFEE_GROUP_MAX_SIZE_CLIENT = 5;
 const COFFEE_SESSION_DURATION_MS = 4 * 60 * 1000;
-const COFFEE_REPLY_DELAY_MIN_MS = 4000;
-const COFFEE_REPLY_DELAY_MAX_MS = 8000;
+const COFFEE_REPLY_DELAY_MIN_MS = 12000;
+const COFFEE_REPLY_DELAY_MAX_MS = 28000;
 const COFFEE_ARRIVAL_STEP_MS = 850;
 const COFFEE_ARRIVAL_SETTLE_MS = 900;
 const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
+const COFFEE_SEND_COOLDOWN_MS = 2200;
+const COFFEE_BOT_REVEAL_DELAY_MIN_MS = 1400;
+const COFFEE_BOT_REVEAL_DELAY_MAX_MS = 3400;
+const COFFEE_BOT_REVEAL_MS_PER_WORD = 90;
+const COFFEE_INTERRUPTION_CUE_HIDE_MS = 3200;
+const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
 const COFFEE_CUP_ROTATION_BIAS_DEGREES = 45;
+
+function randomCoffeeAutonomousDelayMs(): number {
+  const range = COFFEE_REPLY_DELAY_MAX_MS - COFFEE_REPLY_DELAY_MIN_MS;
+  // Bias toward the slow end while preserving occasional quicker replies.
+  const slowLoungeUnit = Math.max(Math.random(), Math.random());
+  return COFFEE_REPLY_DELAY_MIN_MS + Math.floor(slowLoungeUnit * range);
+}
+
+function randomCoffeeRevealDelayMs(messageText: string): number {
+  const wordCount = Math.max(1, (messageText.match(/\S+/g) ?? []).length);
+  const lengthBiasMs = Math.min(
+    COFFEE_BOT_REVEAL_DELAY_MAX_MS - COFFEE_BOT_REVEAL_DELAY_MIN_MS,
+    wordCount * COFFEE_BOT_REVEAL_MS_PER_WORD
+  );
+  const jitterMs = Math.floor(
+    Math.random() * (COFFEE_BOT_REVEAL_DELAY_MAX_MS - COFFEE_BOT_REVEAL_DELAY_MIN_MS)
+  );
+  return Math.min(
+    COFFEE_BOT_REVEAL_DELAY_MAX_MS,
+    COFFEE_BOT_REVEAL_DELAY_MIN_MS + Math.floor(lengthBiasMs * 0.55) + Math.floor(jitterMs * 0.45)
+  );
+}
 
 function emptyCoffeeSeatBotIds(): Array<string | null> {
   return Array.from({ length: COFFEE_GROUP_MAX_SIZE_CLIENT }, () => null);
@@ -1861,6 +2051,12 @@ type CoffeeArrivalScenario =
   | "partial-table-in-progress"
   | "full-table-present";
 type CoffeeSessionPhase = "selecting" | "preview" | "arriving" | "live" | "finished";
+type CoffeeTurnRhythmState =
+  | "idle"
+  | "botThinking"
+  | "playerComposing"
+  | "tableTyping"
+  | "cooldown";
 
 interface CoffeeConversationMessage {
   id: string;
@@ -1870,6 +2066,35 @@ interface CoffeeConversationMessage {
   botName?: string;
   botColor?: string;
   botGlyph?: string;
+}
+
+interface CoffeePlayerInterruptionInput {
+  interruptedMessageId: string;
+  interruptedBotId: string;
+  visibleTokenCount: number;
+}
+
+interface CoffeeInterruptionSocialDelta {
+  botId: string;
+  dispositionDelta: number;
+  valuesFrictionDelta: number;
+}
+
+interface CoffeeInterruptionEvent {
+  kind: "playerInterruptsBot" | "botInterruptsPlayer";
+  interruptedBotId: string;
+  interrupterBotId?: string;
+  interruptedMessageId?: string;
+  visibleTokenCount?: number;
+  interruptedSnippet?: string;
+  socialConsequences: CoffeeInterruptionSocialDelta[];
+}
+
+interface CoffeeSeatInterruptedSnippetState {
+  botId: string;
+  snippet: string;
+  sourceMessageId: string;
+  createdAtMs: number;
 }
 
 /** Local mirror of the Coffee conversation shape returned by `POST /api/coffee/turn`. */
@@ -1884,6 +2109,7 @@ interface CoffeeConversationState {
   lastBotId?: string | null;
   lastBotColor?: string | null;
   hasAssistantReply?: boolean;
+  coffeeBotSocialById?: Record<string, CoffeeBotSocialSnapshot>;
   createdAt?: string;
   updatedAt?: string;
   messages: CoffeeConversationMessage[];
@@ -3214,7 +3440,7 @@ interface UserMemory {
   text: string;
   category?: MemoryCategory;
   tier?: MemoryTier;
-  source?: "direct" | "inferred" | "compiled";
+  source?: "direct" | "inferred" | "compiled" | "about_you";
   certainty?: number;
   durability?: number;
   sourceMessageIds?: string[];
@@ -3244,7 +3470,7 @@ interface MemoryEventPayload {
   confidence: number;
   category?: MemoryCategory;
   tier?: MemoryTier;
-  source?: "direct" | "inferred" | "compiled";
+  source?: "direct" | "inferred" | "compiled" | "about_you";
   certainty?: number;
   durability?: number;
   sourceMessageIds?: string[];
@@ -3321,7 +3547,7 @@ interface BotExportMemory {
   confidence?: number;
   category?: MemoryCategory;
   tier?: MemoryTier;
-  source?: "direct" | "inferred" | "compiled";
+  source?: "direct" | "inferred" | "compiled" | "about_you";
   certainty?: number;
   durability?: number;
   sourceMessageIds?: string[];
@@ -3363,6 +3589,26 @@ function normalizeImportedBotHash(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim().toLowerCase();
   return /^[a-f0-9]{32}$/.test(trimmed) ? trimmed : null;
+}
+
+function normalizeImportedMemorySource(
+  source: BotExportMemory["source"] | undefined
+): "direct" | "inferred" | "compiled" | "about_you" {
+  return source === "inferred" || source === "compiled" || source === "about_you"
+    ? source
+    : "direct";
+}
+
+function normalizeImportedMemoryCategory(
+  category: BotExportMemory["category"] | undefined,
+  source: "direct" | "inferred" | "compiled" | "about_you"
+): MemoryCategory {
+  if (category === "general" || category === "user" || category === "bot_relation") {
+    return category;
+  }
+  // Bot-export payloads often omit category; for imported bot memories, default
+  // to "general" so second-person persona lines are not mistaken as "About you."
+  return source === "about_you" ? "user" : "general";
 }
 
 function createClientBotExportHash(): string {
@@ -3434,18 +3680,20 @@ const BOT_REPLY_LENGTH_PRESETS = [
 const BOT_REPLY_LENGTH_DEFAULT_TOKENS = 2048;
 const BOT_RANDOM_TEMPERATURES = [0.25, 0.45, 0.7, 0.95, 1.1] as const;
 
-type BotProfileBuilderPageId = "purpose" | "personality" | "character";
+type BotProfileBuilderPageId = "purpose" | "personality" | "character" | "facts";
 
 const BOT_PROFILE_BUILDER_PAGE_ORDER: readonly BotProfileBuilderPageId[] = [
   "purpose",
   "personality",
   "character",
+  "facts",
 ] as const;
 
 const BOT_PROFILE_BUILDER_PAGE_LABELS: Record<BotProfileBuilderPageId, string> = {
   purpose: "Purpose",
   personality: "Personality",
   character: "Character",
+  facts: "Facts",
 };
 
 const BOT_PROFILE_PAGE_COPY: Record<
@@ -3463,6 +3711,10 @@ const BOT_PROFILE_PAGE_COPY: Record<
   character: {
     label: "Character",
     description: "Identity, appearance, and optional worldview in one place.",
+  },
+  facts: {
+    label: "Facts",
+    description: "Permanent canon. The bot will always treat these as true.",
   },
 };
 
@@ -3535,9 +3787,22 @@ function botProfileCategoryCount(
           profile.worldview.tradition
         )
       );
+    case "facts":
+      return botProfileFactCount(profile);
     default:
       return 0;
   }
+}
+
+function botProfileFactCount(profile: BotProfileFields): number {
+  let count = 0;
+  for (const key of BOT_FACT_KEY_ORDER) {
+    if (profile.facts?.[key]?.trim()) count += 1;
+  }
+  for (const fact of profile.facts?.customFacts ?? []) {
+    if (fact?.label?.trim() || fact?.value?.trim()) count += 1;
+  }
+  return count;
 }
 
 function botProfileCategorySummary(
@@ -3765,6 +4030,16 @@ function visibleConcreteModelChoiceForProvider(
   return visibleChoice === AUTO_MODEL_CHOICE
     ? defaultModelChoiceForProvider(catalog, settings, provider)
     : visibleChoice;
+}
+
+function visibleModelChoiceForProvider(
+  settings: UserSettings | null,
+  choice: string | null | undefined
+): string {
+  return visibleBotCustomizerModelChoice(
+    settings,
+    normalizeModelChoice(choice)
+  );
 }
 
 function allBotCustomizerModelOptions(
@@ -4350,16 +4625,70 @@ function memoryBubbleSignalValue(memory: UserMemory): number {
     : memoryConfidenceValue(memory);
 }
 
+const MEMORY_BUBBLE_DEDUP_EPSILON = 0.0001;
+const MEMORY_DUPLICATE_CONFIDENCE_MAX_BOOST = 0.22;
+const MEMORY_DUPLICATE_CONFIDENCE_BOOST_DECAY = 0.62;
+
+function normalizeMemoryBubbleDedupKey(text: string): string {
+  return text.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function chooseMemoryBubbleRepresentative(current: UserMemory, candidate: UserMemory): UserMemory {
+  const currentSignal = memoryBubbleSignalValue(current);
+  const candidateSignal = memoryBubbleSignalValue(candidate);
+  if (candidateSignal > currentSignal + MEMORY_BUBBLE_DEDUP_EPSILON) return candidate;
+  if (currentSignal > candidateSignal + MEMORY_BUBBLE_DEDUP_EPSILON) return current;
+
+  const currentDurability = Number.isFinite(current.durability)
+    ? Math.max(0, Math.min(1, current.durability as number))
+    : 0;
+  const candidateDurability = Number.isFinite(candidate.durability)
+    ? Math.max(0, Math.min(1, candidate.durability as number))
+    : 0;
+  if (candidateDurability > currentDurability + MEMORY_BUBBLE_DEDUP_EPSILON) return candidate;
+  if (currentDurability > candidateDurability + MEMORY_BUBBLE_DEDUP_EPSILON) return current;
+
+  const currentCreatedAtMs = Date.parse(current.createdAt);
+  const candidateCreatedAtMs = Date.parse(candidate.createdAt);
+  if (Number.isFinite(candidateCreatedAtMs) && Number.isFinite(currentCreatedAtMs)) {
+    if (candidateCreatedAtMs > currentCreatedAtMs) return candidate;
+    if (currentCreatedAtMs > candidateCreatedAtMs) return current;
+  }
+
+  return current;
+}
+
+function applyDuplicateConfidenceBoost(memory: UserMemory, duplicateCount: number): UserMemory {
+  if (duplicateCount <= 1) return memory;
+  const baseSignal = memoryBubbleSignalValue(memory);
+  const boostProgress = 1 - Math.pow(MEMORY_DUPLICATE_CONFIDENCE_BOOST_DECAY, duplicateCount - 1);
+  const boostedSignal = Math.max(
+    0,
+    Math.min(
+      1,
+      baseSignal + (1 - baseSignal) * MEMORY_DUPLICATE_CONFIDENCE_MAX_BOOST * boostProgress
+    )
+  );
+  if (isAssumptionMemory(memory)) {
+    return {
+      ...memory,
+      confidence: boostedSignal,
+      certainty: boostedSignal,
+    };
+  }
+  return {
+    ...memory,
+    confidence: boostedSignal,
+  };
+}
+
 function estimateMemoryDurabilityForDisplay(text: string): number {
   const normalized = text.trim();
   if (!normalized) return 0.25;
   let score = 0.46;
-  if (/^(?:you|your|the user|user)\b|\b(?:you do not want me|you don't want me|you like|you love|you enjoy|you prefer|you dislike|you want|you need|your favorite)\b/i.test(normalized)) {
-    score += 0.16;
-  }
-  if (/\b(?:other bots?|another bot|bots?\s+(?:talk|interact|respond|remember|know|argue|agree)|bot-to-bot|coffee\s+session|group\s+chat)\b/i.test(normalized)) {
-    score += 0.18;
-  }
+  const cat = classifyMemoryCategoryFromText(normalized);
+  if (cat === "user") score += 0.16;
+  if (cat === "bot_relation") score += 0.18;
   const durablePatternHits = [
     /\b(?:always|never|do not|don't|like|likes|love|loves|enjoy|enjoys|prefer|prefers|favorite|favourite|need|needs|want|wants|value|values|care about|cares about)\b/i,
     /\b(?:identity|personality|character|believes?|principles?|boundary|boundaries|comfort|safe|safety)\b/i,
@@ -4399,7 +4728,93 @@ function memoryCategory(memory: UserMemory): MemoryCategory {
   if (memory.category === "general" || memory.category === "user" || memory.category === "bot_relation") {
     return memory.category;
   }
-  return memory.botId ? "general" : "user";
+  return memory.botId ? classifyMemoryCategoryFromText(memory.text) : "user";
+}
+
+function toPossessiveLabel(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) return "User's";
+  return trimmed.endsWith("s") ? `${trimmed}'` : `${trimmed}'s`;
+}
+
+function toThirdPersonVerb(verb: string): string {
+  const lower = verb.toLowerCase();
+  const irregular = new Map<string, string>([
+    ["am", "is"],
+    ["are", "is"],
+    ["were", "was"],
+    ["have", "has"],
+    ["do", "does"],
+  ]);
+  const irregularMatch = irregular.get(lower);
+  if (irregularMatch) return irregularMatch;
+  const doNotTransform = new Set([
+    "can",
+    "can't",
+    "cannot",
+    "could",
+    "couldn't",
+    "did",
+    "didn't",
+    "does",
+    "doesn't",
+    "had",
+    "has",
+    "is",
+    "might",
+    "must",
+    "shall",
+    "should",
+    "shouldn't",
+    "was",
+    "will",
+    "won't",
+    "would",
+    "wouldn't",
+  ]);
+  if (doNotTransform.has(lower)) return lower;
+  if (lower.endsWith("ies") || lower.endsWith("s")) return lower;
+  if (lower.endsWith("y") && lower.length > 1 && !/[aeiou]y$/.test(lower)) {
+    return `${lower.slice(0, -1)}ies`;
+  }
+  if (/(ch|sh|x|z|o)$/.test(lower)) return `${lower}es`;
+  return `${lower}s`;
+}
+
+function formatMemoryPanelText(
+  text: string,
+  subjectLabel: string,
+  category: MemoryCategory
+): string {
+  const normalized = text.trim();
+  if (!normalized) return normalized;
+  if (category !== "user") return normalized;
+  const subject = subjectLabel.trim() || "User";
+  const possessive = toPossessiveLabel(subject);
+  const subjectPattern = subject.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rewritten = normalized
+    .replace(/^the user's\b/i, possessive)
+    .replace(/^user's\b/i, possessive)
+    .replace(/^your\b/i, possessive)
+    .replace(/^the user\b/i, subject)
+    .replace(/^user\b/i, subject)
+    .replace(/^you(?:'re| are)\b/i, `${subject} is`)
+    .replace(/^you(?:'ve| have)\b/i, `${subject} has`)
+    .replace(/^you(?:'d| would)\b/i, `${subject} would`)
+    .replace(/^you(?:'ll| will)\b/i, `${subject} will`)
+    .replace(/^you don't\b/i, `${subject} doesn't`)
+    .replace(/^you do\b/i, `${subject} does`)
+    .replace(/^you were\b/i, `${subject} was`)
+    .replace(/^you\b/i, subject);
+
+  const lead = rewritten.match(new RegExp(`^${subjectPattern}\\s+([A-Za-z']+)\\b`, "i"));
+  const verb = lead?.[1];
+  if (!verb) return rewritten;
+  const thirdPerson = toThirdPersonVerb(verb);
+  return rewritten.replace(
+    new RegExp(`^(${subjectPattern}\\s+)${verb}\\b`, "i"),
+    `$1${thirdPerson}`
+  );
 }
 
 function stableUnitValue(seed: string): number {
@@ -4939,6 +5354,43 @@ function BookmarkGlyph(): React.ReactElement {
   return (
     <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
       <path d="M4.25 3.25h7.5v9.5l-3.75-2.35-3.75 2.35z" />
+    </svg>
+  );
+}
+
+/** Picture/photo glyph for the Images header button. */
+function ImagesGlyph(): React.ReactElement {
+  return (
+    <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" ry="1.5" />
+      <circle cx="6" cy="6.75" r="0.85" />
+      <path d="M2.75 11.25 6 8.25l2.25 2.25L11 7.75l2.25 2.5" />
+    </svg>
+  );
+}
+
+/** Robot/bot glyph for the Bots header button. Reuses the same path shape as
+ *  the inline `bot` BotGlyph (antenna, head, eyes, side ears, mouth) so the
+ *  header icon and the in-bubble bot identity mark stay visually consistent. */
+function BotsGlyph(): React.ReactElement {
+  return (
+    <svg
+      className={styles.headerIconGlyph}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 4v3" />
+      <circle cx="12" cy="3" r="1" />
+      <rect x="4" y="7" width="16" height="13" rx="2" />
+      <path d="M2 14h2" />
+      <path d="M20 14h2" />
+      <circle cx="9" cy="13" r="1" />
+      <circle cx="15" cy="13" r="1" />
+      <path d="M9 17h6" />
     </svg>
   );
 }
@@ -7671,13 +8123,23 @@ function ComposerModelPicker({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const showAutoOption = true;
+  const autoOptionLabel = "Auto";
+  const autoOptionMeta =
+    provider === "openai"
+      ? "Bot default online model"
+      : "Bot default local model";
   const selectedModel =
-    options.find((model) => model.id === value) ??
+    (value === AUTO_MODEL_CHOICE
+      ? null
+      : options.find((model) => model.id === value)) ??
     options.find((model) => model.isDefault) ??
     options[0] ??
     null;
   const selectedLabel =
-    selectedModel?.label ?? (value === AUTO_MODEL_CHOICE ? "Model" : value);
+    value === AUTO_MODEL_CHOICE
+      ? autoOptionLabel
+      : selectedModel?.label ?? value;
   const menuOpen = open && !disabled;
   const menuPortalStyle = useComposeMenuPortalStyle(
     menuOpen,
@@ -7779,6 +8241,25 @@ function ComposerModelPicker({
             role="listbox"
             aria-label={ariaLabel}
           >
+            {showAutoOption && (
+              <button
+                key={AUTO_MODEL_CHOICE}
+                type="button"
+                className={`${styles.composeBotOption} ${styles.composeModelOption}`}
+                role="option"
+                aria-selected={value === AUTO_MODEL_CHOICE}
+                onClick={() => pick(AUTO_MODEL_CHOICE)}
+              >
+                <span className={styles.composeModelOptionMain}>
+                  <span className={styles.composeModelOptionName}>
+                    {autoOptionLabel}
+                  </span>
+                  <span className={styles.composeModelOptionMeta}>
+                    {autoOptionMeta}
+                  </span>
+                </span>
+              </button>
+            )}
             {options.map((model) => {
               const isSelected = value === model.id;
               return (
@@ -9093,6 +9574,7 @@ interface CodeBlockRevealPlan {
   startToken: number;
   blockTokenCount: number;
   totalLineCount: number;
+  codeBody: string;
 }
 
 function buildCodeBlockRevealPlan(source: string): CodeBlockRevealPlan[] {
@@ -9115,6 +9597,7 @@ function buildCodeBlockRevealPlan(source: string): CodeBlockRevealPlan[] {
       startToken: consumedTokenCount,
       blockTokenCount,
       totalLineCount,
+      codeBody: normalizedCodeBody,
     });
     consumedTokenCount += blockTokenCount;
     lastIndex = matchIndex + fullFence.length;
@@ -9633,6 +10116,7 @@ function findChatModeMessageScrollAnchor(row: HTMLElement): HTMLElement {
 interface ComposerInputHandle {
   focus: (options?: FocusOptions) => void;
   blur: () => void;
+  getValue: () => string;
 }
 
 interface ComposerInputProps {
@@ -9730,6 +10214,18 @@ function useMobileKeyboardInset(active: boolean): number {
   }, [active]);
 
   return active ? inset : 0;
+}
+
+function resolveTypedLineStartIndexes(lines: string[]): number[] {
+  let cursor = 0;
+  return lines.map((line) => {
+    const headingInfo = parseChatModeHashHeadingLine(line);
+    const displayLine = headingInfo?.text ?? line;
+    const wordTokens = displayLine.match(/\S+\s*/g) ?? [];
+    const lineStartIndex = cursor;
+    cursor += wordTokens.length;
+    return lineStartIndex;
+  });
 }
 
 function MessageBody({
@@ -9839,10 +10335,10 @@ function MessageBody({
     messageRole === "assistant" &&
     !hasFencedCodeBlock
   );
-  if (useTypedLineRenderer) {
+  const typedLineRendererNode = useTypedLineRenderer ? (() => {
     const lines = splitEphemeralDisplayLines(renderedSource);
     const finalLines = splitEphemeralDisplayLines(chatModeSource);
-    let revealCursor = 0;
+    const lineStartIndexes = resolveTypedLineStartIndexes(lines);
     return (
       <div
         className={`${styles.markdownBody} ${styles.chatEphemeralMarkdownBody}`}
@@ -9856,8 +10352,7 @@ function MessageBody({
           const wordTokens = displayLine.match(/\S+\s*/g) ?? [];
           const lineNoLetterFade = isChatModeHeadingLikeLine(line);
           const lineIsPullQuoteInline = isChatModePullQuoteInlineLine(line);
-          const lineStartIndex = revealCursor;
-          revealCursor += wordTokens.length;
+          const lineStartIndex = lineStartIndexes[index] ?? 0;
           const visibleLimit = revealWordByWord ? renderVisibleTokenCount : Number.POSITIVE_INFINITY;
           const latestVisibleTokenIndex = Math.max(0, visibleLimit - 1);
           const lineEndIndex = lineStartIndex + Math.max(1, wordTokens.length);
@@ -9962,7 +10457,7 @@ function MessageBody({
         })}
       </div>
     );
-  }
+  })() : null;
   const chatPhaseAttrs =
     chatPhase
       ? ({
@@ -9972,7 +10467,6 @@ function MessageBody({
       : undefined;
   const markdownComponents = useMemo(
     () => {
-      let codeBlockCursor = 0;
       return {
       p: ({ children }: { children?: React.ReactNode }) => {
         const isPullQuoteInline = nodeStartsWithPullQuoteInlinePrefix(children);
@@ -10007,9 +10501,17 @@ function MessageBody({
         }>;
         const languageMatch = codeElement.props.className?.match(/language-([\w-]+)/i);
         const language = languageMatch?.[1]?.toLowerCase();
-        const currentBlockIndex = codeBlockCursor;
-        const revealPlan = codeBlockRevealPlan[currentBlockIndex];
-        codeBlockCursor += 1;
+        const normalizedCodeBody = String(codeElement.props.children ?? "")
+          .replace(/\r\n?/g, "\n")
+          .replace(/\n$/u, "");
+        const matchingRevealPlans = codeBlockRevealPlan.filter(
+          (plan) => plan.codeBody === normalizedCodeBody
+        );
+        const revealPlan =
+          matchingRevealPlans.find(
+            (plan) => renderVisibleTokenCount <= plan.startToken + plan.blockTokenCount
+          ) ??
+          matchingRevealPlans[matchingRevealPlans.length - 1];
         const shouldUseTypedLineReveal =
           shouldProgressiveFenceReveal &&
           Boolean(revealPlan);
@@ -10063,6 +10565,7 @@ function MessageBody({
       revealWordByWord,
     ]
   );
+  if (typedLineRendererNode) return typedLineRendererNode;
   return (
     <div
       className={`${styles.markdownBody} ${styles.chatEphemeralMarkdownBody}`}
@@ -10082,6 +10585,7 @@ function MessageBody({
 interface DesktopMarkdownComposerHandle {
   focus: (options?: FocusOptions) => void;
   blur: () => void;
+  getValue: () => string;
 }
 
 interface DesktopMarkdownComposerProps {
@@ -10114,6 +10618,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const onValueChangeRef = useRef(onValueChange);
     const onFocusRef = useRef(onFocus);
     const editorRef = useRef<Editor | null>(null);
+    const pendingValueRef = useRef<string | null>(null);
+    const pendingValueTimerRef = useRef<number | null>(null);
 
     useLayoutEffect(() => {
       onValueChangeRef.current = onValueChange;
@@ -10196,9 +10702,17 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         },
         onUpdate: ({ editor: ed }) => {
           const md = ed.getMarkdown();
-          if (md === lastEmittedRef.current) return;
-          lastEmittedRef.current = md;
-          onValueChangeRef.current(md);
+          pendingValueRef.current = md;
+          if (pendingValueTimerRef.current !== null) return;
+          pendingValueTimerRef.current = window.setTimeout(() => {
+            pendingValueTimerRef.current = null;
+            const nextMarkdown = pendingValueRef.current;
+            pendingValueRef.current = null;
+            if (typeof nextMarkdown !== "string") return;
+            if (nextMarkdown === lastEmittedRef.current) return;
+            lastEmittedRef.current = nextMarkdown;
+            onValueChangeRef.current(nextMarkdown);
+          }, 90);
         },
       },
       [placeholder]
@@ -10221,11 +10735,31 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
 
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
+      // Most value updates come directly from this editor's own onUpdate path.
+      // In that common case, skip re-serializing markdown back out of ProseMirror.
+      if (value === lastEmittedRef.current) return;
+      if (pendingValueTimerRef.current !== null) {
+        window.clearTimeout(pendingValueTimerRef.current);
+        pendingValueTimerRef.current = null;
+      }
+      pendingValueRef.current = null;
       const current = editor.getMarkdown();
-      if (current === value) return;
+      if (current === value) {
+        lastEmittedRef.current = value;
+        return;
+      }
       lastEmittedRef.current = value;
       editor.commands.setContent(value || "", { contentType: "markdown" });
     }, [value, editor]);
+
+    useEffect(() => {
+      return () => {
+        if (pendingValueTimerRef.current !== null) {
+          window.clearTimeout(pendingValueTimerRef.current);
+          pendingValueTimerRef.current = null;
+        }
+      };
+    }, []);
 
     useImperativeHandle(
       ref,
@@ -10241,6 +10775,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         blur: () => {
           const dom = editor?.view.dom as HTMLElement | undefined;
           dom?.blur();
+        },
+        getValue: () => {
+          const activeEditor = editorRef.current;
+          if (!activeEditor || activeEditor.isDestroyed) {
+            return pendingValueRef.current ?? lastEmittedRef.current ?? "";
+          }
+          return activeEditor.getMarkdown();
         },
       }),
       [editor]
@@ -10348,8 +10889,14 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           textareaRef.current?.blur();
         }
       },
+      getValue: () => {
+        if (enabled) {
+          return wysiwygRef.current?.getValue() ?? value;
+        }
+        return textareaRef.current?.value ?? value;
+      },
     }),
-    [enabled]
+    [enabled, value]
   );
 
   return (
@@ -10519,6 +11066,55 @@ function BotProfileBuilder({
     onProfileChange((previous) => ({
       ...previous,
       worldview: { ...previous.worldview, [field]: value },
+    }));
+  };
+  const updateFactField = (field: BotFactKey, value: string) => {
+    onProfileChange((previous) => ({
+      ...previous,
+      facts: { ...previous.facts, [field]: value },
+    }));
+  };
+  const updateCustomFact = (
+    index: number,
+    field: keyof BotCustomFact,
+    value: string
+  ) => {
+    onProfileChange((previous) => {
+      const next = previous.facts.customFacts.slice();
+      const current = next[index] ?? { label: "", value: "" };
+      next[index] = { ...current, [field]: value };
+      return {
+        ...previous,
+        facts: { ...previous.facts, customFacts: next },
+      };
+    });
+  };
+  const addCustomFact = () => {
+    onProfileChange((previous) => {
+      if (previous.facts.customFacts.length >= MAX_CUSTOM_FACTS) return previous;
+      return {
+        ...previous,
+        facts: {
+          ...previous.facts,
+          customFacts: [
+            {
+              label: "",
+              value: "",
+              rowId: crypto.randomUUID(),
+            },
+            ...previous.facts.customFacts,
+          ],
+        },
+      };
+    });
+  };
+  const removeCustomFact = (index: number) => {
+    onProfileChange((previous) => ({
+      ...previous,
+      facts: {
+        ...previous.facts,
+        customFacts: previous.facts.customFacts.filter((_, i) => i !== index),
+      },
     }));
   };
 
@@ -10717,6 +11313,95 @@ function BotProfileBuilder({
             </label>
           </>
         );
+      case "facts":
+        return (
+          <>
+            <div className={styles.botProfileFactsTopSticky}>
+              <div className={styles.botProfileSubsection}>
+                <span>Permanent facts</span>
+                <small>
+                  Treated as canon. The bot will not contradict these and the
+                  Memories panel shows them read-only. Leave anything blank you do
+                  not want to invent.
+                </small>
+              </div>
+              {profile.facts.customFacts.length < MAX_CUSTOM_FACTS && (
+                <button
+                  type="button"
+                  className={styles.botProfileFactAddButton}
+                  onClick={addCustomFact}
+                >
+                  Add custom fact
+                </button>
+              )}
+              {(() => {
+                // Birthday is the only standard fact key. It is rendered as a
+                // real `<input type="date">` so we never end up with ambiguous
+                // values like "the morning after a meteor shower". Stored as
+                // ISO YYYY-MM-DD; the browser renders it in the user's locale
+                // automatically. Any legacy free-text value that is not a
+                // valid ISO date displays as empty until the user picks a real
+                // date, at which point the new ISO string replaces it.
+                const storedBirthday = profile.facts.birthday;
+                const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(storedBirthday)
+                  ? storedBirthday
+                  : "";
+                return (
+                  <label key="birthday" className={styles.botProfileField}>
+                    <span>{BOT_FACT_KEY_LABELS.birthday}</span>
+                    <input
+                      type="date"
+                      value={dateValue}
+                      onChange={(event) =>
+                        updateFactField("birthday", event.currentTarget.value)
+                      }
+                    />
+                  </label>
+                );
+              })()}
+            </div>
+            <div
+              className={styles.botProfileCustomFactsScroll}
+              aria-label="Custom fact rows"
+            >
+              {profile.facts.customFacts.map((fact, index) => (
+                <div
+                  key={fact.rowId ?? `custom-fact-${index}`}
+                  className={styles.botProfileFactRow}
+                >
+                  <input
+                    type="text"
+                    className={styles.botProfileFactLabel}
+                    value={fact.label}
+                    onChange={(event) =>
+                      updateCustomFact(index, "label", event.currentTarget.value)
+                    }
+                    placeholder="Label"
+                    aria-label={`Custom fact ${index + 1} label`}
+                  />
+                  <input
+                    type="text"
+                    className={styles.botProfileFactValue}
+                    value={fact.value}
+                    onChange={(event) =>
+                      updateCustomFact(index, "value", event.currentTarget.value)
+                    }
+                    placeholder="Value"
+                    aria-label={`Custom fact ${index + 1} value`}
+                  />
+                  <button
+                    type="button"
+                    className={styles.botProfileFactRemove}
+                    onClick={() => removeCustomFact(index)}
+                    aria-label={`Remove custom fact ${index + 1}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        );
       default:
         return null;
     }
@@ -10755,7 +11440,15 @@ function BotProfileBuilder({
             </button>
           ))}
         </nav>
-        <div className={styles.botProfileBuilderBody}>{renderPage()}</div>
+        <div
+          className={
+            activePage === "facts"
+              ? `${styles.botProfileBuilderBody} ${styles.botProfileBuilderBodyFacts}`
+              : styles.botProfileBuilderBody
+          }
+        >
+          {renderPage()}
+        </div>
         <footer className={styles.botProfileBuilderFooter}>
           <button
             type="button"
@@ -10925,6 +11618,7 @@ function HomeContent(): React.JSX.Element {
   const [sessionOpinion, setSessionOpinion] = useState<SessionOpinion | null>(null);
   const [botOpinion, setBotOpinion] = useState<BotOpinion | null>(null);
   const [draft, setDraft] = useState("");
+  const [, startDraftTransition] = useTransition();
   const [debugComposerDraft, setDebugComposerDraft] = useState("");
   const [composerCleanupBusy, setComposerCleanupBusy] = useState(false);
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
@@ -10960,7 +11654,19 @@ function HomeContent(): React.JSX.Element {
   const [memoryPanelBotId, setMemoryPanelBotId] = useState<string | null>(null);
   const [memoryPanelSelectedFamily, setMemoryPanelSelectedFamily] = useState<PrismGroupId | null>(null);
   const [longTermMemoryCategory, setLongTermMemoryCategory] = useState<MemoryCategory>("general");
+  const [memoryPanelLoading, setMemoryPanelLoading] = useState(false);
+  const [memoryPanelLoadingText, setMemoryPanelLoadingText] = useState("Loading memories...");
   const [focusedMemoryId, setFocusedMemoryId] = useState<string | null>(null);
+  const [memoryBubbleLayoutsByScope, setMemoryBubbleLayoutsByScope] =
+    useState<MemoryBubbleLayoutByScope>({});
+  const memoryBubbleLayoutsRef = useRef<MemoryBubbleLayoutByScope>({});
+  const memoryBubbleLayoutsHydratedRef = useRef(false);
+  const memoryBubbleLayoutsPersistReadyRef = useRef(false);
+  const [memoryBubbleDraggingId, setMemoryBubbleDraggingId] = useState<string | null>(null);
+  const memoryBubbleCloudRef = useRef<HTMLUListElement | null>(null);
+  const memoryBubbleDragStateRef = useRef<MemoryBubbleDragState | null>(null);
+  const memoryBubbleDragCleanupRef = useRef<(() => void) | null>(null);
+  const memoryBubbleSuppressClickRef = useRef<string | null>(null);
   // Phase + direction drive the cinematic zoom + fade between memory
   // directory levels. We keep them as separate state so React can apply
   // the data attributes in lockstep when a navigation begins.
@@ -11029,6 +11735,7 @@ function HomeContent(): React.JSX.Element {
   });
   const titleRefreshInFlightRef = useRef<Set<string>>(new Set());
   const memoryTransitionRunRef = useRef(0);
+  const memoryPanelLoadRunRef = useRef(0);
   const [modelRevealMessageId, setModelRevealMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -11368,6 +12075,10 @@ function HomeContent(): React.JSX.Element {
   const [importBotPasteText, setImportBotPasteText] = useState("");
   const [importBotPasteError, setImportBotPasteError] = useState<string | null>(null);
   const [importBotPasteBusy, setImportBotPasteBusy] = useState(false);
+  const [importBotFileBusy, setImportBotFileBusy] = useState(false);
+  const [importBotFileBusyName, setImportBotFileBusyName] = useState("");
+  const [importBotFileBusyColor, setImportBotFileBusyColor] = useState<string | null>(null);
+  const [importBotFileBusyGlyph, setImportBotFileBusyGlyph] = useState<BotGlyphName>(DEFAULT_BOT_GLYPH);
   const [devToolsBotImportPasteEnabled, setDevToolsBotImportPasteEnabledState] = useState(false);
   const [devChatMetricsEnabled, setDevChatMetricsEnabledState] = useState(false);
   const [devSlashCommandsEnabled, setDevSlashCommandsEnabledState] = useState(false);
@@ -11766,6 +12477,7 @@ function HomeContent(): React.JSX.Element {
     setBotLibraryExpanded(false);
     setBotPanelLibraryEnabled(true);
     setPanelBotDeleteConfirm(null);
+    setMemoryPanelLoading(false);
   }, [closeImportBotModal]);
 
   const closePanel = useCallback(() => {
@@ -12326,10 +13038,8 @@ function HomeContent(): React.JSX.Element {
     const modelProvider: Provider =
       settings?.preferredProvider === "openai" ? "openai" : "local";
     const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-    const visibleModelChoice = visibleConcreteModelChoiceForProvider(
-      modelCatalog,
+    const visibleModelChoice = visibleModelChoiceForProvider(
       settings,
-      modelProvider,
       rawModelChoice
     );
     const modelOptions = includeSelectedModelOption(
@@ -12342,7 +13052,7 @@ function HomeContent(): React.JSX.Element {
       selectedModel?.label?.trim() ||
       (visibleModelChoice !== AUTO_MODEL_CHOICE
         ? modelLabelFromId(visibleModelChoice)
-        : "Model");
+        : "Auto");
     return modelTitle;
   }, [
     chatModelChoiceByProvider,
@@ -12413,10 +13123,8 @@ function HomeContent(): React.JSX.Element {
     const isLocal = settings?.preferredProvider !== "openai";
     const modelProvider: Provider = isLocal ? "local" : "openai";
     const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-    const visibleModelChoice = visibleConcreteModelChoiceForProvider(
-      modelCatalog,
+    const visibleModelChoice = visibleModelChoiceForProvider(
       settings,
-      modelProvider,
       rawModelChoice
     );
     const modelOptions = includeSelectedModelOption(
@@ -13293,7 +14001,6 @@ function HomeContent(): React.JSX.Element {
   const [coffeeAutoBusy, setCoffeeAutoBusy] = useState<boolean>(false);
   const [coffeeAutoplayPaused, setCoffeeAutoplayPaused] = useState<boolean>(false);
   const [coffeeError, setCoffeeError] = useState<string | null>(null);
-  const [coffeeRouterReason, setCoffeeRouterReason] = useState<string | null>(null);
   const [coffeeTranscriptOpen, setCoffeeTranscriptOpen] = useState(false);
   const [coffeeTranscriptClosing, setCoffeeTranscriptClosing] = useState(false);
   const [coffeeSessionPhase, setCoffeeSessionPhase] =
@@ -13302,12 +14009,25 @@ function HomeContent(): React.JSX.Element {
     useState<CoffeeArrivalScenario>("user-first");
   const [coffeeArrivedBotIds, setCoffeeArrivedBotIds] = useState<string[]>([]);
   const [coffeeSessionEndsAtMs, setCoffeeSessionEndsAtMs] = useState<number | null>(null);
+  const [coffeeTurnRhythmState, setCoffeeTurnRhythmState] =
+    useState<CoffeeTurnRhythmState>("idle");
+  const [coffeePendingSpeakerBotId, setCoffeePendingSpeakerBotId] = useState<string | null>(null);
+  const [coffeePendingRevealConversation, setCoffeePendingRevealConversation] =
+    useState<CoffeeConversationState | null>(null);
+  const [coffeeInterruptedSnippet, setCoffeeInterruptedSnippet] =
+    useState<CoffeeSeatInterruptedSnippetState | null>(null);
+  const [coffeeLiveInterruptionCue, setCoffeeLiveInterruptionCue] =
+    useState<CoffeeInterruptionEvent | null>(null);
   const coffeeArrivalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeLoopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeTranscriptCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coffeeCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coffeeRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeTurnAbortRef = useRef<AbortController | null>(null);
   const coffeeContinueAbortRef = useRef<AbortController | null>(null);
   const coffeeAutoplayPausedRef = useRef(false);
+  const coffeeDraftRef = useRef("");
+  const coffeeInterruptionCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearCoffeeTranscriptCloseTimer = (): void => {
     if (coffeeTranscriptCloseTimerRef.current) {
       clearTimeout(coffeeTranscriptCloseTimerRef.current);
@@ -13344,6 +14064,9 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     coffeeAutoplayPausedRef.current = coffeeAutoplayPaused;
   }, [coffeeAutoplayPaused]);
+  useEffect(() => {
+    coffeeDraftRef.current = coffeeDraft;
+  }, [coffeeDraft]);
   // Per-request provider override (mirrors the Sandbox toggle). The
   // user can flip it inside the Coffee shell without touching their
   // global setting; once they manually toggle, we stop syncing from
@@ -13357,6 +14080,51 @@ function HomeContent(): React.JSX.Element {
       setCoffeeProvider(user.preferredProvider);
     }
   }, [user?.preferredProvider, coffeeProviderTouched]);
+  useEffect(() => {
+    if (!coffeeInterruptedSnippet) return;
+    const now = Date.now();
+    const remainingMs = Math.max(
+      0,
+      COFFEE_INTERRUPTED_SNIPPET_HIDE_MS - (now - coffeeInterruptedSnippet.createdAtMs)
+    );
+    const timer = setTimeout(() => {
+      setCoffeeInterruptedSnippet((current) =>
+        current?.sourceMessageId === coffeeInterruptedSnippet.sourceMessageId ? null : current
+      );
+    }, remainingMs);
+    return () => clearTimeout(timer);
+  }, [coffeeInterruptedSnippet]);
+  useEffect(() => {
+    if (coffeeSessionPhase !== "live") {
+      if (coffeeTurnRhythmState !== "tableTyping" && coffeeTurnRhythmState !== "cooldown") {
+        setCoffeeTurnRhythmState("idle");
+      }
+      return;
+    }
+    if (
+      coffeeTurnRhythmState === "tableTyping" ||
+      coffeeTurnRhythmState === "cooldown"
+    ) {
+      return;
+    }
+    if (coffeeDraft.trim().length > 0) {
+      setCoffeeTurnRhythmState("playerComposing");
+      return;
+    }
+    if (coffeeBusy || coffeeAutoBusy) {
+      setCoffeeTurnRhythmState("botThinking");
+      return;
+    }
+    if (coffeeTurnRhythmState !== "idle") {
+      setCoffeeTurnRhythmState("idle");
+    }
+  }, [
+    coffeeSessionPhase,
+    coffeeTurnRhythmState,
+    coffeeDraft,
+    coffeeBusy,
+    coffeeAutoBusy,
+  ]);
   // Whenever we leave Coffee view, drop transient live-room state. The
   // persisted Coffee Sessions remain in the conversation list via
   // `conversation_mode = 'coffee'`.
@@ -13372,13 +14140,29 @@ function HomeContent(): React.JSX.Element {
       coffeeAutoplayPausedRef.current = false;
       setCoffeeAutoplayPaused(false);
       setCoffeeError(null);
-      setCoffeeRouterReason(null);
       clearCoffeeTranscriptCloseTimer();
       setCoffeeTranscriptClosing(false);
       setCoffeeTranscriptOpen(false);
       setCoffeeSessionPhase("selecting");
       setCoffeeArrivedBotIds([]);
       setCoffeeSessionEndsAtMs(null);
+      setCoffeeTurnRhythmState("idle");
+      setCoffeePendingSpeakerBotId(null);
+      setCoffeePendingRevealConversation(null);
+      setCoffeeInterruptedSnippet(null);
+      setCoffeeLiveInterruptionCue(null);
+      if (coffeeCooldownTimerRef.current) {
+        clearTimeout(coffeeCooldownTimerRef.current);
+        coffeeCooldownTimerRef.current = null;
+      }
+      if (coffeeRevealTimerRef.current) {
+        clearTimeout(coffeeRevealTimerRef.current);
+        coffeeRevealTimerRef.current = null;
+      }
+      if (coffeeInterruptionCueTimerRef.current) {
+        clearTimeout(coffeeInterruptionCueTimerRef.current);
+        coffeeInterruptionCueTimerRef.current = null;
+      }
     }
   }, [view]);
   const coffeeBotsLibrary = useMemo(
@@ -13415,6 +14199,18 @@ function HomeContent(): React.JSX.Element {
       if (coffeeLoopTimerRef.current) {
         clearTimeout(coffeeLoopTimerRef.current);
         coffeeLoopTimerRef.current = null;
+      }
+      if (coffeeCooldownTimerRef.current) {
+        clearTimeout(coffeeCooldownTimerRef.current);
+        coffeeCooldownTimerRef.current = null;
+      }
+      if (coffeeRevealTimerRef.current) {
+        clearTimeout(coffeeRevealTimerRef.current);
+        coffeeRevealTimerRef.current = null;
+      }
+      if (coffeeInterruptionCueTimerRef.current) {
+        clearTimeout(coffeeInterruptionCueTimerRef.current);
+        coffeeInterruptionCueTimerRef.current = null;
       }
       coffeeTurnAbortRef.current?.abort();
       coffeeContinueAbortRef.current?.abort();
@@ -14553,6 +15349,35 @@ function HomeContent(): React.JSX.Element {
     const d = await api<{ memories: UserMemory[] }>("/api/memories?scope=default");
     setBotMemories(d.memories);
   }
+  async function runMemoryPanelLoad(
+    label: string,
+    load: () => Promise<void>
+  ): Promise<boolean> {
+    const runId = memoryPanelLoadRunRef.current + 1;
+    memoryPanelLoadRunRef.current = runId;
+    const isCurrent = () => memoryPanelLoadRunRef.current === runId;
+    const shouldShowLoading = panel === "memories";
+
+    setPanelError(null);
+    setMemoryPanelLoadingText(label);
+    if (shouldShowLoading) {
+      setMemoryPanelLoading(true);
+    }
+
+    try {
+      await load();
+      return true;
+    } catch (err) {
+      if (isCurrent()) {
+        setPanelError(err instanceof Error ? err.message : "Memory load failed.");
+      }
+      return false;
+    } finally {
+      if (isCurrent()) {
+        setMemoryPanelLoading(false);
+      }
+    }
+  }
   async function refreshOpenMemoryViews() {
     await refreshMemories();
     if (memoryPanelScope === "default") {
@@ -14821,6 +15646,7 @@ function HomeContent(): React.JSX.Element {
     message: string,
     options: {
       starterPrompt?: boolean;
+      starterPromptWarrantsIntro?: boolean;
       ephemeralMessages?: Message[];
       sessionEnding?: boolean;
       forceNewConversation?: boolean;
@@ -14841,10 +15667,8 @@ function HomeContent(): React.JSX.Element {
       isChatMode || privateForSend ? "chat" : "sandbox";
     const providerForSend = settings?.preferredProvider;
     const modelChoice = providerForSend
-      ? visibleConcreteModelChoiceForProvider(
-          modelCatalog,
+      ? visibleModelChoiceForProvider(
           settings,
-          providerForSend,
           chatModelChoiceByProvider[providerForSend]
         )
       : AUTO_MODEL_CHOICE;
@@ -14856,6 +15680,9 @@ function HomeContent(): React.JSX.Element {
       conversationId: selectedId ?? undefined,
       message,
       ...(options.starterPrompt ? { starterPrompt: true } : {}),
+      ...(options.starterPromptWarrantsIntro
+        ? { starterPromptWarrantsIntro: true }
+        : {}),
       ...(options.sessionEnding ? { sessionEnding: true } : {}),
       ...(options.forceNewConversation ? { forceNewConversation: true } : {}),
       mode,
@@ -15149,7 +15976,28 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  /** Local slash commands gated by Dev toggles (e.g. `/clear`, `/help`). */
+  async function forgetPlayerMemoryFromSlashCommand(): Promise<void> {
+    try {
+      await api<{
+        deletedMemories?: number;
+        deletedSummaries?: number;
+        includeAboutYou?: boolean;
+        vectorsCleared?: boolean;
+      }>("/api/dev/clear-session-memory", {
+        method: "POST",
+        body: JSON.stringify({ includeAboutYou: true }),
+      });
+      try {
+        await refreshMemories();
+      } catch {
+        // Best-effort UI refresh; the server is the source of truth.
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Player memory forget failed.");
+    }
+  }
+
+  /** Local slash commands gated by Dev toggles (e.g. `/forget`, `/forget all`, `/help`). */
   async function consumeDevSlashCommand(trimmedLine: string): Promise<boolean> {
     if (!devSlashCommandsEnabled) return false;
     const tokens = trimmedLine
@@ -15158,7 +16006,9 @@ function HomeContent(): React.JSX.Element {
       .filter((token) => token.length > 0);
     if (tokens.length === 0) return false;
     const normalizedCommand = tokens[0].toLowerCase();
-    if (normalizedCommand !== "/clear" && normalizedCommand !== "/help") return false;
+    if (normalizedCommand !== "/forget" && normalizedCommand !== "/help") {
+      return false;
+    }
     setError(null);
     setConversationStarterPrompts(null);
     setDraft("");
@@ -15168,8 +16018,8 @@ function HomeContent(): React.JSX.Element {
         role: "assistant",
         content:
           "**Dev slash commands** (local only)\n\n" +
-          "- `/clear` - hard-resets chat for testing. Wipes the active conversation, every extracted memory, every summary fragment (SQLite + Qdrant), and the UI.\n" +
-          "- `/clear -s` or `/clear --summaries` - same as `/clear`; the flag is kept for backwards compatibility.\n" +
+          "- `/forget` - forgets player-only memory. Clears profile memory and resets summaries, while preserving non-player memories.\n" +
+          "- `/forget all` - hard-resets chat for testing. Wipes the active conversation, every extracted memory, every summary fragment (SQLite + Qdrant), and the UI.\n" +
           "- `/help` - shows this command list.",
         createdAt: new Date().toISOString(),
         provider: "local",
@@ -15199,46 +16049,60 @@ function HomeContent(): React.JSX.Element {
       }
       return true;
     }
-    let clearSummaries = false;
-    for (const flag of tokens.slice(1)) {
-      const normalizedFlag = flag.toLowerCase();
-      if (normalizedFlag === "-s" || normalizedFlag === "--summaries") {
-        clearSummaries = true;
-        continue;
+    if (normalizedCommand === "/forget") {
+      const forgetMode = tokens[1]?.toLowerCase() ?? "";
+      if (tokens.length > 2) {
+        const extras = tokens.slice(2).join(" ");
+        setError(`Unknown /forget option "${extras}". Use /help for supported flags.`);
+        return true;
       }
-      setError(`Unknown /clear option "${flag}". Use /help for supported flags.`);
+      if (forgetMode.length === 0) {
+        void clearSummariesFromSlashCommand();
+        void forgetPlayerMemoryFromSlashCommand();
+        if (editingMessageId !== null) {
+          setEditingMessageId(null);
+          setEditingOriginalText("");
+        }
+        setForceNewConversationOnNextSend(true);
+        startFreshConversation(false);
+        setComposerPrimed(false);
+        return true;
+      }
+      if (forgetMode !== "all") {
+        setError(`Unknown /forget option "${tokens[1]}". Use /help for supported flags.`);
+        return true;
+      }
+      // `/forget all` should be a hard reset for chat testing, so summary context
+      // is always cleared.
+      void clearSummariesFromSlashCommand();
+      // Order matters: nuke the conversation first so its messages stop
+      // referencing memories/summaries, then drop every per-user memory
+      // artifact so the next chat starts with no recall surface at all.
+      void clearConversationFromSlashCommand();
+      void clearAllSessionMemoryFromSlashCommand();
+      // Keep Chat mode from auto-reopening the latest saved thread until the
+      // user explicitly starts or opens a conversation again.
+      setChatAutoRestoreSuppressed(true);
+      // Next real send must open a brand-new chat conversation server-side.
+      setForceNewConversationOnNextSend(true);
+      if (editingMessageId !== null) {
+        setEditingMessageId(null);
+        setEditingOriginalText("");
+      }
+      startFreshConversation(false);
+      setComposerPrimed(false);
       return true;
     }
-    if (!clearSummaries) {
-      // `/clear` should be a hard reset for chat testing, so summary context
-      // is cleared by default. The `-s/--summaries` flag remains accepted.
-      clearSummaries = true;
-    }
-    if (clearSummaries) {
-      void clearSummariesFromSlashCommand();
-    }
-    // Order matters: nuke the conversation first so its messages stop
-    // referencing memories/summaries, then drop every per-user memory
-    // artifact so the next chat starts with no recall surface at all.
-    void clearConversationFromSlashCommand();
-    void clearAllSessionMemoryFromSlashCommand();
-    // Keep Chat mode from auto-reopening the latest saved thread until the
-    // user explicitly starts or opens a conversation again.
-    setChatAutoRestoreSuppressed(true);
-    // Next real send must open a brand-new chat conversation server-side.
-    setForceNewConversationOnNextSend(true);
-    if (editingMessageId !== null) {
-      setEditingMessageId(null);
-      setEditingOriginalText("");
-    }
-    startFreshConversation(false);
-    setComposerPrimed(false);
-    return true;
+    return false;
   }
 
   async function sendMessage(
     e: React.FormEvent | React.KeyboardEvent<HTMLTextAreaElement | HTMLFormElement>,
-    options: { starterPrompt?: boolean; draftOverride?: string } = {}
+    options: {
+      starterPrompt?: boolean;
+      starterPromptWarrantsIntro?: boolean;
+      draftOverride?: string;
+    } = {}
   ) {
     e.preventDefault();
     const rawDraft = options.draftOverride ?? draft;
@@ -15393,6 +16257,9 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify(
           buildChatRequestBody(isStarterPrompt ? "" : trimmed, {
             starterPrompt: isStarterPrompt,
+            ...(options.starterPromptWarrantsIntro
+              ? { starterPromptWarrantsIntro: true }
+              : {}),
             ...(forceNewConversation ? { forceNewConversation: true } : {}),
           })
         ),
@@ -16018,8 +16885,10 @@ function HomeContent(): React.JSX.Element {
   }
 
   function handleComposerSubmit(e: React.FormEvent<HTMLFormElement>) {
+    const liveDraft = draftComposerRef.current?.getValue() ?? draft;
     void sendMessage(e, {
-      starterPrompt: isStarterPromptReady(draft),
+      starterPrompt: isStarterPromptReady(liveDraft),
+      draftOverride: liveDraft,
     });
   }
 
@@ -16089,7 +16958,9 @@ function HomeContent(): React.JSX.Element {
 
   function updateComposerDraft(nextDraft: string) {
     resetComposerHistoryCursor();
-    setDraft(nextDraft);
+    startDraftTransition(() => {
+      setDraft(nextDraft);
+    });
   }
 
   function handleComposerChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -16203,8 +17074,10 @@ function HomeContent(): React.JSX.Element {
     if (e.key !== "Enter" || e.shiftKey) return;
     if (fromMarkdownEditor) return;
     e.preventDefault();
+    const liveDraft = draftComposerRef.current?.getValue() ?? draft;
     void sendMessage(e, {
-      starterPrompt: isStarterPromptReady(draft),
+      starterPrompt: isStarterPromptReady(liveDraft),
+      draftOverride: liveDraft,
     });
   }
 
@@ -16269,7 +17142,7 @@ function HomeContent(): React.JSX.Element {
     if (!isStarterPromptAvailable(draft)) return;
     void sendMessage(
       { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>,
-      { starterPrompt: true }
+      { starterPrompt: true, starterPromptWarrantsIntro: true }
     );
   }
 
@@ -16772,6 +17645,36 @@ function HomeContent(): React.JSX.Element {
     return trimmed;
   }
 
+  function parseImportBotLoadingHint(raw: string): {
+    name: string | null;
+    color: string | null;
+    glyph: BotGlyphName;
+  } {
+    try {
+      const parsedUnknown = JSON.parse(extractBotExportJson(raw));
+      if (typeof parsedUnknown !== "object" || parsedUnknown === null || Array.isArray(parsedUnknown)) {
+        return { name: null, color: null, glyph: DEFAULT_BOT_GLYPH };
+      }
+      const parsed = parsedUnknown as {
+        bot?: { name?: unknown; color?: unknown; glyph?: unknown };
+      };
+      const rawName = typeof parsed.bot?.name === "string" ? parsed.bot.name.trim() : "";
+      const rawColor = typeof parsed.bot?.color === "string" ? parsed.bot.color.trim() : "";
+      const rawGlyph = typeof parsed.bot?.glyph === "string" ? parsed.bot.glyph.trim() : "";
+      const color = /^#?[0-9a-fA-F]{6}$/.test(rawColor)
+        ? (rawColor.startsWith("#") ? rawColor : `#${rawColor}`)
+        : null;
+      const glyph = isBotGlyphName(rawGlyph) ? rawGlyph : DEFAULT_BOT_GLYPH;
+      return {
+        name: rawName.length > 0 ? rawName : null,
+        color,
+        glyph,
+      };
+    } catch {
+      return { name: null, color: null, glyph: DEFAULT_BOT_GLYPH };
+    }
+  }
+
   async function exportBotProfile(bot: Bot) {
     setPanelError(null);
     setPanelNotice(null);
@@ -16805,14 +17708,14 @@ function HomeContent(): React.JSX.Element {
         confidence?: number;
         category?: MemoryCategory;
         tier?: MemoryTier;
-        source?: "direct" | "inferred" | "compiled";
+        source?: "direct" | "inferred" | "compiled" | "about_you";
         certainty?: number;
         durability?: number;
         sourceMessageIds?: string[];
       }>;
     }>(`/api/memories?botId=${encodeURIComponent(bot.id)}`);
     const memories: BotExportMemory[] = (memoryResult.memories ?? [])
-      .filter((memory): memory is { text: string; confidence?: number; category?: MemoryCategory; tier?: MemoryTier; source?: "direct" | "inferred" | "compiled"; certainty?: number; durability?: number; sourceMessageIds?: string[] } =>
+      .filter((memory): memory is { text: string; confidence?: number; category?: MemoryCategory; tier?: MemoryTier; source?: "direct" | "inferred" | "compiled" | "about_you"; certainty?: number; durability?: number; sourceMessageIds?: string[] } =>
         typeof memory.text === "string" && memory.text.trim().length > 0
       )
       .map((memory) => ({
@@ -16946,21 +17849,17 @@ function HomeContent(): React.JSX.Element {
     let restored = 0;
     for (const memory of memories) {
       if (!memory || typeof memory.text !== "string" || memory.text.trim().length === 0) continue;
+      const source = normalizeImportedMemorySource(memory.source);
+      const category = normalizeImportedMemoryCategory(memory.category, source);
       await api("/api/memories/restore", {
         method: "POST",
         body: JSON.stringify({
           text: memory.text.trim(),
           botId: createdBotId,
-          source:
-            memory.source === "inferred" || memory.source === "compiled"
-              ? memory.source
-              : "direct",
+          source,
           confidence:
             typeof memory.confidence === "number" ? memory.confidence : undefined,
-          category:
-            memory.category === "general" || memory.category === "user" || memory.category === "bot_relation"
-              ? memory.category
-              : undefined,
+          category,
           tier:
             memory.tier === "long_term" || memory.tier === "short_term"
               ? memory.tier
@@ -16988,25 +17887,35 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  async function importBotFromFile(file: File): Promise<void> {
-    const lower = file.name.trim().toLowerCase();
-    if (!lower.endsWith(".bot")) {
-      throw new Error("Only .bot files can be imported from disk.");
-    }
-    const raw = await file.text();
-    await importBotFromExportRawText(raw);
-  }
-
   async function handleBotImportFileSelection(
     event: React.ChangeEvent<HTMLInputElement>
   ): Promise<void> {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
     if (!file) return;
+    const lower = file.name.trim().toLowerCase();
+    if (!lower.endsWith(".bot")) {
+      setPanelError("Only .bot files can be imported from disk.");
+      return;
+    }
+    setImportBotFileBusy(true);
+    setImportBotFileBusyName(file.name);
+    setImportBotFileBusyColor(null);
+    setImportBotFileBusyGlyph(DEFAULT_BOT_GLYPH);
     try {
-      await importBotFromFile(file);
+      const raw = await file.text();
+      const hint = parseImportBotLoadingHint(raw);
+      if (hint.name) setImportBotFileBusyName(hint.name);
+      setImportBotFileBusyColor(hint.color);
+      setImportBotFileBusyGlyph(hint.glyph);
+      await importBotFromExportRawText(raw);
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Bot import failed.");
+    } finally {
+      setImportBotFileBusy(false);
+      setImportBotFileBusyName("");
+      setImportBotFileBusyColor(null);
+      setImportBotFileBusyGlyph(DEFAULT_BOT_GLYPH);
     }
   }
 
@@ -18806,7 +19715,15 @@ function HomeContent(): React.JSX.Element {
     setBotPanelLibraryEnabled(false);
   }
 
-  function openMemoriesPanelForBot(bot: Bot) {
+  /** Opens the customizer focused on the Facts page so the Memories panel
+   *  can hand off fact edits without duplicating the editor surface. */
+  function openBotCustomizerFacts(bot: Bot) {
+    openBotCustomizer(bot);
+    setBotProfileActivePage("facts");
+    setBotProfileBuilderOpen(true);
+  }
+
+  async function openMemoriesPanelForBot(bot: Bot) {
     setMemoryPanelScope("bot");
     setMemoryPanelBotId(bot.id);
     // Pre-select the PRISM family this bot belongs to so the bot-view
@@ -18814,29 +19731,39 @@ function HomeContent(): React.JSX.Element {
     // even when the user opened bot memories straight from the chat
     // header instead of drilling in through the directory.
     setMemoryPanelSelectedFamily(botPrismGroup(bot.color));
-    void refreshBotMemories(bot.id);
+    setFocusedMemoryId(null);
+    setBotMemories([]);
+    await runMemoryPanelLoad(`Loading ${bot.name} memories...`, async () => {
+      await refreshBotMemories(bot.id);
+    });
     openRightPanel("memories");
   }
 
   function openActiveBotMemoriesPanel() {
     if (!activeBot?.id) return;
-    openMemoriesPanelForBot(activeBot);
+    void openMemoriesPanelForBot(activeBot);
   }
 
-  function openDefaultMemoriesPanel() {
+  async function openDefaultMemoriesPanel() {
     setMemoryPanelScope("default");
     setMemoryPanelBotId(null);
     setMemoryPanelSelectedFamily(null);
     setFocusedMemoryId(null);
-    void refreshDefaultMemories();
+    setBotMemories([]);
+    await runMemoryPanelLoad("Loading Prism shared memories...", async () => {
+      await refreshDefaultMemories();
+    });
     openRightPanel("memories");
   }
 
-  function openAllMemoriesPanel() {
+  async function openAllMemoriesPanel() {
     setMemoryPanelScope("all");
     setMemoryPanelBotId(null);
     setMemoryPanelSelectedFamily(null);
-    void refreshMemories();
+    setFocusedMemoryId(null);
+    await runMemoryPanelLoad("Loading memory directories...", async () => {
+      await refreshMemories();
+    });
     openRightPanel("memories");
   }
 
@@ -18848,10 +19775,10 @@ function HomeContent(): React.JSX.Element {
       ? bots.find((candidate) => candidate.id === targetBotId) ?? null
       : null;
     if (targetBot) {
-      openMemoriesPanelForBot(targetBot);
+      void openMemoriesPanelForBot(targetBot);
       return;
     }
-    openDefaultMemoriesPanel();
+    void openDefaultMemoriesPanel();
   }
 
   function handleHeaderHubClick() {
@@ -18935,6 +19862,15 @@ function HomeContent(): React.JSX.Element {
     }
     return activeBot;
   }, [memoryPanelScope, memoryPanelBotId, bots, activeBot]);
+
+  // Profile-owned facts for the active bot, displayed read-only in the
+  // Memories panel. The Bot Customizer is the source of truth — editing
+  // happens there via `openBotCustomizerFacts`, never in the Memories panel.
+  const memoryPanelBotFacts = useMemo(() => {
+    if (!memoryPanelBot) return [];
+    const { fields } = parseStoredBotPrompt(memoryPanelBot.system_prompt ?? "");
+    return listBotProfileFacts(fields.facts);
+  }, [memoryPanelBot]);
 
   const memoryPanelAccent = normalizeAccentForTheme(
     memoryPanelScope === "bot"
@@ -19035,10 +19971,9 @@ function HomeContent(): React.JSX.Element {
   const selectedFamilyBotClusters = useMemo<MemoryFamilyBotCluster[]>(() => {
     if (!memoryPanelSelectedFamily) return [];
     const familyBots = bots.filter((bot) => botPrismGroup(bot.color) === memoryPanelSelectedFamily);
-    // Bots with zero memories are intentionally omitted from the family
-    // drill-down so the orb cloud reads as "memories present" rather than
-    // "complete bot roster". A family with bots but no memories falls
-    // through to the empty-state messaging below.
+    // Family drill-down should show the full bot roster. Empty bots render as
+    // small presence bubbles so the user can see who belongs here before they
+    // have gathered memories.
     const baseClusters: Omit<MemoryFamilyBotCluster, "style" | "innerBubbles">[] = familyBots
       .map((bot) => ({
         id: bot.id,
@@ -19047,8 +19982,7 @@ function HomeContent(): React.JSX.Element {
         botGlyph: bot.glyph,
         color: normalizeAccentForTheme(bot.color ?? selectedMemoryFamilyDirectory?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme),
         memoryCount: directMemoryCountsByBotId[bot.id] ?? 0,
-      }))
-      .filter((cluster) => cluster.memoryCount > 0);
+      }));
 
     const maxCount = Math.max(1, ...baseClusters.map((cluster) => cluster.memoryCount));
     const buildInnerBubbles = (
@@ -19183,7 +20117,9 @@ function HomeContent(): React.JSX.Element {
       const slot = MEMORY_BUBBLE_CLOUD_SLOTS[index % MEMORY_BUBBLE_CLOUD_SLOTS.length];
       const slotLoop = Math.floor(index / MEMORY_BUBBLE_CLOUD_SLOTS.length);
       const baseSize = ratioBubbleSize(cluster.memoryCount, maxCount);
-      let size = Math.max(MEMORY_RATIO_MIN_SIZE, Math.round(baseSize * crowdScale));
+      let size = cluster.memoryCount === 0
+        ? MEMORY_FAMILY_EMPTY_BOT_SIZE
+        : Math.max(MEMORY_RATIO_MIN_SIZE, Math.round(baseSize * crowdScale));
       let radiusPct = (size / 2) * pxToPct;
       let baseX = slot[0] + ((slotLoop % 3) - 1) * 4 + (stableUnitValue(`${cluster.id}:x`) - 0.5) * 6;
       let baseY = slot[1] + ((slotLoop % 2) * 5 - 2.5) + (stableUnitValue(`${cluster.id}:y`) - 0.5) * 6;
@@ -19290,14 +20226,31 @@ function HomeContent(): React.JSX.Element {
     resolvedTheme,
   ]);
 
-  const visibleMemoryBubbles = useMemo(
-    () => (
-      memoryPanelScope === "all"
-        ? []
-        : botMemories.filter((memory) => memoryTier(memory) === "short_term")
-    ),
-    [memoryPanelScope, botMemories]
-  );
+  const visibleMemoryBubbles = useMemo(() => {
+    if (memoryPanelScope === "all") return [];
+    const shortTermMemories = botMemories.filter((memory) => memoryTier(memory) === "short_term");
+    const groupedByDedupKey = new Map<string, { representative: UserMemory; duplicateCount: number }>();
+    for (const memory of shortTermMemories) {
+      const dedupKey = normalizeMemoryBubbleDedupKey(memory.text);
+      if (!dedupKey) continue;
+      const currentGroup = groupedByDedupKey.get(dedupKey);
+      if (!currentGroup) {
+        groupedByDedupKey.set(dedupKey, {
+          representative: memory,
+          duplicateCount: 1,
+        });
+        continue;
+      }
+      const nextRepresentative = chooseMemoryBubbleRepresentative(currentGroup.representative, memory);
+      groupedByDedupKey.set(dedupKey, {
+        representative: nextRepresentative,
+        duplicateCount: currentGroup.duplicateCount + 1,
+      });
+    }
+    return Array.from(groupedByDedupKey.values()).map((group) =>
+      applyDuplicateConfidenceBoost(group.representative, group.duplicateCount)
+    );
+  }, [memoryPanelScope, botMemories]);
 
   const visibleLongTermMemories = useMemo(
     () => (
@@ -19324,6 +20277,94 @@ function HomeContent(): React.JSX.Element {
     () => visibleLongTermMemories.filter((memory) => memoryCategory(memory) === longTermMemoryCategory),
     [longTermMemoryCategory, visibleLongTermMemories]
   );
+  const memoryPanelWidthPx = Math.min(479, Math.max(0, viewportWidth - 32));
+  const floatingMemoryCardAvailableStripPx = viewportWidth - memoryPanelWidthPx - 40;
+  const showFloatingMemoryDetailCard = false;
+  const memoryBubbleScopeKey = useMemo(() => {
+    if (memoryPanelScope === "default") return "default";
+    if (memoryPanelScope !== "bot") return null;
+    if (!memoryPanelBot?.id) return null;
+    return `bot:${memoryPanelBot.id}`;
+  }, [memoryPanelScope, memoryPanelBot?.id]);
+  const activeMemoryBubblePositions = useMemo(
+    () => (memoryBubbleScopeKey ? memoryBubbleLayoutsByScope[memoryBubbleScopeKey] ?? {} : {}),
+    [memoryBubbleLayoutsByScope, memoryBubbleScopeKey]
+  );
+
+  useEffect(() => {
+    if (memoryBubbleLayoutsHydratedRef.current) return;
+    const stored = readStoredMemoryBubbleLayouts();
+    memoryBubbleLayoutsRef.current = stored;
+    setMemoryBubbleLayoutsByScope(stored);
+    memoryBubbleLayoutsHydratedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    memoryBubbleLayoutsRef.current = memoryBubbleLayoutsByScope;
+  }, [memoryBubbleLayoutsByScope]);
+
+  const commitMemoryBubbleScopePositions = useCallback(
+    (scopeKey: string, positions: Record<string, MemoryBubblePositionPct>) => {
+      const nextLayouts = {
+        ...memoryBubbleLayoutsRef.current,
+        [scopeKey]: positions,
+      };
+      memoryBubbleLayoutsRef.current = nextLayouts;
+      persistMemoryBubbleLayouts(nextLayouts);
+      setMemoryBubbleLayoutsByScope(nextLayouts);
+    },
+    []
+  );
+  const commitMemoryBubbleScopePositionsRef = useRef(commitMemoryBubbleScopePositions);
+
+  useEffect(() => {
+    commitMemoryBubbleScopePositionsRef.current = commitMemoryBubbleScopePositions;
+  }, [commitMemoryBubbleScopePositions]);
+
+  useEffect(() => {
+    if (!memoryBubbleLayoutsHydratedRef.current) return;
+    if (!memoryBubbleLayoutsPersistReadyRef.current) {
+      memoryBubbleLayoutsPersistReadyRef.current = true;
+      if (Object.keys(memoryBubbleLayoutsByScope).length === 0) return;
+    }
+    persistMemoryBubbleLayouts(memoryBubbleLayoutsByScope);
+  }, [memoryBubbleLayoutsByScope]);
+
+  useEffect(() => {
+    if (!memoryBubbleScopeKey) return;
+    if (visibleMemoryBubbles.length === 0) return;
+    const visibleIds = new Set(visibleMemoryBubbles.map((memory) => memory.id));
+    setMemoryBubbleLayoutsByScope((current) => {
+      const scoped = current[memoryBubbleScopeKey];
+      if (!scoped) return current;
+      let changed = false;
+      const nextScoped: Record<string, MemoryBubblePositionPct> = {};
+      for (const [memoryId, pos] of Object.entries(scoped)) {
+        if (!visibleIds.has(memoryId)) {
+          changed = true;
+          continue;
+        }
+        nextScoped[memoryId] = pos;
+      }
+      if (!changed) return current;
+      return { ...current, [memoryBubbleScopeKey]: nextScoped };
+    });
+  }, [memoryBubbleScopeKey, visibleMemoryBubbles]);
+
+  useEffect(() => {
+    if (!memoryBubbleScopeKey) return;
+    const latest = readStoredMemoryBubbleLayouts();
+    const latestScoped = latest[memoryBubbleScopeKey];
+    if (!latestScoped) return;
+    const currentScoped = memoryBubbleLayoutsRef.current[memoryBubbleScopeKey];
+    if (JSON.stringify(currentScoped) === JSON.stringify(latestScoped)) return;
+    const merged = {
+      ...memoryBubbleLayoutsRef.current,
+      [memoryBubbleScopeKey]: latestScoped,
+    };
+    memoryBubbleLayoutsRef.current = merged;
+    setMemoryBubbleLayoutsByScope(merged);
+  }, [memoryBubbleScopeKey]);
 
   const memoryBubbleLayoutById = useMemo(() => {
     const layoutById = new Map<string, { style: React.CSSProperties; uncertain: boolean }>();
@@ -19331,10 +20372,23 @@ function HomeContent(): React.JSX.Element {
     if (visibleMemoryBubbles.length === 0) return layoutById;
 
     const pxToPct = 100 / 520;
-    const bounds = { minX: 8, maxX: 92, minY: 10, maxY: 90 };
+    const bounds = { minX: 6, maxX: 94, minY: 7, maxY: 93 };
     const shadePattern = [0.08, 0.16, 0.24, 0.12, 0.28, 0.2];
     const shadeTarget = resolvedTheme === "dark" ? "#ffffff" : "#000000";
     const placed: Array<{ x: number; y: number; radiusPct: number }> = [];
+
+    const shortTermCount = visibleMemoryBubbles.length;
+    const densityT = Math.max(0, Math.min(1, (shortTermCount - 6) / 30));
+    // Dense short-term clouds need a steeper size falloff than the linear
+    // curve so overlap reduces before we start hard-shrinking individual bubbles.
+    const shortTermBubbleScale = Math.max(
+      0.38,
+      1 - densityT * 0.45 - densityT * densityT * 0.2
+    );
+    const bubbleMin = Math.round(MEMORY_BUBBLE_MIN_SIZE * shortTermBubbleScale);
+    const bubbleMax = Math.round(MEMORY_BUBBLE_MAX_SIZE * shortTermBubbleScale);
+    const uncertainMin = Math.round(MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE * shortTermBubbleScale);
+    const uncertainMax = Math.round(MEMORY_UNCERTAIN_BUBBLE_MAX_SIZE * shortTermBubbleScale);
 
     const entries = visibleMemoryBubbles.map((memory) => {
       const confidence = memoryBubbleSignalValue(memory);
@@ -19347,8 +20401,8 @@ function HomeContent(): React.JSX.Element {
       // size range instead of bunching into near-identical circles.
       const easedConfidence = Math.pow(confidenceScale, 0.82);
       const size = uncertain
-        ? Math.round(MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE + easedConfidence * (MEMORY_UNCERTAIN_BUBBLE_MAX_SIZE - MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE))
-        : Math.round(MEMORY_BUBBLE_MIN_SIZE + easedConfidence * (MEMORY_BUBBLE_MAX_SIZE - MEMORY_BUBBLE_MIN_SIZE));
+        ? Math.round(uncertainMin + easedConfidence * (uncertainMax - uncertainMin))
+        : Math.round(bubbleMin + easedConfidence * (bubbleMax - bubbleMin));
       return { memory, confidence, uncertain, size };
     });
 
@@ -19409,13 +20463,19 @@ function HomeContent(): React.JSX.Element {
       const slotLoop = Math.floor(sortedIndex / MEMORY_BUBBLE_CLOUD_SLOTS.length);
       let size = entry.size;
       let radiusPct = (size / 2) * pxToPct;
-      let baseX =
-        slot[0] + ((slotLoop % 3) - 1) * 4 + (stableUnitValue(`${entry.memory.id}:x`) - 0.5) * 7;
-      let baseY =
-        slot[1] + ((slotLoop % 2) * 5 - 2.5) + (stableUnitValue(`${entry.memory.id}:y`) - 0.5) * 7;
-      let placedPoint = findPlacement(entry.memory.id, baseX, baseY, radiusPct);
+      const saved = activeMemoryBubblePositions[entry.memory.id];
+      let baseX = saved?.xPct ??
+        (slot[0] + ((slotLoop % 3) - 1) * 4 + (stableUnitValue(`${entry.memory.id}:x`) - 0.5) * 7);
+      let baseY = saved?.yPct ??
+        (slot[1] + ((slotLoop % 2) * 5 - 2.5) + (stableUnitValue(`${entry.memory.id}:y`) - 0.5) * 7);
+      let placedPoint = saved
+        ? {
+          x: Math.max(bounds.minX + radiusPct, Math.min(bounds.maxX - radiusPct, baseX)),
+          y: Math.max(bounds.minY + radiusPct, Math.min(bounds.maxY - radiusPct, baseY)),
+        }
+        : findPlacement(entry.memory.id, baseX, baseY, radiusPct);
 
-      for (let shrink = 0; shrink < 4; shrink += 1) {
+      for (let shrink = 0; shrink < 6; shrink += 1) {
         const overlaps = placed.some((other) => {
           const dx = placedPoint.x - other.x;
           const dy = placedPoint.y - other.y;
@@ -19423,7 +20483,7 @@ function HomeContent(): React.JSX.Element {
           return distance < radiusPct + other.radiusPct + 0.85;
         });
         if (!overlaps) break;
-        size = Math.max(entry.uncertain ? MEMORY_UNCERTAIN_BUBBLE_MIN_SIZE : MEMORY_BUBBLE_MIN_SIZE, Math.round(size * 0.94));
+        size = Math.max(entry.uncertain ? uncertainMin : bubbleMin, Math.round(size * 0.9));
         radiusPct = (size / 2) * pxToPct;
         baseX = Math.max(bounds.minX + radiusPct, Math.min(bounds.maxX - radiusPct, baseX));
         baseY = Math.max(bounds.minY + radiusPct, Math.min(bounds.maxY - radiusPct, baseY));
@@ -19438,7 +20498,7 @@ function HomeContent(): React.JSX.Element {
     // after the greedy placement fallback chooses "least bad" positions.
     // The bubbles are small enough now that this can usually separate all
     // of them without additional shrinkage.
-    const RELAX_BUFFER_PCT = 1.05;
+    const RELAX_BUFFER_PCT = 1.28;
     const RELAX_ITERATIONS = 100;
     const RELAX_PUSH = 0.56;
     const RELAX_SETTLE_THRESHOLD = 0.035;
@@ -19491,8 +20551,10 @@ function HomeContent(): React.JSX.Element {
       const textLength = entry.memory.text.length;
       const fontDivisor = textLength > 92 ? 10.2 : textLength > 68 ? 9.2 : textLength > 46 ? 8.4 : 7.8;
       const fontSize = Math.max(11, Math.min(14, Math.round(size / fontDivisor)));
-      const scoreSize = Math.max(13, Math.min(26, Math.round(size * 0.22)));
-      const lineCount = size >= 118 ? 4 : 3;
+      const scoreInset = Math.max(6, Math.round(size * 0.16));
+      const scoreMax = Math.max(12, size - scoreInset * 2);
+      const scoreSize = Math.max(11, Math.min(scoreMax, Math.round(size * 0.22)));
+      const lineCount = size >= Math.round(bubbleMax * 0.9) ? 4 : 3;
       layoutById.set(entry.memory.id, {
         uncertain: entry.uncertain,
         style: {
@@ -19502,6 +20564,7 @@ function HomeContent(): React.JSX.Element {
           "--memory-bubble-ink": pickReadableText(shade),
           "--memory-bubble-font-size": `${fontSize}px`,
           "--memory-bubble-score-size": `${scoreSize}px`,
+          "--memory-bubble-score-inset": `${scoreInset}px`,
           "--memory-bubble-line-count": lineCount,
           "--memory-cloud-x": `${placedPoint.x.toFixed(2)}%`,
           "--memory-cloud-y": `${placedPoint.y.toFixed(2)}%`,
@@ -19511,11 +20574,20 @@ function HomeContent(): React.JSX.Element {
       });
     });
     return layoutById;
-  }, [memoryPanelScope, visibleMemoryBubbles, memoryPanelAccent, resolvedTheme]);
+  }, [memoryPanelScope, visibleMemoryBubbles, memoryPanelAccent, resolvedTheme, activeMemoryBubblePositions]);
 
   const selectedVisibleMemory = useMemo(
     () => visibleMemoryBubbles.find((memory) => memory.id === focusedMemoryId) ?? null,
     [focusedMemoryId, visibleMemoryBubbles]
+  );
+  const memoryPanelSubjectLabel = useMemo(() => {
+    const name = user?.displayName?.trim();
+    return name && name.length > 0 ? name : "User";
+  }, [user?.displayName]);
+  const renderMemoryPanelText = useCallback(
+    (memory: UserMemory) =>
+      formatMemoryPanelText(memory.text, memoryPanelSubjectLabel, memoryCategory(memory)),
+    [memoryPanelSubjectLabel]
   );
 
   useEffect(() => {
@@ -19536,6 +20608,210 @@ function HomeContent(): React.JSX.Element {
       setFocusedMemoryId(null);
     }
   }, [focusedMemoryId, memoryPanelScope, visibleMemoryBubbles]);
+
+  const handleMemoryBubblePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLElement>, memoryId: string) => {
+      if (focusedMemoryId) return;
+      if (!memoryBubbleScopeKey) return;
+      const cloud = memoryBubbleCloudRef.current;
+      if (!cloud) return;
+      if (
+        event.pointerType === "mouse" &&
+        event.button !== 0
+      ) {
+        return;
+      }
+      const cloudRect = cloud.getBoundingClientRect();
+      if (cloudRect.width <= 0 || cloudRect.height <= 0) return;
+      const positionsPx: Record<string, MemoryBubblePositionPx> = {};
+      const radiiPx: Record<string, number> = {};
+      for (const memory of visibleMemoryBubbles) {
+        const layout = memoryBubbleLayoutById.get(memory.id);
+        if (!layout) continue;
+        const styleVars = layout.style as Record<string, string | number | undefined>;
+        const xPctRaw = Number.parseFloat(String(styleVars["--memory-cloud-x"] ?? "50"));
+        const yPctRaw = Number.parseFloat(String(styleVars["--memory-cloud-y"] ?? "50"));
+        const sizeRaw = Number.parseFloat(String(styleVars["--memory-bubble-size"] ?? "72"));
+        const xPct = Number.isFinite(xPctRaw) ? xPctRaw : 50;
+        const yPct = Number.isFinite(yPctRaw) ? yPctRaw : 50;
+        const sizePx = Number.isFinite(sizeRaw) ? sizeRaw : 72;
+        positionsPx[memory.id] = {
+          x: (xPct / 100) * cloudRect.width,
+          y: (yPct / 100) * cloudRect.height,
+        };
+        radiiPx[memory.id] = Math.max(8, sizePx / 2);
+      }
+      const dragStart = positionsPx[memoryId];
+      if (!dragStart) return;
+      const originX = dragStart.x;
+      const originY = dragStart.y;
+      const nodeById: Record<string, HTMLElement> = {};
+      for (const node of Array.from(cloud.querySelectorAll<HTMLElement>("[data-memory-physics-id]"))) {
+        const id = node.dataset.memoryPhysicsId;
+        if (!id?.startsWith("memory:")) continue;
+        nodeById[id.slice("memory:".length)] = node;
+      }
+
+      const dragState: MemoryBubbleDragState = {
+        pointerId: event.pointerId,
+        memoryId,
+        scopeKey: memoryBubbleScopeKey,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        cloudWidth: cloudRect.width,
+        cloudHeight: cloudRect.height,
+        boundsPx: {
+          minX: cloudRect.width * 0.06,
+          maxX: cloudRect.width * 0.94,
+          minY: cloudRect.height * 0.07,
+          maxY: cloudRect.height * 0.93,
+        },
+        positionsPx,
+        radiiPx,
+        nodeById,
+        rafId: null,
+        dragged: false,
+      };
+
+      const cleanup = () => {
+        if (dragState.rafId !== null) {
+          window.cancelAnimationFrame(dragState.rafId);
+          dragState.rafId = null;
+        }
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        memoryBubbleDragCleanupRef.current = null;
+      };
+
+      const paintPositions = () => {
+        dragState.rafId = null;
+        for (const [id, pos] of Object.entries(dragState.positionsPx)) {
+          const node = dragState.nodeById[id];
+          if (!node) continue;
+          const xPct = Math.max(0, Math.min(100, (pos.x / dragState.cloudWidth) * 100));
+          const yPct = Math.max(0, Math.min(100, (pos.y / dragState.cloudHeight) * 100));
+          node.style.setProperty("--memory-cloud-x", `${xPct.toFixed(2)}%`);
+          node.style.setProperty("--memory-cloud-y", `${yPct.toFixed(2)}%`);
+        }
+      };
+
+      const onMove = (moveEvent: PointerEvent) => {
+        if (!memoryBubbleDragStateRef.current) return;
+        if (moveEvent.pointerId !== dragState.pointerId) return;
+        const dx = moveEvent.clientX - dragState.startClientX;
+        const dy = moveEvent.clientY - dragState.startClientY;
+        if (!dragState.dragged && Math.hypot(dx, dy) >= 5) {
+          dragState.dragged = true;
+          setMemoryPhysicsActive(false);
+        }
+        if (!dragState.dragged) return;
+        const active = dragState.positionsPx[dragState.memoryId];
+        const radius = dragState.radiiPx[dragState.memoryId] ?? 16;
+        active.x = originX + dx;
+        active.y = originY + dy;
+        active.x = Math.max(dragState.boundsPx.minX + radius, Math.min(dragState.boundsPx.maxX - radius, active.x));
+        active.y = Math.max(dragState.boundsPx.minY + radius, Math.min(dragState.boundsPx.maxY - radius, active.y));
+        resolveMemoryBubbleCollisionsPx(
+          dragState.positionsPx,
+          dragState.radiiPx,
+          dragState.boundsPx,
+          dragState.memoryId
+        );
+        if (dragState.rafId === null) {
+          dragState.rafId = window.requestAnimationFrame(paintPositions);
+        }
+        setMemoryBubbleDraggingId(dragState.memoryId);
+      };
+
+      const onUp = (upEvent: PointerEvent) => {
+        if (!memoryBubbleDragStateRef.current) return;
+        if (upEvent.pointerId !== dragState.pointerId) return;
+        if (dragState.dragged) {
+          if (dragState.rafId !== null) {
+            window.cancelAnimationFrame(dragState.rafId);
+            dragState.rafId = null;
+          }
+          paintPositions();
+          const finalPct = memoryBubblePositionsPxToPctMap(dragState);
+          commitMemoryBubbleScopePositions(dragState.scopeKey, finalPct);
+          memoryBubbleSuppressClickRef.current = dragState.memoryId;
+          window.setTimeout(() => {
+            if (memoryBubbleSuppressClickRef.current === dragState.memoryId) {
+              memoryBubbleSuppressClickRef.current = null;
+            }
+          }, 120);
+        }
+        setMemoryBubbleDraggingId(null);
+        memoryBubbleDragStateRef.current = null;
+        cleanup();
+      };
+
+      if (memoryBubbleDragCleanupRef.current) {
+        memoryBubbleDragCleanupRef.current();
+      }
+      memoryBubbleDragStateRef.current = dragState;
+      memoryBubbleDragCleanupRef.current = cleanup;
+      window.addEventListener("pointermove", onMove, { passive: true });
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    },
+    [
+      commitMemoryBubbleScopePositions,
+      focusedMemoryId,
+      memoryBubbleLayoutById,
+      memoryBubbleScopeKey,
+      visibleMemoryBubbles,
+    ]
+  );
+
+  useEffect(() => {
+    return () => {
+      const dragState = memoryBubbleDragStateRef.current;
+      if (dragState?.dragged) {
+        commitMemoryBubbleScopePositionsRef.current(
+          dragState.scopeKey,
+          memoryBubblePositionsPxToPctMap(dragState)
+        );
+      }
+      if (memoryBubbleDragCleanupRef.current) {
+        memoryBubbleDragCleanupRef.current();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!memoryBubbleScopeKey) {
+      const dragState = memoryBubbleDragStateRef.current;
+      if (dragState?.dragged) {
+        commitMemoryBubbleScopePositions(
+          dragState.scopeKey,
+          memoryBubblePositionsPxToPctMap(dragState)
+        );
+      }
+      setMemoryBubbleDraggingId(null);
+      if (memoryBubbleDragCleanupRef.current) {
+        memoryBubbleDragCleanupRef.current();
+      }
+      memoryBubbleDragStateRef.current = null;
+      return;
+    }
+    const dragScope = memoryBubbleDragStateRef.current?.scopeKey;
+    if (dragScope && dragScope !== memoryBubbleScopeKey) {
+      const dragState = memoryBubbleDragStateRef.current;
+      if (dragState?.dragged) {
+        commitMemoryBubbleScopePositions(
+          dragState.scopeKey,
+          memoryBubblePositionsPxToPctMap(dragState)
+        );
+      }
+      if (memoryBubbleDragCleanupRef.current) {
+        memoryBubbleDragCleanupRef.current();
+      }
+      memoryBubbleDragStateRef.current = null;
+      setMemoryBubbleDraggingId(null);
+    }
+  }, [commitMemoryBubbleScopePositions, memoryBubbleScopeKey]);
 
   useEffect(() => {
     if (panel !== "memories") return;
@@ -19971,7 +21247,7 @@ function HomeContent(): React.JSX.Element {
           role="menuitem"
           onClick={() => {
             closeBotContextMenu();
-            openMemoriesPanelForBot(bot);
+            void openMemoriesPanelForBot(bot);
           }}
         >
           View memories
@@ -20767,9 +22043,7 @@ function HomeContent(): React.JSX.Element {
     const gearHidden = sidebarOpen || panel !== null;
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
     const canBotActions = Boolean(activeBot);
-    const canMemoryActions = Boolean(
-      activeBot || defaultConversationUsesPrismIdentity || sandboxDefaultBotView
-    );
+    const canMemoryActions = true;
     const canExport = Boolean(detail && selectedId);
     const selectedBotCanDelete = Boolean(activeBot && activeBot.delete_protected !== 1);
     const canDelete = Boolean((detail && selectedId) || selectedBotCanDelete);
@@ -20792,10 +22066,10 @@ function HomeContent(): React.JSX.Element {
     const handleMemories = () => {
       closeMenu();
       if (activeBot) {
-        openMemoriesPanelForBot(activeBot);
-      } else if (defaultConversationUsesPrismIdentity) {
-        openDefaultMemoriesPanel();
+        void openMemoriesPanelForBot(activeBot);
+        return;
       }
+      void openAllMemoriesPanel();
     };
     const handleEditBot = () => {
       closeMenu();
@@ -20866,138 +22140,11 @@ function HomeContent(): React.JSX.Element {
     };
 
     if (!isMobileGear) {
-      // Desktop: wrench glyph at the right edge mirrors the mobile pattern, but
-      // expands the action pills horizontally leftward like an accordion instead
-      // of dropping a vertical popout. Buttons fade in with a per-index stagger
-      // (Memories first → Delete last) so the destructive action settles in
-      // farthest from the cursor at open time.
-      const accordionId = "chat-header-actions-accordion";
-      const accordionCollapsed = !chatOverflowMenuOpen;
-      // React 19 supports `inert` natively; `tabIndex={-1}` belt-and-suspenders
-      // keeps collapsed buttons unreachable on older browsers / a11y stacks.
-      const collapsedTabIndex = accordionCollapsed ? -1 : 0;
-      const renderAccordionButton = (
-        index: number,
-        totalCount: number,
-        node: React.ReactElement<React.ButtonHTMLAttributes<HTMLButtonElement>>,
-      ): React.ReactElement => {
-        const existingStyle = node.props.style ?? {};
-        const progress = totalCount > 1 ? index / (totalCount - 1) : 0;
-        const accentStrength = Math.round(84 - progress * 62);
-        const surfaceStrength = 100 - accentStrength;
-        const borderAccentStrength = Math.round(64 - progress * 12);
-        const borderLineStrength = 100 - borderAccentStrength;
-        const hoverAccentStrength = Math.min(92, accentStrength + 12);
-        const hoverSurfaceStrength = 100 - hoverAccentStrength;
-        const textBlackStrength = Math.round(68 + progress * 22);
-        const textAccentStrength = 100 - textBlackStrength;
-        // CSS reads `--accordion-index` + `--accordion-count` to compute the
-        // per-button stagger delay for both open and close directions.
-        // Cast lets us attach a CSS custom property without TS rejecting the key.
-        const styleWithIndex = {
-          ...existingStyle,
-          "--accordion-index": index,
-          "--accordion-count": totalCount,
-          "--accordion-accent-strength": `${accentStrength}%`,
-          "--accordion-surface-strength": `${surfaceStrength}%`,
-          "--accordion-text-black-strength": `${textBlackStrength}%`,
-          "--accordion-text-accent-strength": `${textAccentStrength}%`,
-          "--accordion-border-accent-strength": `${borderAccentStrength}%`,
-          "--accordion-border-line-strength": `${borderLineStrength}%`,
-          "--accordion-hover-accent-strength": `${hoverAccentStrength}%`,
-          "--accordion-hover-surface-strength": `${hoverSurfaceStrength}%`,
-        } as React.CSSProperties;
-        return cloneElement(node, {
-          style: styleWithIndex,
-          tabIndex: collapsedTabIndex,
-        });
-      };
-      const accordionButtons: React.ReactElement<
-        React.ButtonHTMLAttributes<HTMLButtonElement>
-      >[] = [];
-      accordionButtons.push(
-        <button
-          key="settings"
-          type="button"
-          className={styles.chatHeaderAction}
-          onClick={handleSettings}
-          title="Settings"
-        >
-          <span className={styles.chatHeaderActionText}>Settings</span>
-        </button>,
-      );
-      if (showChatModeStyleButtons) {
-        accordionButtons.push(
-          <button
-            key="images"
-            type="button"
-            className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled}
-            onClick={handleImages}
-            title="Images"
-          >
-            <span className={styles.chatHeaderActionText}>Images</span>
-          </button>,
-        );
-      }
-      if (!showSettingsOnly) {
-        accordionButtons.push(
-          <button
-            key="memories"
-            type="button"
-            className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled || !canMemoryActions}
-            onClick={handleMemories}
-            title={activeBot ? "Bot memories" : "Default Prism memories"}
-          >
-            <span className={styles.chatHeaderActionText}>Memories</span>
-          </button>,
-        );
-      }
-      if (!showSettingsOnly && canBotActions) {
-        accordionButtons.push(
-          <button
-            key="edit-bot"
-            type="button"
-            className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled}
-            onClick={handleEditBot}
-            title="Edit bot"
-          >
-            <span className={styles.chatHeaderActionText}>Edit bot</span>
-          </button>,
-        );
-      }
-      if (!showSettingsOnly && view !== "chat" && canExport) {
-        accordionButtons.push(
-          <button
-            key="export"
-            type="button"
-            className={styles.chatHeaderAction}
-            disabled={headerActionsDisabled || !canExport || privateChatActive}
-            onClick={handleExport}
-            title={privateChatActive ? "Unavailable in private chats" : exportTitle}
-          >
-            <span className={styles.chatHeaderActionText}>{exportButtonText}</span>
-          </button>,
-        );
-        accordionButtons.push(
-          <button
-            key="delete"
-            type="button"
-            className={`${styles.chatHeaderAction} ${
-              deleteArmed ? styles.chatHeaderActionDanger : ""
-            }`}
-            disabled={headerActionsDisabled || !canDelete || privateChatActive}
-            data-delete-affordance="true"
-            aria-label={deleteLabel}
-            title={privateChatActive ? "Unavailable in private chats" : deleteLabel}
-            onClick={handleDelete}
-          >
-            <span className={styles.chatHeaderActionText}>{deleteButtonText}</span>
-          </button>,
-        );
-      }
+      // Desktop: header is now a row of glyph-only icon buttons. The old
+      // SETTINGS / IMAGES / MEMORIES accordion was removed in favor of
+      // direct-action icons; the gear glyph opens Settings instead of toggling
+      // an overflow menu. Edit-bot, Export, Delete still live on the message
+      // context menu and bot card affordances elsewhere.
       return (
         <div
           ref={chatOverflowMenuRef}
@@ -21011,40 +22158,13 @@ function HomeContent(): React.JSX.Element {
         >
           {renderMemoryToasts()}
           <div className={styles.chatHeaderGearAnchor}>
-            <div
-              id={accordionId}
-              className={`${styles.chatHeaderActionsAccordion} ${
-                chatOverflowMenuOpen ? styles.chatHeaderActionsAccordionOpen : ""
-              }`}
-              aria-hidden={accordionCollapsed}
-              // `inert` removes the entire subtree from focus + AT trees while
-              // collapsed, so screen readers don't announce hidden controls.
-              inert={accordionCollapsed || undefined}
-            >
-              <div
-                className={styles.chatHeaderActionsRow}
-                role="group"
-                aria-label="Conversation actions"
-              >
-                {accordionButtons.map((node, index) =>
-                  renderAccordionButton(index, accordionButtons.length, node),
-                )}
-              </div>
-            </div>
             <button
               ref={chatOverflowGearButtonRef}
               type="button"
               className={styles.chatGearButton}
-              aria-expanded={chatOverflowMenuOpen}
-              aria-haspopup="true"
-              aria-controls={accordionId}
-              aria-label={
-                chatOverflowMenuOpen
-                  ? "Hide conversation tools"
-                  : "Show conversation tools"
-              }
-              data-glyph-tooltip="Conversation tools"
-              onClick={() => setChatOverflowMenuOpen(open => !open)}
+              aria-label="Open settings"
+              data-glyph-tooltip="Settings"
+              onClick={handleSettings}
             >
               <WrenchGlyph />
             </button>
@@ -21059,6 +22179,37 @@ function HomeContent(): React.JSX.Element {
               disabled={headerActionsDisabled || !canMemoryActions}
             >
               <BookmarkGlyph />
+            </button>
+          ) : null}
+          {showChatModeStyleButtons ? (
+            <button
+              type="button"
+              className={styles.headerIconButton}
+              onClick={handleImages}
+              aria-label="Images"
+              data-glyph-tooltip="Images"
+              disabled={headerActionsDisabled}
+            >
+              <ImagesGlyph />
+            </button>
+          ) : null}
+          {!showSettingsOnly ? (
+            <button
+              type="button"
+              className={styles.headerIconButton}
+              onClick={() => {
+                closeMenu();
+                if (activeBot) {
+                  openActiveBotCustomizer();
+                } else {
+                  openRightPanel("bots");
+                }
+              }}
+              aria-label={activeBot ? `Edit ${activeBot.name}` : "Open bot customizer"}
+              data-glyph-tooltip={activeBot ? "Edit bot" : "Bots"}
+              disabled={headerActionsDisabled}
+            >
+              <BotsGlyph />
             </button>
           ) : null}
           {showChatThemeButton ? (
@@ -21483,8 +22634,8 @@ function HomeContent(): React.JSX.Element {
             <span>
               <strong>Enable slash dev commands in chat</strong>
               <small>
-                Allows local chat commands like <code>/clear</code> and <code>/help</code> to run
-                in the composer without sending them to the model.
+                Allows local chat commands like <code>/forget</code>, <code>/forget all</code>,
+                and <code>/help</code> to run in the composer without sending them to the model.
               </small>
             </span>
           </label>
@@ -21537,6 +22688,29 @@ function HomeContent(): React.JSX.Element {
         ? `${summaryDebug.latestSummary.slice(0, 217)}...`
         : summaryDebug.latestSummary
       : null;
+    const coffeeSocialById =
+      view === "coffee" ? coffeeConversation?.coffeeBotSocialById ?? null : null;
+    const coffeeSocialSeatOrder =
+      view === "coffee" && coffeeConversation
+        ? (coffeeConversation.coffeeSeatBotIds ??
+          coffeeSeatsFromBotIds(coffeeConversation.botGroupIds))
+        : [];
+    const coffeeSocialOrderedBotIds = Array.from(
+      new Set(
+        coffeeSocialSeatOrder
+          .filter((botId): botId is string => typeof botId === "string")
+          .concat(
+            coffeeSocialById
+              ? Object.keys(coffeeSocialById).filter(
+                  (botId) =>
+                    !coffeeSocialSeatOrder.some((seatBotId) => seatBotId === botId)
+                )
+              : []
+          )
+      )
+    );
+    const formatSocialPercent = (value: number): string =>
+      `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
     return (
       <>
         <div
@@ -21600,6 +22774,49 @@ function HomeContent(): React.JSX.Element {
             </span>
           </p>
         </details>
+
+        {view === "coffee" && (
+          <details className={styles.devToolsSection}>
+            <summary className={styles.devToolsSectionSummary}>
+              <span className={styles.devToolsSectionTitle}>Coffee social diagnostics</span>
+              <span className={styles.devToolsToggleSummary}>
+                {coffeeSocialById
+                  ? <>Bots <strong>{Object.keys(coffeeSocialById).length}</strong></>
+                  : "No social snapshot yet"}
+              </span>
+            </summary>
+            <p className={styles.devToolsSectionHint}>
+              Hidden per-bot metrics for this Coffee conversation. Player-facing UI never shows this.
+            </p>
+            {coffeeSocialById ? (
+              coffeeSocialOrderedBotIds.length > 0 ? (
+                <div className={styles.devToolsSectionHint}>
+                  {coffeeSocialOrderedBotIds.map((botId) => {
+                    const social = coffeeSocialById[botId];
+                    if (!social) return null;
+                    const bot = coffeeBotsById.get(botId);
+                    return (
+                      <p key={botId} className={styles.devToolsSectionHint}>
+                        <strong>{bot?.name ?? botId}</strong> · disposition{" "}
+                        <strong>{formatSocialPercent(social.disposition)}</strong> · values friction{" "}
+                        <strong>{formatSocialPercent(social.valuesFriction)}</strong> · restraint{" "}
+                        <strong>{formatSocialPercent(social.restraint)}</strong> · engagement{" "}
+                        <strong>{formatSocialPercent(social.engagement)}</strong> · leave pressure{" "}
+                        <strong>{formatSocialPercent(social.leavePressure)}</strong>
+                      </p>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className={styles.devToolsSectionHint}>No seated bots in this snapshot.</p>
+              )
+            ) : (
+              <p className={styles.devToolsSectionHint}>
+                Start or continue a Coffee turn to populate social diagnostics.
+              </p>
+            )}
+          </details>
+        )}
 
         <details className={styles.devToolsSection}>
           <summary className={styles.devToolsSectionSummary}>
@@ -22034,15 +23251,6 @@ function HomeContent(): React.JSX.Element {
           </div>
           <p>{opinionBandDescription(sessionOpinion.band)}</p>
           <small>{opinionTrendDescription(sessionOpinion.trend)}</small>
-          {botOpinion && memoryPanelScope !== "all" ? (
-            <div
-              className={styles.memoryConnectionBotLine}
-              data-band={botOpinion.band}
-            >
-              <span>{memoryPanelScope === "default" ? "With Prism" : "With this bot"}</span>
-              <strong>{botOpinionBandTitle(botOpinion.band)} · {botOpinion.score}%</strong>
-            </div>
-          ) : null}
         </div>
       </section>
     );
@@ -22161,13 +23369,27 @@ function HomeContent(): React.JSX.Element {
           >
           {memoryPanelBot && (
             <div className={styles.memoryBotHeader}>
-              <span className={styles.memoryBotGlyph} aria-hidden="true">
-                <BotGlyph name={memoryPanelBot.glyph} size={24} strokeWidth={1.9} />
-              </span>
-              <div>
-                <strong>{memoryPanelBot.name}</strong>
-                <span>Only this bot can use these memories.</span>
+              <div className={styles.memoryBotHeaderMain}>
+                <span className={styles.memoryBotGlyph} aria-hidden="true">
+                  <BotGlyph name={memoryPanelBot.glyph} size={24} strokeWidth={1.9} />
+                </span>
+                <div>
+                  <strong>{memoryPanelBot.name}</strong>
+                  <span>Only this bot can use these memories.</span>
+                </div>
               </div>
+              {memoryPanelBotFacts.length > 0 && (
+                <button
+                  type="button"
+                  className={styles.memoryFactsEditButton}
+                  onClick={() => {
+                    if (memoryPanelBot) openBotCustomizerFacts(memoryPanelBot);
+                  }}
+                  aria-label={`Edit ${memoryPanelBot.name} permanent facts`}
+                >
+                  Edit facts
+                </button>
+              )}
             </div>
           )}
           {memoryPanelScope === "default" && (
@@ -22248,6 +23470,7 @@ function HomeContent(): React.JSX.Element {
                     className={styles.memoryBubble}
                     data-clickable="true"
                     data-source-cluster="true"
+                    data-source-cluster-empty={cluster.memoryCount === 0 ? "true" : undefined}
                     data-memory-physics-id={`cluster:${cluster.id}`}
                     style={cluster.style}
                     onClick={() => void runMemoryTransition(async () => {
@@ -22259,7 +23482,11 @@ function HomeContent(): React.JSX.Element {
                       // bot-view back button returns to this family's
                       // drill-down view instead of jumping all the way
                       // to the directory.
-                      await refreshBotMemories(cluster.botId);
+                      setBotMemories([]);
+                      await runMemoryPanelLoad(`Loading ${cluster.botName} memories...`, async () => {
+                        if (!cluster.botId) return;
+                        await refreshBotMemories(cluster.botId);
+                      });
                     }, "forward")}
                     role="button"
                     tabIndex={0}
@@ -22272,7 +23499,11 @@ function HomeContent(): React.JSX.Element {
                         setMemoryPanelScope("bot");
                         setMemoryPanelBotId(cluster.botId);
                         setFocusedMemoryId(null);
-                        await refreshBotMemories(cluster.botId);
+                        setBotMemories([]);
+                        await runMemoryPanelLoad(`Loading ${cluster.botName} memories...`, async () => {
+                          if (!cluster.botId) return;
+                          await refreshBotMemories(cluster.botId);
+                        });
                       }, "forward");
                     }}
                     aria-label={
@@ -22285,8 +23516,8 @@ function HomeContent(): React.JSX.Element {
                     <span className={styles.memorySourceClusterGlyph}>
                       <BotGlyph
                         name={cluster.botGlyph}
-                        size={40}
-                        strokeWidth={1.95}
+                        size={cluster.memoryCount === 0 ? 24 : 40}
+                        strokeWidth={cluster.memoryCount === 0 ? 2.15 : 1.95}
                       />
                     </span>
                     <div className={styles.memorySourceClusterInnerBubbles} aria-hidden="true">
@@ -22311,14 +23542,16 @@ function HomeContent(): React.JSX.Element {
           ) : visibleMemoryBubbles.length > 0 || visibleLongTermMemories.length > 0 ? (
             <div className={styles.memoryPanelMemoryStacks}>
               {visibleMemoryBubbles.length > 0 ? (
-                <ul
-                  className={styles.memoryBubbleCloud}
-                  onClick={(event) => {
-                    if (event.target === event.currentTarget) {
-                      setFocusedMemoryId(null);
-                    }
-                  }}
-                >
+                <>
+                  <ul
+                    ref={memoryBubbleCloudRef}
+                    className={styles.memoryBubbleCloud}
+                    onClick={(event) => {
+                      if (event.target === event.currentTarget) {
+                        setFocusedMemoryId(null);
+                      }
+                    }}
+                  >
                   {visibleMemoryBubbles.map((memory) => {
                     const layout = memoryBubbleLayoutById.get(memory.id);
                     const uncertain = layout?.uncertain ?? false;
@@ -22326,6 +23559,7 @@ function HomeContent(): React.JSX.Element {
                     const dimmed = Boolean(focusedMemoryId && !selected);
                     const inferred = isAssumptionMemory(memory);
                     const signalPercent = Math.round(memoryBubbleSignalValue(memory) * 100);
+                    const memoryDisplayText = renderMemoryPanelText(memory);
                     return (
                       <li
                         key={`memory:${memoryPhysicsSeed}:${memory.id}`}
@@ -22342,18 +23576,31 @@ function HomeContent(): React.JSX.Element {
                             ? { "--memory-assumption-opacity": assumptionMemoryOpacity(memory) } as React.CSSProperties
                             : {}),
                         }}
-                        title={memory.text}
+                        title={memoryDisplayText}
                         role="button"
                         tabIndex={0}
-                        aria-label={`${memory.text}. ${inferred ? "Certainty" : "Confidence"} ${signalPercent} percent.`}
+                        aria-label={`${memoryDisplayText}. ${inferred ? "Certainty" : "Confidence"} ${signalPercent} percent.`}
                         onClick={() => {
+                          if (memoryBubbleSuppressClickRef.current === memory.id) {
+                            memoryBubbleSuppressClickRef.current = null;
+                            return;
+                          }
                           setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
+                        }}
+                        onPointerDown={(event) => {
+                          handleMemoryBubblePointerDown(event, memory.id);
                         }}
                         onKeyDown={(event) => {
                           if (event.key !== "Enter" && event.key !== " ") return;
                           event.preventDefault();
                           setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
                         }}
+                        data-memory-draggable={
+                          memoryBubbleScopeKey && !focusedMemoryId ? "true" : undefined
+                        }
+                        data-memory-dragging={
+                          memoryBubbleDraggingId === memory.id ? "true" : undefined
+                        }
                       >
                         {selected ? (
                           <span className={styles.memoryBubbleScore}>
@@ -22365,10 +23612,32 @@ function HomeContent(): React.JSX.Element {
                       </li>
                     );
                   })}
-                  {selectedVisibleMemory && (
-                    <li className={styles.memoryFullProseCard} role="status" aria-live="polite">
+                    {!showFloatingMemoryDetailCard && selectedVisibleMemory && (
+                      <li className={styles.memoryFullProseCard} role="status" aria-live="polite">
+                        <strong>{isAssumptionMemory(selectedVisibleMemory) ? "Assumption" : "Memory"}</strong>
+                        <p>{renderMemoryPanelText(selectedVisibleMemory)}</p>
+                        <button
+                          type="button"
+                          className={styles.memoryFullProseDeleteButton}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void deleteMemory(selectedVisibleMemory.id);
+                          }}
+                          aria-label={`Delete memory: ${renderMemoryPanelText(selectedVisibleMemory)}`}
+                        >
+                          Delete memory
+                        </button>
+                      </li>
+                    )}
+                  </ul>
+                  {showFloatingMemoryDetailCard && selectedVisibleMemory && (
+                    <div
+                      className={`${styles.memoryFullProseCard} ${styles.memoryFullProseCardFloating}`}
+                      role="status"
+                      aria-live="polite"
+                    >
                       <strong>{isAssumptionMemory(selectedVisibleMemory) ? "Assumption" : "Memory"}</strong>
-                      <p>{selectedVisibleMemory.text}</p>
+                      <p>{renderMemoryPanelText(selectedVisibleMemory)}</p>
                       <button
                         type="button"
                         className={styles.memoryFullProseDeleteButton}
@@ -22376,13 +23645,13 @@ function HomeContent(): React.JSX.Element {
                           event.stopPropagation();
                           void deleteMemory(selectedVisibleMemory.id);
                         }}
-                        aria-label={`Delete memory: ${selectedVisibleMemory.text}`}
+                        aria-label={`Delete memory: ${renderMemoryPanelText(selectedVisibleMemory)}`}
                       >
                         Delete memory
                       </button>
-                    </li>
+                    </div>
                   )}
-                </ul>
+                </>
               ) : (
                 <div className={`${styles.memoryBubbleCloud} ${styles.memoryShortTermEmpty}`}>
                   <strong>No short-term memories right now</strong>
@@ -22412,24 +23681,26 @@ function HomeContent(): React.JSX.Element {
                       ))}
                     </div>
                   </div>
-                  {selectedLongTermMemories.length > 0 ? (
-                    <ul className={styles.longTermMemoryList}>
-                      {selectedLongTermMemories.map((memory) => (
-                        <li key={`long-term:${memory.id}`}>
-                          <p>{memory.text}</p>
-                          <button
-                            type="button"
-                            onClick={() => void demoteLongTermMemory(memory.id)}
-                            aria-label={`Move long-term memory back to short-term: ${memory.text}`}
-                          >
-                            ×
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className={styles.longTermMemoryEmpty}>No long-term memories in this category yet.</p>
-                  )}
+                  <div className={styles.longTermMemoryBody}>
+                    {selectedLongTermMemories.length > 0 ? (
+                      <ul className={styles.longTermMemoryList}>
+                        {selectedLongTermMemories.map((memory) => (
+                          <li key={`long-term:${memory.id}`}>
+                            <p>{renderMemoryPanelText(memory)}</p>
+                            <button
+                              type="button"
+                              onClick={() => void demoteLongTermMemory(memory.id)}
+                              aria-label={`Move long-term memory back to short-term: ${renderMemoryPanelText(memory)}`}
+                            >
+                              ×
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className={styles.longTermMemoryEmpty}>No long-term memories in this category yet.</p>
+                    )}
+                  </div>
                 </section>
               )}
             </div>
@@ -22448,6 +23719,13 @@ function HomeContent(): React.JSX.Element {
             </div>
           )}
           </div>
+          {memoryPanelLoading && (
+            <div className={styles.memoryPanelLoadingState} role="status" aria-live="polite">
+              <span className={styles.memoryPanelLoadingOrb} aria-hidden="true" />
+              <strong>Loading memories</strong>
+              <p>{memoryPanelLoadingText}</p>
+            </div>
+          )}
           {panelError && <p className={styles.error} role="alert">{panelError}</p>}
         </div>
       )}
@@ -22473,12 +23751,17 @@ function HomeContent(): React.JSX.Element {
           {settings && (
             <form className={styles.form} onSubmit={saveSettings}>
               <label>
-                What is your name?
+                Preferred name
                 <input
                   type="text"
                   placeholder="How should bots address you?"
-                  value={settings.displayName ?? ""}
-                  onChange={e => setSettings(p => p ? { ...p, displayName: e.target.value } : p)}
+                  value={settings.displayName}
+                  onChange={e =>
+                    setSettings(previous =>
+                      previous ? { ...previous, displayName: e.target.value } : previous
+                    )
+                  }
+                  maxLength={80}
                 />
               </label>
               <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
@@ -23804,6 +25087,35 @@ function HomeContent(): React.JSX.Element {
                 </div>
               </div>
             )}
+            {importBotFileBusy && (
+              <div className={styles.importBotLoadingBackdrop} role="presentation" aria-hidden="true">
+                <div
+                  className={styles.importBotLoadingCard}
+                  style={
+                    importBotFileBusyColor
+                      ? ({
+                        ["--import-bot-accent" as string]: normalizeAccentForTheme(
+                          importBotFileBusyColor,
+                          resolvedTheme
+                        ),
+                      } as React.CSSProperties)
+                      : undefined
+                  }
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className={styles.importBotLoadingOrb} aria-hidden="true">
+                    <div className={styles.importBotLoadingOrbFill} />
+                    <span className={styles.importBotLoadingGlyph}>
+                      <BotGlyph name={importBotFileBusyGlyph} size={30} strokeWidth={1.95} />
+                    </span>
+                  </div>
+                  <p className={styles.importBotLoadingName}>{importBotFileBusyName || "Importing bot"}</p>
+                  <h4>Importing…</h4>
+                  <p>Restoring profile + memories.</p>
+                </div>
+              </div>
+            )}
             {/* Errors from createBot / deleteBot / saveBot used to silently
                 surface in the composer behind the drawer overlay. They now
                 live inside the panel next to the action that triggered
@@ -23908,6 +25220,77 @@ function HomeContent(): React.JSX.Element {
       coffeeLoopTimerRef.current = null;
     }
   };
+  const clearCoffeeRhythmTimers = () => {
+    if (coffeeCooldownTimerRef.current) {
+      clearTimeout(coffeeCooldownTimerRef.current);
+      coffeeCooldownTimerRef.current = null;
+    }
+    if (coffeeRevealTimerRef.current) {
+      clearTimeout(coffeeRevealTimerRef.current);
+      coffeeRevealTimerRef.current = null;
+    }
+  };
+  const resetCoffeeRhythm = () => {
+    clearCoffeeRhythmTimers();
+    setCoffeePendingSpeakerBotId(null);
+    setCoffeePendingRevealConversation(null);
+    setCoffeeInterruptedSnippet(null);
+    if (coffeeInterruptionCueTimerRef.current) {
+      clearTimeout(coffeeInterruptionCueTimerRef.current);
+      coffeeInterruptionCueTimerRef.current = null;
+    }
+    setCoffeeLiveInterruptionCue(null);
+    setCoffeeTurnRhythmState("idle");
+  };
+  const queueCoffeeReveal = (args: {
+    conversation: CoffeeConversationState;
+    speakerBotId: string;
+    includeCooldown: boolean;
+    onReveal?: () => void;
+  }) => {
+    const pendingMessages = args.conversation.messages;
+    const pendingMessage =
+      pendingMessages.length > 0 ? pendingMessages[pendingMessages.length - 1] : null;
+    const revealDelayMs = randomCoffeeRevealDelayMs(
+      pendingMessage?.role === "assistant" ? pendingMessage.content : ""
+    );
+    const applyReveal = () => {
+      setCoffeeConversation(args.conversation);
+      setCoffeeSelectedSessionId(args.conversation.id);
+      setCoffeePendingRevealConversation(null);
+      setCoffeePendingSpeakerBotId(null);
+      setCoffeeTurnRhythmState(
+        coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "idle"
+      );
+      args.onReveal?.();
+    };
+    clearCoffeeRhythmTimers();
+    setCoffeePendingRevealConversation(args.conversation);
+    setCoffeePendingSpeakerBotId(args.speakerBotId);
+    if (args.includeCooldown) {
+      setCoffeeTurnRhythmState("cooldown");
+      coffeeCooldownTimerRef.current = setTimeout(() => {
+        setCoffeeTurnRhythmState("tableTyping");
+        coffeeRevealTimerRef.current = setTimeout(applyReveal, revealDelayMs);
+      }, COFFEE_SEND_COOLDOWN_MS);
+      return;
+    }
+    setCoffeeTurnRhythmState("tableTyping");
+    coffeeRevealTimerRef.current = setTimeout(applyReveal, revealDelayMs);
+  };
+  const showCoffeeInterruptionCue = (event: CoffeeInterruptionEvent | undefined) => {
+    if (!event) return;
+    if (coffeeInterruptionCueTimerRef.current) {
+      clearTimeout(coffeeInterruptionCueTimerRef.current);
+    }
+    setCoffeeLiveInterruptionCue(event);
+    coffeeInterruptionCueTimerRef.current = setTimeout(() => {
+      setCoffeeLiveInterruptionCue((current) =>
+        current === event ? null : current
+      );
+      coffeeInterruptionCueTimerRef.current = null;
+    }, COFFEE_INTERRUPTION_CUE_HIDE_MS);
+  };
   const clearCoffeeArrivalTimer = () => {
     if (coffeeArrivalTimerRef.current) {
       clearTimeout(coffeeArrivalTimerRef.current);
@@ -23973,6 +25356,7 @@ function HomeContent(): React.JSX.Element {
   const resetCoffeeToPicker = () => {
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
+    resetCoffeeRhythm();
     abortCoffeeRequests();
     setCoffeeConversation(null);
     setCoffeeSelectedSessionId(null);
@@ -23982,7 +25366,6 @@ function HomeContent(): React.JSX.Element {
     setCoffeeAutoBusy(false);
     setCoffeeAutoplayPausedValue(false);
     setCoffeeError(null);
-    setCoffeeRouterReason(null);
     closeCoffeeTranscript();
     setCoffeeArrivedBotIds([]);
     setCoffeeSessionEndsAtMs(null);
@@ -24000,9 +25383,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (coffeeAutoplayPausedRef.current) return;
     if (!ignoreDraft && coffeeDraft.trim().length > 0) return;
-    const delay =
-      COFFEE_REPLY_DELAY_MIN_MS +
-      Math.floor(Math.random() * (COFFEE_REPLY_DELAY_MAX_MS - COFFEE_REPLY_DELAY_MIN_MS));
+    const delay = randomCoffeeAutonomousDelayMs();
     const scheduledEndsAtMs = endsAtMs;
     coffeeLoopTimerRef.current = setTimeout(() => {
       void continueCoffeeSession(conversationId, scheduledEndsAtMs);
@@ -24145,6 +25526,8 @@ function HomeContent(): React.JSX.Element {
     }
     clearCoffeeLoopTimer();
     setCoffeeAutoBusy(true);
+    setCoffeeTurnRhythmState(coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "botThinking");
+    setCoffeePendingSpeakerBotId(directedSpeakerBotId ?? null);
     setCoffeeError(null);
     const abortController = new AbortController();
     coffeeContinueAbortRef.current = abortController;
@@ -24154,22 +25537,31 @@ function HomeContent(): React.JSX.Element {
         conversation: CoffeeConversationState;
         speakerBotId: string;
         routerReason?: string;
+        interruption?: CoffeeInterruptionEvent;
       }>(`/api/coffee/sessions/${encodeURIComponent(conversationId)}/continue`, {
         method: "POST",
         body: JSON.stringify({
           preferredProvider: coffeeProvider,
+          userIsComposing: coffeeDraftRef.current.trim().length > 0,
           ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
         }),
         signal: abortController.signal,
       });
-      setCoffeeConversation(response.conversation);
-      setCoffeeRouterReason(response.routerReason ?? null);
       await refreshConversations();
-      if (!coffeeAutoplayPausedRef.current) {
-        scheduleCoffeeAutonomousTurn(response.conversation.id, endsAtOverride, true);
-      }
+      showCoffeeInterruptionCue(response.interruption);
+      queueCoffeeReveal({
+        conversation: response.conversation,
+        speakerBotId: response.speakerBotId,
+        includeCooldown: false,
+        onReveal: () => {
+          if (!coffeeAutoplayPausedRef.current) {
+            scheduleCoffeeAutonomousTurn(response.conversation.id, endsAtOverride, true);
+          }
+        },
+      });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
+      setCoffeePendingSpeakerBotId(null);
       setCoffeeError(err instanceof Error ? err.message : "Failed to continue Coffee Session.");
     } finally {
       if (coffeeContinueAbortRef.current === abortController) {
@@ -24202,8 +25594,44 @@ function HomeContent(): React.JSX.Element {
   const sendCoffeeTurn = async () => {
     const trimmed = coffeeDraft.trim();
     if (!trimmed) return;
+    if (coffeeTurnRhythmState === "cooldown") return;
     if (coffeeBusy) return;
     clearCoffeeLoopTimer();
+    const pendingRevealMessages = coffeePendingRevealConversation?.messages ?? [];
+    const pendingRevealLatestMessage =
+      pendingRevealMessages.length > 0
+        ? pendingRevealMessages[pendingRevealMessages.length - 1]
+        : null;
+    let playerInterruption: CoffeePlayerInterruptionInput | undefined;
+    if (
+      coffeeTurnRhythmState === "tableTyping" &&
+      pendingRevealLatestMessage?.role === "assistant" &&
+      coffeePendingSpeakerBotId
+    ) {
+      const revealTokens = tokenizeMessageReveal(pendingRevealLatestMessage.content);
+      const visibleTokenCount = Math.max(
+        1,
+        Math.min(revealTokens.length, Math.floor(revealTokens.length * 0.65))
+      );
+      playerInterruption = {
+        interruptedMessageId: pendingRevealLatestMessage.id,
+        interruptedBotId: coffeePendingSpeakerBotId,
+        visibleTokenCount,
+      };
+      setCoffeeInterruptedSnippet({
+        botId: coffeePendingSpeakerBotId,
+        snippet: interruptedMidWordSnippet(
+          pendingRevealLatestMessage.content,
+          visibleTokenCount
+        ),
+        sourceMessageId: pendingRevealLatestMessage.id,
+        createdAtMs: Date.now(),
+      });
+      clearCoffeeRhythmTimers();
+      setCoffeePendingSpeakerBotId(null);
+      setCoffeePendingRevealConversation(null);
+      setCoffeeTurnRhythmState("playerComposing");
+    }
     let activeConversation = coffeeConversation;
     let activeEndsAt = coffeeSessionEndsAtMs;
     if (!activeConversation) {
@@ -24221,6 +25649,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeeAutoplayPausedValue(false);
     }
     setCoffeeBusy(true);
+    setCoffeeTurnRhythmState("playerComposing");
     setCoffeeError(null);
     const abortController = new AbortController();
     coffeeTurnAbortRef.current = abortController;
@@ -24230,28 +25659,47 @@ function HomeContent(): React.JSX.Element {
         conversation: CoffeeConversationState;
         speakerBotId: string;
         routerReason?: string;
+        interruption?: CoffeeInterruptionEvent;
       }>("/api/coffee/turn", {
         method: "POST",
         body: JSON.stringify({
           conversationId: activeConversation.id,
           message: trimmed,
           preferredProvider: coffeeProvider,
+          ...(playerInterruption ? { playerInterruption } : {}),
         }),
         signal: abortController.signal,
       });
-      setCoffeeConversation(response.conversation);
-      setCoffeeSelectedSessionId(response.conversation.id);
-      setCoffeeRouterReason(response.routerReason ?? null);
       setCoffeeDraft("");
       await refreshConversations();
+      showCoffeeInterruptionCue(response.interruption);
+      if (response.interruption?.kind === "playerInterruptsBot" && response.interruption.interruptedSnippet) {
+        setCoffeeInterruptedSnippet({
+          botId: response.interruption.interruptedBotId,
+          snippet: response.interruption.interruptedSnippet,
+          sourceMessageId:
+            response.interruption.interruptedMessageId ?? `interrupted-${Date.now().toString(36)}`,
+          createdAtMs: Date.now(),
+        });
+      }
       if (coffeeSessionPhase !== "finished") {
         const endsAt = activeEndsAt ?? Date.now() + COFFEE_SESSION_DURATION_MS;
         setCoffeeSessionEndsAtMs(endsAt);
         setCoffeeSessionPhase("live");
-        scheduleCoffeeAutonomousTurn(response.conversation.id, endsAt, true);
+        queueCoffeeReveal({
+          conversation: response.conversation,
+          speakerBotId: response.speakerBotId,
+          includeCooldown: true,
+          onReveal: () => {
+            if (!coffeeAutoplayPausedRef.current) {
+              scheduleCoffeeAutonomousTurn(response.conversation.id, endsAt, true);
+            }
+          },
+        });
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
+      setCoffeePendingSpeakerBotId(null);
       setCoffeeError(err instanceof Error ? err.message : "Failed to send.");
     } finally {
       if (coffeeTurnAbortRef.current === abortController) {
@@ -24263,6 +25711,7 @@ function HomeContent(): React.JSX.Element {
   const stopActiveCoffeeSession = () => {
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
+    resetCoffeeRhythm();
     abortCoffeeRequests();
     setCoffeeBusy(false);
     setCoffeeAutoBusy(false);
@@ -24284,6 +25733,7 @@ function HomeContent(): React.JSX.Element {
     const groupIds = coffeeConversation.botGroupIds ?? [];
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
+    resetCoffeeRhythm();
     abortCoffeeRequests();
     setCoffeeBusy(false);
     setCoffeeAutoBusy(false);
@@ -24378,6 +25828,13 @@ function HomeContent(): React.JSX.Element {
   };
   const renderCoffeeTranscriptPanel = (): React.JSX.Element | null => {
     if (!coffeeConversation) return null;
+    const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
+    const pendingLatestMessage =
+      pendingMessages.length > 0 ? pendingMessages[pendingMessages.length - 1] : null;
+    const pendingSpeakerLabel =
+      pendingLatestMessage?.role === "assistant"
+        ? pendingLatestMessage.botName ?? "a bot"
+        : "a bot";
     return (
       <>
         <div
@@ -24443,7 +25900,10 @@ function HomeContent(): React.JSX.Element {
                 </li>
                 );
               })}
-              {(coffeeBusy || coffeeAutoBusy) && (
+              {(coffeeBusy ||
+                coffeeAutoBusy ||
+                coffeeTurnRhythmState === "cooldown" ||
+                coffeeTurnRhythmState === "tableTyping") && (
                 <li
                   className={styles.coffeeMessage}
                   data-role="assistant"
@@ -24451,16 +25911,17 @@ function HomeContent(): React.JSX.Element {
                 >
                   <div className={styles.coffeeMessageBotLabel}>...</div>
                   <div className={styles.coffeeMessageContent}>
-                    {coffeeAutoBusy ? "Someone is taking a sip before replying." : "Picking the next speaker."}
+                    {coffeeTurnRhythmState === "cooldown"
+                      ? "Giving the table a beat before the next voice."
+                      : coffeeTurnRhythmState === "tableTyping"
+                        ? `${pendingSpeakerLabel} is about to speak.`
+                        : coffeeAutoBusy
+                          ? "Someone is taking a sip before replying."
+                          : "Picking the next speaker."}
                   </div>
                 </li>
               )}
             </ul>
-            {coffeeRouterReason && (
-              <p className={styles.coffeeRouterReason}>
-                Router: {coffeeRouterReason}
-              </p>
-            )}
           </section>
         </aside>
       </>
@@ -24477,16 +25938,28 @@ function HomeContent(): React.JSX.Element {
       !coffeeBusy &&
       !coffeeAutoBusy;
     const messages = coffeeConversation?.messages ?? [];
+    const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
+    const pendingLatestMessage =
+      pendingMessages.length > 0 ? pendingMessages[pendingMessages.length - 1] : null;
+    const tableTypingBot =
+      coffeeTurnRhythmState === "tableTyping" &&
+      pendingLatestMessage?.role === "assistant"
+        ? coffeeBotsById.get(coffeePendingSpeakerBotId ?? "")
+        : null;
     const centerMessage = previewingSession
       ? null
       : messages.length > 0
         ? messages[messages.length - 1]
         : null;
-    const centerSpeaker = centerMessage?.role === "assistant"
+    const centerSpeaker = tableTypingBot
+      ? tableTypingBot.name
+      : centerMessage?.role === "assistant"
       ? centerMessage.botName ?? "Bot"
       : centerMessage?.role === "user"
         ? "You"
         : "PRISM";
+    const showThinkingIndicator = coffeeDraft.trim().length === 0;
+    const thinkingBotId = showThinkingIndicator ? coffeePendingSpeakerBotId : null;
     const visibleCoffeeSeats = coffeeActiveSeatBotIds
       .map((botId, seatIndex) => ({
         botId,
@@ -24519,18 +25992,34 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.coffeeTableScene}>
           <div className={styles.coffeeTableGlow} aria-hidden="true" />
           <div className={styles.coffeeTableDisk} aria-hidden="true" />
-          <div className={styles.coffeeCenterMessage} data-empty={!centerMessage ? "true" : undefined}>
+          <div
+            className={styles.coffeeCenterMessage}
+            data-empty={!centerMessage && !tableTypingBot ? "true" : undefined}
+          >
             <span className={styles.coffeeCenterIcon} aria-hidden="true">☕</span>
-            <strong>{centerMessage ? centerSpeaker : "The table is waiting"}</strong>
-            <p>
-              {centerMessage
-                ? centerMessage.content
-                : coffeeSessionPhase === "arriving"
-                  ? "Bots will arrive one at a time."
-                : coffeeSessionPhase === "preview"
-                  ? "The bots are seated, but you have not joined the conversation yet."
-                  : "Select bots below, then start the session."}
-            </p>
+            <strong>
+              {tableTypingBot || centerMessage ? centerSpeaker : "The table is waiting"}
+            </strong>
+            <div className={styles.coffeeCenterMessageScroll}>
+              <p>
+                {tableTypingBot ? (
+                  <span className={styles.coffeeTableTypingLine}>
+                    <span className={styles.typingDots} aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                    <span className={styles.srOnly}>{`${tableTypingBot.name} is speaking.`}</span>
+                  </span>
+                ) : centerMessage
+                  ? centerMessage.content
+                  : coffeeSessionPhase === "arriving"
+                    ? "Bots will arrive one at a time."
+                  : coffeeSessionPhase === "preview"
+                    ? "The bots are seated, but you have not joined the conversation yet."
+                    : "Select bots below, then start the session."}
+              </p>
+            </div>
             {coffeeSessionPhase === "selecting" && (
               <button
                 type="button"
@@ -24551,7 +26040,11 @@ function HomeContent(): React.JSX.Element {
               </button>
             )}
           </div>
-          {visibleCoffeeSeats.map(({ botId, seatIndex, bot }, layoutIndex) => {
+          {visibleCoffeeSeats.map(({ seatIndex, bot }, layoutIndex) => {
+            const interruptedSeatSnippet =
+              coffeeInterruptedSnippet?.botId === bot.id
+                ? coffeeInterruptedSnippet
+                : null;
             return (
               <button
                 type="button"
@@ -24576,13 +26069,31 @@ function HomeContent(): React.JSX.Element {
                 }
               >
                 <div className={styles.coffeeSeatPlate}>
-                  <BotGlyph name={bot.glyph} size={34} strokeWidth={1.65} />
+                  <BotGlyph name={bot.glyph} size={40} strokeWidth={1.55} />
                 </div>
                 <div className={styles.coffeeCup} aria-hidden="true" />
                 <div className={styles.coffeeSeatLabel}>
                   <span>{bot.name}</span>
                   <small>{coffeeBotSubtitle(bot)}</small>
                 </div>
+                {interruptedSeatSnippet ? (
+                  <div className={styles.coffeeSeatInterruptedBubble}>
+                    {interruptedSeatSnippet.snippet}
+                  </div>
+                ) : null}
+                {thinkingBotId === bot.id ? (
+                  <div
+                    className={styles.coffeeSeatThinkingIndicator}
+                    aria-label={`${bot.name} is preparing a reply`}
+                    title={`${bot.name} is preparing a reply`}
+                  >
+                    <span className={styles.typingDots} aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                  </div>
+                ) : null}
               </button>
             );
           })}
@@ -24616,6 +26127,14 @@ function HomeContent(): React.JSX.Element {
             : coffeeSelectionValid
               ? "Send the first message to start..."
               : `Select at least ${COFFEE_GROUP_MIN_SIZE_CLIENT} bots to start...`;
+    const interruptionCueBotId =
+      coffeeLiveInterruptionCue?.interrupterBotId ?? coffeeLiveInterruptionCue?.interruptedBotId;
+    const interruptionCueBotName =
+      interruptionCueBotId ? (coffeeBotsById.get(interruptionCueBotId)?.name ?? "A bot") : "A bot";
+    const interruptionCueText =
+      coffeeLiveInterruptionCue?.kind === "botInterruptsPlayer"
+        ? `${interruptionCueBotName} cuts in briefly, but you can keep typing.`
+        : null;
     return (
       <main
         className={`${styles.appLayout} ${themeClass} ${styles.coffeeShell}`}
@@ -24836,6 +26355,12 @@ function HomeContent(): React.JSX.Element {
             </section>
           )}
 
+        {interruptionCueText && (
+          <p className={styles.coffeeInterruptionCue} role="status" aria-live="polite">
+            {interruptionCueText}
+          </p>
+        )}
+
         {coffeeError && (
           <p className={styles.coffeeError} role="alert">
             {coffeeError}
@@ -24863,6 +26388,7 @@ function HomeContent(): React.JSX.Element {
                 rows={2}
                 disabled={
                   coffeeBusy ||
+                  coffeeTurnRhythmState === "cooldown" ||
                   coffeeSessionPhase === "finished" ||
                   !coffeeComposerEnabled
                 }
@@ -24879,6 +26405,7 @@ function HomeContent(): React.JSX.Element {
                 className={styles.coffeeSend}
                 disabled={
                   coffeeBusy ||
+                  coffeeTurnRhythmState === "cooldown" ||
                   coffeeDraft.trim().length === 0 ||
                   coffeeSessionPhase === "finished" ||
                   !coffeeComposerEnabled
@@ -25140,7 +26667,7 @@ function HomeContent(): React.JSX.Element {
             <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
             <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
             <button type="button" onClick={() => openRightPanel("images")}>Images</button>
-            <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
+            <button type="button" onClick={() => void openAllMemoriesPanel()}>Memories</button>
           </div>
         </div>
       </div>
@@ -26283,7 +27810,7 @@ function HomeContent(): React.JSX.Element {
             <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
             <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
             <button type="button" onClick={() => openRightPanel("images")}>Images</button>
-            <button type="button" onClick={openAllMemoriesPanel}>Memories</button>
+            <button type="button" onClick={() => void openAllMemoriesPanel()}>Memories</button>
           </div>
         )}
       </aside>
@@ -26468,20 +27995,6 @@ function HomeContent(): React.JSX.Element {
                   : bots.length > 0
                     ? "Tap the bot's glyph to begin, or pick a bot below."
                     : "Tap the symbol above to create a bot to get started.";
-            const sandboxBotHintRecap =
-              !pendingIncognito &&
-              heroBot?.id &&
-              sandboxBotStatusSummaryBotId === heroBot.id &&
-              sandboxBotStatusSummary
-                ? sandboxBotStatusSummary
-                : "";
-            const sandboxBotStatusLoadingLabel =
-              !pendingIncognito &&
-              heroBot?.id &&
-              selectedBotId === heroBot.id &&
-              sandboxBotStatusBusy
-                ? `Getting ${heroBot.name.trim()}'s status`
-                : "";
             const heroRecentConversations =
               !pendingIncognito && heroBot?.id
                 ? conversations
@@ -26492,19 +28005,8 @@ function HomeContent(): React.JSX.Element {
                     )
                     .slice(0, 8)
                 : [];
-            // Only swap from purpose copy to a "status" recap once the user
-            // has at least two prior chats with this bot. With a single chat,
-            // any "trend" read is statistical noise and feels presumptuous.
-            const heroHasReturningChats = heroRecentConversations.length >= 2;
             const hint = (() => {
               if (pendingIncognito) return `${heroStartLabel} No memories are saved.`;
-              if (!heroHasReturningChats) {
-                if (selectedBotPromptPreview) return selectedBotPromptPreview;
-                if (descriptionPreview) return descriptionPreview;
-                return heroStartLabel;
-              }
-              if (sandboxBotStatusLoadingLabel) return sandboxBotStatusLoadingLabel;
-              if (sandboxBotHintRecap) return sandboxBotHintRecap;
               if (selectedBotPromptPreview) return selectedBotPromptPreview;
               if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
               return heroStartLabel;
@@ -26623,7 +28125,7 @@ function HomeContent(): React.JSX.Element {
                             ) : null}
                           </div>
                           <p className={styles.emptyStateHint}>
-                            {sandboxBotStatusLoadingLabel ? (
+                            {sandboxBotStatusBusy ? (
                               <span className={styles.emptyStateHintLoading}>
                                 <span className={styles.summarySpinnerWheel} aria-hidden="true" />
                                 <span>{hint}</span>
@@ -27366,10 +28868,8 @@ function HomeContent(): React.JSX.Element {
               const isLocal = settings?.preferredProvider !== "openai";
               const modelProvider: Provider = isLocal ? "local" : "openai";
               const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-              const visibleModelChoice = visibleConcreteModelChoiceForProvider(
-                modelCatalog,
+              const visibleModelChoice = visibleModelChoiceForProvider(
                 settings,
-                modelProvider,
                 rawModelChoice
               );
               const modelOptions = includeSelectedModelOption(
