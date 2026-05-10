@@ -1,12 +1,17 @@
 export {
+  BOT_FACT_KEY_LABELS,
+  BOT_FACT_KEY_ORDER,
+  BOT_FACT_KEY_PLACEHOLDERS,
   BOT_PROFILE_CATEGORY_LABELS,
   BOT_PROFILE_CATEGORY_ORDER,
   BOT_PROFILE_META_END,
   BOT_PROFILE_META_START,
   BOT_VOICE_PRESET_LABELS,
   DEFAULT_BOT_PROFILE_FIELDS,
+  MAX_CUSTOM_FACTS,
   composeBotProfileProse,
   defaultBotPurpose,
+  listBotProfileFacts,
   parseStoredBotPrompt,
   randomBotProfile,
   serializeStoredBotPrompt,
@@ -14,6 +19,9 @@ export {
   stripPurposeStatementPrefixes,
   type BotAppearanceProfile,
   type BotCoreProfile,
+  type BotCustomFact,
+  type BotFactKey,
+  type BotFactsProfile,
   type BotIdentityProfile,
   type BotProfileCategoryId,
   type BotProfileFields,
@@ -106,6 +114,40 @@ export interface ChatMessage {
   askQuestion?: AskQuestionPayload;
 }
 
+/**
+ * Coffee-only hidden social metrics tracked per bot for a single session.
+ * Values are normalized (0-1) to keep prompt shaping and diagnostics simple.
+ */
+export interface CoffeeBotSocialSnapshot {
+  disposition: number;
+  valuesFriction: number;
+  restraint: number;
+  engagement: number;
+  leavePressure: number;
+}
+
+export interface CoffeeInterruptionSocialDelta {
+  botId: string;
+  dispositionDelta: number;
+  valuesFrictionDelta: number;
+}
+
+export interface CoffeePlayerInterruptionInput {
+  interruptedMessageId: string;
+  interruptedBotId: string;
+  visibleTokenCount: number;
+}
+
+export interface CoffeeInterruptionEvent {
+  kind: "playerInterruptsBot" | "botInterruptsPlayer";
+  interruptedBotId: string;
+  interrupterBotId?: string;
+  interruptedMessageId?: string;
+  visibleTokenCount?: number;
+  interruptedSnippet?: string;
+  socialConsequences: CoffeeInterruptionSocialDelta[];
+}
+
 export interface Conversation {
   id: string;
   userId: string;
@@ -136,6 +178,11 @@ export interface Conversation {
    * the compact participant list above.
    */
   coffeeSeatBotIds?: Array<string | null>;
+  /**
+   * Coffee-only hidden social values keyed by bot id for this conversation.
+   * This is primarily consumed by dev diagnostics and prompt shaping.
+   */
+  coffeeBotSocialById?: Record<string, CoffeeBotSocialSnapshot>;
   /**
    * Private chat marker — once `true`, accent styling is suppressed to
    * grayscale, the thread stays client-held, and nothing is written to
@@ -190,7 +237,7 @@ export interface UserMemory {
   /** Short-term memories can be rewritten/removed; long-term memories must be demoted first. */
   tier?: MemoryTier;
   /** Origin of this memory item. */
-  source?: "direct" | "inferred" | "compiled";
+  source?: "direct" | "inferred" | "compiled" | "about_you";
   /** Separate certainty channel for inferred/compiled assumptions. */
   certainty?: number;
   /** How likely this memory is to remain useful across future chats. */
@@ -202,6 +249,8 @@ export interface UserMemory {
 
 export type MemoryCategory = "general" | "user" | "bot_relation";
 export type MemoryTier = "short_term" | "long_term";
+
+export { classifyMemoryCategoryFromText } from "./memoryClassification.js";
 
 export type MemoryValidationStatus = "approved" | "auto_fixed";
 
@@ -347,7 +396,7 @@ export interface ChatResponsePayload extends StarterChatExtras {
       confidence: number;
       category?: MemoryCategory;
       tier?: MemoryTier;
-      source?: "direct" | "inferred" | "compiled";
+      source?: "direct" | "inferred" | "compiled" | "about_you";
       certainty?: number;
       durability?: number;
       sourceMessageIds?: string[];
@@ -363,7 +412,7 @@ export interface ChatResponsePayload extends StarterChatExtras {
       confidence: number;
       category?: MemoryCategory;
       tier?: MemoryTier;
-      source?: "direct" | "inferred" | "compiled";
+      source?: "direct" | "inferred" | "compiled" | "about_you";
       certainty?: number;
       durability?: number;
       sourceMessageIds?: string[];
@@ -418,6 +467,8 @@ export interface CoffeeContinueRequest {
    * to speak instead of running the automatic speaker router.
    */
   directedSpeakerBotId?: string;
+  /** Client hint used for rare bot-interrupt presentation while composing. */
+  userIsComposing?: boolean;
 }
 
 /** Request body for `POST /api/coffee/turn`. */
@@ -440,6 +491,8 @@ export interface CoffeeTurnRequest {
   preferredProvider?: "local" | "openai";
   /** The user's outgoing message. */
   message: string;
+  /** Optional player-interruption metadata from the live table reveal state. */
+  playerInterruption?: CoffeePlayerInterruptionInput;
 }
 
 /** Response body for `POST /api/coffee/turn`. */
@@ -449,4 +502,6 @@ export interface CoffeeTurnResponse {
   speakerBotId: string;
   /** Optional human-readable router rationale for debugging/inspection. Never shown to the user verbatim. */
   routerReason?: string;
+  /** Optional interruption event payload for live Coffee table presentation. */
+  interruption?: CoffeeInterruptionEvent;
 }

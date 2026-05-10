@@ -1,9 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  BOT_FACT_KEY_LABELS,
   BOT_PROFILE_META_END,
   BOT_PROFILE_META_START,
   composeBotProfileProse,
+  listBotProfileFacts,
   parseStoredBotPrompt,
   randomBotProfile,
   serializeStoredBotPrompt,
@@ -154,5 +156,208 @@ describe("bot profile serialization", () => {
     assert.equal(profile.v, 2);
     assert.match(prose, /Purpose:/);
     assert.match(stored, /"v":2/);
+  });
+
+  it("defaults a missing facts section to empty", () => {
+    const profile = parseStoredBotPrompt("").fields;
+
+    assert.equal(profile.facts.birthday, "");
+    assert.deepEqual(profile.facts.customFacts, []);
+  });
+
+  it("round-trips the birthday and custom facts", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthday = "1942-10-29";
+    profile.facts.customFacts = [
+      { label: "Catchphrase", value: "Happy little trees" },
+      { label: "Signature method", value: "Wet-on-wet oil painting" },
+    ];
+
+    const stored = serializeStoredBotPrompt(profile, "Bob Ross");
+    const parsed = parseStoredBotPrompt(stored).fields;
+
+    const stripRowIds = (facts: BotFactsProfile) => ({
+      birthday: facts.birthday,
+      customFacts: facts.customFacts.map(({ label, value }) => ({ label, value })),
+    });
+    assert.deepEqual(stripRowIds(parsed.facts), stripRowIds(profile.facts));
+  });
+
+  it("composes facts as canon prose so the model treats them as immutable", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthday = "1942-10-29";
+    profile.facts.customFacts = [
+      { label: "Catchphrase", value: "Happy little trees" },
+    ];
+
+    const prose = composeBotProfileProse(profile, "Bob Ross");
+
+    assert.match(prose, /Permanent facts \(canon, do not contradict\):/);
+    assert.match(prose, /Birthday: October 29, 1942/);
+    assert.match(prose, /Catchphrase: Happy little trees/);
+  });
+
+  it("lists only filled facts, with a stable order and label", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthday = "1942-10-29";
+    profile.facts.customFacts = [
+      { label: "Catchphrase", value: "Happy little trees" },
+      { label: "", value: "" },
+    ];
+
+    const list = listBotProfileFacts(profile.facts);
+
+    assert.equal(list[0]?.key, "birthday");
+    assert.ok(
+      list[1]?.key.startsWith("custom:"),
+      "custom fact key should use custom: prefix"
+    );
+    assert.equal(list[0]?.label, BOT_FACT_KEY_LABELS.birthday);
+    assert.equal(list[1]?.label, "Catchphrase");
+    assert.equal(list[1]?.value, "Happy little trees");
+  });
+
+  it("formats ISO birthdays for display while leaving free-text values alone", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthday = "1942-10-29";
+
+    const rows = listBotProfileFacts(profile.facts);
+    const birthday = rows.find((row) => row.key === "birthday");
+
+    assert.ok(birthday, "birthday row should be present");
+    assert.equal(birthday?.value, "October 29, 1942");
+
+    // Legacy free-text birthdays must still display literally rather than
+    // disappear when the formatter cannot parse them.
+    profile.facts.birthday = "an unmarked Tuesday";
+    const legacyRows = listBotProfileFacts(profile.facts);
+    assert.equal(
+      legacyRows.find((row) => row.key === "birthday")?.value,
+      "an unmarked Tuesday"
+    );
+  });
+
+  it("random birthdays are always ISO YYYY-MM-DD when populated", () => {
+    let isoCount = 0;
+    let populatedCount = 0;
+    const trials = 64;
+    for (let i = 0; i < trials; i += 1) {
+      const profile = randomBotProfile("Random");
+      const value = profile.facts.birthday;
+      if (!value) continue;
+      populatedCount += 1;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) isoCount += 1;
+    }
+    assert.ok(populatedCount > 0, "expected at least one populated birthday");
+    assert.equal(
+      isoCount,
+      populatedCount,
+      `every populated random birthday should be ISO YYYY-MM-DD; ${populatedCount - isoCount} were not`
+    );
+  });
+
+  it("randomized profiles populate the Facts section most of the time", () => {
+    let withFacts = 0;
+    const trials = 64;
+    for (let i = 0; i < trials; i += 1) {
+      const profile = randomBotProfile("Random");
+      const facts = profile.facts;
+      const filled = Boolean(
+        facts.birthday.trim() || facts.customFacts.length > 0
+      );
+      if (filled) withFacts += 1;
+    }
+    // Birthday rolls at 0.85 and custom facts roll independently, so the
+    // chance of a single trial producing no facts is well under 15%. Across
+    // 64 trials we expect the vast majority to fill something.
+    assert.ok(
+      withFacts >= trials - 16,
+      `Expected at least ${trials - 16} of ${trials} random profiles to fill facts; got ${withFacts}.`
+    );
+  });
+
+  it("keeps surreal terms limited in a single randomized profile", () => {
+    const surrealTerm = /\b(?:eldritch|haunted|ghost|goblin|portal|cryptid|wizard|storm drain|space mall|accordion|cloud dentist|emotional forklift)\b/gi;
+    const trials = 96;
+
+    for (let i = 0; i < trials; i += 1) {
+      const profile = randomBotProfile("Random");
+      const text = [
+        profile.purpose.statement,
+        profile.core.traits,
+        profile.core.interests,
+        profile.core.quirks,
+        profile.identity.role,
+        profile.identity.background,
+        profile.appearance.description,
+        profile.worldview.values,
+      ].join(" ");
+      const hits = (text.match(surrealTerm) ?? []).length;
+      assert.ok(
+        hits <= 1,
+        `Expected at most 1 surreal term in a profile, got ${hits}: ${text}`
+      );
+    }
+  });
+
+  it("stays unique across a short randomization burst", () => {
+    const signatures = new Set<string>();
+    const trials = 18;
+
+    for (let i = 0; i < trials; i += 1) {
+      const profile = randomBotProfile("Random");
+      signatures.add(
+        [
+          profile.purpose.statement,
+          profile.core.traits,
+          profile.identity.role,
+          profile.appearance.description,
+          profile.worldview.values,
+        ]
+          .join("|")
+          .toLowerCase()
+      );
+    }
+
+    assert.ok(
+      signatures.size >= 14,
+      `Expected at least 14 unique profiles in ${trials} rolls; got ${signatures.size}.`
+    );
+  });
+
+  it("ignores malformed customFacts entries during parse", () => {
+    const stored = [
+      "Old prose",
+      BOT_PROFILE_META_START,
+      JSON.stringify({
+        v: 2,
+        purpose: { statement: "", legacyNotes: "" },
+        core: {},
+        identity: {},
+        worldview: {},
+        appearance: {},
+        facts: {
+          birthday: "1942-10-29",
+          customFacts: [
+            { label: "Catchphrase", value: "Happy little trees" },
+            "not an object",
+            { label: "", value: "" },
+            null,
+          ],
+        },
+      }),
+      BOT_PROFILE_META_END,
+    ].join("\n");
+
+    const parsed = parseStoredBotPrompt(stored).fields;
+
+    assert.equal(parsed.facts.birthday, "1942-10-29");
+    assert.equal(parsed.facts.customFacts.length, 1);
+    assert.equal(parsed.facts.customFacts[0]?.label, "Catchphrase");
+    assert.equal(parsed.facts.customFacts[0]?.value, "Happy little trees");
+    assert.ok(
+      parsed.facts.customFacts[0]?.rowId && parsed.facts.customFacts[0].rowId.length > 0,
+      "expected a generated rowId"
+    );
   });
 });

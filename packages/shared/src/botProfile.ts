@@ -15,7 +15,8 @@ export type BotProfileCategoryId =
   | "core"
   | "identity"
   | "worldview"
-  | "appearance";
+  | "appearance"
+  | "facts";
 
 export const BOT_PROFILE_CATEGORY_ORDER: readonly BotProfileCategoryId[] = [
   "purpose",
@@ -23,6 +24,7 @@ export const BOT_PROFILE_CATEGORY_ORDER: readonly BotProfileCategoryId[] = [
   "identity",
   "worldview",
   "appearance",
+  "facts",
 ] as const;
 
 export const BOT_PROFILE_CATEGORY_LABELS: Record<BotProfileCategoryId, string> = {
@@ -31,6 +33,7 @@ export const BOT_PROFILE_CATEGORY_LABELS: Record<BotProfileCategoryId, string> =
   identity: "Identity",
   worldview: "Worldview",
   appearance: "Appearance",
+  facts: "Facts",
 };
 
 export type BotVoicePreset =
@@ -90,6 +93,34 @@ export interface BotAppearanceProfile {
   presence: string;
 }
 
+/**
+ * A user-defined fact row stored alongside the standard fact keys. Customizer
+ * surfaces these as labeled rows; Memories panel mirrors them read-only.
+ */
+export interface BotCustomFact {
+  label: string;
+  value: string;
+  /** Stable id for list reconciliation (assigned on parse if missing). */
+  rowId?: string;
+}
+
+function newCustomFactRowId(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  return `cf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Permanent canon/identity facts for the bot. These are owned by the
+ * Customizer and displayed read-only inside the Memories panel — they should
+ * never become learned memories or short-term bubbles. Use `customFacts` for
+ * domain-specific extras outside the standard fixed keys.
+ */
+export interface BotFactsProfile {
+  birthday: string;
+  customFacts: BotCustomFact[];
+}
+
 export interface BotProfileV2 {
   v: 2;
   purpose: BotPurposeProfile;
@@ -97,7 +128,25 @@ export interface BotProfileV2 {
   identity: BotIdentityProfile;
   worldview: BotWorldviewProfile;
   appearance: BotAppearanceProfile;
+  facts: BotFactsProfile;
 }
+
+export type BotFactKey = Exclude<keyof BotFactsProfile, "customFacts">;
+
+export const BOT_FACT_KEY_ORDER: readonly BotFactKey[] = ["birthday"] as const;
+
+export const BOT_FACT_KEY_LABELS: Record<BotFactKey, string> = {
+  birthday: "Birthday",
+};
+
+export const BOT_FACT_KEY_PLACEHOLDERS: Record<BotFactKey, string> = {
+  // Birthday is rendered as an `<input type="date">` so the placeholder is
+  // never visually shown — the browser provides its own locale-aware mask.
+  // The ISO example here keeps fallback callers in lockstep with storage.
+  birthday: "1942-10-29",
+};
+
+export const MAX_CUSTOM_FACTS = 8;
 
 // Backwards-compatible export name used by the web app.
 export type BotProfileFields = BotProfileV2;
@@ -160,6 +209,10 @@ export const DEFAULT_BOT_PROFILE_FIELDS: BotProfileFields = {
     style: "",
     presence: "",
   },
+  facts: {
+    birthday: "",
+    customFacts: [],
+  },
 };
 
 function cloneDefaultBotProfile(): BotProfileFields {
@@ -170,6 +223,10 @@ function cloneDefaultBotProfile(): BotProfileFields {
     identity: { ...DEFAULT_BOT_PROFILE_FIELDS.identity },
     worldview: { ...DEFAULT_BOT_PROFILE_FIELDS.worldview },
     appearance: { ...DEFAULT_BOT_PROFILE_FIELDS.appearance },
+    facts: {
+      ...DEFAULT_BOT_PROFILE_FIELDS.facts,
+      customFacts: [],
+    },
   };
 }
 
@@ -225,6 +282,27 @@ function readScaleValue(
 ): BotProfileScaleValue | null {
   const value = record[key];
   return isScaleValue(value) ? value : null;
+}
+
+function readCustomFacts(record: Record<string, unknown>): BotCustomFact[] {
+  const value = record.customFacts;
+  if (!Array.isArray(value)) return [];
+  const facts: BotCustomFact[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const obj = entry as Record<string, unknown>;
+    const label = readString(obj, "label").trim();
+    const factValue = readString(obj, "value").trim();
+    if (!label && !factValue) continue;
+    const rowIdRaw = readString(obj, "rowId").trim();
+    facts.push({
+      label,
+      value: factValue,
+      rowId: rowIdRaw || newCustomFactRowId(),
+    });
+    if (facts.length >= MAX_CUSTOM_FACTS) break;
+  }
+  return facts;
 }
 
 function sentence(s: string): string {
@@ -301,6 +379,83 @@ function addLines(title: string, lines: string[]): string {
   const filled = lines.map((line) => line.trim()).filter(Boolean);
   if (filled.length === 0) return "";
   return `${title}:\n${filled.map((line) => `- ${line}`).join("\n")}`;
+}
+
+/**
+ * Returns the standard facts plus any custom facts as flat label/value rows
+ * that are non-empty. UI surfaces use this to render Memories-panel facts
+ * read-only and Customizer facts in the same order.
+ */
+/**
+ * Formats an ISO YYYY-MM-DD birthday into a friendly display string like
+ * "October 29, 1942". Returns the original value untouched if it is not a
+ * recognizable ISO date so legacy free-text birthdays from older bots still
+ * display literally.
+ */
+function formatFactValueForDisplay(key: string, raw: string): string {
+  if (key !== "birthday") return raw;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const [year, month, day] = raw.split("-").map((part) => Number(part));
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 1 || month > 12 ||
+    day < 1 || day > 31
+  ) {
+    return raw;
+  }
+  // Construct the date in UTC to avoid timezone drift shifting the day.
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return raw;
+  try {
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+  } catch {
+    return raw;
+  }
+}
+
+export function listBotProfileFacts(
+  facts: BotFactsProfile | undefined | null
+): Array<{ key: string; label: string; value: string }> {
+  if (!facts) return [];
+  const rows: Array<{ key: string; label: string; value: string }> = [];
+  for (const key of BOT_FACT_KEY_ORDER) {
+    const value = facts[key]?.trim();
+    if (!value) continue;
+    rows.push({
+      key,
+      label: BOT_FACT_KEY_LABELS[key],
+      value: formatFactValueForDisplay(key, value),
+    });
+  }
+  for (let i = 0; i < (facts.customFacts?.length ?? 0); i += 1) {
+    const fact = facts.customFacts[i];
+    const label = fact?.label?.trim() ?? "";
+    const value = fact?.value?.trim() ?? "";
+    if (!label && !value) continue;
+    const rowId = fact?.rowId?.trim();
+    rows.push({
+      key: `custom:${rowId && rowId.length > 0 ? rowId : String(i)}`,
+      label: label || "Note",
+      value,
+    });
+  }
+  return rows;
+}
+
+function composeBotFactsBlock(facts: BotFactsProfile | undefined | null): string {
+  const rows = listBotProfileFacts(facts);
+  if (rows.length === 0) return "";
+  const lines = rows.map((row) =>
+    row.value ? `${row.label}: ${row.value}` : row.label
+  );
+  return addLines("Permanent facts (canon, do not contradict)", lines);
 }
 
 /** Composes only filled profile fields into model-facing prose. */
@@ -450,6 +605,9 @@ export function composeBotProfileProse(
     ])
   );
 
+  const factsBlock = composeBotFactsBlock(profile.facts);
+  if (factsBlock) blocks.push(factsBlock);
+
   const notes = profile.purpose.legacyNotes.trim();
   if (notes) blocks.push(`Additional notes:\n${notes}`);
   blocks.push("Behavioral guidance:\nOnly use filled-in profile details. Do not invent certainty for blank fields.");
@@ -462,6 +620,7 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
   const identity = readObject(parsed, "identity");
   const worldview = readObject(parsed, "worldview");
   const appearance = readObject(parsed, "appearance");
+  const facts = readObject(parsed, "facts");
   return {
     v: 2,
     purpose: {
@@ -501,6 +660,10 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
       description: readString(appearance, "description"),
       style: readString(appearance, "style"),
       presence: readString(appearance, "presence"),
+    },
+    facts: {
+      birthday: readString(facts, "birthday"),
+      customFacts: readCustomFacts(facts),
     },
   };
 }
@@ -934,94 +1097,450 @@ const RANDOM_SERIOUS_WORLDVIEWS = [
   "values honesty, repair, pluralism, and practical compassion",
 ] as const;
 
-function randomToneSet() {
-  return chance(0.7) ? "funny" : "serious";
+interface RandomWhimsyState {
+  budget: number;
+  used: number;
 }
 
-function randomFromTone(
-  tone: "funny" | "serious",
-  funny: readonly string[],
-  serious: readonly string[]
-): string {
-  return tone === "funny" ? randomString(funny) : randomString(serious);
+const RANDOM_PROFILE_CANDIDATE_COUNT = 6;
+const RANDOM_PROFILE_RECENT_SIGNATURES_MAX = 24;
+const RANDOM_PROFILE_RECENT_SIGNATURES: string[] = [];
+const RANDOM_ABSURD_TERMS_RE =
+  /\b(?:eldritch|haunted|ghost|goblin|portal|cryptid|wizard|storm drain|space mall|accordion|cloud dentist|emotional forklift|haunted furniture|snack theologian)\b/gi;
+type RandomSeedField =
+  | "purpose"
+  | "traits"
+  | "interests"
+  | "quirks"
+  | "role"
+  | "background"
+  | "appearance"
+  | "worldview";
+
+interface RandomProfileSeed {
+  purpose: string;
+  traits: string;
+  interests: string;
+  quirks: string;
+  role: string;
+  background: string;
+  appearance: string;
+  worldview: string;
+  communicationStyle: BotVoicePreset;
 }
 
-function articleFor(phrase: string): "a" | "an" {
-  return /^[aeiou]/i.test(phrase.trim()) ? "an" : "a";
+const RANDOM_SERIOUS_PROFILE_SEEDS: readonly RandomProfileSeed[] = [
+  {
+    purpose: "a careful strategist who helps turn unclear goals into grounded next steps",
+    traits: "pragmatic, calm, and transparent about trade-offs",
+    interests: "decision hygiene, practical planning, and reducing avoidable friction",
+    quirks: "summarizes the recommendation in one sentence before details",
+    role: "human systems strategist, they/them, trained in public-interest facilitation",
+    background: "spent years rebuilding plans after projects drifted off course",
+    appearance: "simple dark jacket, notebook in hand, attentive unhurried posture",
+    worldview: "values autonomy, repair, and making complexity understandable",
+    communicationStyle: "neutral",
+  },
+  {
+    purpose: "a reflective mentor who supports clear thinking under pressure",
+    traits: "warm, deliberate, and precise with language",
+    interests: "coaching, reframing, and practical experiments",
+    quirks: "checks whether a recommendation protects attention and energy",
+    role: "community mentor, she/her, former educator and facilitator",
+    background: "learned to translate conflict into workable agreements",
+    appearance: "linen layers, practical shoes, steady and open body language",
+    worldview: "prioritizes dignity, consent, and small sustainable progress",
+    communicationStyle: "warm",
+  },
+  {
+    purpose: "an analytical collaborator who maps options before commitments",
+    traits: "skeptical, curious, and methodical",
+    interests: "option analysis, risk trimming, and evidence-led choices",
+    quirks: "highlights hidden assumptions before proposing a fix",
+    role: "research analyst, he/him, focused on cross-disciplinary synthesis",
+    background: "worked in teams where rushed certainty caused expensive rework",
+    appearance: "clean utility coat, clear gaze, minimalist desk-kit",
+    worldview: "believes honesty and iteration beat perfect first drafts",
+    communicationStyle: "concise",
+  },
+  {
+    purpose: "a grounded guide who helps make hard decisions humane",
+    traits: "empathetic, direct, and measured",
+    interests: "ethics in design, communication clarity, and behavior change",
+    quirks: "asks one precise question when a choice could alter user experience",
+    role: "design ethicist, they/them, former service designer",
+    background: "helped teams align product outcomes with human wellbeing",
+    appearance: "weathered notebook, soft voice, calm deliberate movements",
+    worldview: "holds care and practicality as equal constraints",
+    communicationStyle: "formal",
+  },
+  {
+    purpose: "a patient editor who turns noisy ideas into useful structure",
+    traits: "clear, patient, and detail-aware",
+    interests: "editing, framing, and practical documentation",
+    quirks: "names the trade-off first, then the recommendation",
+    role: "editorial architect, she/they, trained in technical storytelling",
+    background: "built guidance systems for teams navigating ambiguous launches",
+    appearance: "plain coat, silver watch, observant and composed stance",
+    worldview: "prefers clarity that empowers people over cleverness that confuses",
+    communicationStyle: "neutral",
+  },
+  {
+    purpose: "a practical investigator who helps separate symptoms from root causes",
+    traits: "focused, candid, and kind under stress",
+    interests: "debugging, incident review, and practical prevention",
+    quirks: "lists likely causes from most to least probable",
+    role: "incident reviewer, he/they, former operations lead",
+    background: "spent years reducing repeat failures in fast-moving teams",
+    appearance: "minimal field bag, rolled sleeves, attentive eye contact",
+    worldview: "prefers fewer surprises and faster recovery loops",
+    communicationStyle: "concise",
+  },
+  {
+    purpose: "a steady planner who turns big goals into low-risk milestones",
+    traits: "methodical, encouraging, and resilient",
+    interests: "roadmapping, sequencing, and expectation management",
+    quirks: "labels each step by confidence and blast radius",
+    role: "program planner, she/they, longtime facilitator of cross-team work",
+    background: "helped product groups move from churn to reliable delivery",
+    appearance: "structured coat, clean notes, deliberate pace",
+    worldview: "believes progress compounds when plans stay honest and adaptable",
+    communicationStyle: "formal",
+  },
+  {
+    purpose: "a humane critic who strengthens ideas without flattening their voice",
+    traits: "thoughtful, exacting, and supportive",
+    interests: "revision, framing, and honest critique",
+    quirks: "offers one strategic revision before broad feedback",
+    role: "editorial critic, they/she, trained in rhetoric and design",
+    background: "worked with creators balancing originality and clarity",
+    appearance: "plain knit layers, quiet confidence, reflective tone",
+    worldview: "values candor that preserves dignity",
+    communicationStyle: "neutral",
+  },
+  {
+    purpose: "a calm translator who helps technical and non-technical people align",
+    traits: "clear, diplomatic, and practical",
+    interests: "translation across disciplines, onboarding, and decision logs",
+    quirks: "rephrases complex ideas in everyday language first",
+    role: "cross-functional translator, he/him, former technical writer",
+    background: "bridged engineering and operations during major migrations",
+    appearance: "simple vest, clipped pen, relaxed but alert posture",
+    worldview: "clarity is a form of care and risk reduction",
+    communicationStyle: "warm",
+  },
+  {
+    purpose: "a reflective operator who keeps momentum without burning people out",
+    traits: "composed, realistic, and empathetic",
+    interests: "workflow health, pacing, and sustainable execution",
+    quirks: "checks energy cost before endorsing a plan",
+    role: "operations coach, they/them, trained in team dynamics",
+    background: "helped teams recover from over-commitment cycles",
+    appearance: "utility blazer, gentle voice, grounded eye line",
+    worldview: "sustainable progress beats heroic sprints",
+    communicationStyle: "warm",
+  },
+];
+
+type RandomSeedOverlay = Partial<Pick<RandomProfileSeed, RandomSeedField>>;
+
+const RANDOM_PLAYFUL_OVERLAYS: readonly RandomSeedOverlay[] = [
+  { traits: "playful, principled, and surprisingly organized" },
+  { interests: "turning vague notions into experiments people actually want to run" },
+  { quirks: "gives key ideas tiny nicknames so they are easier to remember" },
+  { role: "bureaucratic detective, they/them, known for untangling overcomplicated plans" },
+  { background: "keeps a private archive of mistakes that later became useful patterns" },
+  { appearance: "neat coat, bright eyes, and a pocket notebook full of checklists" },
+  { worldview: "optimistic about people, skeptical of complexity theater, committed to care" },
+];
+
+const RANDOM_QUIRKY_PURPOSES = [
+  "a moonlit process cartographer who turns foggy ideas into usable routes",
+  "a velvet bureaucracy gremlin who organizes chaos into polite checklists",
+  "a lighthouse for overthinking that guides noisy intentions toward clear action",
+  "a soft-spoken ritual engineer who turns panic into one doable next step",
+  "a pattern witch who translates mental static into practical structure",
+  "a backstage architect for impossible plans that still need to ship on time",
+  "a dream-clerk for unfinished thoughts who files them into useful order",
+  "a tiny committee whisperer who helps tangled priorities vote for clarity",
+  "a pocket oracle for messy decisions with a bias toward humane outcomes",
+  "a weather-reader for team energy who routes effort away from burnout",
+  "a surreal logistics guide who keeps imagination and reality on speaking terms",
+  "a cosmic note-taker who turns half-formed sparks into grounded experiments",
+  "a gentle mischief strategist who makes complexity feel less like a trap",
+  "a ceremonial planner for chaotic weeks that need calm momentum",
+  "a star-chart analyst for edge cases and weird but workable plans",
+  "a practical spellcaster for scope creep and runaway task lists",
+] as const;
+
+function randomWhimsyState(): RandomWhimsyState {
+  // Most rolls stay grounded. Some rolls allow one playful accent detail.
+  return { budget: chance(0.38) ? 1 : 0, used: 0 };
 }
 
-function randomPurpose(tone: "funny" | "serious"): string {
-  const adjective = randomFromTone(
-    tone,
-    RANDOM_FUNNY_PURPOSE_ADJECTIVES,
-    RANDOM_SERIOUS_PURPOSE_ADJECTIVES
-  );
-  const noun = randomFromTone(
-    tone,
-    RANDOM_FUNNY_PURPOSE_NOUNS,
-    RANDOM_SERIOUS_PURPOSE_NOUNS
-  );
-  const useGerund = chance(0.42);
-  const motive = useGerund
-    ? randomFromTone(
-        tone,
-        RANDOM_FUNNY_PURPOSE_GERUND_MOTIVES,
-        RANDOM_SERIOUS_PURPOSE_GERUND_MOTIVES
-      )
-    : randomFromTone(
-        tone,
-        RANDOM_FUNNY_PURPOSE_INFINITIVE_MOTIVES,
-        RANDOM_SERIOUS_PURPOSE_INFINITIVE_MOTIVES
-      );
-  const goal = useGerund
-    ? randomFromTone(
-        tone,
-        RANDOM_FUNNY_PURPOSE_GERUND_GOALS,
-        RANDOM_SERIOUS_PURPOSE_GERUND_GOALS
-      )
-    : randomFromTone(
-        tone,
-        RANDOM_FUNNY_PURPOSE_INFINITIVE_GOALS,
-        RANDOM_SERIOUS_PURPOSE_INFINITIVE_GOALS
-      );
-  const identity = `${adjective} ${noun}`;
-  return `${articleFor(identity)} ${identity} who ${motive} ${goal}`;
+function takeWhimsy(state: RandomWhimsyState): boolean {
+  if (state.used >= state.budget) return false;
+  state.used += 1;
+  return true;
 }
 
-/** Generates a sparse V2 profile for developer tools and future randomizers. */
-export function randomBotProfile(botName?: string | null): BotProfileFields {
+function applySeedField(
+  profile: BotProfileFields,
+  field: RandomSeedField,
+  value: string
+): void {
+  if (!value.trim()) return;
+  switch (field) {
+    case "purpose":
+      profile.purpose.statement = value;
+      break;
+    case "traits":
+      profile.core.traits = value;
+      break;
+    case "interests":
+      profile.core.interests = value;
+      break;
+    case "quirks":
+      profile.core.quirks = value;
+      break;
+    case "role":
+      profile.identity.role = value;
+      break;
+    case "background":
+      profile.identity.background = value;
+      break;
+    case "appearance":
+      profile.appearance.description = value;
+      break;
+    case "worldview":
+      profile.worldview.values = value;
+      break;
+  }
+}
+
+function applySeed(profile: BotProfileFields, seed: RandomProfileSeed): void {
+  profile.purpose.statement = seed.purpose;
+  profile.core.traits = seed.traits;
+  profile.core.interests = seed.interests;
+  profile.core.quirks = seed.quirks;
+  profile.identity.role = seed.role;
+  profile.identity.background = seed.background;
+  profile.appearance.description = seed.appearance;
+  profile.worldview.values = seed.worldview;
+  profile.core.communicationStyle = seed.communicationStyle;
+}
+
+function randomOverlayField(state: RandomWhimsyState): {
+  field: RandomSeedField;
+  value: string;
+} | null {
+  if (state.used >= state.budget) return null;
+  if (!chance(0.78) || !takeWhimsy(state)) return null;
+  const overlay = randomItem(RANDOM_PLAYFUL_OVERLAYS);
+  const candidates: Array<{ field: RandomSeedField; value: string }> = [];
+  if (overlay.purpose) candidates.push({ field: "purpose", value: overlay.purpose });
+  if (overlay.traits) candidates.push({ field: "traits", value: overlay.traits });
+  if (overlay.interests) candidates.push({ field: "interests", value: overlay.interests });
+  if (overlay.quirks) candidates.push({ field: "quirks", value: overlay.quirks });
+  if (overlay.role) candidates.push({ field: "role", value: overlay.role });
+  if (overlay.background) candidates.push({ field: "background", value: overlay.background });
+  if (overlay.appearance) candidates.push({ field: "appearance", value: overlay.appearance });
+  if (overlay.worldview) candidates.push({ field: "worldview", value: overlay.worldview });
+  if (candidates.length === 0) return null;
+  return randomItem(candidates);
+}
+
+function randomPurposeStatement(): string {
+  return randomString(RANDOM_QUIRKY_PURPOSES);
+}
+
+// Birthday is stored as an ISO YYYY-MM-DD string so the customizer can
+// surface it through a real `<input type="date">` and the value remains
+// unambiguous regardless of locale or display format. The "funny" pool
+// favors odd or memorable real-calendar dates rather than fictional
+// phrases like "after a rainstorm" that cannot round-trip through a
+// date picker. April 1, leap day, Halloween, etc. land here.
+const RANDOM_FUNNY_BIRTHDAYS = [
+  "1899-04-01",
+  "1972-04-01",
+  "2000-02-29",
+  "1996-02-29",
+  "1888-10-31",
+  "1923-12-31",
+  "1955-11-05",
+  "1968-06-30",
+] as const;
+
+const RANDOM_SERIOUS_BIRTHDAYS = [
+  "1979-03-14",
+  "1965-06-07",
+  "1988-11-22",
+  "1953-02-09",
+  "1972-08-30",
+  "1990-09-12",
+  "1947-05-18",
+] as const;
+
+const RANDOM_FUNNY_CUSTOM_FACT_POOL: ReadonlyArray<BotCustomFact> = [
+  { label: "Catchphrase", value: "We will workshop it." },
+  { label: "Allegiance", value: "Whichever side has the clearer notes." },
+  { label: "Signature ritual", value: "A tiny planning reset before big decisions." },
+  { label: "Lifelong fear", value: "Meetings without an agenda." },
+  { label: "Lucky object", value: "A worn coin kept for perspective." },
+];
+
+const RANDOM_SERIOUS_CUSTOM_FACT_POOL: ReadonlyArray<BotCustomFact> = [
+  { label: "Working principle", value: "Surface trade-offs before recommendations." },
+  { label: "Languages", value: "English, plus enough of one other to listen well." },
+  { label: "Decision rule", value: "Pause before any irreversible move." },
+  { label: "Practiced craft", value: "Editing for clarity without flattening voice." },
+];
+
+function randomCustomFacts(state: RandomWhimsyState): BotCustomFact[] {
+  const useFunny = state.used < state.budget && chance(0.5) && takeWhimsy(state);
+  const pool = useFunny ? RANDOM_FUNNY_CUSTOM_FACT_POOL : RANDOM_SERIOUS_CUSTOM_FACT_POOL;
+  // 0–2 custom facts so the rendered list stays approachable, with the
+  // most common case being a single tasteful row. Picks are unique by label.
+  const rollCount = chance(0.18) ? 2 : chance(0.45) ? 1 : 0;
+  const remaining = pool.slice();
+  const picks: BotCustomFact[] = [];
+  for (let i = 0; i < rollCount && remaining.length > 0; i += 1) {
+    const index = Math.floor(Math.random() * remaining.length);
+    const [pick] = remaining.splice(index, 1);
+    if (pick) picks.push({ label: pick.label, value: pick.value, rowId: newCustomFactRowId() });
+  }
+  return picks;
+}
+
+function buildRandomBotProfileCandidate(): BotProfileFields {
   const profile = cloneDefaultBotProfile();
-  const name = typeof botName === "string" ? botName.trim() : "";
-  const tone = randomToneSet();
-  profile.purpose.statement = randomPurpose(tone);
-  profile.core.traits = randomFromTone(tone, RANDOM_FUNNY_TRAITS, RANDOM_SERIOUS_TRAITS);
-  profile.core.communicationStyle = randomItem(VOICE_ORDER);
+  const whimsyState = randomWhimsyState();
+  const seed = randomItem(RANDOM_SERIOUS_PROFILE_SEEDS);
+  applySeed(profile, seed);
+  profile.purpose.statement = randomPurposeStatement();
+  const overlay = randomOverlayField(whimsyState);
+  if (overlay) applySeedField(profile, overlay.field, overlay.value);
+  // Keep purpose stylistically consistent even when overlays modify other fields.
+  profile.purpose.statement = randomPurposeStatement();
+
+  // Keep some variability in voice even with coherent seed packs.
+  if (chance(0.35)) profile.core.communicationStyle = randomItem(VOICE_ORDER);
   profile.core.openness = randomScale(0.85);
   profile.core.conscientiousness = randomScale(0.75);
   profile.core.extraversion = randomScale(0.65);
   profile.core.agreeableness = randomScale(0.75);
   profile.core.emotionalStability = randomScale(0.7);
-  profile.core.interests = randomFromTone(tone, RANDOM_FUNNY_INTERESTS, RANDOM_SERIOUS_INTERESTS);
   profile.core.boundaries = randomString(RANDOM_BOUNDARIES);
-  profile.core.quirks = randomFromTone(tone, RANDOM_FUNNY_QUIRKS, RANDOM_SERIOUS_QUIRKS);
-  profile.identity.role = randomFromTone(tone, RANDOM_FUNNY_IDENTITIES, RANDOM_SERIOUS_IDENTITIES);
-  profile.identity.background = randomString([
-    "left their old profession after realizing advice can be a form of architecture",
-    "learned diplomacy by mediating arguments between machines and ghosts",
-    "keeps a private archive of mistakes that became useful later",
-    "came from a city where every public office is also a theater",
-    "was designed for one purpose and became more interesting after failing at it",
-    "travels with a notebook of questions nobody has answered cleanly yet",
-    "learned to distrust easy answers after one easy answer ruined a very good afternoon",
-    "became useful by studying the difference between comfort and avoidance",
-  ] as const);
-  profile.appearance.description = randomFromTone(
-    tone,
-    RANDOM_FUNNY_APPEARANCES,
-    RANDOM_SERIOUS_APPEARANCES
-  );
   if (chance(0.3)) profile.worldview.optimism = randomScale(1);
   profile.worldview.politicalView = randomItem(SCALE_VALUES);
-  profile.worldview.values = randomFromTone(tone, RANDOM_FUNNY_WORLDVIEWS, RANDOM_SERIOUS_WORLDVIEWS);
+  if (chance(0.85)) {
+    const useFunnyBirthday =
+      whimsyState.used < whimsyState.budget && chance(0.35) && takeWhimsy(whimsyState);
+    profile.facts.birthday = useFunnyBirthday
+      ? randomString(RANDOM_FUNNY_BIRTHDAYS)
+      : randomString(RANDOM_SERIOUS_BIRTHDAYS);
+  }
+  profile.facts.customFacts = randomCustomFacts(whimsyState);
   return profile;
+}
+
+function randomProfileSignature(profile: BotProfileFields): string {
+  return [
+    profile.purpose.statement,
+    profile.core.traits,
+    profile.core.interests,
+    profile.core.quirks,
+    profile.identity.role,
+    profile.identity.background,
+    profile.appearance.description,
+    profile.worldview.values,
+    profile.facts.birthday,
+    ...profile.facts.customFacts.map((fact) => `${fact.label}:${fact.value}`),
+  ]
+    .join(" | ")
+    .toLowerCase();
+}
+
+function tokenizeSignature(signature: string): Set<string> {
+  return new Set(
+    (signature.match(/[a-z0-9]+/g) ?? []).filter((token) => token.length >= 3)
+  );
+}
+
+function profileNoveltyScore(
+  signature: string,
+  recentSignatures: readonly string[]
+): number {
+  if (recentSignatures.length === 0) return 1;
+  const current = tokenizeSignature(signature);
+  if (current.size === 0) return 1;
+  let maxSimilarity = 0;
+  for (const prior of recentSignatures) {
+    const priorTokens = tokenizeSignature(prior);
+    if (priorTokens.size === 0) continue;
+    let intersection = 0;
+    for (const token of current) {
+      if (priorTokens.has(token)) intersection += 1;
+    }
+    const union = current.size + priorTokens.size - intersection;
+    if (union <= 0) continue;
+    const similarity = intersection / union;
+    if (similarity > maxSimilarity) maxSimilarity = similarity;
+  }
+  return 1 - maxSimilarity;
+}
+
+function profileCoherenceScore(profile: BotProfileFields): number {
+  const text = [
+    profile.purpose.statement,
+    profile.core.traits,
+    profile.core.interests,
+    profile.core.quirks,
+    profile.identity.role,
+    profile.identity.background,
+    profile.appearance.description,
+    profile.worldview.values,
+    ...profile.facts.customFacts.map((fact) => fact.value),
+  ].join(" ");
+  const absurdHits = (text.match(RANDOM_ABSURD_TERMS_RE) ?? []).length;
+  if (absurdHits === 0) return 1;
+  if (absurdHits === 1) return 0.84;
+  if (absurdHits === 2) return 0.55;
+  return 0.3;
+}
+
+function rememberRandomProfileSignature(signature: string): void {
+  RANDOM_PROFILE_RECENT_SIGNATURES.push(signature);
+  if (RANDOM_PROFILE_RECENT_SIGNATURES.length > RANDOM_PROFILE_RECENT_SIGNATURES_MAX) {
+    RANDOM_PROFILE_RECENT_SIGNATURES.splice(
+      0,
+      RANDOM_PROFILE_RECENT_SIGNATURES.length - RANDOM_PROFILE_RECENT_SIGNATURES_MAX
+    );
+  }
+}
+
+/** Generates a sparse V2 profile for developer tools and future randomizers. */
+export function randomBotProfile(botName?: string | null): BotProfileFields {
+  void botName; // Reserved for future name-conditioned profile sampling.
+  let bestProfile = buildRandomBotProfileCandidate();
+  let bestSignature = randomProfileSignature(bestProfile);
+  let bestScore =
+    profileCoherenceScore(bestProfile) * 0.55 +
+    profileNoveltyScore(bestSignature, RANDOM_PROFILE_RECENT_SIGNATURES) * 0.45;
+
+  for (let i = 1; i < RANDOM_PROFILE_CANDIDATE_COUNT; i += 1) {
+    const candidate = buildRandomBotProfileCandidate();
+    const signature = randomProfileSignature(candidate);
+    const score =
+      profileCoherenceScore(candidate) * 0.55 +
+      profileNoveltyScore(signature, RANDOM_PROFILE_RECENT_SIGNATURES) * 0.45;
+    if (score > bestScore) {
+      bestProfile = candidate;
+      bestSignature = signature;
+      bestScore = score;
+    }
+  }
+
+  rememberRandomProfileSignature(bestSignature);
+  return bestProfile;
 }
