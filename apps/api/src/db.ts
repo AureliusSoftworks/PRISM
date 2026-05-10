@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   ChatMessage,
+  CoffeeBotSocialSnapshot,
   Conversation,
   MemoryCategory,
   MemoryTier,
@@ -47,10 +48,19 @@ export interface DbMemoryRecord {
   category: MemoryCategory;
   tier: MemoryTier;
   durability: number;
-  source: "direct" | "inferred" | "compiled";
+  source: "direct" | "inferred" | "compiled" | "about_you";
   certainty: number | null;
   sourceMessageIds: string;
   createdAt: string;
+}
+
+interface DbCoffeeBotSocialRow {
+  bot_id: string;
+  disposition: number;
+  values_friction: number;
+  restraint: number;
+  engagement: number;
+  leave_pressure: number;
 }
 
 export function resolveDbPath(): string {
@@ -260,6 +270,20 @@ export function createDatabase(): DatabaseSync {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, bot_scope_key),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS coffee_bot_social_state (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      disposition REAL NOT NULL DEFAULT 0.5,
+      values_friction REAL NOT NULL DEFAULT 0.35,
+      restraint REAL NOT NULL DEFAULT 0.65,
+      engagement REAL NOT NULL DEFAULT 0.65,
+      leave_pressure REAL NOT NULL DEFAULT 0.1,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
   const userColumns = db
@@ -616,6 +640,9 @@ export function createDatabase(): DatabaseSync {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_bot_opinions_user_bot ON bot_opinions (user_id, bot_id);"
   );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);"
+  );
 
   return db;
 }
@@ -710,5 +737,75 @@ function parseMemorySourceMessageIds(raw: string): string[] {
       : [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Loads persisted Coffee social state for a conversation and subset of bots.
+ */
+export function loadCoffeeBotSocialState(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  botIds: readonly string[]
+): Record<string, CoffeeBotSocialSnapshot> {
+  if (botIds.length === 0) return {};
+  const placeholders = botIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT bot_id, disposition, values_friction, restraint, engagement, leave_pressure
+         FROM coffee_bot_social_state
+        WHERE user_id = ? AND conversation_id = ? AND bot_id IN (${placeholders})`
+    )
+    .all(userId, conversationId, ...botIds) as unknown as DbCoffeeBotSocialRow[];
+  const byId: Record<string, CoffeeBotSocialSnapshot> = {};
+  for (const row of rows) {
+    byId[row.bot_id] = {
+      disposition: row.disposition,
+      valuesFriction: row.values_friction,
+      restraint: row.restraint,
+      engagement: row.engagement,
+      leavePressure: row.leave_pressure,
+    };
+  }
+  return byId;
+}
+
+/**
+ * Upserts Coffee social state snapshots for one conversation.
+ */
+export function upsertCoffeeBotSocialState(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  stateByBotId: Record<string, CoffeeBotSocialSnapshot>,
+  updatedAt: string
+): void {
+  const entries = Object.entries(stateByBotId);
+  if (entries.length === 0) return;
+  const statement = db.prepare(
+    `INSERT INTO coffee_bot_social_state (
+      user_id, conversation_id, bot_id, disposition, values_friction, restraint, engagement, leave_pressure, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, conversation_id, bot_id) DO UPDATE SET
+      disposition = excluded.disposition,
+      values_friction = excluded.values_friction,
+      restraint = excluded.restraint,
+      engagement = excluded.engagement,
+      leave_pressure = excluded.leave_pressure,
+      updated_at = excluded.updated_at`
+  );
+  for (const [botId, snapshot] of entries) {
+    statement.run(
+      userId,
+      conversationId,
+      botId,
+      snapshot.disposition,
+      snapshot.valuesFriction,
+      snapshot.restraint,
+      snapshot.engagement,
+      snapshot.leavePressure,
+      updatedAt
+    );
   }
 }

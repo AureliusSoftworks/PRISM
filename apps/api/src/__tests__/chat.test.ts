@@ -47,6 +47,7 @@ function createChatTestDb(): DatabaseSync {
     );
     CREATE TABLE bots (
       id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT 'user-1',
       name TEXT NOT NULL,
       color TEXT,
       glyph TEXT,
@@ -281,6 +282,186 @@ describe("processChatMessage starter prompts", () => {
     );
     await flushBackgroundTitleJobs();
     assert.equal(fetchCount, 3);
+  });
+
+  it("does not inject first-contact intro instructions for hero-start prompts", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, color, glyph) VALUES (?, ?, ?, ?)"
+    ).run("bot-1", "Leaf Bot", "#5f8f6b", "leaf");
+
+    type ProviderBodies = Array<{
+      messages?: Array<{ role: string; content: string }>;
+    }>;
+    const bodies: ProviderBodies = [];
+    let fetchCount = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Hi, I'm Leaf Bot. What should I call you?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["Call me by my first name","Use my full name","Use a nickname","Let me think"]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        userDisplayName: "Jared",
+        starterPrompt: true,
+        starterPromptWarrantsIntro: true,
+        starterPromptLabel: "Leaf Bot",
+        botId: "bot-1",
+        incognito: false,
+        botSystemPrompt: "You are Leaf Bot. You are curious and warm.",
+        mode: "chat",
+      }
+    );
+
+    const starterBody = bodies[0];
+    const firstContactInstruction = starterBody?.messages?.find(
+      (message) =>
+        message.role === "system" &&
+        /first real conversation/i.test(message.content)
+    );
+    assert.equal(firstContactInstruction, undefined);
+    const preferredNameInstruction = starterBody?.messages?.find(
+      (message) =>
+        message.role === "system" &&
+        /The user's preferred name is/i.test(message.content)
+    );
+    assert.equal(preferredNameInstruction, undefined);
+  });
+
+  it("does not inject first-contact intro instructions for default Prism starts", async () => {
+    const db = createChatTestDb();
+
+    type ProviderBodies = Array<{
+      messages?: Array<{ role: string; content: string }>;
+    }>;
+    const bodies: ProviderBodies = [];
+    let fetchCount = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Hi, I'm Prism. What should I call you?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["Use my first name","Use my full name","Use a nickname","I am not sure yet"]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptWarrantsIntro: true,
+        starterPromptLabel: "Prism",
+        botId: null,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const starterBody = bodies[0];
+    const firstContactInstruction = starterBody?.messages?.find(
+      (message) =>
+        message.role === "system" &&
+        /first real conversation/i.test(message.content)
+    );
+    assert.equal(firstContactInstruction, undefined);
+  });
+
+  it("preserves intro wording when starter memory enforcement adds a question", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, color, glyph) VALUES (?, ?, ?, ?)"
+    ).run("bot-1", "Leaf Bot", "#5f8f6b", "leaf");
+
+    let fetchCount = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Hi, I'm Leaf Bot. Glad to meet you.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["Use my first name","Use my full name","Use a nickname","I am not sure yet"]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptWarrantsIntro: true,
+        starterPromptLabel: "Leaf Bot",
+        botId: "bot-1",
+        incognito: false,
+        botSystemPrompt: "You are Leaf Bot. You are curious and warm.",
+        mode: "chat",
+      }
+    );
+
+    const starterReply = result.conversation.messages[0]?.content ?? "";
+    assert.match(starterReply, /Hi, I'm Leaf Bot/i);
+    assert.match(starterReply, /\?/);
   });
 
   it("injects recent memories into starter opener prompts for personalization", async () => {
@@ -1966,6 +2147,124 @@ describe("refreshConversationTitle", () => {
 });
 
 describe("processChatMessage conversational memory cues", () => {
+  it("saves explicit fun-fact disclosures even when auto-memory is off", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    installChatFetchStub();
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Fun fact: I live on land!",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.memoryLearned?.created.length, 1);
+    assert.equal(result.memoryLearned?.created[0]?.text, "You live on land.");
+    assert.equal(result.memoryLearned?.created[0]?.botId, "bot-1");
+    assert.ok((result.memoryLearned?.created[0]?.confidence ?? 0) >= 0.82);
+  });
+
+  it("saves funny-enough disclosures even when auto-memory is off", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    installChatFetchStub();
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Funny enough, I live on land!",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.memoryLearned?.created.length, 1);
+    assert.equal(result.memoryLearned?.created[0]?.text, "You live on land.");
+    assert.equal(result.memoryLearned?.created[0]?.botId, "bot-1");
+    assert.ok((result.memoryLearned?.created[0]?.confidence ?? 0) >= 0.82);
+  });
+
+  it("saves figurative allergy jokes as stable named-user preferences", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        prompt?: string;
+        messages?: Array<{ content: string }>;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.messages?.[0]?.content.includes("memory validation critic")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                results: [
+                  {
+                    index: 0,
+                    decision: "auto_fix",
+                    text: "Jared prefers spending time with kind people.",
+                    confidence: 0.82,
+                    reasonCodes: ["figurative_preference"],
+                  },
+                ],
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "That makes sense." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Fun fact: I am allergic to mean people.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        userDisplayName: "Jared",
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.memoryLearned?.created.length, 1);
+    assert.equal(
+      result.memoryLearned?.created[0]?.text,
+      "Jared prefers spending time with kind people."
+    );
+    assert.equal(result.memoryLearned?.created[0]?.category, "user");
+    assert.equal(result.memoryLearned?.created[0]?.validationStatus, "auto_fixed");
+    assert.deepEqual(result.memoryLearned?.created[0]?.reasonCodes, [
+      "figurative_preference",
+    ]);
+  });
+
   it("saves explicit global memories even when auto-memory is off", async () => {
     const db = createChatTestDb();
     const userKey = Buffer.alloc(32, 7);
@@ -2090,7 +2389,7 @@ describe("processChatMessage conversational memory cues", () => {
     );
 
     const remaining = db
-      .prepare("SELECT COUNT(*) AS n FROM memories")
+      .prepare("SELECT COUNT(*) AS n FROM memories WHERE source != 'about_you'")
       .get() as { n: number };
     assert.equal(remaining.n, 0);
     assert.equal(result.memoryLearned?.retracted[0]?.text, "You love pistachios.");
@@ -2129,7 +2428,7 @@ describe("processChatMessage conversational memory cues", () => {
     );
 
     const rows = db
-      .prepare("SELECT bot_id FROM memories")
+      .prepare("SELECT bot_id FROM memories WHERE source != 'about_you'")
       .all() as Array<{ bot_id: string | null }>;
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.bot_id, "bot-1");
@@ -2276,5 +2575,60 @@ describe("processChatMessage conversational memory cues", () => {
     assert.ok((repaired.botOpinion?.score ?? 0) > (harsh.botOpinion?.score ?? 0));
     assert.equal(repaired.botOpinion?.repairCount, 1);
     assert.match(repaired.botOpinion?.lastReason ?? "", /repair/i);
+  });
+
+  it("auto-creates one protected about-you memory when a bot has no long-term user memory", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Thanks for sharing.");
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "I like practical answers.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const firstAboutYou = db
+      .prepare(
+        "SELECT source, category, tier FROM memories WHERE user_id = ? AND source = 'about_you' ORDER BY created_at DESC LIMIT 1"
+      )
+      .get("user-1") as { source: string; category: string; tier: string } | undefined;
+    assert.equal(firstAboutYou?.source, "about_you");
+    assert.equal(firstAboutYou?.category, "user");
+    assert.equal(firstAboutYou?.tier, "long_term");
+    const firstCount = (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND source = 'about_you'")
+        .get("user-1") as { n: number }
+    ).n;
+    assert.equal(firstCount, 1);
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Let's keep going.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      },
+      first.conversation.id
+    );
+    const secondCount = (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND source = 'about_you'")
+        .get("user-1") as { n: number }
+    ).n;
+    assert.equal(secondCount, 1);
   });
 });

@@ -5,12 +5,20 @@ import {
   COFFEE_GROUP_MAX_SIZE,
   COFFEE_GROUP_MIN_SIZE,
   buildRouterPrompt,
+  buildSpeakerPrompt,
+  clampCoffeeSocialValue,
+  clampCoffeeTableReplyText,
+  computePlayerInterruptionConsequences,
+  computeNextCoffeeSocialState,
   createCoffeeConversation,
+  initializeCoffeeSocialState,
+  maybeBuildBotInterruptionEvent,
   normalizeCoffeeGroupBotIds,
   normalizeCoffeeSeatBotIds,
   parseRouterResponse,
   pickDirectedSpeaker,
   pickFallbackSpeaker,
+  stripCoffeeSpeakerPrefix,
   type CoffeeBotProfile,
 } from "../coffee.ts";
 
@@ -62,6 +70,14 @@ const CARA: CoffeeBotProfile = {
   temperature: 0.7,
   maxTokens: 512,
   onlineEnabled: true,
+};
+
+const TEST_SOCIAL = {
+  disposition: 0.5,
+  valuesFriction: 0.25,
+  restraint: 0.72,
+  engagement: 0.62,
+  leavePressure: 0.18,
 };
 
 describe("normalizeCoffeeGroupBotIds", () => {
@@ -140,6 +156,18 @@ function createCoffeeTestDb(): DatabaseSync {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE coffee_bot_social_state (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      disposition REAL NOT NULL,
+      values_friction REAL NOT NULL,
+      restraint REAL NOT NULL,
+      engagement REAL NOT NULL,
+      leave_pressure REAL NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, bot_id)
+    );
   `);
   return db;
 }
@@ -191,9 +219,36 @@ describe("createCoffeeConversation", () => {
       null,
       null,
     ]);
+    assert.deepEqual(result.conversation.coffeeBotSocialById, {
+      [ALICE.id]: {
+        disposition: 0.5,
+        valuesFriction: 0.35,
+        restraint: 0.65,
+        engagement: 0.65,
+        leavePressure: 0.1,
+      },
+      [BORIS.id]: {
+        disposition: 0.5,
+        valuesFriction: 0.35,
+        restraint: 0.65,
+        engagement: 0.65,
+        leavePressure: 0.1,
+      },
+    });
     assert.equal(result.conversation.messages.length, 0);
     assert.match(result.conversation.title, /Coffee with Alice, Boris/);
     assert.match(result.arrivalScenario, /user-first|partial-table-in-progress|full-table-present/);
+    const persistedRows = db
+      .prepare(
+        "SELECT bot_id, disposition, values_friction, restraint, engagement, leave_pressure FROM coffee_bot_social_state WHERE conversation_id = ? ORDER BY bot_id"
+      )
+      .all(result.conversation.id) as Array<{ bot_id: string; leave_pressure: number }>;
+    assert.equal(persistedRows.length, 2);
+    assert.deepEqual(
+      persistedRows.map((row) => row.bot_id),
+      [ALICE.id, BORIS.id].sort()
+    );
+    assert.ok(persistedRows.every((row) => row.leave_pressure >= 0 && row.leave_pressure <= 1));
   });
 });
 
@@ -235,6 +290,122 @@ describe("buildRouterPrompt", () => {
       lastSpeakerBotId: null,
     });
     assert.match(messages[0]!.content, /No bot has spoken yet/);
+    assert.match(messages[0]!.content, /still warming up/);
+    assert.match(messages[0]!.content, /should not imply prior friendship/);
+  });
+
+  it("allows topic changes without forcing every bot to answer", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Alice just said: The rain feels soft today.",
+      lastSpeakerBotId: ALICE.id,
+      turnKind: "autonomous",
+    });
+    assert.match(messages[0]!.content, /gently change topics/);
+    assert.match(messages[0]!.content, /Do not force every bot to answer everything/);
+  });
+
+  it("formats prior bot messages as a clean transcript instead of bracketed assistant labels", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [
+        {
+          id: "msg-1",
+          role: "assistant",
+          content: "[Alice (assistant)] What a curious question.",
+          botName: "Alice",
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      userMessage: "Continue.",
+      lastSpeakerBotId: ALICE.id,
+    });
+
+    const transcript = messages.find((message) =>
+      message.content.includes("Recent table transcript")
+    );
+    assert.ok(transcript);
+    assert.match(transcript!.content, /Alice: What a curious question\./);
+    assert.doesNotMatch(transcript!.content, /\[Alice \(assistant\)\]/);
+  });
+
+  it("frames autonomous turns as table moments, not fresh user utterances", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Alice just said: What do you think, Boris?",
+      lastSpeakerBotId: ALICE.id,
+      turnKind: "autonomous",
+    });
+
+    const focus = messages.find((message) =>
+      message.content.includes("Current autonomous table moment")
+    );
+    assert.equal(focus?.role, "system");
+    assert.match(focus!.content, /Alice just said/);
+  });
+});
+
+describe("buildSpeakerPrompt", () => {
+  it("includes short sweet one-paragraph and question-restraint reply guidance", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "What do you think?",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+    });
+    const systemInstruction = messages.find(
+      (message) =>
+        message.role === "system" &&
+        message.content.includes("Reply in exactly one paragraph")
+    );
+    assert.ok(systemInstruction);
+    assert.match(systemInstruction!.content, /no line breaks/);
+    assert.match(systemInstruction!.content, /usually one sentence/);
+    assert.match(systemInstruction!.content, /at most two short sentences/);
+    assert.match(systemInstruction!.content, /Do not end with a question by default/);
+    assert.match(systemInstruction!.content, /cutting off another bot mid-sentence/);
+    assert.match(systemInstruction!.content, /still warming up/);
+    assert.match(systemInstruction!.content, /Hard tabletop budget/);
+    assert.match(systemInstruction!.content, /260 characters/);
+
+    const userTurnInstruction = messages.at(-1);
+    assert.equal(userTurnInstruction?.role, "user");
+    assert.match(userTurnInstruction!.content, /one sentence is ideal/);
+    assert.match(userTurnInstruction!.content, /Use exactly one paragraph/);
+    assert.match(userTurnInstruction!.content, /Do not end with a question unless/);
+  });
+});
+
+describe("clampCoffeeTableReplyText", () => {
+  it("returns short text untouched", () => {
+    assert.equal(clampCoffeeTableReplyText("  Hello there. "), "Hello there.");
+  });
+
+  it("collapses internal whitespace into single spaces", () => {
+    assert.equal(clampCoffeeTableReplyText("A\n\nB\tC"), "A B C");
+  });
+
+  it("truncates oversized replies", () => {
+    const filler = `${"word ".repeat(120)}`;
+    const out = clampCoffeeTableReplyText(filler);
+    assert.ok(out.endsWith("…") || out.length <= 291);
+    assert.ok(out.length < filler.length);
+  });
+
+  it("prefers cutting at sentence punctuation when possible", () => {
+    const base = `${"short ".repeat(20)}`; // preamble
+    const tail = `${"reallylongtoken".repeat(12)}`; // forces length
+    const long = `${base}First fitting end. ${tail}`;
+    const out = clampCoffeeTableReplyText(long);
+    assert.ok(out.includes("First fitting end."), out);
+    assert.ok(out.length <= 300);
   });
 });
 
@@ -280,6 +451,33 @@ describe("parseRouterResponse", () => {
     assert.equal(result?.botId, "bot-alice");
     assert.match(result?.reason ?? "", /no reason/i);
   });
+
+  it("accepts a unique bot name when the router returns name-shaped JSON", () => {
+    const result = parseRouterResponse(
+      `{"botName": "Boris", "reason": "Boris was addressed directly"}`,
+      [ALICE, BORIS, CARA]
+    );
+    assert.deepEqual(result, {
+      botId: "bot-boris",
+      reason: "Boris was addressed directly",
+    });
+  });
+});
+
+describe("stripCoffeeSpeakerPrefix", () => {
+  it("removes copied bracket speaker labels from visible replies", () => {
+    assert.equal(
+      stripCoffeeSpeakerPrefix("[Mister Rogers (assistant)] I really appreciate that.", "Mister Rogers"),
+      "I really appreciate that."
+    );
+  });
+
+  it("removes copied colon speaker labels from visible replies", () => {
+    assert.equal(
+      stripCoffeeSpeakerPrefix("Bob Ross: Let's add a little color.", "Bob Ross"),
+      "Let's add a little color."
+    );
+  });
 });
 
 describe("pickFallbackSpeaker", () => {
@@ -322,5 +520,187 @@ describe("pickDirectedSpeaker", () => {
       () => pickDirectedSpeaker([ALICE, BORIS], "bot-cara"),
       /not seated/
     );
+  });
+});
+
+describe("coffee social state helpers", () => {
+  it("clamps social values to the 0-1 range", () => {
+    assert.equal(clampCoffeeSocialValue(-0.25), 0);
+    assert.equal(clampCoffeeSocialValue(1.25), 1);
+    assert.equal(clampCoffeeSocialValue(0.42), 0.42);
+  });
+
+  it("initializes missing bot snapshots from defaults", () => {
+    const state = initializeCoffeeSocialState([ALICE, BORIS], {
+      [ALICE.id]: {
+        disposition: 0.75,
+        valuesFriction: 0.1,
+        restraint: 0.45,
+        engagement: 0.8,
+        leavePressure: 0.2,
+      },
+    });
+    assert.deepEqual(state[ALICE.id], {
+      disposition: 0.75,
+      valuesFriction: 0.1,
+      restraint: 0.45,
+      engagement: 0.8,
+      leavePressure: 0.2,
+    });
+    assert.deepEqual(state[BORIS.id], {
+      disposition: 0.5,
+      valuesFriction: 0.35,
+      restraint: 0.65,
+      engagement: 0.65,
+      leavePressure: 0.1,
+    });
+  });
+
+  it("updates speaker and non-speakers deterministically", () => {
+    const previous = initializeCoffeeSocialState([ALICE, BORIS], {});
+    const next = computeNextCoffeeSocialState({
+      previousByBotId: previous,
+      group: [ALICE, BORIS],
+      speakerBotId: BORIS.id,
+      turnKind: "user",
+      replyText: "I would rather not go there. Let's move on.",
+    });
+    assert.ok(next[BORIS.id]!.valuesFriction > previous[BORIS.id]!.valuesFriction);
+    assert.ok(next[BORIS.id]!.restraint > previous[BORIS.id]!.restraint);
+    assert.ok(next[BORIS.id]!.engagement > previous[BORIS.id]!.engagement);
+    assert.ok(next[ALICE.id]!.engagement < previous[ALICE.id]!.engagement);
+  });
+
+  it("injects social guardrail context into speaker prompts", () => {
+    const prompts = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "What do you think?",
+      socialByBotId: {
+        [ALICE.id]: {
+          disposition: 0.4,
+          valuesFriction: 0.8,
+          restraint: 0.85,
+          engagement: 0.5,
+          leavePressure: 0.4,
+        },
+        [BORIS.id]: {
+          disposition: 0.6,
+          valuesFriction: 0.2,
+          restraint: 0.5,
+          engagement: 0.7,
+          leavePressure: 0.1,
+        },
+      },
+    });
+    const combined = prompts.map((prompt) => prompt.content).join("\n");
+    assert.match(combined, /Hidden social metrics for this moment/i);
+    assert.match(combined, /Avoid insults or hostile escalation/i);
+  });
+});
+
+describe("computePlayerInterruptionConsequences", () => {
+  it("applies stronger deltas to interrupted bot and light third-party friction", () => {
+    const socialByBotId = {
+      [ALICE.id]: {
+        disposition: 0.58,
+        valuesFriction: 0.3,
+        restraint: 0.78,
+        engagement: 0.7,
+        leavePressure: 0.12,
+      },
+      [BORIS.id]: {
+        disposition: 0.46,
+        valuesFriction: 0.52,
+        restraint: 0.4,
+        engagement: 0.63,
+        leavePressure: 0.2,
+      },
+      [CARA.id]: {
+        disposition: 0.6,
+        valuesFriction: 0.2,
+        restraint: 0.8,
+        engagement: 0.6,
+        leavePressure: 0.15,
+      },
+    };
+
+    const consequences = computePlayerInterruptionConsequences({
+      interruptedBotId: BORIS.id,
+      visibleTokenCount: 12,
+      group: [ALICE, BORIS, CARA],
+      socialByBotId,
+    });
+
+    assert.equal(consequences.length, 3);
+    const interrupted = consequences.find((entry) => entry.botId === BORIS.id);
+    assert.ok(interrupted);
+    assert.ok((interrupted?.dispositionDelta ?? 0) < 0);
+    assert.ok((interrupted?.valuesFrictionDelta ?? 0) > 0);
+    const others = consequences.filter((entry) => entry.botId !== BORIS.id);
+    assert.ok(others.every((entry) => entry.valuesFrictionDelta >= 0));
+  });
+});
+
+describe("maybeBuildBotInterruptionEvent", () => {
+  const socialByBotId = {
+    [ALICE.id]: {
+      disposition: 0.5,
+      valuesFriction: 0.25,
+      restraint: 0.72,
+      engagement: 0.66,
+      leavePressure: 0.2,
+    },
+    [BORIS.id]: {
+      disposition: 0.39,
+      valuesFriction: 0.9,
+      restraint: 0.08,
+      engagement: 0.98,
+      leavePressure: 0.22,
+    },
+  };
+
+  it("returns undefined when autonomous-compose gate is not satisfied", () => {
+    const noCompose = maybeBuildBotInterruptionEvent({
+      turnKind: "autonomous",
+      userIsComposing: false,
+      speaker: BORIS,
+      socialByBotId,
+      group: [ALICE, BORIS],
+      conversationId: "coffee-gate",
+      historyLength: 4,
+    });
+    assert.equal(noCompose, undefined);
+
+    const wrongTurnKind = maybeBuildBotInterruptionEvent({
+      turnKind: "user",
+      userIsComposing: true,
+      speaker: BORIS,
+      socialByBotId,
+      group: [ALICE, BORIS],
+      conversationId: "coffee-gate",
+      historyLength: 4,
+    });
+    assert.equal(wrongTurnKind, undefined);
+  });
+
+  it("emits bounded interruption metadata for at least one deterministic seed", () => {
+    let event: ReturnType<typeof maybeBuildBotInterruptionEvent> | undefined;
+    for (let attempt = 0; attempt < 180 && !event; attempt += 1) {
+      event = maybeBuildBotInterruptionEvent({
+        turnKind: "autonomous",
+        userIsComposing: true,
+        speaker: BORIS,
+        socialByBotId,
+        group: [ALICE, BORIS],
+        conversationId: `coffee-interrupt-${attempt}`,
+        historyLength: 12,
+      });
+    }
+    assert.ok(event, "expected at least one seed to produce a rare interruption");
+    assert.equal(event?.kind, "botInterruptsPlayer");
+    assert.equal(event?.interrupterBotId, BORIS.id);
+    assert.ok((event?.socialConsequences.length ?? 0) >= 1);
   });
 });

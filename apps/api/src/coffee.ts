@@ -32,11 +32,24 @@ import {
   type LlmProvider,
   type ProviderMessage,
 } from "./providers.ts";
+import {
+  buildInitialAboutYouMemoryText,
+  hasAboutYouMemoryForBot,
+  restoreMemory,
+} from "./memory.ts";
 import { composeBotSystemPrompt } from "./bots.ts";
+import {
+  loadCoffeeBotSocialState,
+  upsertCoffeeBotSocialState,
+} from "./db.ts";
 import type {
   ChatMessage,
   Conversation,
+  CoffeeBotSocialSnapshot,
   CoffeeArrivalScenario,
+  CoffeeInterruptionEvent,
+  CoffeeInterruptionSocialDelta,
+  CoffeePlayerInterruptionInput,
   CoffeeSessionCreateResponse,
   CoffeeTurnResponse,
 } from "@localai/shared";
@@ -48,12 +61,25 @@ export const COFFEE_GROUP_MAX_SIZE = 5;
 /** Recent message window forwarded to the router and the speaker. */
 const COFFEE_HISTORY_WINDOW = 24;
 
+/** Hard cap so verbose models cannot flood the tabletop card (full text still in transcript tooling). */
+const COFFEE_TABLE_REPLY_MAX_CHARS = 280;
+
+/**
+ * Hard cap on speaker decode budget for Coffee. Per-bot overrides may be lower
+ * but cannot exceed this envelope.
+ */
+const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS = 96;
+
 /** Router LLM call budget — keep low so latency stays acceptable. */
 const ROUTER_TEMPERATURE = 0.2;
 const ROUTER_MAX_TOKENS = 80;
 
 /** Fallback when router output cannot be parsed. */
 const ROUTER_FALLBACK_REASON = "Router fallback (unparseable response)";
+
+type CoffeeTurnKind = "user" | "autonomous";
+
+type RouterAllowedBot = string | Pick<CoffeeBotProfile, "id" | "name">;
 
 /**
  * Bot row shape used internally by the router and speaker pipeline.
@@ -73,22 +99,418 @@ export interface CoffeeBotProfile {
   onlineEnabled: boolean;
 }
 
+const COFFEE_SOCIAL_MIN = 0;
+const COFFEE_SOCIAL_MAX = 1;
+
+const DEFAULT_COFFEE_SOCIAL: CoffeeBotSocialSnapshot = {
+  disposition: 0.5,
+  valuesFriction: 0.35,
+  restraint: 0.65,
+  engagement: 0.65,
+  leavePressure: 0.1,
+};
+
+const COFFEE_INTERRUPTION_MIN_VISIBLE_TOKENS = 1;
+const COFFEE_INTERRUPTION_VISIBLE_TOKEN_SOFT_CAP = 24;
+const COFFEE_PLAYER_INTERRUPT_BASE_DISPOSITION_DELTA = -0.03;
+const COFFEE_PLAYER_INTERRUPT_BASE_FRICTION_DELTA = 0.03;
+const COFFEE_PLAYER_INTERRUPT_THIRD_PARTY_FRICTION_DELTA = 0.012;
+const COFFEE_BOT_INTERRUPT_BASE_CHANCE = 0.03;
+const COFFEE_BOT_INTERRUPT_MAX_CHANCE = 0.16;
+
+/**
+ * Clamp a social metric to the normalized 0..1 range.
+ */
+export function clampCoffeeSocialValue(value: number): number {
+  if (!Number.isFinite(value)) return COFFEE_SOCIAL_MIN;
+  return Math.min(COFFEE_SOCIAL_MAX, Math.max(COFFEE_SOCIAL_MIN, value));
+}
+
+function sanitizeCoffeeSocialSnapshot(input: Partial<CoffeeBotSocialSnapshot> | undefined): CoffeeBotSocialSnapshot {
+  return {
+    disposition: clampCoffeeSocialValue(input?.disposition ?? DEFAULT_COFFEE_SOCIAL.disposition),
+    valuesFriction: clampCoffeeSocialValue(input?.valuesFriction ?? DEFAULT_COFFEE_SOCIAL.valuesFriction),
+    restraint: clampCoffeeSocialValue(input?.restraint ?? DEFAULT_COFFEE_SOCIAL.restraint),
+    engagement: clampCoffeeSocialValue(input?.engagement ?? DEFAULT_COFFEE_SOCIAL.engagement),
+    leavePressure: clampCoffeeSocialValue(input?.leavePressure ?? DEFAULT_COFFEE_SOCIAL.leavePressure),
+  };
+}
+
+/**
+ * Ensure every seated bot has a valid social snapshot.
+ */
+export function initializeCoffeeSocialState(
+  group: readonly Pick<CoffeeBotProfile, "id">[],
+  persistedByBotId: Record<string, CoffeeBotSocialSnapshot>
+): Record<string, CoffeeBotSocialSnapshot> {
+  const next: Record<string, CoffeeBotSocialSnapshot> = {};
+  for (const bot of group) {
+    next[bot.id] = sanitizeCoffeeSocialSnapshot(persistedByBotId[bot.id]);
+  }
+  return next;
+}
+
+function nudgedTowardsMidpoint(value: number, intensity: number): number {
+  return value + (0.5 - value) * intensity;
+}
+
+function computeBoundarySignal(text: string): number {
+  const normalized = text.toLowerCase();
+  const boundaryPatterns = [
+    /\bi\s+don't\s+want\b/,
+    /\bi\s+would\s+rather\s+not\b/,
+    /\bnot\s+comfortable\b/,
+    /\blet'?s\s+change\s+the\s+subject\b/,
+    /\blet'?s\s+move\s+on\b/,
+    /\bi\s+need\s+some\s+space\b/,
+  ];
+  let hits = 0;
+  for (const pattern of boundaryPatterns) {
+    if (pattern.test(normalized)) hits += 1;
+  }
+  return Math.min(1, hits / 2);
+}
+
+/**
+ * Deterministically update per-bot social values after a completed Coffee turn.
+ */
+export function computeNextCoffeeSocialState(args: {
+  previousByBotId: Record<string, CoffeeBotSocialSnapshot>;
+  group: readonly Pick<CoffeeBotProfile, "id">[];
+  speakerBotId: string;
+  turnKind: CoffeeTurnKind;
+  replyText: string;
+}): Record<string, CoffeeBotSocialSnapshot> {
+  const { previousByBotId, group, speakerBotId, turnKind, replyText } = args;
+  const next: Record<string, CoffeeBotSocialSnapshot> = {};
+  const boundarySignal = computeBoundarySignal(replyText);
+  const wordCount = replyText.trim().split(/\s+/).filter(Boolean).length;
+  const terseReplySignal = wordCount <= 14 ? 1 : 0;
+
+  for (const bot of group) {
+    const previous = sanitizeCoffeeSocialSnapshot(previousByBotId[bot.id]);
+    const isSpeaker = bot.id === speakerBotId;
+    if (isSpeaker) {
+      next[bot.id] = sanitizeCoffeeSocialSnapshot({
+        disposition: previous.disposition + (turnKind === "user" ? 0.025 : 0.01),
+        valuesFriction:
+          previous.valuesFriction +
+          boundarySignal * 0.06 +
+          (turnKind === "autonomous" ? 0.015 : 0),
+        restraint:
+          previous.restraint +
+          boundarySignal * 0.07 +
+          terseReplySignal * 0.03,
+        engagement: previous.engagement + (turnKind === "user" ? 0.07 : 0.045),
+        leavePressure:
+          previous.leavePressure -
+          (turnKind === "user" ? 0.05 : 0.03) +
+          boundarySignal * 0.04 +
+          terseReplySignal * 0.02,
+      });
+      continue;
+    }
+
+    next[bot.id] = sanitizeCoffeeSocialSnapshot({
+      disposition: nudgedTowardsMidpoint(previous.disposition, 0.08),
+      valuesFriction: nudgedTowardsMidpoint(previous.valuesFriction, 0.06),
+      restraint: nudgedTowardsMidpoint(previous.restraint, 0.06),
+      engagement: previous.engagement - (turnKind === "user" ? 0.025 : 0.02),
+      leavePressure:
+        previous.leavePressure +
+        (turnKind === "user" ? 0.02 : 0.015) +
+        boundarySignal * 0.01,
+    });
+  }
+
+  return next;
+}
+
+function formatCoffeeSocialPromptSummary(
+  group: readonly CoffeeBotProfile[],
+  socialByBotId: Record<string, CoffeeBotSocialSnapshot>
+): string {
+  return group
+    .map((bot) => {
+      const social = socialByBotId[bot.id] ?? DEFAULT_COFFEE_SOCIAL;
+      return `- ${bot.name} (${bot.id}): disposition=${social.disposition.toFixed(2)}, valuesFriction=${social.valuesFriction.toFixed(2)}, restraint=${social.restraint.toFixed(2)}, engagement=${social.engagement.toFixed(2)}, leavePressure=${social.leavePressure.toFixed(2)}`;
+    })
+    .join("\n");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Remove speaker labels that small models sometimes copy from the transcript
+ * prompt into the visible reply.
+ */
+export function stripCoffeeSpeakerPrefix(raw: string, speakerName: string | null | undefined): string {
+  let text = raw.trim();
+  const names = [speakerName, "assistant", "bot"]
+    .map((name) => (typeof name === "string" ? name.trim() : ""))
+    .filter((name) => name.length > 0);
+
+  for (let pass = 0; pass < 3; pass += 1) {
+    const before = text;
+    for (const name of names) {
+      const escaped = escapeRegExp(name);
+      text = text
+        .replace(
+          new RegExp(`^\\s*\\[\\s*${escaped}\\s*(?:\\((?:assistant|bot)\\))?\\s*\\]\\s*:?\\s*`, "i"),
+          ""
+        )
+        .replace(
+          new RegExp(`^\\s*\\*{0,2}${escaped}\\s*(?:\\((?:assistant|bot)\\))?\\*{0,2}\\s*[:：-]\\s*`, "i"),
+          ""
+        )
+        .trim();
+    }
+    if (text === before) break;
+  }
+
+  return text;
+}
+
+/**
+ * Collapse whitespace and trim Coffee replies so the live table stays a tiny
+ * card; prefer ending on sentence punctuation when clipping is required.
+ */
+export function clampCoffeeTableReplyText(raw: string): string {
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  if (normalized.length <= COFFEE_TABLE_REPLY_MAX_CHARS) {
+    return normalized;
+  }
+  const slice = normalized.slice(0, COFFEE_TABLE_REPLY_MAX_CHARS);
+  const minSentenceCut = Math.floor(COFFEE_TABLE_REPLY_MAX_CHARS * 0.42);
+  for (let index = slice.length - 1; index >= minSentenceCut; index -= 1) {
+    const char = slice[index];
+    if (char === "." || char === "!" || char === "?") {
+      const next = slice[index + 1];
+      if (!next || /\s/u.test(next)) {
+        return slice.slice(0, index + 1).trim();
+      }
+    }
+  }
+
+  const wordTrimmed = normalized.slice(0, COFFEE_TABLE_REPLY_MAX_CHARS - 1);
+  const space = wordTrimmed.lastIndexOf(" ");
+  if (space >= minSentenceCut) {
+    return `${wordTrimmed.slice(0, space).trim()}…`;
+  }
+  return `${wordTrimmed.trim()}…`;
+}
+
+function formatCoffeeTranscriptLine(message: ChatMessage): string {
+  if (message.role === "assistant") {
+    const label = message.botName?.trim() || "Bot";
+    return `${label}: ${stripCoffeeSpeakerPrefix(message.content, label)}`;
+  }
+  if (message.role === "user") {
+    return `User: ${message.content.trim()}`;
+  }
+  return `System: ${message.content.trim()}`;
+}
+
 /** Settings forwarded from the HTTP route. */
 export interface CoffeeTurnSettings {
   preferredProvider: "local" | "openai";
   openAiApiKey?: string;
   secondaryOllamaHost?: string | null;
   userDisplayName?: string;
+  userKey?: Buffer;
 }
 
 export interface CoffeeTurnInput {
   conversationId?: string;
   groupBotIds?: Array<string | null>;
   message: string;
+  playerInterruption?: CoffeePlayerInterruptionInput;
 }
 
 export interface CoffeeSessionCreateInput {
   groupBotIds?: Array<string | null>;
+}
+
+function stableUnitValue(seed: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) % 10000) / 10000;
+}
+
+function interruptedSnippetFromTokenCount(fullText: string, visibleTokenCount: number): string {
+  const tokens = fullText.match(/\S+\s*/g) ?? [];
+  const clampedVisibleTokenCount = Math.max(
+    COFFEE_INTERRUPTION_MIN_VISIBLE_TOKENS,
+    Math.min(visibleTokenCount, Math.max(1, tokens.length))
+  );
+  const visible = tokens.slice(0, clampedVisibleTokenCount).join("").trimEnd();
+  if (visible.length === 0) return "…";
+  const lastWordMatch = visible.match(/(\S+)$/);
+  if (!lastWordMatch) return `${visible}—`;
+  const fullWord = lastWordMatch[1];
+  if (fullWord.length < 4) return `${visible}—`;
+  const cutoffLength = Math.max(2, Math.floor(fullWord.length * 0.6));
+  const prefix = visible.slice(0, visible.length - fullWord.length);
+  return `${prefix}${fullWord.slice(0, cutoffLength)}—`;
+}
+
+function quantizeDelta(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function applyInterruptionSocialConsequences(args: {
+  previousByBotId: Record<string, CoffeeBotSocialSnapshot>;
+  consequences: readonly CoffeeInterruptionSocialDelta[];
+}): Record<string, CoffeeBotSocialSnapshot> {
+  const next: Record<string, CoffeeBotSocialSnapshot> = {};
+  for (const [botId, snapshot] of Object.entries(args.previousByBotId)) {
+    next[botId] = { ...snapshot };
+  }
+  for (const consequence of args.consequences) {
+    const previous = next[consequence.botId];
+    if (!previous) continue;
+    next[consequence.botId] = sanitizeCoffeeSocialSnapshot({
+      ...previous,
+      disposition: previous.disposition + consequence.dispositionDelta,
+      valuesFriction: previous.valuesFriction + consequence.valuesFrictionDelta,
+    });
+  }
+  return next;
+}
+
+export function computePlayerInterruptionConsequences(args: {
+  interruptedBotId: string;
+  visibleTokenCount: number;
+  group: readonly CoffeeBotProfile[];
+  socialByBotId: Record<string, CoffeeBotSocialSnapshot>;
+}): CoffeeInterruptionSocialDelta[] {
+  const interruptedSocial = args.socialByBotId[args.interruptedBotId] ?? DEFAULT_COFFEE_SOCIAL;
+  const normalizedVisibleTokens = Math.min(
+    COFFEE_INTERRUPTION_VISIBLE_TOKEN_SOFT_CAP,
+    Math.max(COFFEE_INTERRUPTION_MIN_VISIBLE_TOKENS, args.visibleTokenCount)
+  );
+  const severity = normalizedVisibleTokens / COFFEE_INTERRUPTION_VISIBLE_TOKEN_SOFT_CAP;
+  const interruptedDispositionDelta =
+    COFFEE_PLAYER_INTERRUPT_BASE_DISPOSITION_DELTA -
+    (1 - interruptedSocial.restraint) * 0.035 * severity;
+  const interruptedFrictionDelta =
+    COFFEE_PLAYER_INTERRUPT_BASE_FRICTION_DELTA +
+    (1 - interruptedSocial.restraint) * 0.035 * severity;
+
+  const consequences: CoffeeInterruptionSocialDelta[] = [
+    {
+      botId: args.interruptedBotId,
+      dispositionDelta: quantizeDelta(interruptedDispositionDelta),
+      valuesFrictionDelta: quantizeDelta(interruptedFrictionDelta),
+    },
+  ];
+
+  for (const bot of args.group) {
+    if (bot.id === args.interruptedBotId) continue;
+    const social = args.socialByBotId[bot.id] ?? DEFAULT_COFFEE_SOCIAL;
+    const annoyanceWeight = 0.5 + social.valuesFriction * 0.5;
+    consequences.push({
+      botId: bot.id,
+      dispositionDelta: quantizeDelta(-0.004 * annoyanceWeight * severity),
+      valuesFrictionDelta: quantizeDelta(
+        COFFEE_PLAYER_INTERRUPT_THIRD_PARTY_FRICTION_DELTA * annoyanceWeight * severity
+      ),
+    });
+  }
+
+  return consequences;
+}
+
+function buildPlayerInterruptionEvent(args: {
+  interruptionInput: CoffeePlayerInterruptionInput | undefined;
+  history: readonly ChatMessage[];
+  group: readonly CoffeeBotProfile[];
+  socialByBotId: Record<string, CoffeeBotSocialSnapshot>;
+}): CoffeeInterruptionEvent | undefined {
+  const interruption = args.interruptionInput;
+  if (!interruption) return undefined;
+  const interruptedMessage = args.history.find(
+    (message) =>
+      message.id === interruption.interruptedMessageId &&
+      message.role === "assistant"
+  );
+  if (!interruptedMessage) return undefined;
+  const interruptedBotId = interruption.interruptedBotId?.trim();
+  if (!interruptedBotId || !args.group.some((bot) => bot.id === interruptedBotId)) {
+    return undefined;
+  }
+  const visibleTokenCount = Math.max(
+    COFFEE_INTERRUPTION_MIN_VISIBLE_TOKENS,
+    Number.isFinite(interruption.visibleTokenCount)
+      ? Math.floor(interruption.visibleTokenCount)
+      : COFFEE_INTERRUPTION_MIN_VISIBLE_TOKENS
+  );
+  const consequences = computePlayerInterruptionConsequences({
+    interruptedBotId,
+    visibleTokenCount,
+    group: args.group,
+    socialByBotId: args.socialByBotId,
+  });
+  return {
+    kind: "playerInterruptsBot",
+    interruptedBotId,
+    interruptedMessageId: interruptedMessage.id,
+    visibleTokenCount,
+    interruptedSnippet: interruptedSnippetFromTokenCount(interruptedMessage.content, visibleTokenCount),
+    socialConsequences: consequences,
+  };
+}
+
+export function maybeBuildBotInterruptionEvent(args: {
+  turnKind: CoffeeTurnKind;
+  userIsComposing: boolean;
+  speaker: CoffeeBotProfile;
+  socialByBotId: Record<string, CoffeeBotSocialSnapshot>;
+  group: readonly CoffeeBotProfile[];
+  conversationId: string;
+  historyLength: number;
+}): CoffeeInterruptionEvent | undefined {
+  if (args.turnKind !== "autonomous" || !args.userIsComposing) return undefined;
+  const speakerSocial = args.socialByBotId[args.speaker.id] ?? DEFAULT_COFFEE_SOCIAL;
+  const chance = Math.min(
+    COFFEE_BOT_INTERRUPT_MAX_CHANCE,
+    COFFEE_BOT_INTERRUPT_BASE_CHANCE +
+      speakerSocial.valuesFriction * 0.06 +
+      (1 - speakerSocial.restraint) * 0.05 +
+      speakerSocial.engagement * 0.03
+  );
+  const roll = stableUnitValue(
+    `${args.conversationId}:${args.speaker.id}:${args.historyLength}:${speakerSocial.disposition.toFixed(2)}`
+  );
+  if (roll > chance) return undefined;
+
+  const consequences: CoffeeInterruptionSocialDelta[] = [
+    {
+      botId: args.speaker.id,
+      dispositionDelta: quantizeDelta(-0.01),
+      valuesFrictionDelta: quantizeDelta(0.018),
+    },
+  ];
+  for (const bot of args.group) {
+    if (bot.id === args.speaker.id) continue;
+    consequences.push({
+      botId: bot.id,
+      dispositionDelta: quantizeDelta(-0.003),
+      valuesFrictionDelta: quantizeDelta(0.008),
+    });
+  }
+
+  return {
+    kind: "botInterruptsPlayer",
+    interruptedBotId: args.speaker.id,
+    interrupterBotId: args.speaker.id,
+    socialConsequences: consequences,
+  };
 }
 
 /**
@@ -225,8 +647,10 @@ export function buildRouterPrompt(args: {
   history: ChatMessage[];
   userMessage: string;
   lastSpeakerBotId: string | null;
+  socialByBotId?: Record<string, CoffeeBotSocialSnapshot>;
+  turnKind?: CoffeeTurnKind;
 }): ProviderMessage[] {
-  const { group, history, userMessage, lastSpeakerBotId } = args;
+  const { group, history, userMessage, lastSpeakerBotId, socialByBotId = {}, turnKind = "user" } = args;
 
   const personaLines = group.map((bot) => {
     const personaSnippet = summarizePersonaForRouter(bot.systemPrompt);
@@ -236,11 +660,18 @@ export function buildRouterPrompt(args: {
   const recencyHint = lastSpeakerBotId
     ? `The last bot to speak was id="${lastSpeakerBotId}". Prefer variety unless the same bot is clearly the most natural next speaker.`
     : `No bot has spoken yet in this thread.`;
+  const earlyThreadHint =
+    history.length < 3
+      ? "This table is still warming up. Bots know the visible names at the table, but should not imply prior friendship, shared memories, or deep familiarity unless the transcript establishes it."
+      : "Use only the visible transcript as shared history. Do not invent off-screen relationships between bots.";
 
   const systemContent = [
     "You are the silent moderator of Coffee Mode, a calm live conversation around an ambiguous coffee table inside PRISM.",
     "There are several bots in this group, each with a distinct personality. They may speak to the user or to each other.",
-    "For each table moment, choose EXACTLY ONE bot from the group to respond next, based on which bot's personality, interests, and relationship to the recent conversation make them the most natural speaker.",
+    "For each table moment, choose EXACTLY ONE bot from the group to respond next, based on which bot's personality, interests, current energy, and fit for the recent conversation make them the most natural speaker.",
+    "The user is one participant at the table, not the center of every turn.",
+    "When the latest table moment comes from another bot, it is okay for the next bot to respond, add a small observation, let the topic breathe, or gently change topics.",
+    "Do not force every bot to answer everything that is on the table. Pick the next voice only when a short contribution would feel welcome.",
     "The bots should never talk over each other. Choose one voice and leave room for natural pauses.",
     "Output requirements:",
     "  - Reply with a single line of valid JSON only.",
@@ -251,6 +682,15 @@ export function buildRouterPrompt(args: {
     ...personaLines,
     "",
     recencyHint,
+    earlyThreadHint,
+    "",
+    "Hidden social metrics snapshot (normalized 0..1):",
+    formatCoffeeSocialPromptSummary(group, socialByBotId),
+    "",
+    "Speaker-selection guidance from social metrics:",
+    "- High engagement suggests that bot has energy to contribute now.",
+    "- High leavePressure suggests the bot may withdraw, set soft limits, or speak briefly.",
+    "- High valuesFriction + high restraint should produce bounded calm responses, not insults.",
   ].join("\n");
 
   const messages: ProviderMessage[] = [
@@ -259,22 +699,26 @@ export function buildRouterPrompt(args: {
 
   // Include only a tail of the history to keep the router cheap.
   const trimmedHistory = history.slice(-Math.min(history.length, 8));
-  for (const item of trimmedHistory) {
-    const speakerLabel =
-      item.role === "assistant"
-        ? item.botName
-          ? `${item.botName} (assistant)`
-          : "assistant"
-        : item.role;
+  if (trimmedHistory.length > 0) {
     messages.push({
-      role: item.role === "assistant" ? "assistant" : "user",
-      content: `[${speakerLabel}] ${item.content}`,
+      role: "system",
+      content: [
+        "Recent table transcript:",
+        ...trimmedHistory.map(formatCoffeeTranscriptLine),
+      ].join("\n"),
     });
   }
-  messages.push({
-    role: "user",
-    content: `[table focus] ${userMessage}`,
-  });
+  messages.push(
+    turnKind === "autonomous"
+      ? {
+          role: "system",
+          content: `Current autonomous table moment: ${userMessage}`,
+        }
+      : {
+          role: "user",
+          content: `The user says: ${userMessage}`,
+        }
+  );
   messages.push({
     role: "system",
     content: "Choose the next speaker at the coffee table. Reply with the JSON object only.",
@@ -290,11 +734,22 @@ export function buildRouterPrompt(args: {
  */
 export function parseRouterResponse(
   raw: string,
-  allowedBotIds: string[]
+  allowedBots: RouterAllowedBot[]
 ): { botId: string; reason: string } | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
+  const allowedBotIds = allowedBots.map((bot) =>
+    typeof bot === "string" ? bot : bot.id
+  );
+  const botIdsByLowerName = new Map<string, string>();
+  for (const bot of allowedBots) {
+    if (typeof bot === "string") continue;
+    const name = bot.name.trim().toLowerCase();
+    if (name && !botIdsByLowerName.has(name)) {
+      botIdsByLowerName.set(name, bot.id);
+    }
+  }
 
   // The model sometimes wraps JSON in code fences or chatter despite the
   // schema instruction. Try a couple of progressively-tolerant parses.
@@ -307,9 +762,19 @@ export function parseRouterResponse(
     try {
       const parsed = JSON.parse(candidate) as unknown;
       if (!parsed || typeof parsed !== "object") continue;
-      const obj = parsed as { botId?: unknown; reason?: unknown };
-      const botId = typeof obj.botId === "string" ? obj.botId.trim() : "";
-      if (!botId || !allowedBotIds.includes(botId)) continue;
+      const obj = parsed as { botId?: unknown; botName?: unknown; name?: unknown; reason?: unknown };
+      const rawBotId = typeof obj.botId === "string" ? obj.botId.trim() : "";
+      const rawBotName =
+        typeof obj.botName === "string"
+          ? obj.botName.trim()
+          : typeof obj.name === "string"
+            ? obj.name.trim()
+            : "";
+      const botId =
+        rawBotId && allowedBotIds.includes(rawBotId)
+          ? rawBotId
+          : botIdsByLowerName.get((rawBotName || rawBotId).toLowerCase()) ?? "";
+      if (!botId) continue;
       const reason =
         typeof obj.reason === "string" && obj.reason.trim().length > 0
           ? obj.reason.trim()
@@ -367,14 +832,26 @@ export function pickDirectedSpeaker(
  * (no AskQuestion in v0), opinion plumbing, dev memories, and starter
  * directives. Just identity + history + the new user message.
  */
-function buildSpeakerPrompt(args: {
+export function buildSpeakerPrompt(args: {
   speaker: CoffeeBotProfile;
   group: CoffeeBotProfile[];
   history: ChatMessage[];
   userMessage: string;
+  socialByBotId: Record<string, CoffeeBotSocialSnapshot>;
   userDisplayName?: string;
+  turnKind?: CoffeeTurnKind;
+  firstContactIntro?: boolean;
 }): ProviderMessage[] {
-  const { speaker, group, history, userMessage, userDisplayName } = args;
+  const {
+    speaker,
+    group,
+    history,
+    userMessage,
+    socialByBotId,
+    userDisplayName,
+    turnKind = "user",
+    firstContactIntro = false,
+  } = args;
   const speakerSystemPrompt = composeBotSystemPrompt(
     speaker.name,
     speaker.systemPrompt
@@ -382,16 +859,31 @@ function buildSpeakerPrompt(args: {
   const peerLines = group
     .filter((bot) => bot.id !== speaker.id)
     .map((bot) => `- ${bot.name}`);
+  const speakerSocial = socialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL;
 
   const groupContextLines = [
     "You are sitting at Coffee Mode: an ambiguous coffee shop table inside PRISM.",
-    "You are genuinely glad to have a quiet place to talk with the user and the other bots.",
+    history.length < 3
+      ? "This table is still warming up. You can see the other participants' names, but do not act as if you already know them unless the transcript proves it."
+      : "Use the current table transcript as your shared history with the user and the other bots.",
     "You are participating in a live group conversation with the user and the following other bots:",
     ...peerLines,
     "",
     "Stay in character. Respond as yourself only — do NOT speak on behalf of the other bots, do NOT include their names as speakers, and do NOT prefix your reply with your own name.",
-    "You may react directly to what another bot just said, ask them a question, agree, disagree, or gently shift the topic when that fits your personality.",
-    "Keep replies conversational and concise. Leave room for another bot or the user to respond after a natural pause.",
+    "You may react directly to what another bot just said, agree, disagree, add one concrete thought, pause into a softer observation, or gently shift the topic when that fits your personality.",
+    "The user is present, but Coffee should feel like a group conversation. Do not turn every reply back toward the user.",
+    "Keep replies short and sweet. Reply in exactly one paragraph with no line breaks, usually one sentence and at most two short sentences.",
+    "Hard tabletop budget: roughly 260 characters (~2 short sentences). Stay safely under this; longer replies are clipped for the tabletop view.",
+    "Aim for the length of a gentle table comment, not a speech. Example length: \"It's so nice to gather here together, sharing a moment of warmth and creativity.\"",
+    "Do not end with a question by default. Ask a question only when it is genuinely the most natural next move; otherwise end with a statement, observation, or small offer.",
+    "Do not write as if you are cutting off another bot mid-sentence. Coffee only presents cutoffs when the app has explicit interruption metadata.",
+    "Avoid long monologues; the table should feel like a shared room, not a speech.",
+    "Leave room for another bot or the user to respond after a natural pause.",
+    "",
+    "Hidden social metrics for this moment (0..1):",
+    `- You (${speaker.name}): disposition=${speakerSocial.disposition.toFixed(2)}, valuesFriction=${speakerSocial.valuesFriction.toFixed(2)}, restraint=${speakerSocial.restraint.toFixed(2)}, engagement=${speakerSocial.engagement.toFixed(2)}, leavePressure=${speakerSocial.leavePressure.toFixed(2)}`,
+    "- If your valuesFriction and restraint are both high, set calm boundaries, be brief, or politely step back. Avoid insults or hostile escalation.",
+    "- If leavePressure is high, prefer short grounded replies and occasional gentle withdrawal language.",
   ];
 
   const messages: ProviderMessage[] = [];
@@ -405,22 +897,58 @@ function buildSpeakerPrompt(args: {
       content: `The user's preferred name is "${userDisplayName.trim()}". Use it naturally when it helps, but do not overuse it.`,
     });
   }
-  // Annotate every prior assistant message with its bot name so the
-  // speaker knows who said what — without this, all assistants blur
-  // together as "the same bot."
-  for (const item of history) {
-    const speakerLabel =
-      item.role === "assistant"
-        ? item.botName
-          ? `${item.botName} (assistant)`
-          : "assistant"
-        : "user";
+  if (firstContactIntro) {
     messages.push({
-      role: item.role === "assistant" ? "assistant" : "user",
-      content: `[${speakerLabel}] ${item.content}`,
+      role: "system",
+      content:
+        "This appears to be your first conversation with this user. Briefly introduce yourself before continuing, then ask how they prefer to be addressed.",
     });
   }
-  messages.push({ role: "user", content: `[table focus] ${userMessage}` });
+  if (history.length > 0) {
+    messages.push({
+      role: "system",
+      content: [
+        "Recent table transcript:",
+        ...history.map(formatCoffeeTranscriptLine),
+      ].join("\n"),
+    });
+  }
+  messages.push({
+    role: "system",
+    content: [
+      "Other bots at the table right now:",
+      ...group
+        .filter((bot) => bot.id !== speaker.id)
+        .map((bot) => {
+          const social = socialByBotId[bot.id] ?? DEFAULT_COFFEE_SOCIAL;
+          return `- ${bot.name}: disposition=${social.disposition.toFixed(2)}, valuesFriction=${social.valuesFriction.toFixed(2)}, restraint=${social.restraint.toFixed(2)}, engagement=${social.engagement.toFixed(2)}, leavePressure=${social.leavePressure.toFixed(2)}`;
+        }),
+    ].join("\n"),
+  });
+  messages.push(
+    turnKind === "autonomous"
+      ? {
+          role: "user",
+          content: [
+            "Continue the table conversation in your own voice.",
+            `Latest table moment: ${userMessage}`,
+            `Respond as ${speaker.name} to the latest bot, the shared topic, or a natural topic shift. Only address the user if that is truly the natural next move.`,
+            "Keep it short and sweet: one sentence is ideal, two short sentences is the ceiling.",
+            "Use exactly one paragraph. Do not end with a question unless the moment truly needs one.",
+            "Do not include a speaker label.",
+          ].join("\n"),
+        }
+      : {
+          role: "user",
+          content: [
+            `The user says: ${userMessage}`,
+            "Reply naturally as part of the table conversation. You may answer the user directly or open the topic to another bot.",
+            "Keep it short and sweet: one sentence is ideal, two short sentences is the ceiling.",
+            "Use exactly one paragraph. Do not end with a question unless the moment truly needs one.",
+            "Do not include a speaker label.",
+          ].join("\n"),
+        }
+  );
   return messages;
 }
 
@@ -556,8 +1084,9 @@ function buildConversationResponse(args: {
   row: ConversationRow;
   messages: ChatMessage[];
   lastSpeakerBotId: string | null;
+  socialByBotId?: Record<string, CoffeeBotSocialSnapshot>;
 }): Conversation {
-  const { row, messages, lastSpeakerBotId } = args;
+  const { row, messages, lastSpeakerBotId, socialByBotId } = args;
   const seatBotIds = parseStoredCoffeeSeatBotIds(row.bot_group_ids);
   const groupIds = parseStoredBotGroupIds(row.bot_group_ids);
   return {
@@ -568,6 +1097,9 @@ function buildConversationResponse(args: {
     botId: row.bot_id ?? null,
     ...(groupIds.length > 0 ? { botGroupIds: groupIds } : {}),
     ...(seatBotIds.some((id) => id !== null) ? { coffeeSeatBotIds: seatBotIds } : {}),
+    ...(socialByBotId && Object.keys(socialByBotId).length > 0
+      ? { coffeeBotSocialById: socialByBotId }
+      : {}),
     incognito: row.incognito === 1,
     lastBotId: lastSpeakerBotId,
     lastBotColor: messages.length > 0 ? findLastAssistantColor(messages) : null,
@@ -672,6 +1204,34 @@ function pickSpeakerModel(
   return speaker.onlineModel ?? speaker.defaultModel ?? undefined;
 }
 
+async function ensureCoffeeAboutYouMemory(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey: Buffer | undefined;
+  conversationId: string;
+  botId: string;
+  sourceMessageId: string | null;
+  userDisplayName?: string;
+}): Promise<void> {
+  const { db, userId, userKey, conversationId, botId, sourceMessageId, userDisplayName } = args;
+  if (!userKey) return;
+  if (hasAboutYouMemoryForBot(db, userId, botId)) return;
+  const aboutYouText = buildInitialAboutYouMemoryText(userDisplayName);
+  if (!aboutYouText) return;
+  await restoreMemory(db, userId, userKey, {
+    conversationId,
+    botId,
+    text: aboutYouText,
+    confidence: 0.96,
+    certainty: 0.96,
+    category: "user",
+    tier: "long_term",
+    durability: 1,
+    source: "about_you",
+    sourceMessageIds: sourceMessageId ? [sourceMessageId] : [],
+  });
+}
+
 export function createCoffeeConversation(
   db: DatabaseSync,
   userId: string,
@@ -682,6 +1242,7 @@ export function createCoffeeConversation(
   const group = loadCoffeeGroupProfiles(db, userId, groupIds);
   const now = new Date().toISOString();
   const conversationId = randomId(12);
+  const initialSocialByBotId = initializeCoffeeSocialState(group, {});
   db.prepare(
     `INSERT INTO conversations
        (id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito, created_at, updated_at)
@@ -694,6 +1255,7 @@ export function createCoffeeConversation(
     now,
     now
   );
+  upsertCoffeeBotSocialState(db, userId, conversationId, initialSocialByBotId, now);
   const row = loadConversationRow(db, userId, conversationId);
   if (!row) {
     throw new Error("Failed to create Coffee conversation.");
@@ -703,6 +1265,7 @@ export function createCoffeeConversation(
       row,
       messages: [],
       lastSpeakerBotId: null,
+      socialByBotId: initialSocialByBotId,
     }),
     arrivalScenario: pickArrivalScenario(conversationId),
   };
@@ -715,11 +1278,49 @@ async function generateCoffeeBotReply(args: {
   group: CoffeeBotProfile[];
   tableFocus: string;
   settings: CoffeeTurnSettings;
+  turnKind: CoffeeTurnKind;
+  playerInterruption?: CoffeePlayerInterruptionInput;
+  userIsComposing?: boolean;
   directedSpeakerBotId?: string;
 }): Promise<CoffeeTurnResponse> {
-  const { db, userId, row, group, tableFocus, settings, directedSpeakerBotId } = args;
+  const {
+    db,
+    userId,
+    row,
+    group,
+    tableFocus,
+    settings,
+    turnKind,
+    playerInterruption,
+    userIsComposing = false,
+    directedSpeakerBotId,
+  } = args;
   const history = loadMessages(db, userId, row.id, COFFEE_HISTORY_WINDOW);
   const lastSpeakerBotId = loadLastSpeakerBotId(db, userId, row.id);
+  const persistedSocialByBotId = loadCoffeeBotSocialState(
+    db,
+    userId,
+    row.id,
+    group.map((bot) => bot.id)
+  );
+  const socialByBotId = initializeCoffeeSocialState(group, persistedSocialByBotId);
+  if (Object.keys(persistedSocialByBotId).length < group.length) {
+    upsertCoffeeBotSocialState(db, userId, row.id, socialByBotId, new Date().toISOString());
+  }
+  const playerInterruptionEvent = buildPlayerInterruptionEvent({
+    interruptionInput: playerInterruption,
+    history,
+    group,
+    socialByBotId,
+  });
+  let preTurnSocialByBotId =
+    playerInterruptionEvent && playerInterruptionEvent.socialConsequences.length > 0
+      ? applyInterruptionSocialConsequences({
+          previousByBotId: socialByBotId,
+          consequences: playerInterruptionEvent.socialConsequences,
+        })
+      : socialByBotId;
+  let interruptionEvent: CoffeeInterruptionEvent | undefined = playerInterruptionEvent;
   const directedSpeaker = pickDirectedSpeaker(group, directedSpeakerBotId);
   let pickedBotId: string;
   let routerReason: string;
@@ -733,16 +1334,15 @@ async function generateCoffeeBotReply(args: {
       history,
       userMessage: tableFocus,
       lastSpeakerBotId,
+      socialByBotId: preTurnSocialByBotId,
+      turnKind,
     });
     try {
       const routerRaw = await routerProvider.generateResponse(routerMessages, {
         temperature: ROUTER_TEMPERATURE,
         maxTokens: ROUTER_MAX_TOKENS,
       });
-      const parsed = parseRouterResponse(
-        routerRaw,
-        group.map((bot) => bot.id)
-      );
+      const parsed = parseRouterResponse(routerRaw, group);
       if (parsed) {
         pickedBotId = parsed.botId;
         routerReason = parsed.reason;
@@ -759,6 +1359,25 @@ async function generateCoffeeBotReply(args: {
   }
 
   const speaker = group.find((bot) => bot.id === pickedBotId) ?? group[0]!;
+  if (!interruptionEvent) {
+    const botInterruptionEvent = maybeBuildBotInterruptionEvent({
+      turnKind,
+      userIsComposing,
+      speaker,
+      socialByBotId: preTurnSocialByBotId,
+      group,
+      conversationId: row.id,
+      historyLength: history.length,
+    });
+    if (botInterruptionEvent) {
+      interruptionEvent = botInterruptionEvent;
+      preTurnSocialByBotId = applyInterruptionSocialConsequences({
+        previousByBotId: preTurnSocialByBotId,
+        consequences: botInterruptionEvent.socialConsequences,
+      });
+    }
+  }
+  const shouldUseFirstContactIntro = !hasAboutYouMemoryForBot(db, userId, speaker.id);
   const { provider: speakerProvider, effectiveProvider } = pickSpeakerProvider(
     speaker,
     settings.preferredProvider,
@@ -771,31 +1390,47 @@ async function generateCoffeeBotReply(args: {
   if (typeof speaker.temperature === "number") {
     speakerOptions.temperature = speaker.temperature;
   }
-  if (typeof speaker.maxTokens === "number") {
-    speakerOptions.maxTokens = speaker.maxTokens;
-  }
+  speakerOptions.maxTokens = Math.min(
+    typeof speaker.maxTokens === "number"
+      ? speaker.maxTokens
+      : COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS,
+    COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS
+  );
   const speakerMessages = buildSpeakerPrompt({
     speaker,
     group,
     history,
     userMessage: tableFocus,
+    socialByBotId: preTurnSocialByBotId,
     userDisplayName: settings.userDisplayName,
+    turnKind,
+    firstContactIntro: turnKind === "user" && shouldUseFirstContactIntro,
   });
   const speakerReply = await speakerProvider.generateResponse(
     speakerMessages,
     speakerOptions
   );
-  const replyText = typeof speakerReply === "string" ? speakerReply.trim() : "";
+  const replyText =
+    typeof speakerReply === "string"
+      ? clampCoffeeTableReplyText(stripCoffeeSpeakerPrefix(speakerReply, speaker.name))
+      : "";
   if (!replyText) {
     throw new Error("Speaker bot returned an empty reply.");
   }
+  const nextSocialByBotId = computeNextCoffeeSocialState({
+    previousByBotId: preTurnSocialByBotId,
+    group,
+    speakerBotId: speaker.id,
+    turnKind,
+    replyText,
+  });
 
   const assistantNow = new Date().toISOString();
   const assistantMessageId = randomId(12);
   db.prepare(
     `INSERT INTO messages
-       (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at)
-     VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)`
+       (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+     VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)`
   ).run(
     assistantMessageId,
     row.id,
@@ -804,11 +1439,24 @@ async function generateCoffeeBotReply(args: {
     effectiveProvider,
     speakerModel ?? null,
     speaker.id,
+    interruptionEvent ? JSON.stringify({ coffeeInterruption: interruptionEvent }) : null,
     assistantNow
   );
   db.prepare(
     "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
   ).run(assistantNow, row.id, userId);
+  upsertCoffeeBotSocialState(db, userId, row.id, nextSocialByBotId, assistantNow);
+  if (turnKind === "user") {
+    await ensureCoffeeAboutYouMemory({
+      db,
+      userId,
+      userKey: settings.userKey,
+      conversationId: row.id,
+      botId: speaker.id,
+      sourceMessageId: null,
+      userDisplayName: settings.userDisplayName,
+    });
+  }
 
   const refreshedRow = loadConversationRow(db, userId, row.id) ?? row;
   const finalHistory = loadMessages(db, userId, refreshedRow.id, COFFEE_HISTORY_WINDOW);
@@ -818,9 +1466,11 @@ async function generateCoffeeBotReply(args: {
       row: refreshedRow,
       messages: finalHistory,
       lastSpeakerBotId: finalLastSpeakerBotId,
+      socialByBotId: nextSocialByBotId,
     }),
     speakerBotId: speaker.id,
     routerReason,
+    ...(interruptionEvent ? { interruption: interruptionEvent } : {}),
   };
 }
 
@@ -887,6 +1537,8 @@ export async function processCoffeeTurn(
     group,
     tableFocus: message,
     settings,
+    turnKind: "user",
+    playerInterruption: input.playerInterruption,
   });
 }
 
@@ -895,6 +1547,7 @@ export async function processCoffeeAutonomousTurn(
   userId: string,
   conversationId: string,
   settings: CoffeeTurnSettings,
+  userIsComposing = false,
   directedSpeakerBotId?: string
 ): Promise<CoffeeTurnResponse> {
   const { row, group } = loadCoffeeConversationGroup(db, userId, conversationId);
@@ -912,6 +1565,8 @@ export async function processCoffeeAutonomousTurn(
     group,
     tableFocus,
     settings,
+    turnKind: "autonomous",
+    userIsComposing,
     directedSpeakerBotId,
   });
 }

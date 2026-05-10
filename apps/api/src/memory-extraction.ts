@@ -1,4 +1,4 @@
-import type { MemoryCategory } from "@localai/shared";
+import { type MemoryCategory, classifyMemoryCategoryFromText } from "@localai/shared";
 
 export interface MemoryCandidate {
   text: string;
@@ -128,14 +128,11 @@ const TRAILING_CONVERSATIONAL_TAG_PATTERN =
 const LEADING_APOLOGY_PREFIX_PATTERN =
   /^(?:sorry(?:\s+about\s+that)?|my\s+bad|apologies)[\s,.:;-]*/i;
 
+const EXPLICIT_DISCLOSURE_PREFIX_PATTERN =
+  /^(?:(?:just\s+)?(?:a\s+)?(?:fun|random)\s*[:,-]?\s*fact|funn?y\s+enough|interestingly(?:\s+enough)?|for\s+the\s+record)\s*[:,-]?\s*/i;
+
 const TASK_REQUEST_PREFIX_PATTERN =
   /^(?:please\s+)?(?:write|draft|compose|create|make|generate|summarize|summarise|explain|help|help\s+me|give\s+me|show\s+me|tell\s+me|find|search|look\s+up|translate|rewrite|edit|review|fix|debug|build|plan)\b/i;
-
-const BOT_RELATION_PATTERN =
-  /\b(?:other bots?|another bot|bots?\s+(?:talk|interact|respond|remember|know|argue|agree)|bot-to-bot|coffee\s+session|group\s+chat)\b/i;
-
-const USER_FACT_PATTERN =
-  /^(?:you|your|the user|user)\b|\b(?:you do not want me|you don't want me|you like|you love|you enjoy|you prefer|you dislike|you want|you need|your favorite)\b/i;
 
 const FOUNDATIONAL_MEMORY_PATTERNS = [
   /\b(?:always|never|do not|don't|like|likes|love|loves|enjoy|enjoys|prefer|prefers|favorite|favourite|need|needs|want|wants|value|values|care about|cares about)\b/i,
@@ -149,10 +146,7 @@ const FOUNDATIONAL_MEMORY_PATTERNS = [
  * source of truth; categories are only organizational labels.
  */
 export function classifyMemoryCategory(text: string): MemoryCategory {
-  const normalized = text.trim();
-  if (BOT_RELATION_PATTERN.test(normalized)) return "bot_relation";
-  if (USER_FACT_PATTERN.test(normalized)) return "user";
-  return "general";
+  return classifyMemoryCategoryFromText(text);
 }
 
 export function estimateMemoryDurability(text: string, explicit = false): number {
@@ -163,8 +157,9 @@ export function estimateMemoryDurability(text: string, explicit = false): number
     (count, pattern) => count + (pattern.test(normalized) ? 1 : 0),
     0
   );
-  if (USER_FACT_PATTERN.test(normalized)) score += 0.16;
-  if (BOT_RELATION_PATTERN.test(normalized)) score += 0.18;
+  const cat = classifyMemoryCategoryFromText(normalized);
+  if (cat === "user") score += 0.16;
+  if (cat === "bot_relation") score += 0.18;
   if (durablePatternHits > 0) {
     score += Math.min(0.44, durablePatternHits * 0.24);
   }
@@ -190,6 +185,7 @@ export function rewriteMemoryText(rawLine: string): string {
   let text = rawLine.trim().replace(MEMORY_CUE_PREFIX_PATTERN_RAW, "");
   text = stripGlobalScopeCues(text);
   text = text.replace(LEADING_APOLOGY_PREFIX_PATTERN, "");
+  text = text.replace(EXPLICIT_DISCLOSURE_PREFIX_PATTERN, "");
   text = text.replace(/^please[\s,]+/i, "");
   text = text.replace(TRAILING_CONVERSATIONAL_TAG_PATTERN, "").trim();
   text = rewriteAssistantDirectedMemory(text);
@@ -269,6 +265,10 @@ function isTaskRequest(line: string): boolean {
   return TASK_REQUEST_PREFIX_PATTERN.test(line.trim());
 }
 
+function hasExplicitDisclosureCue(line: string): boolean {
+  return EXPLICIT_DISCLOSURE_PREFIX_PATTERN.test(line.trim());
+}
+
 function extractMemoryCandidatesFromLines(lines: string[]): MemoryCandidate[] {
   const candidates: MemoryCandidate[] = [];
   for (const line of lines) {
@@ -277,14 +277,17 @@ function extractMemoryCandidatesFromLines(lines: string[]): MemoryCandidate[] {
 
     const lower = line.toLowerCase();
     const hasHighConfidenceCue = hasSubstantiveHighConfidenceMemory(lower);
+    const hasExplicitDisclosure = hasExplicitDisclosureCue(line);
     if (!hasHighConfidenceCue && isTaskRequest(cleanLine)) {
       continue;
     }
     const looksPersonal =
       hasHighConfidenceCue ||
+      hasExplicitDisclosure ||
       lower.includes("i am") ||
       lower.includes("i'm") ||
       lower.includes("my ") ||
+      lower.includes("i live") ||
       lower.includes("i prefer") ||
       lower.includes("i like") ||
       lower.includes("i love") ||
@@ -298,7 +301,9 @@ function extractMemoryCandidatesFromLines(lines: string[]): MemoryCandidate[] {
     }
     const confidence = hasHighConfidenceCue
       ? 0.98
-      : Math.min(0.95, 0.55 + cleanLine.length / 220);
+      : hasExplicitDisclosure
+        ? Math.max(0.9, Math.min(0.95, 0.55 + cleanLine.length / 220))
+        : Math.min(0.95, 0.55 + cleanLine.length / 220);
     const text = rewriteMemoryText(cleanLine);
     if (text.length === 0) continue;
     candidates.push({
@@ -324,9 +329,10 @@ export function analyzeMemoryIntent(message: string): MemoryIntent {
   const candidateLines = lines.filter((line) => !isRetractionCue(line));
   const newCandidates = extractMemoryCandidatesFromLines(candidateLines);
   const hasCorrection = candidateLines.some(isCorrectionCue);
-  const explicit = scope === "global" || candidateLines.some((line) =>
-    hasSubstantiveHighConfidenceMemory(line.toLowerCase())
-  );
+  const explicit = scope === "global" || candidateLines.some((line) => {
+    const lowerLine = line.toLowerCase();
+    return hasSubstantiveHighConfidenceMemory(lowerLine) || hasExplicitDisclosureCue(line);
+  });
 
   if (cuePhrases.length > 0 && (hasCorrection || newCandidates.length > 0)) {
     return {

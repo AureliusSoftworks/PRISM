@@ -2,10 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, encryptJson, randomId } from "./security.ts";
 import { embedTextLocal, fallbackEmbedding } from "./providers.ts";
 import type { MemoryCategory, MemoryTier, UserMemory } from "@localai/shared";
+import { classifyMemoryCategoryFromText } from "@localai/shared";
 import type { MemoryCandidate } from "./memory-extraction.ts";
 import {
   analyzeMemoryIntent,
-  classifyMemoryCategory,
   estimateMemoryDurability,
   extractMemoryCandidates,
 } from "./memory-extraction.ts";
@@ -20,7 +20,7 @@ interface StoredMemoryPayload {
 interface DevSeedMemoryOptions {
   randomizeAcrossBots?: boolean;
   random?: () => number;
-  source?: "direct" | "inferred" | "compiled";
+  source?: "direct" | "inferred" | "compiled" | "about_you";
   certainty?: number;
   category?: MemoryCategory;
   tier?: MemoryTier;
@@ -39,14 +39,14 @@ type MemoryRow = {
   category: MemoryCategory;
   tier: MemoryTier;
   durability: number | null;
-  source: "direct" | "inferred" | "compiled";
+  source: "direct" | "inferred" | "compiled" | "about_you";
   certainty: number | null;
   source_message_ids: string;
   created_at: string;
 };
 
 interface PersistMemoryOptions {
-  source?: "direct" | "inferred" | "compiled";
+  source?: "direct" | "inferred" | "compiled" | "about_you";
   certainty?: number;
   category?: MemoryCategory;
   tier?: MemoryTier;
@@ -62,13 +62,13 @@ interface RestoreMemoryOptions {
   category?: MemoryCategory;
   tier?: MemoryTier;
   durability?: number;
-  source?: "direct" | "inferred" | "compiled";
+  source?: "direct" | "inferred" | "compiled" | "about_you";
   certainty?: number;
   sourceMessageIds?: string[];
 }
 
 interface StoredMemoryWithEmbedding extends UserMemory {
-  source: "direct" | "inferred" | "compiled";
+  source: "direct" | "inferred" | "compiled" | "about_you";
   certainty: number;
   durability: number;
   sourceMessageIds: string[];
@@ -109,6 +109,7 @@ const CULMINATION_CONTRADICTION_SIMILARITY = 0.78;
 const CULMINATION_LOOKBACK_LIMIT = 80;
 const CULMINATION_MAX_DETAILS = 4;
 export const LONG_TERM_MEMORY_SCORE = 0.95;
+export const ABOUT_YOU_MEMORY_SOURCE = "about_you";
 const LONG_TERM_HIGH_TRUTH_SCORE = 0.9;
 const LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH = 0.5;
 const LONG_TERM_DURABILITY_PROMOTION = 0.72;
@@ -120,6 +121,11 @@ const SAME_CONVERSATION_MEMORY_BOOST = 0.05;
 const RECENT_MEMORY_BOOST = 0.02;
 const RECENT_MEMORY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MEMORY_TARGET_TOKEN_BOOST = 0.3;
+const DIRECT_MEMORY_INITIAL_CONFIDENCE_DISCOUNT = 0.08;
+const DIRECT_MEMORY_INITIAL_CONFIDENCE_MIN = 0.45;
+const DIRECT_MEMORY_REINFORCE_CONFIDENCE_BOOST = 0.14;
+const DIRECT_MEMORY_REINFORCE_DURABILITY_BOOST = 0.06;
+const DIRECT_MEMORY_REINFORCE_CERTAINTY_BOOST = 0.12;
 const MEMORY_TARGET_STOP_WORDS = new Set([
   "about",
   "actually",
@@ -151,10 +157,14 @@ export function normalizeMemoryCategory(
   category: MemoryCategory | string | null | undefined,
   text = ""
 ): MemoryCategory {
+  const fromText = classifyMemoryCategoryFromText(text);
   if (category === "general" || category === "user" || category === "bot_relation") {
+    if (category === "user" && fromText === "general") {
+      return "general";
+    }
     return category;
   }
-  return classifyMemoryCategory(text);
+  return fromText;
 }
 
 function clampMemoryDurability(durability: number): number {
@@ -246,6 +256,26 @@ function normalizeSourceMessageIds(sourceMessageIds?: string[]): string[] {
     if (trimmed.length > 0) seen.add(trimmed);
   }
   return [...seen];
+}
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function isHighConfidenceDirectMemory(candidateConfidence: number): boolean {
+  return Number.isFinite(candidateConfidence) && candidateConfidence >= 0.95;
+}
+
+function initialStoredConfidence(source: string, candidateConfidence: number): number {
+  if (source !== "direct" || isHighConfidenceDirectMemory(candidateConfidence)) {
+    return clampUnit(candidateConfidence);
+  }
+  return clampUnit(
+    Math.max(
+      DIRECT_MEMORY_INITIAL_CONFIDENCE_MIN,
+      candidateConfidence - DIRECT_MEMORY_INITIAL_CONFIDENCE_DISCOUNT
+    )
+  );
 }
 
 function parseSourceMessageIds(raw: string | null | undefined): string[] {
@@ -424,6 +454,7 @@ export function deleteOrphanedBotMemories(
         WHERE bots.id = memories.bot_id
           AND bots.user_id = memories.user_id
       )
+      AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
   `).run(userId);
 
   return Number(result.changes ?? 0);
@@ -431,6 +462,57 @@ export function deleteOrphanedBotMemories(
 
 export function memorySourceMessageIds(memory: UserMemory): string[] {
   return normalizeSourceMessageIds(memory.sourceMessageIds);
+}
+
+export function hasLongTermUserMemoriesForBot(
+  db: DatabaseSync,
+  userId: string,
+  botId: string
+): boolean {
+  const row = db.prepare(
+    `SELECT 1 AS exists_flag
+     FROM memories
+     WHERE user_id = ?
+       AND bot_id = ?
+       AND category = 'user'
+       AND COALESCE(tier, 'short_term') = 'long_term'
+     LIMIT 1`
+  ).get(userId, botId) as { exists_flag?: number } | undefined;
+  return Boolean(row);
+}
+
+export function hasAboutYouMemoryForBot(
+  db: DatabaseSync,
+  userId: string,
+  botId: string
+): boolean {
+  const row = db.prepare(
+    `SELECT 1 AS exists_flag
+     FROM memories
+     WHERE user_id = ?
+       AND bot_id = ?
+       AND COALESCE(source, 'direct') = '${ABOUT_YOU_MEMORY_SOURCE}'
+     LIMIT 1`
+  ).get(userId, botId) as { exists_flag?: number } | undefined;
+  return Boolean(row);
+}
+
+function firstNameFromDisplayName(displayName: string | null | undefined): string | null {
+  const trimmed = typeof displayName === "string" ? displayName.trim() : "";
+  if (!trimmed) return null;
+  const firstToken = trimmed.split(/\s+/)[0]?.trim() ?? "";
+  const cleaned = firstToken.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9'-]+$/g, "");
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+export function buildInitialAboutYouMemoryText(
+  displayName: string | null | undefined
+): string {
+  const firstName = firstNameFromDisplayName(displayName);
+  if (firstName) {
+    return `You prefer to be called ${firstName}.`;
+  }
+  return "You prefer to be called by your first name.";
 }
 
 export function listMemoryIdsLinkedToMessages(
@@ -463,6 +545,7 @@ export function deleteMemoriesLinkedToMessages(
     `DELETE FROM memories
      WHERE user_id = ?
        AND id IN (${placeholders})
+       AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
        AND COALESCE(tier, 'short_term') != 'long_term'`
   ).run(userId, ...linkedIds);
 
@@ -484,6 +567,7 @@ export function deleteMemoryById(
       `DELETE FROM memories
        WHERE id = ?
          AND user_id = ?
+         AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
          AND (? = 1 OR COALESCE(tier, 'short_term') != 'long_term')`
     )
     .run(memoryId, userId, options.allowLongTerm ? 1 : 0);
@@ -504,7 +588,8 @@ export function demoteMemoryToShortTerm(
            confidence = ?,
            certainty = ?
        WHERE id = ?
-         AND user_id = ?`
+         AND user_id = ?
+         AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'`
     )
     .run(clampedConfidence, clampedConfidence, memoryId, userId);
   return Number(result.changes ?? 0) > 0;
@@ -755,6 +840,84 @@ async function resolveMemoryCulmination(
   };
 }
 
+function extractPreferenceDetailForReinforcement(text: string): string {
+  const detail = extractCulminationDetail(text);
+  return normalizedMemoryText(detail);
+}
+
+function detailsAreCompatibleForReinforcement(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length >= 4 && b.includes(a)) return true;
+  if (b.length >= 4 && a.includes(b)) return true;
+  return false;
+}
+
+function canReinforceExistingMemory(
+  existing: StoredMemoryWithEmbedding,
+  candidateText: string
+): boolean {
+  const existingSingleValueKey = getSingleValueMemoryKey(existing.text);
+  const candidateSingleValueKey = getSingleValueMemoryKey(candidateText);
+  if (existingSingleValueKey || candidateSingleValueKey) {
+    return (
+      existingSingleValueKey !== null &&
+      candidateSingleValueKey !== null &&
+      existingSingleValueKey === candidateSingleValueKey
+    );
+  }
+
+  const existingTopic = getCulminationTopicKey(existing.text);
+  const candidateTopic = getCulminationTopicKey(candidateText);
+  if (!existingTopic || !candidateTopic || existingTopic !== candidateTopic) {
+    return false;
+  }
+
+  const existingDetail = extractPreferenceDetailForReinforcement(existing.text);
+  const candidateDetail = extractPreferenceDetailForReinforcement(candidateText);
+  return detailsAreCompatibleForReinforcement(existingDetail, candidateDetail);
+}
+
+function loadScopeMemoriesForReinforcement(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null,
+  userKey: Buffer
+): StoredMemoryWithEmbedding[] {
+  const rows = botId
+    ? db.prepare(`
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+        FROM memories
+        WHERE user_id = ?
+          AND bot_id = ?
+          AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
+        ORDER BY created_at DESC
+        LIMIT ?
+      `).all(userId, botId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[]
+    : db.prepare(`
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+        FROM memories
+        WHERE user_id = ?
+          AND bot_id IS NULL
+          AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
+        ORDER BY created_at DESC
+        LIMIT ?
+      `).all(userId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[];
+
+  return rows.map((row) => decryptMemoryRow(row, userKey));
+}
+
+function pickReinforcementTarget(
+  existingScopeMemories: StoredMemoryWithEmbedding[],
+  candidateText: string
+): StoredMemoryWithEmbedding | null {
+  const compatible = existingScopeMemories.filter((memory) =>
+    canReinforceExistingMemory(memory, candidateText)
+  );
+  if (compatible.length === 0) return null;
+  return compatible.sort((a, b) => compareMemoryPriority(a, b)).at(-1) ?? null;
+}
+
 export async function persistMemoryCandidates(
   db: DatabaseSync,
   userId: string,
@@ -771,6 +934,10 @@ export async function persistMemoryCandidates(
   let stored: UserMemory[] = [];
   const source = options.source ?? "direct";
   const sourceMessageIds = normalizeSourceMessageIds(options.sourceMessageIds);
+  const scopeMemoriesForReinforcement =
+    source === "direct"
+      ? loadScopeMemoriesForReinforcement(db, userId, botId, userKey)
+      : [];
 
   for (const candidate of candidates) {
     let embedding: number[];
@@ -784,11 +951,101 @@ export async function persistMemoryCandidates(
     const id = randomId(12);
     const createdAt = new Date().toISOString();
     const category = normalizeMemoryCategory(options.category ?? candidate.category, candidate.text);
-    const certainty = options.certainty ?? candidate.confidence;
+    const hasExplicitCertaintyOverride =
+      typeof options.certainty === "number" && Number.isFinite(options.certainty);
+    const candidateConfidence = hasExplicitCertaintyOverride
+      ? clampUnit(candidate.confidence)
+      : initialStoredConfidence(source, candidate.confidence);
+    const certainty = options.certainty ?? candidateConfidence;
     const durability =
       explicitMemoryDurability(options.durability) ??
       normalizeMemoryDurability(candidate.durability, candidate.text);
-    const tier = normalizeMemoryTier(options.tier, candidate.confidence, certainty, durability);
+    const target = source === "direct"
+      ? pickReinforcementTarget(scopeMemoriesForReinforcement, candidate.text)
+      : null;
+    const tier = normalizeMemoryTier(options.tier, candidateConfidence, certainty, durability);
+    if (target) {
+      const mergedSourceMessageIds = normalizeSourceMessageIds([
+        ...target.sourceMessageIds,
+        ...sourceMessageIds,
+      ]);
+      const reinforcedConfidence = clampUnit(
+        Math.max(target.confidence, candidateConfidence) + DIRECT_MEMORY_REINFORCE_CONFIDENCE_BOOST
+      );
+      const reinforcedCertainty = clampUnit(
+        Math.max(target.certainty, certainty) + DIRECT_MEMORY_REINFORCE_CERTAINTY_BOOST
+      );
+      const reinforcedDurability = clampMemoryDurability(
+        Math.max(target.durability, durability) + DIRECT_MEMORY_REINFORCE_DURABILITY_BOOST
+      );
+      const reinforcedTier = normalizeMemoryTier(
+        options.tier,
+        reinforcedConfidence,
+        reinforcedCertainty,
+        reinforcedDurability
+      );
+      db.prepare(`
+        UPDATE memories
+        SET conversation_id = ?,
+            ciphertext = ?,
+            iv = ?,
+            tag = ?,
+            confidence = ?,
+            category = ?,
+            tier = ?,
+            durability = ?,
+            source = ?,
+            certainty = ?,
+            source_message_ids = ?,
+            created_at = ?
+        WHERE id = ?
+      `).run(
+        conversationId,
+        encrypted.ciphertext,
+        encrypted.iv,
+        encrypted.tag,
+        reinforcedConfidence,
+        category,
+        reinforcedTier,
+        reinforcedDurability,
+        source,
+        reinforcedCertainty,
+        sourceMessageIdsJson(mergedSourceMessageIds),
+        createdAt,
+        target.id
+      );
+      const reinforcedMemory: StoredMemoryWithEmbedding = {
+        ...target,
+        conversationId,
+        confidence: reinforcedConfidence,
+        category,
+        tier: reinforcedTier,
+        durability: reinforcedDurability,
+        source,
+        certainty: reinforcedCertainty,
+        sourceMessageIds: mergedSourceMessageIds,
+        createdAt,
+        text: candidate.text,
+        embedding,
+      };
+      scopeMemoriesForReinforcement.unshift(reinforcedMemory);
+      stored.push({
+        id: reinforcedMemory.id,
+        userId: reinforcedMemory.userId,
+        conversationId: reinforcedMemory.conversationId,
+        botId: reinforcedMemory.botId,
+        confidence: reinforcedMemory.confidence,
+        category: reinforcedMemory.category,
+        tier: reinforcedMemory.tier,
+        durability: reinforcedMemory.durability,
+        source: reinforcedMemory.source,
+        certainty: reinforcedMemory.certainty,
+        sourceMessageIds: reinforcedMemory.sourceMessageIds,
+        createdAt: reinforcedMemory.createdAt,
+        text: reinforcedMemory.text,
+      });
+      continue;
+    }
     insertMemory.run(
       id,
       userId,
@@ -797,7 +1054,7 @@ export async function persistMemoryCandidates(
       encrypted.ciphertext,
       encrypted.iv,
       encrypted.tag,
-      candidate.confidence,
+      candidateConfidence,
       category,
       tier,
       durability,
@@ -811,7 +1068,7 @@ export async function persistMemoryCandidates(
       userId,
       conversationId,
       botId: botId ?? undefined,
-      confidence: candidate.confidence,
+      confidence: candidateConfidence,
       category,
       tier,
       durability,
@@ -823,6 +1080,9 @@ export async function persistMemoryCandidates(
       embedding,
     };
     stored.push(memory);
+    if (source === "direct") {
+      scopeMemoriesForReinforcement.unshift(memory);
+    }
 
     const culmination = await resolveMemoryCulmination(
       db,

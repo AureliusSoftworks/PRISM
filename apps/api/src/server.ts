@@ -1163,6 +1163,8 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const starterPrompt = body.starterPrompt === true;
+      const starterPromptWarrantsIntro =
+        starterPrompt && body.starterPromptWarrantsIntro === true;
       const message = starterPrompt ? "" : readString(body.message, "message");
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
@@ -1302,6 +1304,7 @@ function buildRoutes(): RouteDefinition[] {
             openAiApiKey,
             userDisplayName: user.display_name,
             starterPrompt,
+            starterPromptWarrantsIntro,
             starterPromptLabel,
             secondaryOllamaHost: user.secondary_ollama_host,
             lenientLocalFallbackModel: user.lenient_local_fallback_model,
@@ -1373,6 +1376,7 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.directedSpeakerBotId === "string"
           ? body.directedSpeakerBotId
           : undefined;
+      const userIsComposing = body.userIsComposing === true;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
@@ -1387,7 +1391,9 @@ function buildRoutes(): RouteDefinition[] {
           openAiApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           userDisplayName: user.display_name,
+          userKey,
         },
+        userIsComposing,
         directedSpeakerBotId
       );
       json(ctx.res, 200, {
@@ -1404,6 +1410,23 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
+      const interruptionInput =
+        body.playerInterruption && typeof body.playerInterruption === "object"
+          ? (body.playerInterruption as Record<string, unknown>)
+          : undefined;
+      const playerInterruption =
+        interruptionInput &&
+        typeof interruptionInput.interruptedMessageId === "string" &&
+        typeof interruptionInput.interruptedBotId === "string"
+          ? {
+              interruptedMessageId: interruptionInput.interruptedMessageId,
+              interruptedBotId: interruptionInput.interruptedBotId,
+              visibleTokenCount:
+                typeof interruptionInput.visibleTokenCount === "number"
+                  ? interruptionInput.visibleTokenCount
+                  : 1,
+            }
+          : undefined;
       // Per-request provider override matches Sandbox's /api/chat semantics:
       // the client toggle wins over the user's saved preferred_provider for
       // this single turn. Anything else (including absent or malformed)
@@ -1424,12 +1447,14 @@ function buildRoutes(): RouteDefinition[] {
           conversationId,
           groupBotIds,
           message,
+          playerInterruption,
         },
         {
           preferredProvider: effectiveProvider,
           openAiApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           userDisplayName: user.display_name,
+          userKey,
         }
       );
       json(ctx.res, 200, {
@@ -1483,7 +1508,7 @@ function buildRoutes(): RouteDefinition[] {
         category: "general" | "user" | "bot_relation";
         tier: "short_term" | "long_term";
         durability: number | null;
-        source: "direct" | "inferred" | "compiled";
+        source: "direct" | "inferred" | "compiled" | "about_you";
         certainty: number | null;
         source_message_ids: string;
         ciphertext: string;
@@ -1574,6 +1599,7 @@ function buildRoutes(): RouteDefinition[] {
       const requestedBotId = readOptionalString(body.botId);
       const requestedSource = readOptionalString(body.source);
       const source = requestedSource === "inferred" || requestedSource === "compiled"
+        || requestedSource === "about_you"
         ? requestedSource
         : "direct";
       const requestedCategory = readOptionalString(body.category);
@@ -1620,23 +1646,33 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/memories", async (ctx) => {
       const userId = requireAuth(ctx);
-      const result = db.prepare("DELETE FROM memories WHERE user_id = ?").run(userId);
+      const result = db
+        .prepare(
+          "DELETE FROM memories WHERE user_id = ? AND COALESCE(source, 'direct') != 'about_you'"
+        )
+        .run(userId);
       json(ctx.res, 200, { ok: true, deleted: Number(result.changes ?? 0) });
     }),
-    // Hard-reset every per-user memory artifact: extracted memory facts,
-    // SQLite summary rows (both thread-scoped and global), and the matching
-    // Qdrant vectors. Powers the dev-only `/clear` slash command in chat
-    // mode so the next session starts with no recall surface at all.
+    // Hard-reset per-user memory artifacts: extracted memory facts, SQLite
+    // summary rows (both thread-scoped and global), and matching Qdrant
+    // vectors. Powers dev slash commands:
+    // - `/clear` (default): keeps `about_you` profile rows in SQLite.
+    // - `/forget`: same clear path with `includeAboutYou = true`.
     // Qdrant cleanup is best-effort because the local stack often runs
     // without a vector DB attached; SQLite truth wins either way.
     route("POST", "/api/dev/clear-session-memory", async (ctx) => {
       const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const includeAboutYou = body.includeAboutYou === true;
       let deletedMemories = 0;
       let deletedSummaries = 0;
       db.exec("BEGIN IMMEDIATE TRANSACTION");
       try {
         const memoryResult = db
-          .prepare("DELETE FROM memories WHERE user_id = ?")
+          .prepare(includeAboutYou
+            ? "DELETE FROM memories WHERE user_id = ?"
+            : "DELETE FROM memories WHERE user_id = ? AND COALESCE(source, 'direct') != 'about_you'"
+          )
           .run(userId);
         const summaryResult = db
           .prepare("DELETE FROM memory_summaries WHERE user_id = ?")
@@ -1659,6 +1695,7 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         deletedMemories,
         deletedSummaries,
+        includeAboutYou,
         vectorsCleared,
       });
     }),
@@ -1680,7 +1717,7 @@ function buildRoutes(): RouteDefinition[] {
       const conversationId = readOptionalString(body.conversationId);
       const requestedSource = readOptionalString(body.source);
       const source =
-        requestedSource === "inferred" || requestedSource === "compiled"
+        requestedSource === "inferred" || requestedSource === "compiled" || requestedSource === "about_you"
           ? requestedSource
           : "direct";
       const requestedCategory = readOptionalString(body.category);

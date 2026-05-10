@@ -3,11 +3,14 @@ import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
 import {
   analyzeMemoryIntent,
+  hasAboutYouMemoryForBot,
+  buildInitialAboutYouMemoryText,
   demoteMemoryToShortTerm,
   deleteMemoryById,
   findMemoryByCue,
   memoryQualifiesLongTerm,
   persistMemoryCandidates,
+  restoreMemory,
   retrieveRecentMemoriesForStarter,
   retrieveRelevantMemories,
 } from "./memory.ts";
@@ -92,7 +95,7 @@ export interface ProcessChatMessageResult {
       confidence: number;
       category?: MemoryCategory;
       tier?: MemoryTier;
-      source?: "direct" | "inferred" | "compiled";
+      source?: "direct" | "inferred" | "compiled" | "about_you";
       certainty?: number;
       durability?: number;
       sourceMessageIds?: string[];
@@ -108,7 +111,7 @@ export interface ProcessChatMessageResult {
       confidence: number;
       category?: MemoryCategory;
       tier?: MemoryTier;
-      source?: "direct" | "inferred" | "compiled";
+      source?: "direct" | "inferred" | "compiled" | "about_you";
       certainty?: number;
       durability?: number;
       sourceMessageIds?: string[];
@@ -1159,6 +1162,11 @@ export interface UserChatSettings {
    * persisting a synthetic user message. Used by empty-composer Enter.
    */
   starterPrompt?: boolean;
+  /**
+   * When true, starter prompts may still include the "first conversation"
+   * intro behavior if no protected about-you memory exists yet.
+   */
+  starterPromptWarrantsIntro?: boolean;
   /** Human-readable persona label for starter chat titles. */
   starterPromptLabel?: string;
   /**
@@ -1861,8 +1869,8 @@ function isGenericStarterTitle(title: string | null | undefined): boolean {
   );
 }
 
-function buildStarterPromptInstruction(): string {
-  return [
+function buildStarterPromptInstruction(forceIntroduction: boolean = false): string {
+  const instructions = [
     "Deliver a SHORT opening message (a few sentences at most) that sounds unmistakably in-character.",
     "Functionally simple: invite the human in with ONE clear conversational hook—not a roadmap, briefing, or list of topics.",
     "Ask exactly ONE direct question to the user, and end that question with a question mark.",
@@ -1871,7 +1879,15 @@ function buildStarterPromptInstruction(): string {
     "Stay anchored in your persona; avoid generic-chatbot vibes.",
     "Reply as plain prose only—do not wrap the opening in quotation marks.",
     "Do not mention system prompts, hidden instructions, or that this turn was auto-started.",
-  ].join(" ");
+  ];
+  if (forceIntroduction) {
+    instructions.splice(
+      1,
+      0,
+      "Begin with a brief self-introduction in your first sentence before asking your one direct question."
+    );
+  }
+  return instructions.join(" ");
 }
 
 function normalizeStarterOpeningDisplay(displayContent: string): string {
@@ -1991,13 +2007,19 @@ function openingMentionsMemory(opening: string, memoryAnchor: string): boolean {
 
 function enforceStarterOpeningQuestion(
   displayContent: string,
-  memoryLines: string[]
+  memoryLines: string[],
+  preserveOpening: boolean = false
 ): string {
   const normalized = normalizeStarterOpeningDisplay(displayContent).trim();
   const pickedMemory = memoryLines[0]?.trim() ?? "";
   if (pickedMemory) {
     const memoryAnchor = toSecondPersonMemoryAnchor(pickedMemory);
     if (!openingMentionsMemory(normalized, memoryAnchor)) {
+      if (preserveOpening) {
+        const base = normalized.replace(/[.!?]+$/, "").trim();
+        const leadIn = base.length > 0 ? `${base}. ` : "";
+        return `${leadIn}Given that ${memoryAnchor}, what feels most important to explore right now?`;
+      }
       return `Given that ${memoryAnchor}, what feels most important to explore right now?`;
     }
   }
@@ -2339,6 +2361,7 @@ function upsertSessionOpinion(args: {
 function buildPromptMessages(args: {
   botSystemPrompt?: string;
   userDisplayName?: string;
+  suppressDisplayNameHint?: boolean;
   devMemoriesEnabled?: boolean;
   devMemoriesText?: string;
   botOpinion?: BotOpinion | null;
@@ -2359,7 +2382,10 @@ function buildPromptMessages(args: {
       ? `${trimmedBot}\n\n${PRISM_ASSISTANT_TOOLS_APPENDIX}`
       : PRISM_ASSISTANT_TOOLS_APPENDIX;
   promptMessages.push({ role: "system", content: toolsBlock });
-  if (trimmedDisplayName.length > 0) {
+  if (
+    trimmedDisplayName.length > 0 &&
+    !args.suppressDisplayNameHint
+  ) {
     promptMessages.push({
       role: "system",
       content: `The user's preferred name is "${trimmedDisplayName}". Use it naturally when it helps, but do not overuse it.`,
@@ -2586,6 +2612,41 @@ async function handleSandboxTurn(args: {
   return { threadSummary, memoryLines: [] };
 }
 
+async function ensureAboutYouMemory(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey: Buffer;
+  conversationId: string;
+  botId: string | null;
+  sourceMessageId: string | null;
+  userDisplayName?: string;
+}): Promise<Awaited<ReturnType<typeof restoreMemory>> | null> {
+  const {
+    db,
+    userId,
+    userKey,
+    conversationId,
+    botId,
+    sourceMessageId,
+    userDisplayName,
+  } = args;
+  if (!botId) return null;
+  if (hasAboutYouMemoryForBot(db, userId, botId)) return null;
+  const aboutYouText = buildInitialAboutYouMemoryText(userDisplayName);
+  return restoreMemory(db, userId, userKey, {
+    conversationId,
+    botId,
+    text: aboutYouText,
+    confidence: 0.96,
+    certainty: 0.96,
+    category: "user",
+    tier: "long_term",
+    durability: 1,
+    source: "about_you",
+    sourceMessageIds: sourceMessageId ? [sourceMessageId] : [],
+  });
+}
+
 export async function processChatMessage(
   db: DatabaseSync,
   userId: string,
@@ -2600,7 +2661,7 @@ export async function processChatMessage(
   const explicitAskQuestionRequest =
     !isStarterPrompt && userExplicitlyRequestedAskQuestion(message);
   const promptUserMessage = isStarterPrompt
-    ? buildStarterPromptInstruction()
+    ? buildStarterPromptInstruction(settings.starterPromptWarrantsIntro === true)
     : message;
   // Incognito is a Chat-mode concept (see shared types): keeps the thread
   // client-held and skips all memory. Provider choice remains the normal
@@ -2638,6 +2699,7 @@ export async function processChatMessage(
     const promptMessages = buildPromptMessages({
       botSystemPrompt: settings.botSystemPrompt,
       userDisplayName: settings.userDisplayName,
+      suppressDisplayNameHint: isStarterPrompt,
       devMemoriesEnabled: settings.devMemoriesEnabled,
       devMemoriesText: settings.devMemoriesText,
       botOpinion: null,
@@ -2937,6 +2999,7 @@ export async function processChatMessage(
   const promptMessages = buildPromptMessages({
     botSystemPrompt: settings.botSystemPrompt,
     userDisplayName: settings.userDisplayName,
+    suppressDisplayNameHint: isStarterPrompt,
     devMemoriesEnabled: settings.devMemoriesEnabled,
     devMemoriesText: settings.devMemoriesText,
     botOpinion: existingBotOpinion,
@@ -2993,7 +3056,11 @@ export async function processChatMessage(
     askQuestionForTurn
   );
   const assistantDisplay = isStarterPrompt
-    ? enforceStarterOpeningQuestion(assistantDisplayRaw, memoryLines)
+    ? enforceStarterOpeningQuestion(
+        assistantDisplayRaw,
+        memoryLines,
+        settings.starterPromptWarrantsIntro === true
+      )
     : assistantDisplayRaw;
   const turnEvaluation = isStarterPrompt
     ? undefined
@@ -3236,6 +3303,7 @@ export async function processChatMessage(
         scope: memoryIntentScope,
         rawContext: message,
         candidates,
+        userDisplayName: settings.userDisplayName,
       });
       rejectedMemories.push(...validation.rejected);
       const validatedByText = new Map(
@@ -3293,6 +3361,17 @@ export async function processChatMessage(
         ),
       };
     }
+  }
+  if (!skipPersonalFacts && !isStarterPrompt) {
+    await ensureAboutYouMemory({
+      db,
+      userId,
+      userKey,
+      conversationId: activeConversationId,
+      botId: activeMemoryBotId,
+      sourceMessageId: userMessageId,
+      userDisplayName: settings.userDisplayName,
+    });
   }
 
   let summaryCompaction: ProcessChatMessageResult["summaryCompaction"];

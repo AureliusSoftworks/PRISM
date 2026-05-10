@@ -137,7 +137,7 @@ export function deleteBot(
       "UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id = ?"
     ).run(userId, botId);
     db.prepare(
-      "DELETE FROM memories WHERE user_id = ? AND bot_id = ?"
+      "DELETE FROM memories WHERE user_id = ? AND bot_id = ? AND COALESCE(source, 'direct') != 'about_you'"
     ).run(userId, botId);
     db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(
       botId,
@@ -188,7 +188,10 @@ export function deleteBots(
       `UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
     ).run(userId, ...ids);
     db.prepare(
-      `DELETE FROM memories WHERE user_id = ? AND bot_id IN (${placeholders})`
+      `DELETE FROM memories
+       WHERE user_id = ?
+         AND bot_id IN (${placeholders})
+         AND COALESCE(source, 'direct') != 'about_you'`
     ).run(userId, ...ids);
     db.prepare(
       `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
@@ -243,7 +246,10 @@ export function deleteAllBots(db: DatabaseSync, userId: string): number {
       `UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
     ).run(userId, ...ids);
     db.prepare(
-      `DELETE FROM memories WHERE user_id = ? AND bot_id IN (${placeholders})`
+      `DELETE FROM memories
+       WHERE user_id = ?
+         AND bot_id IN (${placeholders})
+         AND COALESCE(source, 'direct') != 'about_you'`
     ).run(userId, ...ids);
     db.prepare(
       `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
