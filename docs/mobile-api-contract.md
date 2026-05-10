@@ -1,8 +1,10 @@
 # Prism Mobile API Contract
 
-This document defines the server contract for official Prism iOS/Mac clients.
-The server remains the source of truth for accounts, memory, provider routing,
-chat history, bots, exports, and local-first guarantees.
+This document defines the server contract for official Prism clients (macOS
+shell today; iPhone via the server-hosted PWA). The server remains the source
+of truth for accounts, memory, provider routing, chat history, bots, exports,
+and **local-first data guarantees** (with optional cloud paths only when the
+user and mode allow — see root `README.md` and `DESIGN.md` for product framing).
 
 ## Current Boundary
 

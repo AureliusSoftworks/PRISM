@@ -4,6 +4,9 @@ Prism is shipped as an indie product: direct downloads, no app stores, no
 TestFlight. The server is open source. The clients are paid, gated by a license
 code that hooks into the existing pairing/passkey system.
 
+For **what Prism is** (modular modes, roadmap tiles, Core vision), see the root
+[`README.md`](../README.md).
+
 This document is the canonical positioning and licensing reference. Operator
 and platform-specific docs (release process, per-app build docs) defer to this
 file when their guidance disagrees.

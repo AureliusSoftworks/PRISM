@@ -1,17 +1,75 @@
 # Prism
 
-A local-first AI playground. The fidelity and per-account isolation of
-ChatGPT Gov, the systems-focus and creative-permission of FL Studio. Runs
-headless on a user-owned machine and reachable across the LAN from any
-trusted device. Every account is its own sandbox — encrypted memory,
-customizable chatbots, OpenAI image generation, forkable conversations,
-Markdown rendering in chat and Markdown conversation export.
+**Prism** is a local-first AI environment that routes intelligence across local models, cloud APIs, memory, tools, and bots — giving users visibility and control over where their work happens.
+
+It is not “just” a chat app or a generic model wrapper. Prism is a **modular intelligence environment**: different **modes** (tiles) are different lenses on the same accounts, memory, and providers. **Sandbox**, **Chat**, and **Coffee** ship today. Other tiles are placeholders or future ideas — see [Feature status](#feature-status).
+
+One intent can fan out across paths the way light splits through a prism: local inference, cloud when it earns its place, memory recall, tools, bot personalities, and (planned) richer agent-style workflows — while the UI stays **one calm surface**. Prism is **local-first**, not local-only: the goal is to keep routine, private, and inexpensive work on hardware you control, and to reach for cloud APIs when the task needs extra capability, ambiguity handling, planning depth, or difficult reasoning.
+
+Over time, Prism is intended to act as an **OpenAI-compatible meta-provider** so external clients (for example Cursor, Continue, or Cline) could connect through it, with routing, budgets, and policy living in a first-class **Core** module (planned), not buried-only settings.
+
+The fidelity and per-account isolation of ChatGPT Gov, the systems-focus and creative permission of FL Studio — still guiding stars. Runs headless on a user-owned machine and across the LAN from trusted devices: encrypted memory, customizable bots, optional cloud image generation, forkable threads, Markdown in chat, and Markdown export.
 
 **Current release:** v0.1.0 (first production build). See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Branch model:** `main` holds tagged, released versions only; all active
 development happens on `dev`. Every release is a merge of `dev` into `main`
 with a matching `CHANGELOG.md` entry and a semver tag.
+
+## The Core vision
+
+- **One request** enters Prism (from you or, someday, from a connected client).
+- **Prism** decides the best route under rules you can see and change.
+- **Routes** can include a local model, a cloud model, memory lookup, a tool call, a bot-led interaction, or (planned) a multi-step agent workflow.
+- **The experience** stays unified — same hub, same threads, same respect for tenancy.
+- **You** can inspect and steer routing: what ran where, and what escalated.
+
+Today, routing is explicit (for example local vs online chat modes and provider picks). The **Core** module is the planned home for deeper automation of those decisions.
+
+## Why Core matters
+
+- **Surprise bills:** Core is the intended place for budgets, caps, and escalation rules so cloud use never sneaks past you.
+- **Visibility:** clear readouts of local vs cloud usage, not a black box.
+- **Control:** define when Prism may step up to a stronger model, and when it must stay local.
+- **External tools:** Core-backed OpenAI-compatible endpoints are how Prism becomes a **personal intelligence gateway**, not only an app you open by hand.
+- **Product shape:** Core turns “a server with settings” into an operational center — providers, routing, API keys, logs, and policy in one first-class tile.
+
+## Intended architecture (future)
+
+This is a **directional** sketch, not a promise of every box shipping tomorrow:
+
+```text
+User / Client
+      ↓
+  PRISM Core
+      ↓
+Router / Policy / Budget / Memory
+      ↓
+Local Models | Cloud APIs | Tools | Bots | Agent tasks
+      ↓
+Unified response
+```
+
+The repo today implements the API, web hub, memory engine, and provider wiring on your machine. **Intelligent meta-routing, the Core tile, and a public meta-provider surface are planned** — see [Feature status](#feature-status).
+
+## Feature status
+
+### Implemented
+
+- **Sandbox** — Full playground: bots, provider/model controls, fork and export, images (when online), memory behavior tuned for experimentation, advanced settings. Optional focus layout for a calmer single-thread view.
+- **Chat** — Focused one-on-one conversation with a selected bot/model and continuity-oriented memory.
+- **Coffee** — Group-table mode: multiple bots in one session, autonomous reactions and turns, with room for you to join gently.
+- **Hub & tenancy** — Authenticated accounts, strict per-user data isolation, pairing for native clients, and mode tiles mirrored in the URL (`?view=…`).
+
+### Planned first-class modules
+
+- **Core** — Operational center: providers, routing, budgets, model usage, API compatibility, logs, and local/cloud policy — including the future meta-provider role for external clients.
+- **Pseudo** — Almost-code workspace: half sketch, half system — rough intent toward structured plans or code-adjacent artifacts.
+- **Gym** — Space for bot training, memory refinement, and behavior shaping.
+
+### Exploratory / not active
+
+Tiles or ideas such as **Feed**, **Games**, **Polling**, **Story**, **Surf**, and **Arena** may appear in the UI as disabled previews or docs-only concepts. Treat them as **exploratory**, not shipped product, unless explicitly called out in release notes.
 
 ## Get Prism Server (GitHub Releases)
 
@@ -112,6 +170,7 @@ Canonical reference: [Distribution model](docs/distribution-model.md).
 Planning and operator docs:
 
 - [Distribution model](docs/distribution-model.md) — positioning + licensing
+- [Technical design](DESIGN.md) — implemented stack, memory pipeline, provider contracts, privacy invariants
 - [Release process (dev -> main)](docs/release-process.md) — operator runbook
 - [Prism Server.app build and release](docs/prism-server-app.md)
 - [Prism.app client build and pairing](docs/prism-client-app.md)
@@ -244,7 +303,9 @@ prism ios      # Simulator
 prism phone    # Paired physical iPhone
 ```
 
-## Architecture
+## Current stack (simplified)
+
+Typical self-hosted layout today (Docker or native). This is **deployment topology**, not the full future “Core + router” picture above.
 
 ```
 [Phone/Desktop] → Nginx (:80) → Frontend (:18788) + API (:18787)
@@ -275,7 +336,7 @@ docker compose up -d
 ## Quick Start (Dev / Mac)
 
 ```bash
-cd /Users/jared/Documents/LocalAI-local
+cd /path/to/this/repo
 cp .env.example .env
 ollama pull llama3.2
 ollama pull nomic-embed-text
@@ -311,11 +372,12 @@ npm run dev
 - **Optional second Ollama host** — add another LAN Ollama machine from Settings, merge its offline models into Prism's local model lists, and route selected models back to the correct host.
 - **Dedicated system models** — user-facing chat can use local or OpenAI, but Prism's internal titles, starters, summaries, memory critic, and embeddings always stay local on mandatory Ollama models (`llama3.2` + `nomic-embed-text`).
 - **Native-client web gate** — the hosted web shell requires a paired Prism client access token, so direct browser visits show an app-required screen instead of bypassing the client.
-- **Post-auth Hub** with 5-colour prism-glyph mode tiles:
-  - **Chat** — a companion timeline: one steady default Prism companion and one ongoing thread that reopens automatically when you return to Chat mode.
-  - **Sandbox** — the command center for experimentation (bot switching, provider/model controls, fork/export, images, advanced settings). Built for testing ideas, not relationship continuity.
-  - **Story**, **Library**, and other disabled roadmap tiles preview future bot experiences before their shells are built.
-  Mode is mirrored to the URL (`?view=chat` / `?view=sandbox`) so refreshes preserve the current surface.
+- **Post-auth Hub** with prism-glyph mode tiles. **Chat**, **Sandbox**, and **Coffee** are live; other tiles are disabled placeholders or exploratory previews.
+  - **Chat** — companion-style timeline: a steady default Prism companion and an ongoing thread that reopens when you return to Chat.
+  - **Sandbox** — command center for experimentation (bot switching, provider/model controls, fork/export, images, advanced settings). Optional **focus layout**: calmer full-width chrome for the **current** Sandbox thread only; memory and routing rules unchanged.
+  - **Coffee** — group table: several bots in one session with autonomous beats and gentle space for you to step in.
+  - **Story**, **Library**, and similar disabled tiles are **not** committed features; they preview possible future shells.
+  Mode is mirrored to the URL (`?view=chat` / `?view=sandbox` / `?view=coffee`) so refreshes preserve the current surface.
 - **Strict data isolation** — every query is tenant-scoped by `user_id`
 - **Mode-specific memory model**:
   - Chat keeps cross-thread personal-fact memory (extracted preferences in the `memories` table + Qdrant similarity recall across conversations) and also maintains a thread compaction summary for long-running sessions.
@@ -323,11 +385,12 @@ npm run dev
   - Sandbox gets a thread-scoped **rolling compaction summary** that kicks in when a thread outgrows the live window. Stored only in SQLite, never indexed into Qdrant, and used as internal context plumbing so long Sandbox threads don't go amnesiac. Nothing ever crosses between threads.
   - Incognito opts out of both paths for the turn and forces the provider to LOCAL.
 
-## When to use Chat vs Sandbox
+## When to use Chat vs Sandbox vs Coffee
 
 - **Use Chat when you want continuity** — journaling, long-form personal threads, or a calm "stay with me" companion rhythm.
 - **Use Sandbox when you want control** — testing different bots/models, trying tools, or running structured experiments.
-- **Rule of thumb:** Chat is for relationship continuity; Sandbox is for lab-style iteration.
+- **Use Coffee when you want a small group** — several bots in one room, emergent cross-talk, and a lighter way to drop in than running parallel solo chats.
+- **Rule of thumb:** Chat is for relationship continuity; Sandbox is for lab-style iteration; Coffee is for social, multi-bot energy.
 - **Customizable chatbots** with a structured profile builder, OCEAN-inspired personality sliders, temperature, model overrides, and optional delete protection for favorite bots (composed into the model system prompt)
 - **Expanded bot glyph picker** with hundreds of Lucide-backed glyphs alongside the original inline set
 - **Forkable chats** — branch from any message in a conversation (Sandbox)
@@ -455,9 +518,6 @@ npm run lint --prefix apps/api    # TypeScript lint
 npm run lint --prefix apps/web    # ESLint
 ```
 
-## Future
+## Future (high level)
 
-- Bot-to-bot sandbox conversations
-- Streaming token responses
-- Cloud backup adapters (S3/R2)
-- Richer profile and role system
+See [Feature status](#feature-status) for module-level intent. Engineering themes on the horizon include streaming replies, richer bot-to-bot scenarios beyond Coffee, cloud backup adapters (S3/R2), and a deeper profile/role system — tracked in code and `CHANGELOG.md` as they land.
