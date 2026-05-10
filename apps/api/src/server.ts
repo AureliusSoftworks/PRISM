@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
+import { existsSync, unlinkSync } from "node:fs";
 import { getAppConfig } from "@localai/config";
 import { createDatabase } from "./db.ts";
-import { clearCookie, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
+import { clearCookie, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import {
@@ -59,7 +60,21 @@ import { buildModelCatalog, checkLocalModelHostStatus, getAuxiliaryProvider, sel
 import type { GenerateOptions } from "./providers.ts";
 import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
-import { generateImage } from "./image-provider.ts";
+import { composeAugmentedImagePrompt } from "@localai/shared";
+import { generateImage, DALLE_IMAGE_MODEL_ID } from "./image-provider.ts";
+import {
+  botBelongsToUser,
+  resolveImageGeneratePersistence,
+} from "./image-generate-resolve.ts";
+import {
+  buildGeneratedImageRelativePath,
+  downloadRemoteImage,
+  readGeneratedImageBytes,
+  removeGeneratedImagesDirectoryForUser,
+  resolveAbsoluteUnderDataRoot,
+  tryUnlinkGeneratedImageFile,
+  writeGeneratedImageBytes,
+} from "./image-storage.ts";
 import {
   clearThreadCompactions,
   getLatestSandboxBotStatusSummary,
@@ -73,10 +88,6 @@ import {
   INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS,
   getInactiveAccountCutoff
 } from "./account-retention.ts";
-import {
-  GENERATED_IMAGE_CLEANUP_INTERVAL_MS,
-  purgeExpiredImages
-} from "./image-retention.ts";
 import { deleteVectorsForUser } from "./qdrant.ts";
 import {
   hydrateAssistantMessageParts,
@@ -419,6 +430,12 @@ async function deleteUserAccount(userId: string): Promise<void> {
   }
 
   try {
+    removeGeneratedImagesDirectoryForUser(userId);
+  } catch {
+    // Best-effort filesystem cleanup after SQLite removes image rows.
+  }
+
+  try {
     await deleteVectorsForUser(userId);
   } catch {
     // Qdrant cleanup is best-effort; account data is already removed from SQLite.
@@ -436,6 +453,40 @@ async function purgeInactiveAccounts(): Promise<void> {
   for (const user of inactiveUsers) {
     await deleteUserAccount(user.id);
   }
+}
+
+function mapImageRowToClient(row: {
+  id: string;
+  prompt: string;
+  revised_prompt: string | null;
+  url: string;
+  size: string;
+  quality: string;
+  provider: string;
+  bot_id: string | null;
+  created_at: string;
+  local_rel_path: string | null;
+  model: string | null;
+}): Record<string, unknown> {
+  const hasLocalFile = Boolean(row.local_rel_path?.trim());
+  const displayUrl = hasLocalFile
+    ? `/api/images/${encodeURIComponent(row.id)}/file`
+    : row.url;
+  return {
+    id: row.id,
+    botId: row.bot_id,
+    prompt: row.prompt,
+    revisedPrompt: row.revised_prompt,
+    size: row.size,
+    quality: row.quality,
+    provider: row.provider,
+    model: row.model ?? DALLE_IMAGE_MODEL_ID,
+    createdAt: row.created_at,
+    url: row.url,
+    localRelPath: row.local_rel_path,
+    displayUrl,
+    hasLocalFile,
+  };
 }
 
 function buildRoutes(): RouteDefinition[] {
@@ -1971,7 +2022,12 @@ function buildRoutes(): RouteDefinition[] {
       const prompt = readString(body.prompt, "prompt");
       const size = (body.size as string) ?? "1024x1024";
       const quality = (body.quality as string) ?? "standard";
-      const conversationId = typeof body.conversationId === "string" ? body.conversationId : null;
+      const conversationIdRaw =
+        typeof body.conversationId === "string" ? body.conversationId.trim() : "";
+      const bodyBotId =
+        typeof body.botId === "string" && body.botId.trim().length > 0
+          ? body.botId.trim()
+          : undefined;
 
       // Privacy gate: image generation always calls OpenAI DALL-E, so it
       // must never fire while the user has LOCAL mode selected. Mirror the
@@ -1990,26 +2046,201 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
 
+      const persistence = resolveImageGeneratePersistence({
+        db,
+        userId,
+        conversationIdRaw,
+        bodyBotId,
+      });
+      if (!persistence.ok) {
+        throw new Error(persistence.message);
+      }
+
+      let promptForModel = prompt;
+      const personaBotId = persistence.personaBotId;
+      if (personaBotId) {
+        const botRow = db
+          .prepare(
+            "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
+          )
+          .get(personaBotId, userId) as
+          | { name: string; system_prompt: string }
+          | undefined;
+        if (botRow) {
+          promptForModel = composeAugmentedImagePrompt({
+            botName: botRow.name,
+            systemPrompt: botRow.system_prompt,
+            userPrompt: prompt,
+          });
+        }
+      }
+
       const userKey = decryptUserKey(userId);
       const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const result = await generateImage(
-        prompt,
+        promptForModel,
         apiKey,
         size as "1024x1024" | "1024x1792" | "1792x1024",
         quality as "standard" | "hd"
       );
       const imageId = randomId(12);
-      db.prepare(
-        "INSERT INTO images (id, user_id, conversation_id, prompt, revised_prompt, url, size, quality, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?)"
-      ).run(imageId, userId, conversationId, prompt, result.revisedPrompt, result.url, size, quality, new Date().toISOString());
-      json(ctx.res, 200, { ok: true, image: { id: imageId, ...result } });
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+
+      let imageBytes: Buffer;
+      try {
+        imageBytes = await downloadRemoteImage(result.url);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "download failed";
+        throw new Error(`Could not download image for local storage (${detail}).`);
+      }
+
+      try {
+        writeGeneratedImageBytes(localRelPath, imageBytes);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "write failed";
+        throw new Error(`Could not save generated image (${detail}).`);
+      }
+
+      try {
+        db.prepare(
+          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?)"
+        ).run(
+          imageId,
+          userId,
+          persistence.conversationIdForInsert,
+          persistence.persistedBotId,
+          prompt,
+          result.revisedPrompt,
+          result.url,
+          size,
+          quality,
+          DALLE_IMAGE_MODEL_ID,
+          localRelPath,
+          new Date().toISOString()
+        );
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      json(ctx.res, 200, {
+        ok: true,
+        image: {
+          id: imageId,
+          url: result.url,
+          revisedPrompt: result.revisedPrompt,
+          displayUrl,
+          hasLocalFile: true,
+          model: DALLE_IMAGE_MODEL_ID,
+        },
+      });
     }),
     route("GET", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);
-      const rows = db.prepare(
-        "SELECT id, prompt, revised_prompt, url, size, quality, created_at FROM images WHERE user_id = ? ORDER BY created_at DESC LIMIT 50"
-      ).all(userId);
-      json(ctx.res, 200, { ok: true, images: rows });
+      const filterBotId = readOptionalString(ctx.query.get("botId"));
+      if (filterBotId && !botBelongsToUser(db, userId, filterBotId)) {
+        throw new Error("Unknown bot for this account.");
+      }
+      const limitRaw = ctx.query.get("limit");
+      let limit = 120;
+      if (limitRaw) {
+        const n = Number(limitRaw);
+        if (Number.isFinite(n)) {
+          limit = Math.min(200, Math.max(1, Math.floor(n)));
+        }
+      }
+      const rows = filterBotId
+        ? db
+            .prepare(
+              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
+               FROM images WHERE user_id = ? AND bot_id = ?
+               ORDER BY created_at DESC LIMIT ?`
+            )
+            .all(userId, filterBotId, limit)
+        : db
+            .prepare(
+              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
+               FROM images WHERE user_id = ?
+               ORDER BY created_at DESC LIMIT ?`
+            )
+            .all(userId, limit);
+      const images = (rows as Array<{
+        id: string;
+        prompt: string;
+        revised_prompt: string | null;
+        url: string;
+        size: string;
+        quality: string;
+        provider: string;
+        bot_id: string | null;
+        created_at: string;
+        local_rel_path: string | null;
+        model: string | null;
+      }>).map((row) => mapImageRowToClient(row));
+      json(ctx.res, 200, { ok: true, images });
+    }),
+    route("GET", "/api/images/:id/file", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const imageId = ctx.params.id;
+      const row = db
+        .prepare(
+          "SELECT user_id, local_rel_path FROM images WHERE id = ?"
+        )
+        .get(imageId) as
+        | { user_id: string; local_rel_path: string | null }
+        | undefined;
+      if (!row || row.user_id !== userId) {
+        throw new HttpError(404, "Image not found.");
+      }
+      const rel = row.local_rel_path?.trim();
+      if (!rel) {
+        throw new HttpError(404, "Image file not available.");
+      }
+      let bytes: Buffer;
+      try {
+        bytes = readGeneratedImageBytes(rel);
+      } catch {
+        throw new HttpError(404, "Image file not found.");
+      }
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", "image/png");
+      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.end(bytes);
+    }),
+    route("DELETE", "/api/images/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const imageId = ctx.params.id;
+      const row = db
+        .prepare(
+          "SELECT user_id, local_rel_path FROM images WHERE id = ? AND user_id = ?"
+        )
+        .get(imageId, userId) as
+        | { user_id: string; local_rel_path: string | null }
+        | undefined;
+      if (!row) {
+        throw new HttpError(404, "Image not found.");
+      }
+      db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+        imageId,
+        userId
+      );
+      const rel = row.local_rel_path?.trim();
+      if (rel) {
+        try {
+          const absolute = resolveAbsoluteUnderDataRoot(rel);
+          if (existsSync(absolute)) {
+            unlinkSync(absolute);
+          }
+        } catch (error) {
+          console.error(
+            `[images] orphan file after DB delete imageId=${imageId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
+      json(ctx.res, 200, { ok: true });
     }),
     route("POST", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -2337,14 +2568,6 @@ setInterval(() => {
   void purgeInactiveAccounts();
 }, INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS);
 
-// Periodic purge of generated-image rows past their 30-day retention. OpenAI
-// image URLs expire on their side long before this cutoff, so the rows are
-// just dead references by the time they age out.
-purgeExpiredImages(db);
-setInterval(() => {
-  purgeExpiredImages(db);
-}, GENERATED_IMAGE_CLEANUP_INTERVAL_MS);
-
 const server = createServer(async (req, res) => {
   try {
     setCorsHeaders(res, req.headers.origin as string | undefined);
@@ -2376,7 +2599,9 @@ const server = createServer(async (req, res) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    json(res, 400, {
+    const status =
+      error instanceof HttpError ? error.statusCode : 400;
+    json(res, status, {
       ok: false,
       error: message
     });

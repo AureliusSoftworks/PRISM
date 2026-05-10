@@ -16805,22 +16805,205 @@
   gap: 10px;
 }
 
-.imageGrid a {
-  display: block;
+.imageThumbWrap {
+  position: relative;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--line);
-  transition: transform 0.15s, border-color 0.15s;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
 }
 
-.imageGrid a:hover {
+.imageThumbWrap:hover,
+.imageThumbWrap:focus-within {
   border-color: var(--accent-ink);
   transform: scale(1.02);
 }
 
-.imageGrid img {
+.imageThumbMain {
+  display: block;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.imageThumbMain img {
   width: 100%;
   display: block;
+  vertical-align: middle;
+}
+
+.imageThumbActions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.imageThumbWrap:hover .imageThumbActions,
+.imageThumbWrap:focus-within .imageThumbActions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .imageThumbActions {
+    opacity: 0.94;
+    pointer-events: auto;
+  }
+}
+
+.imageThumbIconBtn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--fg);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  line-height: 1;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.12s ease;
+}
+
+.imageThumbIconBtn:hover,
+.imageThumbIconBtn:focus-visible {
+  border-color: var(--accent-ink);
+  outline: none;
+}
+
+.imageLightboxBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 62%, transparent);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  animation: imageLightboxBackdropIn 0.18s ease-out;
+}
+
+@keyframes imageLightboxBackdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.imageLightboxDialog {
+  position: relative;
+  max-width: min(96vw, 1080px);
+  max-height: min(92vh, 920px);
+  display: grid;
+  place-items: center;
+  animation: imageLightboxDialogIn 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@keyframes imageLightboxDialogIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.imageLightboxClose {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  box-shadow: var(--shadow-lg);
+  transition:
+    border-color 0.15s ease,
+    transform 0.12s ease;
+}
+
+.imageLightboxClose:hover,
+.imageLightboxClose:focus-visible {
+  border-color: var(--accent-ink);
+  outline: none;
+}
+
+.imageLightboxImg {
+  max-width: min(92vw, 1040px);
+  max-height: min(88vh, 880px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.35),
+    0 10px 28px rgba(0, 0, 0, 0.22);
+}
+
+.imageBotDirectory {
+  list-style: none;
+  margin: 0 0 12px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.imageBotDirectoryRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.imageBotDirectoryRow:hover {
+  border-color: var(--accent-ink);
+}
+
+.imageBotDirectoryCount {
+  font-size: 12px;
+  opacity: 0.72;
 }
 
 /* Mobile-only menu toggle. Hidden on desktop. */
@@ -18510,7 +18693,7 @@
   .modeControl:hover:not(:active):not(:focus-visible),
   .accountLogoutButton:hover:not(:disabled):not(:active):not(:focus-visible),
   .dangerButton:hover:not(:disabled):not(:active):not(:focus-visible),
-  .imageGrid a:hover:not(:active):not(:focus-visible) {
+  .imageThumbWrap:hover:not(:active):not(:focus-visible) {
     background: transparent !important;
     border-color: var(--line) !important;
     color: inherit !important;

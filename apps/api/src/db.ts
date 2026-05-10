@@ -183,12 +183,15 @@ export function createDatabase(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       conversation_id TEXT,
+      bot_id TEXT,
       prompt TEXT NOT NULL,
       revised_prompt TEXT,
       url TEXT NOT NULL,
       size TEXT NOT NULL DEFAULT '1024x1024',
       quality TEXT NOT NULL DEFAULT 'standard',
       provider TEXT NOT NULL DEFAULT 'openai',
+      local_rel_path TEXT,
+      model TEXT NOT NULL DEFAULT 'dall-e-3',
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -568,6 +571,32 @@ export function createDatabase(): DatabaseSync {
       )
       AND tier = 'long_term';
   `);
+
+  const imageColumns = db
+    .prepare("PRAGMA table_info(images)")
+    .all() as Array<{ name: string }>;
+  const hasImageBotIdColumn = imageColumns.some(
+    (column) => column.name === "bot_id"
+  );
+  if (!hasImageBotIdColumn) {
+    db.exec("ALTER TABLE images ADD COLUMN bot_id TEXT;");
+  }
+
+  const hasImageLocalRelPathColumn = imageColumns.some(
+    (column) => column.name === "local_rel_path"
+  );
+  if (!hasImageLocalRelPathColumn) {
+    db.exec("ALTER TABLE images ADD COLUMN local_rel_path TEXT;");
+  }
+
+  const hasImageModelColumn = imageColumns.some(
+    (column) => column.name === "model"
+  );
+  if (!hasImageModelColumn) {
+    db.exec(
+      "ALTER TABLE images ADD COLUMN model TEXT NOT NULL DEFAULT 'dall-e-3';"
+    );
+  }
 
   // Migrate existing DBs to the bots.color and bots.glyph columns used
   // for the visual identifier that appears on the bot card and messages.

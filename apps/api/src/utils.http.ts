@@ -12,6 +12,16 @@ export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(raw);
 }
 
+export class HttpError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = "HttpError";
+    this.statusCode = statusCode;
+  }
+}
+
 export function json(
   res: ServerResponse,
   statusCode: number,

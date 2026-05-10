@@ -61,6 +61,7 @@ function createTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       conversation_id TEXT,
+      bot_id TEXT,
       prompt TEXT NOT NULL,
       url TEXT NOT NULL,
       created_at TEXT NOT NULL

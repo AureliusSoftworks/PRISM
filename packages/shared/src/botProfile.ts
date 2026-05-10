@@ -717,6 +717,84 @@ export function parseStoredBotPrompt(raw: string | null | undefined): {
   }
 }
 
+/** Default cap so persona metadata never crowds out the user's scene request. */
+export const DEFAULT_IMAGE_PERSONA_CONTEXT_MAX_CHARS = 900;
+
+function truncateImagePersonaProse(s: string, max: number): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, Math.max(0, max - 1))}…`;
+}
+
+/**
+ * Builds a short, image-model-safe persona prefix from a bot's stored profile.
+ * Pulls identity + appearance fields and a capped prose slice — not the full system prompt.
+ */
+export function buildImagePersonaContext(options: {
+  botName: string;
+  systemPrompt: string;
+  maxChars?: number;
+}): string {
+  const maxChars = options.maxChars ?? DEFAULT_IMAGE_PERSONA_CONTEXT_MAX_CHARS;
+  const { fields } = parseStoredBotPrompt(options.systemPrompt);
+  const name = options.botName.trim() || "Assistant";
+  const role = fields.identity.role.trim();
+  const background = fields.identity.background.trim();
+  const identityBits = [
+    background ? `Background: ${background}.` : "",
+    role ? `Role: ${role}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const appearanceBits = [
+    fields.appearance.description.trim(),
+    fields.appearance.style.trim(),
+    fields.appearance.presence.trim(),
+  ]
+    .filter(Boolean)
+    .join("; ");
+
+  const prosePurpose = fields.purpose.statement.trim();
+  const legacy = fields.purpose.legacyNotes.trim();
+  const voiceOrPersona = prosePurpose || legacy;
+  const proseCap = Math.min(280, maxChars);
+  const clippedVoice = voiceOrPersona
+    ? truncateImagePersonaProse(voiceOrPersona, proseCap)
+    : "";
+
+  const core = [
+    `Character: ${name}.`,
+    identityBits,
+    appearanceBits ? `Look and presence: ${appearanceBits}.` : "",
+    clippedVoice ? `Persona: ${clippedVoice}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return truncateImagePersonaProse(core, maxChars);
+}
+
+/**
+ * Prefixes the user's image prompt with {@link buildImagePersonaContext} for DALL·E.
+ */
+export function composeAugmentedImagePrompt(options: {
+  botName: string;
+  systemPrompt: string;
+  userPrompt: string;
+  maxPersonaChars?: number;
+}): string {
+  const prefix = buildImagePersonaContext({
+    botName: options.botName,
+    systemPrompt: options.systemPrompt,
+    maxChars: options.maxPersonaChars,
+  });
+  const user = options.userPrompt.trim();
+  if (!prefix) return user;
+  if (!user) return prefix;
+  return `${prefix}\n\nScene request: ${user}`;
+}
+
 function randomString(values: readonly string[]): string {
   return values[Math.floor(Math.random() * values.length)] ?? "";
 }

@@ -4880,7 +4880,24 @@ function botPrismGroup(hex: string | null | undefined): PrismGroupId {
 // first paint. Subsequent random seeds run only when the Bots panel opens
 // in create mode before the user has typed anything — closing the panel and
 // reopening preserves picks + text (see bots-panel seed useEffect below).
-interface ImageRecord { id: string; prompt: string; url: string; created_at: string; }
+interface ImageRecord {
+  id: string;
+  prompt: string;
+  url: string;
+  createdAt: string;
+  botId?: string | null;
+  /** Prefer for rendering — points at authenticated `/api/images/:id/file` when durably stored. */
+  displayUrl?: string;
+  hasLocalFile?: boolean;
+  revisedPrompt?: string | null;
+  size?: string;
+  quality?: string;
+  provider?: string;
+  model?: string | null;
+  localRelPath?: string | null;
+}
+
+type ImagePanelScope = "all" | "bot";
 
 const DEFAULT_ASSISTANT_NAME = "Prism";
 const PRISM_MESSAGE_ROLE_LETTERS = ["P", "R", "I", "S", "M"] as const;
@@ -5450,7 +5467,7 @@ function isPrimaryPointerDismissal(event: MouseEvent | PointerEvent): boolean {
   return event.button === 0;
 }
 
-async function api<T>(path: string, options?: RequestInit): Promise<T> {
+function authHeadersForFetch(): HeadersInit {
   let nativeSessionToken: string | null = null;
   let clientAccessToken: string | null = null;
   if (typeof window !== "undefined") {
@@ -5462,10 +5479,66 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
       clientAccessToken = null;
     }
   }
-  const headers: HeadersInit = {
-    "content-type": "application/json",
+  return {
     ...(nativeSessionToken ? { authorization: `Bearer ${nativeSessionToken}` } : {}),
     ...(clientAccessToken ? { "x-prism-client-access": clientAccessToken } : {}),
+  };
+}
+
+async function fetchAuthenticated(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(path, {
+    credentials: "include",
+    headers: {
+      ...authHeadersForFetch(),
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  });
+}
+
+function sanitizeForFilenameSegment(raw: string): string {
+  const cleaned = raw.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned.length > 0 ? cleaned.slice(0, 96) : "image";
+}
+
+async function downloadBotImageFile(
+  img: ImageRecord,
+  botDisplayName: string,
+): Promise<void> {
+  const path = img.displayUrl ?? img.url;
+  const res = await fetchAuthenticated(path);
+  if (!res.ok) {
+    const raw = await res.text();
+    let message = raw.trim() || `Download failed (${res.status})`;
+    try {
+      const payload = JSON.parse(raw) as { error?: string };
+      if (payload.error) message = payload.error;
+    } catch {
+      // Keep constructed message when body is not JSON.
+    }
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  const stamp = sanitizeForFilenameSegment(
+    (img.createdAt ?? img.id).replace(/[:.]/g, "-"),
+  );
+  const nameBase = sanitizeForFilenameSegment(botDisplayName);
+  const filename = `prism-${nameBase}-image-${stamp}.png`;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: HeadersInit = {
+    "content-type": "application/json",
+    ...authHeadersForFetch(),
     ...(options?.headers ?? {}),
   };
   const res = await fetch(path, {
@@ -11900,7 +11973,30 @@ function HomeContent(): React.JSX.Element {
   const [chatBotOverride, setChatBotOverride] =
     useState<string | null | undefined>(undefined);
   const [images, setImages] = useState<ImageRecord[]>([]);
+  const [imageLightbox, setImageLightbox] = useState<ImageRecord | null>(null);
   const [imagePrompt, setImagePrompt] = useState("");
+  const [imagePanelScope, setImagePanelScope] = useState<ImagePanelScope>("all");
+  const [imagePanelBotId, setImagePanelBotId] = useState<string | null>(null);
+  const imagePanelBot =
+    imagePanelBotId != null
+      ? bots.find((candidate) => candidate.id === imagePanelBotId) ?? null
+      : null;
+  const imageBotDirectoryEntries = useMemo(() => {
+    if (imagePanelScope !== "all") return [];
+    const tallies = new Map<string, number>();
+    for (const img of images) {
+      const bid = img.botId ?? null;
+      if (!bid) continue;
+      tallies.set(bid, (tallies.get(bid) ?? 0) + 1);
+    }
+    return [...tallies.entries()]
+      .map(([botId, count]) => ({
+        botId,
+        count,
+        name: bots.find((b) => b.id === botId)?.name ?? "Bot",
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [imagePanelScope, images, bots]);
   // Single bot-form state used for BOTH create and edit modes. The top
   // form in the Bots panel is the only place a color + glyph picker ever
   // renders; when the user clicks a bot's pencil, we hydrate these same
@@ -12486,8 +12582,7 @@ function HomeContent(): React.JSX.Element {
     // A stale "Save failed" shouldn't greet the user next time they open
     // the panel. The composer's `error` state is unaffected.
     setPanelError(null);
-    // Drop any selected color group so reopening the Bots drawer always
-    // starts on the dashboard root rather than a stale drilled-in view.
+    setImageLightbox(null);
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     setBotLibraryExpanded(false);
     setBotPanelLibraryEnabled(true);
@@ -15622,7 +15717,68 @@ function HomeContent(): React.JSX.Element {
     });
   }
   async function refreshBots() { const d = await api<{ bots: Bot[] }>("/api/bots"); setBots(d.bots); }
-  async function refreshImages() { const d = await api<{ images: ImageRecord[] }>("/api/images"); setImages(d.images); }
+  async function refreshImages(botFilter?: string | null) {
+    const path =
+      typeof botFilter === "string" && botFilter.length > 0
+        ? `/api/images?botId=${encodeURIComponent(botFilter)}`
+        : "/api/images";
+    const d = await api<{ images: ImageRecord[] }>(path);
+    setImages(d.images);
+  }
+
+  async function deleteGalleryImage(img: ImageRecord) {
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      await api(`/api/images/${encodeURIComponent(img.id)}`, { method: "DELETE" });
+      setImageLightbox((current) => (current?.id === img.id ? null : current));
+      await refreshImages(
+        imagePanelScope === "bot" && imagePanelBotId ? imagePanelBotId : null,
+      );
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Could not delete image.");
+    }
+  }
+
+  async function downloadGalleryImage(img: ImageRecord) {
+    setPanelError(null);
+    try {
+      const resolvedBot =
+        img.botId != null ? bots.find((b) => b.id === img.botId) : undefined;
+      const botLabel =
+        resolvedBot?.name ??
+        (imagePanelScope === "bot" ? imagePanelBot?.name : null) ??
+        "bot";
+      await downloadBotImageFile(img, botLabel);
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Could not download image.");
+    }
+  }
+
+  useEffect(() => {
+    if (!imageLightbox) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setImageLightbox(null);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [imageLightbox]);
+  async function openAllImagesPanel() {
+    setImagePanelScope("all");
+    setImagePanelBotId(null);
+    await refreshImages();
+    openRightPanel("images");
+  }
+
+  async function openImagesPanelForBot(bot: Bot) {
+    setImagePanelScope("bot");
+    setImagePanelBotId(bot.id);
+    await refreshImages(bot.id);
+    openRightPanel("images");
+  }
 
   async function runMemoryTransition(
     work: () => void | Promise<void>,
@@ -21200,10 +21356,43 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function generateImg(e: React.FormEvent) {
-    e.preventDefault(); if (!imagePrompt.trim()) return; setBusy(true); setPanelError(null);
-    try { await api("/api/images/generate", { method: "POST", body: JSON.stringify({ prompt: imagePrompt, conversationId: selectedId }) }); setImagePrompt(""); await refreshImages(); }
-    catch (err) { setPanelError(err instanceof Error ? err.message : "Image gen failed."); }
-    finally { setBusy(false); }
+    e.preventDefault();
+    if (!imagePrompt.trim()) return;
+    const scopeBotId =
+      imagePanelScope === "bot" && imagePanelBotId
+        ? imagePanelBotId
+        : activeBot?.id ?? null;
+    if (!selectedId && !scopeBotId) {
+      setPanelError(
+        "Select a bot in the Bots hub or open a Sandbox chat before generating images."
+      );
+      return;
+    }
+    setBusy(true);
+    setPanelError(null);
+    try {
+      const body: Record<string, unknown> = {
+        prompt: imagePrompt,
+      };
+      if (selectedId) {
+        body.conversationId = selectedId;
+      }
+      if (scopeBotId) {
+        body.botId = scopeBotId;
+      }
+      await api("/api/images/generate", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setImagePrompt("");
+      await refreshImages(
+        imagePanelScope === "bot" && imagePanelBotId ? imagePanelBotId : null
+      );
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Image gen failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const secondaryOllamaUiStatus: SecondaryOllamaUiStatus =
@@ -22159,7 +22348,6 @@ function HomeContent(): React.JSX.Element {
       view !== "chat" &&
       !defaultConversationUsesPrismIdentity &&
       !sandboxDefaultBotView;
-    const showChatModeStyleButtons = view === "chat" || view === "sandbox";
     const showToolbarMemoriesButton = view === "chat" || view === "sandbox";
     const showChatThemeButton = view === "chat" || view === "sandbox";
     const showSandboxHubButton = view === "chat" || view === "sandbox";
@@ -22184,7 +22372,11 @@ function HomeContent(): React.JSX.Element {
     };
     const handleImages = () => {
       closeMenu();
-      openRightPanel("images");
+      if (view === "sandbox" && activeBot) {
+        void openImagesPanelForBot(activeBot);
+        return;
+      }
+      void openAllImagesPanel();
     };
     const handleMemories = () => {
       closeMenu();
@@ -22320,7 +22512,7 @@ function HomeContent(): React.JSX.Element {
               <ZenFocusGlyph />
             </button>
           ) : null}
-          {showChatModeStyleButtons ? (
+          {view === "sandbox" ? (
             <button
               type="button"
               className={styles.headerIconButton}
@@ -22443,7 +22635,7 @@ function HomeContent(): React.JSX.Element {
                 {zenPresentationActive ? "Exit focus layout" : "Focus layout"}
               </button>
             ) : null}
-            {showChatModeStyleButtons && (
+            {view === "sandbox" ? (
               <button
                 type="button"
                 role="menuitem"
@@ -22456,7 +22648,7 @@ function HomeContent(): React.JSX.Element {
               >
                 Images
               </button>
-            )}
+            ) : null}
             {!showSettingsOnly && canBotActions && (
               <button
                 type="button"
@@ -23409,12 +23601,11 @@ function HomeContent(): React.JSX.Element {
   };
 
   // ── Shared right-hand panels (Settings / Bots / Images / Memories) ──
-  // Both the Chat shell and the Sandbox shell reach these drawers
-  // via the sidebar footer. Extracted into a single helper so the
-  // surfaces stay in lockstep — a fix to the Bots panel shouldn't need
-  // to be applied twice, and the shell backdrop click behaviour must
-  // match in both modes so the overlay feels like one system, not two
-  // parallel implementations.
+  // Settings/Bots/Memories still open from multiple shells (sidebar footer,
+  // hub utilities, header). Images is intentionally Sandbox-first: the header
+  // glyph only appears in Sandbox, while the panel can still open in "all
+  // images" scope from code paths that call `openAllImagesPanel`. Shared
+  // overlay + backdrop behaviour keeps the drawers feeling like one system.
   //
   // Returned JSX is a fragment so the helper plugs straight into the
   // existing render tree without introducing a wrapper element that
@@ -25284,13 +25475,38 @@ function HomeContent(): React.JSX.Element {
         // invariant by hiding the form when LOCAL is selected; past images
         // stay visible so the gallery remains useful.
         const canGenerate = settings?.preferredProvider === "openai";
+        const hasBotImageContext =
+          Boolean(imagePanelScope === "bot" && imagePanelBotId) ||
+          Boolean(activeBot?.id);
         return (
           <div
             className={`${styles.panel} ${styles.panelImages}`}
             data-closing={panelClosing ? "true" : undefined}
+            data-image-scope={imagePanelScope}
           >
             <div className={styles.panelHeader}>
-              <h3>Images</h3>
+              <div className={styles.panelHeaderTitle}>
+                {imagePanelScope === "bot" ? (
+                  <button
+                    type="button"
+                    className={styles.panelBack}
+                    onClick={() => {
+                      setImagePanelScope("all");
+                      setImagePanelBotId(null);
+                      void refreshImages();
+                    }}
+                    aria-label="Back to all images"
+                    data-glyph-tooltip="Back to all images"
+                  >
+                    ←
+                  </button>
+                ) : null}
+                <h3>
+                  {imagePanelScope === "bot" && imagePanelBot
+                    ? `${imagePanelBot.name} — images`
+                    : "Images"}
+                </h3>
+              </div>
               <button
                 type="button"
                 className={styles.panelClose}
@@ -25303,8 +25519,15 @@ function HomeContent(): React.JSX.Element {
             </div>
             {canGenerate ? (
               <form className={styles.form} onSubmit={generateImg}>
-                <input required placeholder="Describe an image..." value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} />
-                <button type="submit" disabled={busy}>{busy ? "Generating..." : "Generate"}</button>
+                <input
+                  required
+                  placeholder="Describe an image..."
+                  value={imagePrompt}
+                  onChange={(e) => setImagePrompt(e.target.value)}
+                />
+                <button type="submit" disabled={busy}>
+                  {busy ? "Generating..." : "Generate"}
+                </button>
               </form>
             ) : (
               <div className={styles.imagesGate} role="note">
@@ -25316,16 +25539,111 @@ function HomeContent(): React.JSX.Element {
                 </p>
               </div>
             )}
-            {images.length > 0 && <h4 className={styles.sectionLabel}>Recent</h4>}
+            {canGenerate && !selectedId && !hasBotImageContext ? (
+              <p className={styles.muted} role="note">
+                Select a bot in the Bots hub to generate bot-scoped images without a chat, or open
+                a Sandbox conversation to attach images to a thread.
+              </p>
+            ) : null}
+            {imagePanelScope === "all" && imageBotDirectoryEntries.length > 0 ? (
+              <>
+                <h4 className={styles.sectionLabel}>By bot</h4>
+                <ul className={styles.imageBotDirectory} aria-label="Bots with saved images">
+                  {imageBotDirectoryEntries.map((row) => (
+                    <li key={row.botId}>
+                      <button
+                        type="button"
+                        className={styles.imageBotDirectoryRow}
+                        onClick={() => {
+                          setImagePanelScope("bot");
+                          setImagePanelBotId(row.botId);
+                          void refreshImages(row.botId);
+                        }}
+                      >
+                        <span>{row.name}</span>
+                        <span className={styles.imageBotDirectoryCount}>{row.count}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            {images.length > 0 ? (
+              <h4 className={styles.sectionLabel}>
+                {imagePanelScope === "bot" ? "This bot" : "All images"}
+              </h4>
+            ) : null}
             <div className={styles.imageGrid}>
-              {images.map(img => (
-                <a key={img.id} href={img.url} target="_blank" rel="noreferrer">
-                  {/* User-generated remote URLs are rendered directly in the gallery surface. */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.url} alt={img.prompt} />
-                </a>
+              {images.map((img) => (
+                <div key={img.id} className={styles.imageThumbWrap}>
+                  <button
+                    type="button"
+                    className={styles.imageThumbMain}
+                    onClick={() => setImageLightbox(img)}
+                    aria-label="View image larger"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.displayUrl ?? img.url} alt={img.prompt} />
+                  </button>
+                  <div className={styles.imageThumbActions}>
+                    <button
+                      type="button"
+                      className={styles.imageThumbIconBtn}
+                      aria-label="Download image"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        event.preventDefault();
+                        void downloadGalleryImage(img);
+                      }}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.imageThumbIconBtn}
+                      aria-label="Delete image"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        event.preventDefault();
+                        void deleteGalleryImage(img);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
+            {imageLightbox ? (
+              <div
+                className={styles.imageLightboxBackdrop}
+                onClick={() => setImageLightbox(null)}
+                role="presentation"
+              >
+                <div
+                  className={styles.imageLightboxDialog}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={imageLightbox.prompt?.trim() ? imageLightbox.prompt : "Generated image"}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    className={styles.imageLightboxClose}
+                    onClick={() => setImageLightbox(null)}
+                    aria-label="Close image preview"
+                  >
+                    ×
+                  </button>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={imageLightbox.displayUrl ?? imageLightbox.url}
+                    alt={imageLightbox.prompt}
+                    className={styles.imageLightboxImg}
+                  />
+                </div>
+              </div>
+            ) : null}
             {/* Scoped to panelError so a chat-send 401 from the composer
                 doesn't double up inside the Images drawer. */}
             {panelError && <p className={styles.error} role="alert">{panelError}</p>}
@@ -26829,7 +27147,6 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.hubUtilityActions}>
             <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
             <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
-            <button type="button" onClick={() => openRightPanel("images")}>Images</button>
             <button type="button" onClick={() => void openAllMemoriesPanel()}>Memories</button>
           </div>
         </div>
@@ -27975,7 +28292,6 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.sidebarFooter}>
             <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
             <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
-            <button type="button" onClick={() => openRightPanel("images")}>Images</button>
             <button type="button" onClick={() => void openAllMemoriesPanel()}>Memories</button>
           </div>
         )}

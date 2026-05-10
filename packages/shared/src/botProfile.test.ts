@@ -5,6 +5,9 @@ import {
   BOT_PROFILE_META_END,
   BOT_PROFILE_META_START,
   composeBotProfileProse,
+  composeAugmentedImagePrompt,
+  buildImagePersonaContext,
+  DEFAULT_BOT_PROFILE_FIELDS,
   listBotProfileFacts,
   parseStoredBotPrompt,
   randomBotProfile,
@@ -359,5 +362,48 @@ describe("bot profile serialization", () => {
       parsed.facts.customFacts[0]?.rowId && parsed.facts.customFacts[0].rowId.length > 0,
       "expected a generated rowId"
     );
+  });
+});
+
+describe("image persona context", () => {
+  it("falls back to the bot name when the stored profile is empty", () => {
+    const ctx = buildImagePersonaContext({
+      botName: "Pat",
+      systemPrompt: "",
+      maxChars: 200,
+    });
+    assert.equal(ctx, "Character: Pat.");
+  });
+
+  it("includes appearance and caps long persona prose", () => {
+    const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+    fields.appearance.description = "Tall, silver hair";
+    fields.appearance.style = "cozy knits";
+    fields.identity.role = "librarian";
+    fields.purpose.statement = "x".repeat(400);
+    const stored = serializeStoredBotPrompt(fields, "River");
+    const ctx = buildImagePersonaContext({
+      botName: "River",
+      systemPrompt: stored,
+      maxChars: 500,
+    });
+    assert.ok(ctx.includes("River"));
+    assert.ok(ctx.includes("librarian"));
+    assert.ok(ctx.includes("silver hair"));
+    assert.ok(ctx.length <= 500);
+    assert.ok(!ctx.includes("x".repeat(300)));
+  });
+
+  it("composeAugmentedImagePrompt appends the scene request", () => {
+    const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+    fields.appearance.description = "round glasses";
+    const stored = serializeStoredBotPrompt(fields, "Mo");
+    const full = composeAugmentedImagePrompt({
+      botName: "Mo",
+      systemPrompt: stored,
+      userPrompt: "reading under a tree",
+    });
+    assert.ok(full.includes("Scene request: reading under a tree"));
+    assert.ok(full.startsWith("Character:"));
   });
 });

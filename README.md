@@ -459,6 +459,8 @@ docker compose cp ./backup-localai.db api:/app/apps/api/data/localai.db
 docker compose restart api
 ```
 
+**Generated images** are also part of local data: each ONLINE DALL·E run downloads the image bytes at creation time into **`generated-images/{userId}/`** under the data root. When **`LOCALAI_DATA_DIR`** is set (native server apps and some deployments), that tree is anchored there **even if `DB_PATH` points elsewhere**. Rows in SQLite store a relative path (`local_rel_path`) and a **`/api/images/…/file`** URL for display — not the expiring provider-hosted link.
+
 ### Qdrant
 ```bash
 # Qdrant data lives in the `qdrant_data` Docker volume

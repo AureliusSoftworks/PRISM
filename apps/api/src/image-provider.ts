@@ -1,6 +1,9 @@
 import { getAppConfig } from "@localai/config";
 import { readOpenAiErrorMessage } from "./providers.ts";
 
+/** Stored on each `images.model` row for provenance / API responses. */
+export const DALLE_IMAGE_MODEL_ID = "dall-e-3";
+
 export interface ImageGenerationResult {
   url: string;
   revisedPrompt: string;
@@ -26,7 +29,7 @@ export async function generateImage(
       authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: "dall-e-3",
+      model: DALLE_IMAGE_MODEL_ID,
       prompt,
       n: 1,
       size,

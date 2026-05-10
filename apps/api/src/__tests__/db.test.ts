@@ -101,6 +101,63 @@ describe("createDatabase bot export hash migration", () => {
   });
 });
 
+describe("createDatabase images.bot_id migration", () => {
+  it("adds bot_id and round-trips inserts", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "localai-db-images-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "images.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      db.prepare(
+        "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        "user-1",
+        "user-1@example.com",
+        "User 1",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      );
+      const columns = db
+        .prepare("PRAGMA table_info(images)")
+        .all() as Array<{ name: string }>;
+      assert.ok(columns.some((column) => column.name === "bot_id"));
+      assert.ok(columns.some((column) => column.name === "local_rel_path"));
+      assert.ok(columns.some((column) => column.name === "model"));
+      db.prepare(
+        "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, NULL, ?)"
+      ).run(
+        "img-1",
+        "user-1",
+        null,
+        "bot-9",
+        "cat",
+        null,
+        "http://example.com/x.png",
+        "1024x1024",
+        "standard",
+        "dall-e-3",
+        "2026-01-02T00:00:00.000Z"
+      );
+      const row = db
+        .prepare("SELECT bot_id FROM images WHERE id = ?")
+        .get("img-1") as { bot_id: string | null } | undefined;
+      assert.equal(row?.bot_id, "bot-9");
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 function restoreEnv(name: string, value: string | undefined): void {
   if (value === undefined) {
     delete process.env[name];
