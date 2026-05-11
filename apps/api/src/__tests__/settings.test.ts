@@ -28,7 +28,11 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     preferredLocalModel: null,
     preferredOnlineModel: null,
     lenientLocalFallbackModel: null,
+    lenientLocalImageFallbackModel: null,
     secondaryOllamaHost: null,
+    comfyUiHost: null,
+    preferredLocalImageModel: null,
+    preferredOpenAiImageModel: null,
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
@@ -268,6 +272,20 @@ describe("resolveNextSettings — preferred auto models", () => {
     );
     assert.equal(cleared.lenientLocalFallbackModel, null);
   });
+
+  it("stores and clears the lenient local image fallback model", () => {
+    const stored = resolveNextSettings(
+      { lenientLocalImageFallbackModel: " comfyui:flux.safetensors " },
+      baseline()
+    );
+    assert.equal(stored.lenientLocalImageFallbackModel, "comfyui:flux.safetensors");
+
+    const cleared = resolveNextSettings(
+      { lenientLocalImageFallbackModel: " " },
+      baseline({ lenientLocalImageFallbackModel: "comfyui:flux.safetensors" })
+    );
+    assert.equal(cleared.lenientLocalImageFallbackModel, null);
+  });
 });
 
 describe("parseHiddenBotModelIds", () => {
@@ -330,6 +348,71 @@ describe("resolveNextSettings — secondaryOllamaHost", () => {
         ),
       /different IP address/
     );
+  });
+});
+
+describe("resolveNextSettings — comfyUiHost", () => {
+  it("normalizes host + trims slashes", () => {
+    const next = resolveNextSettings(
+      { comfyUiHost: "192.168.1.10:8188/" },
+      baseline()
+    );
+    assert.equal(next.comfyUiHost, "http://192.168.1.10:8188");
+  });
+
+  it("clears when empty string or null", () => {
+    const current = baseline({ comfyUiHost: "http://127.0.0.1:8188" });
+    assert.equal(resolveNextSettings({ comfyUiHost: "" }, current).comfyUiHost, null);
+    assert.equal(resolveNextSettings({ comfyUiHost: null }, current).comfyUiHost, null);
+  });
+
+  it("keeps stored value when field missing or invalid type", () => {
+    const current = baseline({ comfyUiHost: "http://127.0.0.1:8188" });
+    assert.equal(resolveNextSettings({}, current).comfyUiHost, current.comfyUiHost);
+    assert.equal(
+      resolveNextSettings({ comfyUiHost: 8188 }, current).comfyUiHost,
+      current.comfyUiHost
+    );
+  });
+
+  it("throws on malformed URL", () => {
+    assert.throws(() => resolveNextSettings({ comfyUiHost: "http://" }, baseline()), /ComfyUI host/);
+  });
+});
+
+describe("resolveNextSettings — image panel model picks", () => {
+  it("stores preferred local image model id", () => {
+    const next = resolveNextSettings(
+      { preferredLocalImageModel: "x/flux2-klein-4b" },
+      baseline()
+    );
+    assert.equal(next.preferredLocalImageModel, "x/flux2-klein-4b");
+  });
+
+  it("stores preferred OpenAI image model id", () => {
+    const next = resolveNextSettings(
+      { preferredOpenAiImageModel: "dall-e-2" },
+      baseline()
+    );
+    assert.equal(next.preferredOpenAiImageModel, "dall-e-2");
+  });
+
+  it("clears local image model when given empty string", () => {
+    const current = baseline({ preferredLocalImageModel: "old" });
+    assert.equal(
+      resolveNextSettings({ preferredLocalImageModel: "" }, current).preferredLocalImageModel,
+      null
+    );
+  });
+
+  it("keeps stored ids when the patch omits them", () => {
+    const current = baseline({
+      preferredLocalImageModel: "comfyui:abc.safetensors",
+      preferredOpenAiImageModel: "dall-e-3",
+    });
+    const next = resolveNextSettings({ theme: "light" }, current);
+    assert.equal(next.preferredLocalImageModel, "comfyui:abc.safetensors");
+    assert.equal(next.preferredOpenAiImageModel, "dall-e-3");
   });
 });
 

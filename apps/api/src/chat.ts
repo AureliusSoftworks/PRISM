@@ -58,8 +58,26 @@ import {
   parseAssistantPrismTools,
   serializeAssistantToolPayload,
 } from "@localai/shared";
+import {
+  runAssistantSentImageGeneration,
+  type AssistantSentImageUserPrefs,
+} from "./assistant-sent-image.ts";
 
 const config = getAppConfig();
+
+const DEFAULT_ASSISTANT_IMAGE_USER_PREFS: AssistantSentImageUserPrefs = {
+  preferredLocalImageModel: null,
+  preferredOpenAiImageModel: null,
+  lenientLocalImageFallbackModel: null,
+  comfyuiHost: null,
+  secondaryOllamaHost: null,
+};
+
+function assistantImagePrefsForTurn(
+  settings: UserChatSettings
+): AssistantSentImageUserPrefs {
+  return settings.assistantImageUserPrefs ?? DEFAULT_ASSISTANT_IMAGE_USER_PREFS;
+}
 
 /** POST /api/chat returns this shape; `conversationStarters` is present only after a starter turn. */
 export interface ProcessChatMessageResult {
@@ -1211,6 +1229,12 @@ export interface UserChatSettings {
    * the server can't tell what the client meant.
    */
   mode?: ChatMode;
+  /**
+   * Saved image defaults (local + OpenAI + Comfy/Ollama routing) for
+   * assistant-initiated `sendGeneratedImage` turns. Optional so tests and
+   * older callers keep working.
+   */
+  assistantImageUserPrefs?: AssistantSentImageUserPrefs;
   sessionEnding?: boolean;
   /** When true, skip automatic latest-chat reuse and force a new conversation row. */
   forceNewConversation?: boolean;
@@ -1229,11 +1253,49 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   `${PRISM_TOOL_END}`,
   "Rules:",
   "- Keep normal conversation in plain prose BEFORE the delimiter block.",
+  "- Do NOT wrap the Prism <<<PRISM_TOOL>>> … <<<END_PRISM_TOOL>>> block in Markdown code fences (` ```json ` … ` ``` `): that leaves empty code boxes in chat.",
+  "- Do NOT paste the tool JSON alone on its own line; use the Prism block (or a single fenced code block). Bare JSON shows up as junk text in chat.",
   "- AskQuestion represents one question in this turn; never output a quiz or multi-question list.",
   "- Inside JSON only: emit exactly three options with ids a, b, c (distinct).",
   "- In JSON, `prompt` is ONLY the short chooser line shown above the chip row (never the main quiz question).",
   "- Labels are what the USER sends verbatim when they tap; keep each short (single clause).",
+  "",
+  "Optional — send a generated image for the user (saved to their library alongside manual images):",
+  "- Add a `sendGeneratedImage` object with a single `prompt` field: a concrete image-model description (scene, style, subject).",
+  "- You may combine AskQuestion and sendGeneratedImage in one JSON object: {\"v\":1,\"askQuestion\":{...},\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
+  "- Or image-only: {\"v\":1,\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
+  "- Use sparingly when a picture truly helps; never use for every turn.",
+  "",
+  "Do NOT use Hugging Face / LM Studio style tool tokens such as <|sendGeneratedImage|> — the supported, reliable path is the Prism block (or one fenced / trailing JSON envelope as above). Prefer that format every time.",
 ].join("\n");
+
+/** Injected only when the turn text references `prism-bot://` links (Teams-style @ mentions). */
+const PRISM_BOT_MENTION_SYNTAX_HINT =
+  "The user may @-mention a specific Prism bot with markdown like [DisplayName](prism-bot://botId). " +
+  "botId may be URL-encoded (%…). Treat DisplayName as the label they used for that bot. " +
+  "Separate memory hints may be pulled from each mentioned bot's stored facts when retrieval finds any.";
+
+/** Visible to tests — parses `prism-bot://…` hrefs from markdown (composer @-mentions round-trip as this). */
+export function extractPrismBotMentionIdsFromMessage(raw: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /prism-bot:\/\/([^)\s]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    let id = (m[1] ?? "").trim();
+    if (!id) continue;
+    try {
+      id = decodeURIComponent(id);
+    } catch {
+      /* keep encoded token */
+    }
+    const normalized = id.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
 
 const ASKQUESTION_REQUEST_PATTERN =
   /\b(ask\s+me\s+(?:a|another)\s+question|quiz(?:\s+me)?|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
@@ -2073,6 +2135,9 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         ? { moodConfidence: assembled.moodConfidence }
         : {}),
       ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+      ...(assembled.sentGeneratedImage
+        ? { sentGeneratedImage: assembled.sentGeneratedImage }
+        : {}),
     };
   });
 }
@@ -2442,6 +2507,12 @@ function buildPromptMessages(args: {
         .join("\n")}`,
     });
   }
+  const transcriptMentionsPrismBot =
+    args.userMessage.includes("prism-bot://") ||
+    args.chatHistory.some((item) => item.content.includes("prism-bot://"));
+  if (transcriptMentionsPrismBot) {
+    promptMessages.push({ role: "system", content: PRISM_BOT_MENTION_SYNTAX_HINT });
+  }
   promptMessages.push(
     ...args.chatHistory.map((item) => ({
       role: item.role,
@@ -2586,6 +2657,33 @@ async function handleCompanionChatTurn(args: {
       activeMemoryBotId,
       true
     );
+    const mentionedBotIds = extractPrismBotMentionIdsFromMessage(message);
+    const seenLine = new Set(
+      memoryLines.map((line) => line.trim().toLowerCase()).filter(Boolean)
+    );
+    for (const mentionId of mentionedBotIds) {
+      if (mentionId === activeMemoryBotId) continue;
+      try {
+        const scoped = await retrieveRelevantMemories(
+          db,
+          userId,
+          message,
+          userKey,
+          mentionId,
+          4
+        );
+        for (const mem of scoped) {
+          const t = mem.text.trim();
+          if (!t) continue;
+          const k = t.toLowerCase();
+          if (seenLine.has(k)) continue;
+          seenLine.add(k);
+          memoryLines.push(mem.text);
+        }
+      } catch {
+        /* best-effort augmentation */
+      }
+    }
   }
   const threadSummary =
     retrievalMode === "cross_thread"
@@ -2761,6 +2859,21 @@ export async function processChatMessage(
       toneDelta: turnEvaluation?.delta,
       repairSignal,
     });
+    const sendImgPromptInc = parsedAssistant.sendGeneratedImage?.prompt?.trim();
+    const sentGeneratedImageInc =
+      sendImgPromptInc === undefined || sendImgPromptInc.length === 0
+        ? undefined
+        : await runAssistantSentImageGeneration({
+            db,
+            userId,
+            mode,
+            conversationId: null,
+            botIdTriState: activeBotId,
+            captionPrompt: sendImgPromptInc,
+            preferredProvider: effectiveProvider,
+            openAiApiKey: settings.openAiApiKey,
+            prefs: assistantImagePrefsForTurn(settings),
+          });
     const assistantCreatedAt = new Date().toISOString();
     const activeBotName =
       typeof activeBotId === "string"
@@ -2777,6 +2890,7 @@ export async function processChatMessage(
       moodConfidence: assistantMood.confidence,
       ...(activeBotName ? { botName: activeBotName } : {}),
       ...(askQuestionForTurn ? { askQuestion: askQuestionForTurn } : {}),
+      ...(sentGeneratedImageInc ? { sentGeneratedImage: sentGeneratedImageInc } : {}),
     };
     const nextMessages: ChatMessage[] = [
       ...history,
@@ -3075,10 +3189,26 @@ export async function processChatMessage(
     botOpinion: existingBotOpinion,
     repairSignal,
   });
+  const sendImgPromptPersisted = parsedAssistant.sendGeneratedImage?.prompt?.trim();
+  const sentGeneratedImagePersisted =
+    sendImgPromptPersisted === undefined || sendImgPromptPersisted.length === 0
+      ? undefined
+      : await runAssistantSentImageGeneration({
+          db,
+          userId,
+          mode,
+          conversationId: activeConversationId,
+          botIdTriState: activeBotId,
+          captionPrompt: sendImgPromptPersisted,
+          preferredProvider: effectiveProvider,
+          openAiApiKey: settings.openAiApiKey,
+          prefs: assistantImagePrefsForTurn(settings),
+        });
   const toolPayloadStored = serializeAssistantToolPayload({
     askQuestion: askQuestionForTurn,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
+    sentGeneratedImage: sentGeneratedImagePersisted,
   });
   const assistantCreatedAt = new Date().toISOString();
   const assistantMessageId = randomId(12);

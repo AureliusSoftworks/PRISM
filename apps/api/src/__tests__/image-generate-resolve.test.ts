@@ -55,10 +55,11 @@ describe("resolveConversationForSandboxImageGenerate", () => {
     assert.equal(r.ok, true);
   });
 
-  it("rejects chat-mode rows", () => {
+  it("accepts chat-mode rows", () => {
     const db = makeConversationDb();
     const r = resolveConversationForSandboxImageGenerate(db, "u1", "c-chat");
-    assert.equal(r.ok, false);
+    assert.equal(r.ok, true);
+    if (r.ok) assert.equal(r.lockedBotId, null);
   });
 
   it("rejects missing conversations", () => {
@@ -183,13 +184,15 @@ describe("resolveStandaloneBotImageForGenerate", () => {
     });
   });
 
-  it("requires botId when there is no conversation", () => {
+  it("allows standalone generate without botId (uncategorized / PRISM general bucket)", () => {
     const db = makeDb();
     const r = resolveStandaloneBotImageForGenerate(db, "u1", undefined);
-    assert.equal(r.ok, false);
-    if (!r.ok) {
-      assert.match(r.message, /Select a bot or open a Sandbox chat/);
-    }
+    assert.deepEqual(r, {
+      ok: true,
+      conversationIdForInsert: null,
+      persistedBotId: null,
+      personaBotId: null,
+    });
   });
 
   it("rejects unknown bots", () => {
@@ -250,6 +253,17 @@ function makePersistenceIntegrationDb(): DatabaseSync {
     "2026-01-01T00:00:00.000Z"
   );
   db.prepare(
+    "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    "c-coffee",
+    "u1",
+    "Coffee",
+    "coffee",
+    null,
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
     "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)"
   ).run("bot-a", "u1", "A", "");
   db.prepare(
@@ -286,7 +300,7 @@ describe("resolveImageGeneratePersistence (POST /api/images/generate)", () => {
     }
   });
 
-  it("reject when neither conversation nor bot", () => {
+  it("standalone without bot: conversation_id null, bot_id null (uncategorized)", () => {
     const db = makePersistenceIntegrationDb();
     const r = resolveImageGeneratePersistence({
       db,
@@ -294,7 +308,12 @@ describe("resolveImageGeneratePersistence (POST /api/images/generate)", () => {
       conversationIdRaw: "",
       bodyBotId: undefined,
     });
-    assert.equal(r.ok, false);
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.conversationIdForInsert, null);
+      assert.equal(r.persistedBotId, null);
+      assert.equal(r.personaBotId, null);
+    }
   });
 
   it("with Sandbox conversation uses thread attribution when body botId omitted", () => {
@@ -313,17 +332,33 @@ describe("resolveImageGeneratePersistence (POST /api/images/generate)", () => {
     }
   });
 
-  it("rejects non-Sandbox conversation id", () => {
+  it("with Chat conversation allows linked generate (same attribution rules as Sandbox)", () => {
     const db = makePersistenceIntegrationDb();
     const r = resolveImageGeneratePersistence({
       db,
       userId: "u1",
       conversationIdRaw: "c-plain",
+      bodyBotId: undefined,
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.conversationIdForInsert, "c-plain");
+      assert.equal(r.persistedBotId, null);
+      assert.equal(r.personaBotId, null);
+    }
+  });
+
+  it("rejects Coffee-session conversation ids", () => {
+    const db = makePersistenceIntegrationDb();
+    const r = resolveImageGeneratePersistence({
+      db,
+      userId: "u1",
+      conversationIdRaw: "c-coffee",
       bodyBotId: "bot-a",
     });
     assert.equal(r.ok, false);
     if (!r.ok) {
-      assert.match(r.message, /Sandbox/);
+      assert.match(r.message, /Sandbox|Chat/i);
     }
   });
 });

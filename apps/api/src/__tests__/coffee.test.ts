@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   COFFEE_GROUP_MAX_SIZE,
   COFFEE_GROUP_MIN_SIZE,
+  buildCoffeeTableTuningAppendix,
   buildRouterPrompt,
   buildSpeakerPrompt,
   clampCoffeeSocialValue,
@@ -11,6 +12,7 @@ import {
   computePlayerInterruptionConsequences,
   computeNextCoffeeSocialState,
   createCoffeeConversation,
+  updateCoffeeConversationSettings,
   initializeCoffeeSocialState,
   maybeBuildBotInterruptionEvent,
   normalizeCoffeeGroupBotIds,
@@ -21,6 +23,12 @@ import {
   stripCoffeeSpeakerPrefix,
   type CoffeeBotProfile,
 } from "../coffee.ts";
+import {
+  coffeeReplyLengthCaps,
+  coffeeRouterTemperature,
+  DEFAULT_COFFEE_SESSION_SETTINGS,
+  normalizeCoffeeSessionSettings,
+} from "@localai/shared";
 
 /**
  * Coffee mode is the multi-bot turn-taking primitive that downstream
@@ -135,6 +143,7 @@ function createCoffeeTestDb(): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       bot_group_ids TEXT,
+      coffee_settings TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -250,6 +259,39 @@ describe("createCoffeeConversation", () => {
     );
     assert.ok(persistedRows.every((row) => row.leave_pressure >= 0 && row.leave_pressure <= 1));
   });
+
+  it("persists normalized coffee settings and returns them on the conversation", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const result = createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      coffeeSettings: {
+        responseLength: "brief",
+        crossTalk: "chatty",
+        responseDelayBias: 999,
+        breathingRoom: -5,
+      },
+    });
+
+    assert.equal(result.conversation.coffeeSettings?.responseLength, "brief");
+    assert.equal(result.conversation.coffeeSettings?.crossTalk, "chatty");
+    assert.equal(result.conversation.coffeeSettings?.responseDelayBias, 100);
+
+    const row = db
+      .prepare("SELECT coffee_settings FROM conversations WHERE id = ?")
+      .get(result.conversation.id) as { coffee_settings: string };
+    const parsed = JSON.parse(row.coffee_settings) as { responseLength: string };
+    assert.equal(parsed.responseLength, "brief");
+
+    const merged = updateCoffeeConversationSettings(db, userId, result.conversation.id, {
+      responseLength: "roomy",
+    });
+    assert.equal(merged.responseLength, "roomy");
+    assert.equal(merged.crossTalk, "chatty");
+  });
 });
 
 describe("buildRouterPrompt", () => {
@@ -345,6 +387,18 @@ describe("buildRouterPrompt", () => {
     assert.equal(focus?.role, "system");
     assert.match(focus!.content, /Alice just said/);
   });
+
+  it("welcomes bot-to-bot banter when cross-talk is chatty", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Hi.",
+      lastSpeakerBotId: ALICE.id,
+      sessionSettings: normalizeCoffeeSessionSettings({ crossTalk: "chatty" }),
+    });
+    assert.match(messages[0]!.content, /Bot-to-bot banter is welcome/i);
+    assert.match(messages[0]!.content, /riffing is welcome/i);
+  });
 });
 
 describe("buildSpeakerPrompt", () => {
@@ -381,6 +435,24 @@ describe("buildSpeakerPrompt", () => {
     assert.match(userTurnInstruction!.content, /48 characters/);
     assert.match(userTurnInstruction!.content, /Do not end with a question unless/);
   });
+
+  it("uses roomy caps when session responseLength is roomy", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "What do you think?",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+      sessionSettings: normalizeCoffeeSessionSettings({ responseLength: "roomy" }),
+    });
+    const combined = messages.map((m) => m.content).join("\n");
+    assert.match(combined, /96 characters/);
+    assert.doesNotMatch(combined, /48 characters/);
+  });
 });
 
 describe("clampCoffeeTableReplyText", () => {
@@ -394,9 +466,15 @@ describe("clampCoffeeTableReplyText", () => {
 
   it("truncates oversized replies", () => {
     const filler = `${"word ".repeat(120)}`;
-    const out = clampCoffeeTableReplyText(filler);
+    const out = clampCoffeeTableReplyText(filler, 48);
     assert.ok(out.endsWith("…") || out.length <= 48);
     assert.ok(out.length < filler.length);
+  });
+
+  it("respects a custom max character budget", () => {
+    const long = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    const out = clampCoffeeTableReplyText(long, 28);
+    assert.ok(out.length <= 28);
   });
 
   it("prefers cutting at sentence punctuation when possible", () => {
@@ -702,5 +780,66 @@ describe("maybeBuildBotInterruptionEvent", () => {
     assert.equal(event?.kind, "botInterruptsPlayer");
     assert.equal(event?.interrupterBotId, BORIS.id);
     assert.ok((event?.socialConsequences.length ?? 0) >= 1);
+  });
+});
+
+describe("normalizeCoffeeSessionSettings", () => {
+  it("returns defaults for non-objects and ignores invalid enums", () => {
+    assert.deepEqual(
+      normalizeCoffeeSessionSettings(undefined),
+      { ...DEFAULT_COFFEE_SESSION_SETTINGS }
+    );
+    assert.deepEqual(
+      normalizeCoffeeSessionSettings({ responseLength: "huge", crossTalk: "loud" }),
+      { ...DEFAULT_COFFEE_SESSION_SETTINGS }
+    );
+  });
+
+  it("clamps numeric sliders and preserves known enum values", () => {
+    const s = normalizeCoffeeSessionSettings({
+      responseLength: "detailed",
+      responseDelayBias: -20,
+      breathingRoom: 200,
+      stayOnThread: false,
+    });
+    assert.equal(s.responseLength, "detailed");
+    assert.equal(s.responseDelayBias, 0);
+    assert.equal(s.breathingRoom, 100);
+    assert.equal(s.stayOnThread, false);
+  });
+});
+
+describe("coffeeReplyLengthCaps", () => {
+  it("maps presets to bounded caps", () => {
+    const brief = coffeeReplyLengthCaps(normalizeCoffeeSessionSettings({ responseLength: "brief" }));
+    assert.deepEqual(brief, { tableReplyMaxChars: 28, speakerMaxOutputTokens: 16 });
+    const roomy = coffeeReplyLengthCaps(normalizeCoffeeSessionSettings({ responseLength: "roomy" }));
+    assert.deepEqual(roomy, { tableReplyMaxChars: 96, speakerMaxOutputTokens: 60 });
+  });
+});
+
+describe("coffeeRouterTemperature", () => {
+  it("stays within a modest band for extreme delay bias", () => {
+    const cold = coffeeRouterTemperature(normalizeCoffeeSessionSettings({ responseDelayBias: 0 }));
+    const hot = coffeeRouterTemperature(normalizeCoffeeSessionSettings({ responseDelayBias: 100 }));
+    assert.ok(cold >= 0.05 && cold <= 0.45);
+    assert.ok(hot >= 0.05 && hot <= 0.45);
+    assert.ok(hot > cold);
+  });
+});
+
+describe("buildCoffeeTableTuningAppendix", () => {
+  it("reflects cross-talk and stay-on-thread modes", () => {
+    const rare = buildCoffeeTableTuningAppendix(
+      normalizeCoffeeSessionSettings({ crossTalk: "rare", stayOnThread: false })
+    );
+    assert.match(rare, /one clear voice at a time/i);
+    assert.match(rare, /Topic shifts are allowed/i);
+
+    const chatty = buildCoffeeTableTuningAppendix(
+      normalizeCoffeeSessionSettings({ crossTalk: "chatty", stayOnThread: true })
+    );
+    assert.match(chatty, /riffing is welcome/i);
+    assert.match(chatty, /Discourage hard topic jumps/i);
   });
 });

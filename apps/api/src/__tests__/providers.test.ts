@@ -7,6 +7,8 @@ import {
   getAuxiliaryProvider,
   LocalOllamaProvider,
   OpenAiProvider,
+  openAiModelUsesMaxCompletionTokens,
+  openAiModelUsesFixedDefaultTemperature,
   readOpenAiErrorMessage,
   SECONDARY_OLLAMA_MODEL_PREFIX,
   selectProvider,
@@ -417,6 +419,116 @@ describe("checkLocalModelHostStatus", () => {
       "http://localhost:11434/api/tags",
       "http://127.0.0.1:11434/api/tags",
     ]);
+  });
+});
+
+describe("openAiModelUsesFixedDefaultTemperature", () => {
+  it("returns true for reasoning-style models (temperature must be omitted)", () => {
+    assert.equal(openAiModelUsesFixedDefaultTemperature("o3-mini"), true);
+    assert.equal(openAiModelUsesFixedDefaultTemperature("gpt-5-nano"), true);
+  });
+
+  it("returns false for models that accept custom temperature", () => {
+    assert.equal(openAiModelUsesFixedDefaultTemperature("gpt-4o-mini"), false);
+  });
+});
+
+describe("openAiModelUsesMaxCompletionTokens", () => {
+  it("returns true for reasoning-style model ids that require max_completion_tokens", () => {
+    assert.equal(openAiModelUsesMaxCompletionTokens("o3-mini"), true);
+    assert.equal(openAiModelUsesMaxCompletionTokens("O4-mini"), true);
+    assert.equal(openAiModelUsesMaxCompletionTokens("gpt-5-nano"), true);
+  });
+
+  it("returns false for classic chat models that accept max_tokens", () => {
+    assert.equal(openAiModelUsesMaxCompletionTokens("gpt-4o-mini"), false);
+    assert.equal(openAiModelUsesMaxCompletionTokens("gpt-4.1"), false);
+  });
+});
+
+describe("OpenAiProvider request shape", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("sends max_tokens for gpt-4o-class models", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-4o-mini",
+      maxTokens: 100,
+    });
+
+    assert.equal(body.max_tokens, 100);
+    assert.equal(body.max_completion_tokens, undefined);
+  });
+
+  it("sends max_completion_tokens for o-series models", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "o3-mini",
+      maxTokens: 2000,
+    });
+
+    assert.equal(body.max_completion_tokens, 2000);
+    assert.equal(body.max_tokens, undefined);
+  });
+
+  it("omits temperature for o-series models even when a custom value is set", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "o3-mini",
+      temperature: 0.91,
+    });
+
+    assert.equal(body.temperature, undefined);
+  });
+
+  it("sends temperature for gpt-4o-class models when provided", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-4o-mini",
+      temperature: 0.91,
+    });
+
+    assert.equal(body.temperature, 0.91);
   });
 });
 

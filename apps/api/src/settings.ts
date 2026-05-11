@@ -39,7 +39,11 @@ export interface CurrentSettings {
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
   lenientLocalFallbackModel: string | null;
+  lenientLocalImageFallbackModel: string | null;
   secondaryOllamaHost: string | null;
+  comfyUiHost: string | null;
+  preferredLocalImageModel: string | null;
+  preferredOpenAiImageModel: string | null;
   primaryOllamaHost: string;
 }
 
@@ -55,7 +59,11 @@ export interface NextSettings {
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
   lenientLocalFallbackModel: string | null;
+  lenientLocalImageFallbackModel: string | null;
   secondaryOllamaHost: string | null;
+  comfyUiHost: string | null;
+  preferredLocalImageModel: string | null;
+  preferredOpenAiImageModel: string | null;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -98,6 +106,34 @@ function normalizeOllamaHostValue(input: string): string {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Second Ollama host must use http:// or https://.");
+  }
+  return normalized;
+}
+
+function normalizeComfyUiHostValue(input: string): string {
+  const raw = input.trim();
+  if (!raw) {
+    return "";
+  }
+
+  let normalized = raw;
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `http://${normalized}`;
+  }
+  normalized = normalized.replace(
+    /\/\/0\.0\.0\.0(?=$|[:\/])/i,
+    "//127.0.0.1"
+  );
+  normalized = normalized.replace(/\/+$/, "");
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error("ComfyUI host must be a valid host or URL.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("ComfyUI host must use http:// or https://.");
   }
   return normalized;
 }
@@ -151,6 +187,38 @@ export function normalizeOllamaHostForStatusCheck(value: unknown): string | null
   const trimmed = value.trim();
   if (!trimmed) return null;
   return normalizeOllamaHostValue(trimmed);
+}
+
+/**
+ * Normalize ComfyUI base URL for connectivity probes (same rules as Ollama URL normalization).
+ */
+export function normalizeComfyUiHostForStatusCheck(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return normalizeComfyUiHostValue(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeComfyUiHostInput(
+  value: unknown
+): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  if (value.trim().length === 0) {
+    return null;
+  }
+  return normalizeComfyUiHostValue(value.trim());
 }
 
 export function parseHiddenBotModelIds(raw: string | null | undefined): string[] {
@@ -278,6 +346,10 @@ export function resolveNextSettings(
     body.lenientLocalFallbackModel,
     current.lenientLocalFallbackModel
   );
+  const lenientLocalImageFallbackModel = readPreferredModel(
+    body.lenientLocalImageFallbackModel,
+    current.lenientLocalImageFallbackModel
+  );
   const normalizedSecondaryOllamaHost = normalizeSecondaryOllamaHostInput(
     body.secondaryOllamaHost,
     current.primaryOllamaHost
@@ -286,6 +358,19 @@ export function resolveNextSettings(
     normalizedSecondaryOllamaHost === undefined
       ? current.secondaryOllamaHost
       : normalizedSecondaryOllamaHost;
+
+  const normalizedComfyUiHost = normalizeComfyUiHostInput(body.comfyUiHost);
+  const comfyUiHost =
+    normalizedComfyUiHost === undefined ? current.comfyUiHost : normalizedComfyUiHost;
+
+  const preferredLocalImageModel = readPreferredModel(
+    body.preferredLocalImageModel,
+    current.preferredLocalImageModel
+  );
+  const preferredOpenAiImageModel = readPreferredModel(
+    body.preferredOpenAiImageModel,
+    current.preferredOpenAiImageModel
+  );
 
   let openAiKeyIntent: NextSettings["openAiKeyIntent"] = { action: "keep" };
   if (typeof body.openAiApiKey === "string") {
@@ -315,7 +400,11 @@ export function resolveNextSettings(
     preferredLocalModel,
     preferredOnlineModel,
     lenientLocalFallbackModel,
+    lenientLocalImageFallbackModel,
     secondaryOllamaHost,
+    comfyUiHost,
+    preferredLocalImageModel,
+    preferredOpenAiImageModel,
     openAiKeyIntent,
   };
 }

@@ -4,7 +4,7 @@ export type ConversationImageGateRow =
   | { ok: true; lockedBotId: string | null }
   | { ok: false; message: string };
 
-/** Loads the conversation row and enforces Sandbox-only image generation. */
+/** Loads the conversation row and allows thread-linked persona images in Chat + Sandbox. */
 export function resolveConversationForSandboxImageGenerate(
   db: DatabaseSync,
   userId: string,
@@ -20,10 +20,10 @@ export function resolveConversationForSandboxImageGenerate(
   if (!row) {
     return { ok: false, message: "That conversation was not found for your account." };
   }
-  if (row.mode !== "sandbox") {
+  if (row.mode !== "sandbox" && row.mode !== "chat") {
     return {
       ok: false,
-      message: "Persona-aware image generation is only available in Sandbox chats.",
+      message: "Linked image generation works in Chat and Sandbox threads only.",
     };
   }
   return { ok: true, lockedBotId: row.lockedBotId };
@@ -115,7 +115,8 @@ export type ImageGeneratePersistenceResolved =
 /**
  * Validates persistence targets for POST `/api/images/generate`.
  * - With `conversationId`: Sandbox gate + existing bot/thread attribution.
- * - Without conversation: requires a valid `botId` for this user; `conversation_id` is stored NULL.
+ * - Without conversation: optional `botId` for this user (`conversation_id` NULL).
+ *   When `botId` is omitted, the row is stored with `bot_id` NULL (PRISM general bucket).
  */
 export function resolveStandaloneBotImageForGenerate(
   db: DatabaseSync,
@@ -124,10 +125,13 @@ export function resolveStandaloneBotImageForGenerate(
 ): ImageGeneratePersistenceResolved {
   const raw = bodyBotId;
   if (raw == null || String(raw).trim() === "") {
+    // Standalone gallery: allow uncategorized rows (`bot_id` NULL). Persona
+    // augmentation is skipped; images appear under PRISM (general) in the UI.
     return {
-      ok: false,
-      message:
-        "Select a bot or open a Sandbox chat — image generation needs a bot or an active conversation.",
+      ok: true,
+      conversationIdForInsert: null,
+      persistedBotId: null,
+      personaBotId: null,
     };
   }
   const botId = String(raw).trim();

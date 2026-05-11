@@ -30,6 +30,7 @@ export interface DbUserRecord {
   preferredOnlineModel: string | null;
   lenientLocalFallbackModel: string | null;
   secondaryOllamaHost: string | null;
+  comfyUiHost: string | null;
   composerWritingAssist: number;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
@@ -100,6 +101,9 @@ export function createDatabase(): DatabaseSync {
       preferred_online_model TEXT,
       lenient_local_fallback_model TEXT,
       secondary_ollama_host TEXT,
+      comfyui_host TEXT,
+      preferred_local_image_model TEXT,
+      preferred_openai_image_model TEXT,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -143,6 +147,7 @@ export function createDatabase(): DatabaseSync {
       archived_at TEXT,
       archive_batch_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
+      coffee_settings TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -204,6 +209,8 @@ export function createDatabase(): DatabaseSync {
       model TEXT,
       local_model TEXT,
       online_model TEXT,
+      local_image_model TEXT,
+      openai_image_model TEXT,
       temperature REAL DEFAULT 0.7,
       max_tokens INTEGER DEFAULT 2048,
       color TEXT,
@@ -344,6 +351,28 @@ export function createDatabase(): DatabaseSync {
   if (!hasComposerWritingAssist) {
     db.exec("ALTER TABLE users ADD COLUMN composer_writing_assist INTEGER NOT NULL DEFAULT 1;");
   }
+  const hasComfyuiHost = userColumns.some((column) => column.name === "comfyui_host");
+  if (!hasComfyuiHost) {
+    db.exec("ALTER TABLE users ADD COLUMN comfyui_host TEXT;");
+  }
+  const hasPreferredLocalImageModel = userColumns.some(
+    (column) => column.name === "preferred_local_image_model"
+  );
+  if (!hasPreferredLocalImageModel) {
+    db.exec("ALTER TABLE users ADD COLUMN preferred_local_image_model TEXT;");
+  }
+  const hasPreferredOpenAiImageModel = userColumns.some(
+    (column) => column.name === "preferred_openai_image_model"
+  );
+  if (!hasPreferredOpenAiImageModel) {
+    db.exec("ALTER TABLE users ADD COLUMN preferred_openai_image_model TEXT;");
+  }
+  const hasLenientLocalImageFallbackModel = userColumns.some(
+    (column) => column.name === "lenient_local_image_fallback_model"
+  );
+  if (!hasLenientLocalImageFallbackModel) {
+    db.exec("ALTER TABLE users ADD COLUMN lenient_local_image_fallback_model TEXT;");
+  }
   db.exec(`
     UPDATE users
     SET last_active_at = COALESCE(last_active_at, created_at)
@@ -404,6 +433,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasConversationBotGroupIdsColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN bot_group_ids TEXT;");
+  }
+  const hasConversationCoffeeSettingsColumn = conversationColumns.some(
+    (column) => column.name === "coffee_settings"
+  );
+  if (!hasConversationCoffeeSettingsColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_settings TEXT;");
   }
   const sweepBatchColumns = db
     .prepare("PRAGMA table_info(conversation_sweep_batches)")
@@ -645,6 +680,18 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotOnlineModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN online_model TEXT;");
+  }
+  const hasBotLocalImageModelColumn = botColumns.some(
+    (column) => column.name === "local_image_model"
+  );
+  if (!hasBotLocalImageModelColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN local_image_model TEXT;");
+  }
+  const hasBotOpenaiImageModelColumn = botColumns.some(
+    (column) => column.name === "openai_image_model"
+  );
+  if (!hasBotOpenaiImageModelColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN openai_image_model TEXT;");
   }
   const hasBotExportHashColumn = botColumns.some(
     (column) => column.name === "export_hash"

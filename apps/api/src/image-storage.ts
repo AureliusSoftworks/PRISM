@@ -88,8 +88,11 @@ export function removeGeneratedImagesDirectoryForUser(userId: string): void {
 }
 
 /** Fetch remote image bytes after provider returns a temporary URL. */
-export async function downloadRemoteImage(url: string): Promise<Buffer> {
-  const res = await fetch(url);
+export async function downloadRemoteImage(
+  url: string,
+  options?: { signal?: AbortSignal }
+): Promise<Buffer> {
+  const res = await fetch(url, { signal: options?.signal });
   if (!res.ok) {
     throw new Error(`Failed to persist generated image (download ${res.status}).`);
   }

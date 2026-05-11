@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
 import { existsSync, unlinkSync } from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { getAppConfig } from "@localai/config";
 import { createDatabase } from "./db.ts";
 import { clearCookie, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
@@ -18,8 +20,10 @@ import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
 import {
   createCoffeeConversation,
+  parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
+  updateCoffeeConversationSettings,
 } from "./coffee.ts";
 import {
   createDevSeedMemories,
@@ -51,17 +55,42 @@ import {
   resolveBotExportHashForCreate,
 } from "./bots.ts";
 import {
+  normalizeComfyUiHostForStatusCheck,
   normalizeOllamaHostForStatusCheck,
   parseHiddenBotModelIds,
   resolveNextSettings,
 } from "./settings.ts";
 import { normalizeMemoryDisplayText } from "./memory-validation.ts";
-import { buildModelCatalog, checkLocalModelHostStatus, getAuxiliaryProvider, selectProvider } from "./providers.ts";
+import {
+  buildModelCatalog,
+  checkLocalModelHostStatus,
+  getAuxiliaryProvider,
+  selectProvider,
+} from "./providers.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
-import { composeAugmentedImagePrompt } from "@localai/shared";
-import { generateImage, DALLE_IMAGE_MODEL_ID } from "./image-provider.ts";
+import {
+  composeAugmentedImagePrompt,
+  DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  encodeComfyUiModelId,
+  hydrateAssistantMessageParts,
+  isAllowedInAppOllamaPullModelName,
+  type BotOpinion,
+  type BotOpinionBoundaryLevel,
+  type ChatMessage,
+  type OpinionBand,
+  type OpinionTrend,
+  type SessionOpinion,
+} from "@localai/shared";
+import { generateImage } from "./image-provider.ts";
+import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
+import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
+import {
+  checkComfyUiHostStatus,
+  fetchComfyUiCheckpointNames,
+  probeComfyUiHostReachable,
+} from "./comfyui-image.ts";
 import {
   botBelongsToUser,
   resolveImageGeneratePersistence,
@@ -75,6 +104,7 @@ import {
   tryUnlinkGeneratedImageFile,
   writeGeneratedImageBytes,
 } from "./image-storage.ts";
+import { inferBotImagePromptSuggestions, inferRandomImageSceneLine } from "./image-prompt-suggestions.ts";
 import {
   clearThreadCompactions,
   getLatestSandboxBotStatusSummary,
@@ -89,16 +119,6 @@ import {
   getInactiveAccountCutoff
 } from "./account-retention.ts";
 import { deleteVectorsForUser } from "./qdrant.ts";
-import {
-  hydrateAssistantMessageParts,
-  type ChatMessage,
-  type BotOpinion,
-  type BotOpinionBoundaryLevel,
-  type OpinionBand,
-  type OpinionTrend,
-  type SessionOpinion,
-} from "@localai/shared";
-
 const config = getAppConfig();
 const db = createDatabase();
 const masterKey = deriveMasterKey(config.encryptionMasterKey);
@@ -129,7 +149,11 @@ interface UserDbRow {
   preferred_local_model: string | null;
   preferred_online_model: string | null;
   lenient_local_fallback_model: string | null;
+  lenient_local_image_fallback_model: string | null;
   secondary_ollama_host: string | null;
+  comfyui_host: string | null;
+  preferred_local_image_model: string | null;
+  preferred_openai_image_model: string | null;
   dev_memories_enabled: number;
   dev_memories_text: string;
   openai_key_ciphertext: string | null;
@@ -234,7 +258,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, preferred_local_model, preferred_online_model, lenient_local_fallback_model, secondary_ollama_host, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, preferred_local_image_model, preferred_openai_image_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -480,13 +504,80 @@ function mapImageRowToClient(row: {
     size: row.size,
     quality: row.quality,
     provider: row.provider,
-    model: row.model ?? DALLE_IMAGE_MODEL_ID,
+    model: row.model ?? DEFAULT_OPENAI_IMAGE_MODEL_ID,
     createdAt: row.created_at,
     url: row.url,
     localRelPath: row.local_rel_path,
     displayUrl,
     hasLocalFile,
   };
+}
+
+type ImageInsertPersistence = {
+  conversationIdForInsert: string | null;
+  persistedBotId: string | null;
+};
+
+/** Persists a ComfyUI or Ollama image and returns the standard JSON success body. */
+function finalizeComfyOrOllamaGeneratedImageResponse(
+  ctx: RequestContext,
+  args: {
+    imageId: string;
+    userId: string;
+    persistence: ImageInsertPersistence;
+    prompt: string;
+    localRelPath: string;
+    size: string;
+    quality: string;
+    imageBytes: Buffer;
+    modelUsed: string;
+    provider: "comfyui" | "ollama";
+  }
+): void {
+  try {
+    writeGeneratedImageBytes(args.localRelPath, args.imageBytes);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "write failed";
+    throw new Error(`Could not save generated image (${detail}).`);
+  }
+
+  const storedUrl = `/api/images/${encodeURIComponent(args.imageId)}/file`;
+
+  try {
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      args.imageId,
+      args.userId,
+      args.persistence.conversationIdForInsert,
+      args.persistence.persistedBotId,
+      args.prompt,
+      args.prompt,
+      storedUrl,
+      args.size,
+      args.quality,
+      args.provider,
+      args.modelUsed,
+      args.localRelPath,
+      new Date().toISOString()
+    );
+  } catch (error) {
+    tryUnlinkGeneratedImageFile(args.localRelPath);
+    throw error;
+  }
+
+  const displayUrl = storedUrl;
+  json(ctx.res, 200, {
+    ok: true,
+    image: {
+      id: args.imageId,
+      url: storedUrl,
+      revisedPrompt: args.prompt,
+      displayUrl,
+      hasLocalFile: true,
+      model: args.modelUsed,
+    },
+  });
 }
 
 function buildRoutes(): RouteDefinition[] {
@@ -727,7 +818,7 @@ function buildRoutes(): RouteDefinition[] {
       // + composer-dropdown sync the same way.
       const conversation = db
         .prepare(
-          `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids, c.incognito, c.created_at, c.updated_at,
+          `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids, c.coffee_settings, c.incognito, c.created_at, c.updated_at,
                   (SELECT m.bot_id FROM messages m
                      WHERE m.conversation_id = c.id
                        AND m.role = 'assistant'
@@ -750,6 +841,7 @@ function buildRoutes(): RouteDefinition[] {
             conversation_mode: string | null;
             bot_id: string | null;
             bot_group_ids: string | null;
+            coffee_settings: string | null;
             incognito: number;
             created_at: string;
             updated_at: string;
@@ -812,6 +904,9 @@ function buildRoutes(): RouteDefinition[] {
             ? { moodConfidence: assembled.moodConfidence }
             : {}),
           ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+          ...(assembled.sentGeneratedImage
+            ? { sentGeneratedImage: assembled.sentGeneratedImage }
+            : {}),
         };
       });
       const opinionRow = db
@@ -874,6 +969,10 @@ function buildRoutes(): RouteDefinition[] {
             : "sandbox";
       const botGroupIdsOut = parseConversationBotGroupIds(conversation.bot_group_ids);
       const coffeeSeatBotIdsOut = parseConversationCoffeeSeatBotIds(conversation.bot_group_ids);
+      const coffeeSettingsOut =
+        conversationModeOut === "coffee"
+          ? parseStoredCoffeeSessionSettings(conversation.coffee_settings)
+          : undefined;
       json(ctx.res, 200, {
         ok: true,
         conversation: {
@@ -883,6 +982,7 @@ function buildRoutes(): RouteDefinition[] {
           botId: conversation.bot_id ?? null,
           ...(botGroupIdsOut.length > 0 ? { botGroupIds: botGroupIdsOut } : {}),
           ...(coffeeSeatBotIdsOut.length > 0 ? { coffeeSeatBotIds: coffeeSeatBotIdsOut } : {}),
+          ...(coffeeSettingsOut !== undefined ? { coffeeSettings: coffeeSettingsOut } : {}),
           incognito: conversation.incognito === 1,
           lastBotId: conversation.last_bot_id ?? null,
           lastBotColor: conversation.last_bot_color ?? null,
@@ -1361,6 +1461,13 @@ function buildRoutes(): RouteDefinition[] {
             lenientLocalFallbackModel: user.lenient_local_fallback_model,
             devMemoriesEnabled: user.dev_memories_enabled === 1,
             devMemoriesText: user.dev_memories_text,
+            assistantImageUserPrefs: {
+              preferredLocalImageModel: user.preferred_local_image_model,
+              preferredOpenAiImageModel: user.preferred_openai_image_model,
+              lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
+              comfyuiHost: user.comfyui_host,
+              secondaryOllamaHost: user.secondary_ollama_host,
+            },
             botId: effectiveBotId,
             incognito,
             ephemeralMessages,
@@ -1410,10 +1517,27 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      const result = createCoffeeConversation(db, userId, { groupBotIds });
+      const result = createCoffeeConversation(db, userId, {
+        groupBotIds,
+        coffeeSettings: body.coffeeSettings,
+      });
       json(ctx.res, 200, {
         ok: true,
         ...result,
+      });
+    }),
+    route("PATCH", "/api/coffee/sessions/:id/settings", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const coffeeSettings = updateCoffeeConversationSettings(
+        db,
+        userId,
+        ctx.params.id,
+        body.coffeeSettings ?? body
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        coffeeSettings,
       });
     }),
     route("POST", "/api/coffee/sessions/:id/continue", async (ctx) => {
@@ -1825,7 +1949,11 @@ function buildRoutes(): RouteDefinition[] {
     route("DELETE", "/api/memories/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const allowLongTerm = ctx.query.get("allowLongTerm") === "true";
-      const deleted = deleteMemoryById(db, userId, ctx.params.id, { allowLongTerm });
+      const allowAboutYou = ctx.query.get("allowAboutYou") === "true";
+      const deleted = deleteMemoryById(db, userId, ctx.params.id, {
+        allowLongTerm,
+        allowAboutYou,
+      });
       json(ctx.res, 200, { ok: true, deleted });
     }),
     route("PATCH", "/api/messages/:id", async (ctx) => {
@@ -1888,11 +2016,15 @@ function buildRoutes(): RouteDefinition[] {
           preferredLocalModel: user.preferred_local_model ?? "",
           preferredOnlineModel: user.preferred_online_model ?? "",
           lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
+          lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model ?? "",
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
           ollamaModel: config.ollamaModel,
           secondaryOllamaHost: user.secondary_ollama_host ?? "",
+          comfyUiHost: user.comfyui_host ?? "",
+          preferredLocalImageModel: user.preferred_local_image_model ?? "",
+          preferredOpenAiImageModel: user.preferred_openai_image_model ?? "",
           devMemoriesEnabled: user.dev_memories_enabled === 1,
           devMemoriesText: user.dev_memories_text ?? "",
         },
@@ -1905,7 +2037,48 @@ function buildRoutes(): RouteDefinition[] {
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
-      json(ctx.res, 200, { ok: true, catalog });
+      // Prefer draft URL from query (matches Settings status probe before save); else persisted column.
+      const comfyHostFromQuery = normalizeComfyUiHostForStatusCheck(
+        ctx.query.get("comfyUiHost")
+      );
+      const comfyHostRaw =
+        comfyHostFromQuery && comfyHostFromQuery.length > 0
+          ? comfyHostFromQuery
+          : user.comfyui_host?.trim() ?? "";
+      let comfyUi:
+        | {
+            configured: boolean;
+            reachable: boolean;
+            checkpoints: Array<{
+              id: string;
+              label: string;
+              provider: "local";
+              imageSource: "comfyui";
+            }>;
+          }
+        | undefined;
+      if (comfyHostRaw) {
+        const names = await fetchComfyUiCheckpointNames(comfyHostRaw);
+        const reachable =
+          names.length > 0 || (await probeComfyUiHostReachable(comfyHostRaw));
+        comfyUi = {
+          configured: true,
+          reachable,
+          checkpoints: names.map((name) => ({
+            id: encodeComfyUiModelId(name),
+            label: `${name} (ComfyUI)`,
+            provider: "local" as const,
+            imageSource: "comfyui" as const,
+          })),
+        };
+      } else {
+        comfyUi = {
+          configured: false,
+          reachable: false,
+          checkpoints: [],
+        };
+      }
+      json(ctx.res, 200, { ok: true, catalog, comfyUi });
     }),
     route("GET", "/api/settings/secondary-ollama-status", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -1915,6 +2088,16 @@ function buildRoutes(): RouteDefinition[] {
         hostToCheck = normalizeOllamaHostForStatusCheck(ctx.query.get("host"));
       }
       const status = await checkLocalModelHostStatus(hostToCheck);
+      json(ctx.res, 200, { ok: true, status });
+    }),
+    route("GET", "/api/settings/comfyui-status", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      let hostToCheck: string | null = user.comfyui_host;
+      if (ctx.query.has("host")) {
+        hostToCheck = normalizeComfyUiHostForStatusCheck(ctx.query.get("host"));
+      }
+      const status = await checkComfyUiHostStatus(hostToCheck);
       json(ctx.res, 200, { ok: true, status });
     }),
     route("PATCH", "/api/settings", async (ctx) => {
@@ -1944,7 +2127,11 @@ function buildRoutes(): RouteDefinition[] {
         preferredLocalModel: user.preferred_local_model,
         preferredOnlineModel: user.preferred_online_model,
         lenientLocalFallbackModel: user.lenient_local_fallback_model,
+        lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
         secondaryOllamaHost: user.secondary_ollama_host,
+        comfyUiHost: user.comfyui_host,
+        preferredLocalImageModel: user.preferred_local_image_model,
+        preferredOpenAiImageModel: user.preferred_openai_image_model,
         primaryOllamaHost: config.ollamaHost,
       });
 
@@ -1969,7 +2156,8 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(`
         UPDATE users
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?,
-            preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, secondary_ollama_host = ?,
+            preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            preferred_local_image_model = ?, preferred_openai_image_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
         WHERE id = ?
@@ -1984,7 +2172,11 @@ function buildRoutes(): RouteDefinition[] {
         next.preferredLocalModel,
         next.preferredOnlineModel,
         next.lenientLocalFallbackModel,
+        next.lenientLocalImageFallbackModel,
         next.secondaryOllamaHost,
+        next.comfyUiHost,
+        next.preferredLocalImageModel,
+        next.preferredOpenAiImageModel,
         devMemoriesEnabled,
         devMemoriesText,
         openAiCipher,
@@ -2016,12 +2208,65 @@ function buildRoutes(): RouteDefinition[] {
       const versions = await backupAdapter.listVersions(userId);
       json(ctx.res, 200, { ok: true, versions });
     }),
+    route("POST", "/api/images/prompt-suggestions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const botId = readString(body.botId, "botId").trim();
+      const row = db
+        .prepare(
+          "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId) as { name: string; system_prompt: string } | undefined;
+      if (!row) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      const suggestions = await inferBotImagePromptSuggestions(
+        getAuxiliaryProvider(),
+        { botName: row.name, systemPrompt: row.system_prompt }
+      );
+      json(ctx.res, 200, { ok: true, suggestions });
+    }),
+    route("POST", "/api/images/random-prompt", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const botIdRaw =
+        typeof body.botId === "string" ? body.botId.trim() : "";
+      let botName: string | undefined;
+      let systemPrompt: string | undefined;
+      if (botIdRaw.length > 0) {
+        const row = db
+          .prepare(
+            "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
+          )
+          .get(botIdRaw, userId) as
+          | { name: string; system_prompt: string }
+          | undefined;
+        if (!row) {
+          throw new HttpError(404, "Bot not found.");
+        }
+        botName = row.name;
+        systemPrompt = row.system_prompt;
+      }
+      const prompt = await inferRandomImageSceneLine(getAuxiliaryProvider(), {
+        botName,
+        systemPrompt,
+      });
+      json(ctx.res, 200, { ok: true, prompt });
+    }),
     route("POST", "/api/images/generate", async (ctx) => {
       const userId = requireAuth(ctx);
+      const imageGenAbort = new AbortController();
+      const onImageGenClientClose = () => imageGenAbort.abort();
+      ctx.req.once("close", onImageGenClientClose);
+      try {
       const body = ctx.body as Record<string, unknown>;
       const prompt = readString(body.prompt, "prompt");
       const size = (body.size as string) ?? "1024x1024";
       const quality = (body.quality as string) ?? "standard";
+      const bodyModel =
+        typeof body.model === "string" && body.model.trim().length > 0
+          ? body.model.trim()
+          : undefined;
       const conversationIdRaw =
         typeof body.conversationId === "string" ? body.conversationId.trim() : "";
       const bodyBotId =
@@ -2029,22 +2274,14 @@ function buildRoutes(): RouteDefinition[] {
           ? body.botId.trim()
           : undefined;
 
-      // Privacy gate: image generation always calls OpenAI DALL-E, so it
-      // must never fire while the user has LOCAL mode selected. Mirror the
-      // chat route's per-request override: the body can carry a
-      // `preferredProvider` for per-send intent, falling back to the user's
-      // stored mode.
+      // ONLINE → OpenAI Images API; LOCAL → Ollama image checkpoint on this Mac.
+      // Body may override `preferredProvider` for this request (same pattern as chat).
       const user = getUserRow(userId);
       const requestedProvider =
         body.preferredProvider === "openai" || body.preferredProvider === "local"
           ? body.preferredProvider
           : undefined;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      if (effectiveProvider === "local") {
-        throw new Error(
-          "Image generation requires ONLINE mode. Switch to ONLINE in the sidebar or compose toggle and try again."
-        );
-      }
 
       const persistence = resolveImageGeneratePersistence({
         db,
@@ -2058,37 +2295,149 @@ function buildRoutes(): RouteDefinition[] {
 
       let promptForModel = prompt;
       const personaBotId = persistence.personaBotId;
+      type BotPersonaImageRow = {
+        name: string;
+        system_prompt: string;
+        local_image_model: string | null;
+        openai_image_model: string | null;
+      };
+      let botPersona: BotPersonaImageRow | undefined;
       if (personaBotId) {
-        const botRow = db
+        botPersona = db
           .prepare(
-            "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
+            "SELECT name, system_prompt, local_image_model, openai_image_model FROM bots WHERE id = ? AND user_id = ?"
           )
-          .get(personaBotId, userId) as
-          | { name: string; system_prompt: string }
-          | undefined;
-        if (botRow) {
+          .get(personaBotId, userId) as BotPersonaImageRow | undefined;
+        if (botPersona) {
           promptForModel = composeAugmentedImagePrompt({
-            botName: botRow.name,
-            systemPrompt: botRow.system_prompt,
+            botName: botPersona.name,
+            systemPrompt: botPersona.system_prompt,
             userPrompt: prompt,
           });
         }
       }
 
-      const userKey = decryptUserKey(userId);
-      const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const result = await generateImage(
-        promptForModel,
-        apiKey,
-        size as "1024x1024" | "1024x1792" | "1792x1024",
-        quality as "standard" | "hd"
-      );
+      const resolvedLocalImageModel =
+        (bodyModel && bodyModel.trim()) ||
+        (botPersona?.local_image_model?.trim() ?? "") ||
+        (user.preferred_local_image_model?.trim() ?? "");
+
+      const resolvedOpenAiImageModel =
+        (bodyModel && bodyModel.trim()) ||
+        (botPersona?.openai_image_model?.trim() ?? "") ||
+        (user.preferred_openai_image_model?.trim() ?? "");
+
       const imageId = randomId(12);
       const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
 
+      if (effectiveProvider === "local") {
+        if (!resolvedLocalImageModel) {
+          throw new Error(
+            "Pick a local image model in the Images panel header, then try again."
+          );
+        }
+
+        const lenientImageFb = user.lenient_local_image_fallback_model?.trim() ?? "";
+        const runLocalBytes = (modelId: string) =>
+          generateLocalImageBytesByModelId({
+            modelId,
+            promptForModel,
+            size,
+            signal: imageGenAbort.signal,
+            comfyUiHost: user.comfyui_host,
+            secondaryOllamaHost: user.secondary_ollama_host,
+            primaryOllamaHost: config.ollamaHost,
+          });
+
+        let localOut: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+        try {
+          localOut = await runLocalBytes(resolvedLocalImageModel);
+        } catch (primaryError) {
+          if (
+            lenientImageFb &&
+            lenientImageFb !== resolvedLocalImageModel.trim() &&
+            shouldAttemptLenientLocalImageFallback(primaryError)
+          ) {
+            localOut = await runLocalBytes(lenientImageFb);
+          } else {
+            throw primaryError;
+          }
+        }
+
+        finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
+          imageId,
+          userId,
+          persistence: {
+            conversationIdForInsert: persistence.conversationIdForInsert,
+            persistedBotId: persistence.persistedBotId,
+          },
+          prompt,
+          localRelPath,
+          size,
+          quality,
+          imageBytes: localOut.imageBytes,
+          modelUsed: localOut.modelUsed,
+          provider: localOut.provider,
+        });
+        return;
+      }
+
+      const userKey = decryptUserKey(userId);
+      const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const lenientImageFbOnline = user.lenient_local_image_fallback_model?.trim() ?? "";
+
+      let openAiResult: Awaited<ReturnType<typeof generateImage>> | null = null;
+      try {
+        openAiResult = await generateImage(promptForModel, apiKey, {
+          model: resolvedOpenAiImageModel || undefined,
+          size,
+          quality,
+          signal: imageGenAbort.signal,
+        });
+      } catch (primaryError) {
+        if (
+          lenientImageFbOnline &&
+          shouldAttemptLenientLocalImageFallback(primaryError)
+        ) {
+          const localOut = await generateLocalImageBytesByModelId({
+            modelId: lenientImageFbOnline,
+            promptForModel,
+            size,
+            signal: imageGenAbort.signal,
+            comfyUiHost: user.comfyui_host,
+            secondaryOllamaHost: user.secondary_ollama_host,
+            primaryOllamaHost: config.ollamaHost,
+          });
+          finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
+            imageId,
+            userId,
+            persistence: {
+              conversationIdForInsert: persistence.conversationIdForInsert,
+              persistedBotId: persistence.persistedBotId,
+            },
+            prompt,
+            localRelPath,
+            size,
+            quality,
+            imageBytes: localOut.imageBytes,
+            modelUsed: localOut.modelUsed,
+            provider: localOut.provider,
+          });
+          return;
+        }
+        throw primaryError;
+      }
+
+      const result = openAiResult;
+      if (!result) {
+        throw new Error("OpenAI image generation did not return a result.");
+      }
+
       let imageBytes: Buffer;
       try {
-        imageBytes = await downloadRemoteImage(result.url);
+        imageBytes = await downloadRemoteImage(result.url, {
+          signal: imageGenAbort.signal,
+        });
       } catch (error) {
         const detail = error instanceof Error ? error.message : "download failed";
         throw new Error(`Could not download image for local storage (${detail}).`);
@@ -2114,7 +2463,7 @@ function buildRoutes(): RouteDefinition[] {
           result.url,
           size,
           quality,
-          DALLE_IMAGE_MODEL_ID,
+          result.model,
           localRelPath,
           new Date().toISOString()
         );
@@ -2132,13 +2481,76 @@ function buildRoutes(): RouteDefinition[] {
           revisedPrompt: result.revisedPrompt,
           displayUrl,
           hasLocalFile: true,
-          model: DALLE_IMAGE_MODEL_ID,
+          model: result.model,
         },
       });
+      } finally {
+        ctx.req.off("close", onImageGenClientClose);
+      }
+    }),
+    route("POST", "/api/ollama/pull-primary", async (ctx) => {
+      requireAuth(ctx);
+      const pullName = config.ollamaInAppPullModel.trim();
+      if (!isAllowedInAppOllamaPullModelName(pullName)) {
+        json(ctx.res, 500, {
+          ok: false,
+          error: "In-app pull model is misconfigured.",
+        });
+        return;
+      }
+
+      let ollamaRes: Response;
+      try {
+        ollamaRes = await fetch(`${config.ollamaHost}/api/pull`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: pullName, stream: true }),
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "network error";
+        json(ctx.res, 502, {
+          ok: false,
+          error: `Could not reach Ollama (${detail}).`,
+        });
+        return;
+      }
+
+      if (!ollamaRes.ok) {
+        const text = await ollamaRes.text();
+        json(ctx.res, 502, {
+          ok: false,
+          error: text.trim() || `Ollama pull failed (${ollamaRes.status}).`,
+        });
+        return;
+      }
+
+      const webBody = ollamaRes.body;
+      if (!webBody) {
+        json(ctx.res, 502, { ok: false, error: "Ollama returned an empty body." });
+        return;
+      }
+
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+
+      try {
+        const nodeReadable = Readable.fromWeb(
+          webBody as import("stream/web").ReadableStream
+        );
+        await pipeline(nodeReadable, ctx.res);
+      } catch {
+        if (!ctx.res.writableEnded) {
+          ctx.res.destroy();
+        }
+      }
     }),
     route("GET", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);
       const filterBotId = readOptionalString(ctx.query.get("botId"));
+      const generalOnly = ctx.query.get("general") === "1";
+      if (generalOnly && filterBotId) {
+        throw new Error("Cannot combine botId filter with general=1.");
+      }
       if (filterBotId && !botBelongsToUser(db, userId, filterBotId)) {
         throw new Error("Unknown bot for this account.");
       }
@@ -2150,21 +2562,29 @@ function buildRoutes(): RouteDefinition[] {
           limit = Math.min(200, Math.max(1, Math.floor(n)));
         }
       }
-      const rows = filterBotId
+      const rows = generalOnly
         ? db
             .prepare(
               `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
-               FROM images WHERE user_id = ? AND bot_id = ?
+               FROM images WHERE user_id = ? AND bot_id IS NULL
                ORDER BY created_at DESC LIMIT ?`
             )
-            .all(userId, filterBotId, limit)
-        : db
-            .prepare(
-              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
-               FROM images WHERE user_id = ?
-               ORDER BY created_at DESC LIMIT ?`
-            )
-            .all(userId, limit);
+            .all(userId, limit)
+        : filterBotId
+          ? db
+              .prepare(
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
+                 FROM images WHERE user_id = ? AND bot_id = ?
+                 ORDER BY created_at DESC LIMIT ?`
+              )
+              .all(userId, filterBotId, limit)
+          : db
+              .prepare(
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
+                 FROM images WHERE user_id = ?
+                 ORDER BY created_at DESC LIMIT ?`
+              )
+              .all(userId, limit);
       const images = (rows as Array<{
         id: string;
         prompt: string;
@@ -2250,6 +2670,8 @@ function buildRoutes(): RouteDefinition[] {
       const model = readOptionalString(body.model);
       const localModel = readOptionalString(body.localModel);
       const onlineModel = readOptionalString(body.onlineModel);
+      const localImageModel = readOptionalString(body.localImageModel);
+      const openaiImageModel = readOptionalString(body.openaiImageModel);
       const onlineEnabled = body.onlineEnabled === false ? 0 : 1;
       const deleteProtected = body.deleteProtected === true ? 1 : 0;
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
@@ -2280,8 +2702,28 @@ function buildRoutes(): RouteDefinition[] {
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
-      ).run(botId, userId, name, systemPrompt, exportHash, model, localModel, onlineModel, onlineEnabled, deleteProtected, temperature, maxTokens, color, glyph, chatEnabled, now, now);
+        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(
+        botId,
+        userId,
+        name,
+        systemPrompt,
+        exportHash,
+        model,
+        localModel,
+        onlineModel,
+        localImageModel,
+        openaiImageModel,
+        onlineEnabled,
+        deleteProtected,
+        temperature,
+        maxTokens,
+        color,
+        glyph,
+        chatEnabled,
+        now,
+        now
+      );
       json(ctx.res, 201, {
         ok: true,
         bot: {
@@ -2292,6 +2734,8 @@ function buildRoutes(): RouteDefinition[] {
           model,
           local_model: localModel,
           online_model: onlineModel,
+          local_image_model: localImageModel,
+          openai_image_model: openaiImageModel,
           online_enabled: onlineEnabled,
           delete_protected: deleteProtected,
           temperature,
@@ -2305,7 +2749,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -2329,6 +2773,14 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.onlineModel === "string") {
         fields.push("online_model = ?");
         values.push(readOptionalString(body.onlineModel));
+      }
+      if (typeof body.localImageModel === "string") {
+        fields.push("local_image_model = ?");
+        values.push(readOptionalString(body.localImageModel));
+      }
+      if (typeof body.openaiImageModel === "string") {
+        fields.push("openai_image_model = ?");
+        values.push(readOptionalString(body.openaiImageModel));
       }
       if (typeof body.onlineEnabled === "boolean") {
         fields.push("online_enabled = ?");

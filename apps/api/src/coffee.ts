@@ -51,27 +51,25 @@ import type {
   CoffeeInterruptionSocialDelta,
   CoffeePlayerInterruptionInput,
   CoffeeSessionCreateResponse,
+  CoffeeSessionSettings,
   CoffeeTurnResponse,
+} from "@localai/shared";
+import {
+  coffeeEffectiveHistoryLimit,
+  coffeeReplyLengthCaps,
+  coffeeRouterTailMessageCount,
+  coffeeRouterTemperature,
+  normalizeCoffeeSessionSettings,
 } from "@localai/shared";
 
 /** Coffee groups must have at least 2 and at most 5 bots. */
 export const COFFEE_GROUP_MIN_SIZE = 2;
 export const COFFEE_GROUP_MAX_SIZE = 5;
 
-/** Recent message window forwarded to the router and the speaker. */
-const COFFEE_HISTORY_WINDOW = 24;
-
-/** Hard cap so verbose models cannot flood the tabletop card (full text still in transcript tooling). */
-const COFFEE_TABLE_REPLY_MAX_CHARS = 48;
-
-/**
- * Hard cap on speaker decode budget for Coffee. Per-bot overrides may be lower
- * but cannot exceed this envelope. Keep aligned with {@link COFFEE_TABLE_REPLY_MAX_CHARS}.
- */
-const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS = 24;
+/** Default tabletop cap when callers omit an explicit limit (tests + legacy). */
+export const COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS = 48;
 
 /** Router LLM call budget — keep low so latency stays acceptable. */
-const ROUTER_TEMPERATURE = 0.2;
 const ROUTER_MAX_TOKENS = 80;
 
 /** Fallback when router output cannot be parsed. */
@@ -277,13 +275,16 @@ export function stripCoffeeSpeakerPrefix(raw: string, speakerName: string | null
  * Collapse whitespace and trim Coffee replies so the live table stays a tiny
  * card; prefer ending on sentence punctuation when clipping is required.
  */
-export function clampCoffeeTableReplyText(raw: string): string {
+export function clampCoffeeTableReplyText(
+  raw: string,
+  maxChars: number = COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS
+): string {
   const normalized = raw.replace(/\s+/g, " ").trim();
-  if (normalized.length <= COFFEE_TABLE_REPLY_MAX_CHARS) {
+  if (normalized.length <= maxChars) {
     return normalized;
   }
-  const slice = normalized.slice(0, COFFEE_TABLE_REPLY_MAX_CHARS);
-  const minSentenceCut = Math.floor(COFFEE_TABLE_REPLY_MAX_CHARS * 0.42);
+  const slice = normalized.slice(0, maxChars);
+  const minSentenceCut = Math.floor(maxChars * 0.42);
   for (let index = slice.length - 1; index >= minSentenceCut; index -= 1) {
     const char = slice[index];
     if (char === "." || char === "!" || char === "?") {
@@ -294,7 +295,7 @@ export function clampCoffeeTableReplyText(raw: string): string {
     }
   }
 
-  const wordTrimmed = normalized.slice(0, COFFEE_TABLE_REPLY_MAX_CHARS - 1);
+  const wordTrimmed = normalized.slice(0, maxChars - 1);
   const space = wordTrimmed.lastIndexOf(" ");
   if (space >= minSentenceCut) {
     return `${wordTrimmed.slice(0, space).trim()}…`;
@@ -331,6 +332,7 @@ export interface CoffeeTurnInput {
 
 export interface CoffeeSessionCreateInput {
   groupBotIds?: Array<string | null>;
+  coffeeSettings?: unknown;
 }
 
 function stableUnitValue(seed: string): number {
@@ -636,6 +638,90 @@ export function loadCoffeeGroupProfiles(
 }
 
 /**
+ * Router-side table tuning (shared with unit tests).
+ */
+export function buildCoffeeTableTuningAppendix(settings: CoffeeSessionSettings): string {
+  const energyLine =
+    settings.tableEnergy === "still"
+      ? "Favor a very quiet circle — change speakers only when someone is clearly invited forward."
+      : settings.tableEnergy === "relaxed"
+        ? "Keep an easy, low-pressure cadence — no rush to fill silence."
+        : settings.tableEnergy === "buzzy"
+          ? "Allow a slightly quicker back-and-forth when personalities support it."
+          : "The table may feel lively — bolder speaker picks are okay when they fit the moment.";
+
+  const crossLine =
+    settings.crossTalk === "rare"
+      ? "Prefer one clear voice at a time; avoid rapid ping-pong between bots unless unavoidable."
+      : settings.crossTalk === "chatty"
+        ? "Bot-to-bot riffing is welcome when it stays grounded in the last few lines."
+        : "Balance replying to the last speaker with leaving air for the whole table.";
+
+  const threadLine = settings.stayOnThread
+    ? "Discourage hard topic jumps until the current thread finds a natural pause or landing."
+    : "Topic shifts are allowed when they feel natural rather than chaotic.";
+
+  return ["Table tuning (follow alongside the base Coffee rules):", energyLine, crossLine, threadLine].join(
+    "\n"
+  );
+}
+
+/**
+ * Speaker-side style cues under the tabletop character cap.
+ */
+export function buildCoffeeSpeakerStyleAppendix(
+  settings: CoffeeSessionSettings,
+  tableReplyMaxChars: number
+): string {
+  const energyLine =
+    settings.tableEnergy === "still"
+      ? "Keep your energy soft and minimal."
+      : settings.tableEnergy === "relaxed"
+        ? "Stay easy and low-key."
+        : settings.tableEnergy === "buzzy"
+          ? "A little sparkle is fine — stay within the tabletop cap."
+          : "Big personality is okay — still respect the tabletop cap.";
+
+  const crossLine =
+    settings.crossTalk === "rare"
+      ? "Prefer addressing the last line or the shared topic without forcing a pile-on."
+      : settings.crossTalk === "chatty"
+        ? "You may bounce off the last bot when it fits your character."
+        : "Sometimes reply to the last bot; sometimes widen to the whole table.";
+
+  return [
+    "Coffee style cues (the tabletop cap below overrides everything):",
+    energyLine,
+    crossLine,
+    `Hard tabletop cap for this session: ${tableReplyMaxChars} characters including spaces.`,
+  ].join("\n");
+}
+
+/** Parse persisted JSON from `conversations.coffee_settings`. */
+export function parseStoredCoffeeSessionSettings(raw: string | null | undefined): CoffeeSessionSettings {
+  if (!raw || typeof raw !== "string" || raw.trim().length === 0) {
+    return normalizeCoffeeSessionSettings(undefined);
+  }
+  try {
+    return normalizeCoffeeSessionSettings(JSON.parse(raw) as unknown);
+  } catch {
+    return normalizeCoffeeSessionSettings(undefined);
+  }
+}
+
+function coffeeTranscriptContainsPrismBotMention(
+  userMessage: string,
+  history: readonly { content: string }[]
+): boolean {
+  if (userMessage.includes("prism-bot://")) return true;
+  return history.some((m) => m.content.includes("prism-bot://"));
+}
+
+/** Router/speaker appendix only when table text includes prism-bot markdown links. */
+const PRISM_BOT_MENTION_COFFEE_APPENDIX =
+  "The user may @-mention bots with markdown like [Label](prism-bot://botId) (botId may be URL-encoded). Prefer the mentioned bot as the next speaker when that fits the table.";
+
+/**
  * Build the router LLM prompt that picks the next speaker.
  *
  * The router is asked to emit a single-line JSON object with `botId`
@@ -649,21 +735,42 @@ export function buildRouterPrompt(args: {
   lastSpeakerBotId: string | null;
   socialByBotId?: Record<string, CoffeeBotSocialSnapshot>;
   turnKind?: CoffeeTurnKind;
+  sessionSettings?: CoffeeSessionSettings;
 }): ProviderMessage[] {
-  const { group, history, userMessage, lastSpeakerBotId, socialByBotId = {}, turnKind = "user" } = args;
+  const {
+    group,
+    history,
+    userMessage,
+    lastSpeakerBotId,
+    socialByBotId = {},
+    turnKind = "user",
+    sessionSettings,
+  } = args;
+  const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
 
   const personaLines = group.map((bot) => {
     const personaSnippet = summarizePersonaForRouter(bot.systemPrompt);
     return `- id="${bot.id}" name="${bot.name}"${personaSnippet ? ` persona=${personaSnippet}` : ""}`;
   });
 
-  const recencyHint = lastSpeakerBotId
-    ? `The last bot to speak was id="${lastSpeakerBotId}". Prefer variety unless the same bot is clearly the most natural next speaker.`
-    : `No bot has spoken yet in this thread.`;
+  const recencyHint =
+    settings.crossTalk === "rare"
+      ? lastSpeakerBotId
+        ? `The last bot to speak was id="${lastSpeakerBotId}". Prefer letting that line land before handing the mic elsewhere unless another bot is clearly a better fit.`
+        : `No bot has spoken yet in this thread.`
+      : settings.crossTalk === "chatty"
+        ? lastSpeakerBotId
+          ? `The last bot to speak was id="${lastSpeakerBotId}". Bot-to-bot banter is welcome; pick the same voice again if the riff should continue, or pass the mic when a fresh perspective helps.`
+          : `No bot has spoken yet in this thread.`
+        : lastSpeakerBotId
+          ? `The last bot to speak was id="${lastSpeakerBotId}". Prefer variety unless the same bot is clearly the most natural next speaker.`
+          : `No bot has spoken yet in this thread.`;
   const earlyThreadHint =
     history.length < 3
       ? "This table is still warming up. Bots know the visible names at the table, but should not imply prior friendship, shared memories, or deep familiarity unless the transcript establishes it."
       : "Use only the visible transcript as shared history. Do not invent off-screen relationships between bots.";
+
+  const prismBotMentionHint = coffeeTranscriptContainsPrismBotMention(userMessage, history);
 
   const systemContent = [
     "You are the silent moderator of Coffee Mode, a calm live conversation around an ambiguous coffee table inside PRISM.",
@@ -684,6 +791,8 @@ export function buildRouterPrompt(args: {
     recencyHint,
     earlyThreadHint,
     "",
+    buildCoffeeTableTuningAppendix(settings),
+    "",
     "Hidden social metrics snapshot (normalized 0..1):",
     formatCoffeeSocialPromptSummary(group, socialByBotId),
     "",
@@ -691,6 +800,7 @@ export function buildRouterPrompt(args: {
     "- High engagement suggests that bot has energy to contribute now.",
     "- High leavePressure suggests the bot may withdraw, set soft limits, or speak briefly.",
     "- High valuesFriction + high restraint should produce bounded calm responses, not insults.",
+    ...(prismBotMentionHint ? ["", PRISM_BOT_MENTION_COFFEE_APPENDIX] : []),
   ].join("\n");
 
   const messages: ProviderMessage[] = [
@@ -698,7 +808,8 @@ export function buildRouterPrompt(args: {
   ];
 
   // Include only a tail of the history to keep the router cheap.
-  const trimmedHistory = history.slice(-Math.min(history.length, 8));
+  const routerTail = coffeeRouterTailMessageCount(settings);
+  const trimmedHistory = history.slice(-Math.min(history.length, routerTail));
   if (trimmedHistory.length > 0) {
     messages.push({
       role: "system",
@@ -841,6 +952,7 @@ export function buildSpeakerPrompt(args: {
   userDisplayName?: string;
   turnKind?: CoffeeTurnKind;
   firstContactIntro?: boolean;
+  sessionSettings?: CoffeeSessionSettings;
 }): ProviderMessage[] {
   const {
     speaker,
@@ -851,7 +963,10 @@ export function buildSpeakerPrompt(args: {
     userDisplayName,
     turnKind = "user",
     firstContactIntro = false,
+    sessionSettings,
   } = args;
+  const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
+  const { tableReplyMaxChars } = coffeeReplyLengthCaps(settings);
   const speakerSystemPrompt = composeBotSystemPrompt(
     speaker.name,
     speaker.systemPrompt
@@ -860,6 +975,8 @@ export function buildSpeakerPrompt(args: {
     .filter((bot) => bot.id !== speaker.id)
     .map((bot) => `- ${bot.name}`);
   const speakerSocial = socialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL;
+
+  const prismBotMentionHint = coffeeTranscriptContainsPrismBotMention(userMessage, history);
 
   const groupContextLines = [
     "You are sitting at Coffee Mode: an ambiguous coffee shop table inside PRISM.",
@@ -873,8 +990,8 @@ export function buildSpeakerPrompt(args: {
     "You may react directly to what another bot just said, agree, disagree, add one concrete thought, pause into a softer observation, or gently shift the topic when that fits your personality.",
     "The user is present, but Coffee should feel like a group conversation. Do not turn every reply back toward the user.",
     "Reply as one line of plain prose (no line breaks). ONE clause only — a single short utterance, like a reaction bark or one breath. No second sentence, no semicolon piles, no em dash add-ons.",
-    "Hard tabletop cap: 48 characters including spaces. Anything longer is clipped and looks broken.",
-    "Examples: \"Hey Patrick!\" \"Wild shift, huh?\" \"Yeah, I get that.\" If you're tempted to type more, stop sooner.",
+    `Hard tabletop cap: ${tableReplyMaxChars} characters including spaces. Anything longer is clipped and looks broken.`,
+    `Examples: "Hey Patrick!" "Wild shift, huh?" "Yeah, I get that." If you're tempted to type more, stop sooner (cap is ${tableReplyMaxChars} chars).`,
     "No asterisk stage directions (like *excitedly*), no parenthetical acting notes.",
     "Do not end with a question by default. Ask a question only when it is genuinely the most natural next move; otherwise end with a statement, observation, or small offer.",
     "Do not write as if you are cutting off another bot mid-sentence. Coffee only presents cutoffs when the app has explicit interruption metadata.",
@@ -885,6 +1002,7 @@ export function buildSpeakerPrompt(args: {
     `- You (${speaker.name}): disposition=${speakerSocial.disposition.toFixed(2)}, valuesFriction=${speakerSocial.valuesFriction.toFixed(2)}, restraint=${speakerSocial.restraint.toFixed(2)}, engagement=${speakerSocial.engagement.toFixed(2)}, leavePressure=${speakerSocial.leavePressure.toFixed(2)}`,
     "- If your valuesFriction and restraint are both high, set calm boundaries, be brief, or politely step back. Avoid insults or hostile escalation.",
     "- If leavePressure is high, prefer short grounded replies and occasional gentle withdrawal language.",
+    ...(prismBotMentionHint ? ["", PRISM_BOT_MENTION_COFFEE_APPENDIX] : []),
   ];
 
   const messages: ProviderMessage[] = [];
@@ -892,6 +1010,10 @@ export function buildSpeakerPrompt(args: {
     messages.push({ role: "system", content: speakerSystemPrompt });
   }
   messages.push({ role: "system", content: groupContextLines.join("\n") });
+  messages.push({
+    role: "system",
+    content: buildCoffeeSpeakerStyleAppendix(settings, tableReplyMaxChars),
+  });
   if (userDisplayName && userDisplayName.trim().length > 0) {
     messages.push({
       role: "system",
@@ -934,7 +1056,7 @@ export function buildSpeakerPrompt(args: {
             "Continue the table conversation in your own voice.",
             `Latest table moment: ${userMessage}`,
             `Respond as ${speaker.name} to the latest bot, the shared topic, or a natural topic shift. Only address the user if that is truly the natural next move.`,
-            "Length: one clause only — hard cap 48 characters including spaces.",
+            `Length: one clause only — hard cap ${tableReplyMaxChars} characters including spaces.`,
             "Do not end with a question unless the moment truly needs one.",
             "Do not include a speaker label.",
           ].join("\n"),
@@ -944,7 +1066,7 @@ export function buildSpeakerPrompt(args: {
           content: [
             `The user says: ${userMessage}`,
             "Reply naturally as part of the table conversation. You may answer the user directly or open the topic to another bot.",
-            "Length: one clause only — hard cap 48 characters including spaces.",
+            `Length: one clause only — hard cap ${tableReplyMaxChars} characters including spaces.`,
             "Do not end with a question unless the moment truly needs one.",
             "Do not include a speaker label.",
           ].join("\n"),
@@ -972,6 +1094,7 @@ interface ConversationRow {
   conversation_mode: string | null;
   bot_id: string | null;
   bot_group_ids: string | null;
+  coffee_settings: string | null;
   incognito: number;
   created_at: string;
   updated_at: string;
@@ -997,7 +1120,7 @@ function loadConversationRow(
 ): ConversationRow | undefined {
   return db
     .prepare(
-      `SELECT id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito, created_at, updated_at
+      `SELECT id, user_id, title, conversation_mode, bot_id, bot_group_ids, coffee_settings, incognito, created_at, updated_at
          FROM conversations
         WHERE id = ? AND user_id = ?`
     )
@@ -1101,6 +1224,7 @@ function buildConversationResponse(args: {
     ...(socialByBotId && Object.keys(socialByBotId).length > 0
       ? { coffeeBotSocialById: socialByBotId }
       : {}),
+    coffeeSettings: parseStoredCoffeeSessionSettings(row.coffee_settings),
     incognito: row.incognito === 1,
     lastBotId: lastSpeakerBotId,
     lastBotColor: messages.length > 0 ? findLastAssistantColor(messages) : null,
@@ -1244,15 +1368,18 @@ export function createCoffeeConversation(
   const now = new Date().toISOString();
   const conversationId = randomId(12);
   const initialSocialByBotId = initializeCoffeeSocialState(group, {});
+  const sessionSettings = normalizeCoffeeSessionSettings(input.coffeeSettings);
+  const coffeeSettingsJson = JSON.stringify(sessionSettings);
   db.prepare(
     `INSERT INTO conversations
-       (id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito, created_at, updated_at)
-     VALUES (?, ?, ?, 'coffee', NULL, ?, 0, ?, ?)`
+       (id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito, coffee_settings, created_at, updated_at)
+     VALUES (?, ?, ?, 'coffee', NULL, ?, 0, ?, ?, ?)`
   ).run(
     conversationId,
     userId,
     generateCoffeeTitle("", group),
     JSON.stringify(seatBotIds),
+    coffeeSettingsJson,
     now,
     now
   );
@@ -1296,7 +1423,10 @@ async function generateCoffeeBotReply(args: {
     userIsComposing = false,
     directedSpeakerBotId,
   } = args;
-  const history = loadMessages(db, userId, row.id, COFFEE_HISTORY_WINDOW);
+  const sessionSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
+  const historyLimit = coffeeEffectiveHistoryLimit(sessionSettings);
+  const replyCaps = coffeeReplyLengthCaps(sessionSettings);
+  const history = loadMessages(db, userId, row.id, historyLimit);
   const lastSpeakerBotId = loadLastSpeakerBotId(db, userId, row.id);
   const persistedSocialByBotId = loadCoffeeBotSocialState(
     db,
@@ -1337,10 +1467,11 @@ async function generateCoffeeBotReply(args: {
       lastSpeakerBotId,
       socialByBotId: preTurnSocialByBotId,
       turnKind,
+      sessionSettings,
     });
     try {
       const routerRaw = await routerProvider.generateResponse(routerMessages, {
-        temperature: ROUTER_TEMPERATURE,
+        temperature: coffeeRouterTemperature(sessionSettings),
         maxTokens: ROUTER_MAX_TOKENS,
       });
       const parsed = parseRouterResponse(routerRaw, group);
@@ -1392,10 +1523,8 @@ async function generateCoffeeBotReply(args: {
     speakerOptions.temperature = speaker.temperature;
   }
   speakerOptions.maxTokens = Math.min(
-    typeof speaker.maxTokens === "number"
-      ? speaker.maxTokens
-      : COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS,
-    COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS
+    typeof speaker.maxTokens === "number" ? speaker.maxTokens : replyCaps.speakerMaxOutputTokens,
+    replyCaps.speakerMaxOutputTokens
   );
   const speakerMessages = buildSpeakerPrompt({
     speaker,
@@ -1406,6 +1535,7 @@ async function generateCoffeeBotReply(args: {
     userDisplayName: settings.userDisplayName,
     turnKind,
     firstContactIntro: turnKind === "user" && shouldUseFirstContactIntro,
+    sessionSettings,
   });
   const speakerReply = await speakerProvider.generateResponse(
     speakerMessages,
@@ -1413,7 +1543,10 @@ async function generateCoffeeBotReply(args: {
   );
   const replyText =
     typeof speakerReply === "string"
-      ? clampCoffeeTableReplyText(stripCoffeeSpeakerPrefix(speakerReply, speaker.name))
+      ? clampCoffeeTableReplyText(
+          stripCoffeeSpeakerPrefix(speakerReply, speaker.name),
+          replyCaps.tableReplyMaxChars
+        )
       : "";
   if (!replyText) {
     throw new Error("Speaker bot returned an empty reply.");
@@ -1460,7 +1593,7 @@ async function generateCoffeeBotReply(args: {
   }
 
   const refreshedRow = loadConversationRow(db, userId, row.id) ?? row;
-  const finalHistory = loadMessages(db, userId, refreshedRow.id, COFFEE_HISTORY_WINDOW);
+  const finalHistory = loadMessages(db, userId, refreshedRow.id, historyLimit);
   const finalLastSpeakerBotId = loadLastSpeakerBotId(db, userId, refreshedRow.id);
   return {
     conversation: buildConversationResponse({
@@ -1508,8 +1641,8 @@ export async function processCoffeeTurn(
     const newConversationId = randomId(12);
     db.prepare(
       `INSERT INTO conversations
-         (id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito, created_at, updated_at)
-       VALUES (?, ?, ?, 'coffee', NULL, ?, 0, ?, ?)`
+         (id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito, coffee_settings, created_at, updated_at)
+       VALUES (?, ?, ?, 'coffee', NULL, ?, 0, NULL, ?, ?)`
     ).run(
       newConversationId,
       userId,
@@ -1543,6 +1676,32 @@ export async function processCoffeeTurn(
   });
 }
 
+/**
+ * Persist updated Coffee session tuning for an existing thread.
+ */
+export function updateCoffeeConversationSettings(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  rawSettings: unknown
+): CoffeeSessionSettings {
+  const row = loadConversationRow(db, userId, conversationId);
+  if (!row || row.conversation_mode !== "coffee") {
+    throw new Error("Coffee session not found.");
+  }
+  const current = parseStoredCoffeeSessionSettings(row.coffee_settings);
+  const mergedUnknown: unknown =
+    rawSettings && typeof rawSettings === "object" && !Array.isArray(rawSettings)
+      ? { ...current, ...(rawSettings as Record<string, unknown>) }
+      : rawSettings;
+  const normalized = normalizeCoffeeSessionSettings(mergedUnknown);
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE conversations SET coffee_settings = ?, updated_at = ? WHERE id = ? AND user_id = ?`
+  ).run(JSON.stringify(normalized), now, conversationId, userId);
+  return normalized;
+}
+
 export async function processCoffeeAutonomousTurn(
   db: DatabaseSync,
   userId: string,
@@ -1552,7 +1711,9 @@ export async function processCoffeeAutonomousTurn(
   directedSpeakerBotId?: string
 ): Promise<CoffeeTurnResponse> {
   const { row, group } = loadCoffeeConversationGroup(db, userId, conversationId);
-  const history = loadMessages(db, userId, row.id, COFFEE_HISTORY_WINDOW);
+  const sessionSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
+  const historyLimit = coffeeEffectiveHistoryLimit(sessionSettings);
+  const history = loadMessages(db, userId, row.id, historyLimit);
   const latest = history[history.length - 1];
   const tableFocus = latest
     ? latest.role === "assistant" && latest.botName

@@ -2,6 +2,7 @@ import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  extractPrismBotMentionIdsFromMessage,
   parseTitleResponse,
   processChatMessage,
   refreshConversationTitle,
@@ -2630,5 +2631,13 @@ describe("processChatMessage conversational memory cues", () => {
         .get("user-1") as { n: number }
     ).n;
     assert.equal(secondCount, 1);
+  });
+});
+
+describe("extractPrismBotMentionIdsFromMessage", () => {
+  it("collects unique decoded bot ids from prism-bot links", () => {
+    const text =
+      "Hey [SpongeBob](prism-bot://sb) and [Pat](prism-bot://pat%201) — also [SpongeBob](prism-bot://sb) again";
+    assert.deepEqual(extractPrismBotMentionIdsFromMessage(text), ["sb", "pat 1"]);
   });
 });

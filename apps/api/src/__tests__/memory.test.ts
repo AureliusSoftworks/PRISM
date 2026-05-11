@@ -528,7 +528,7 @@ describe("persistMemoryCandidates", () => {
     assert.equal(deleteMemoryById(db, "user-1", memory.id), true);
   });
 
-  it("never deletes or demotes protected about-you memories", async () => {
+  it("blocks about-you demotion and default deletes; explicit allowAboutYou deletes", async () => {
     const db = createMemoryTestDb();
     const userKey = Buffer.alloc(32, 7);
     const memory = await restoreMemory(db, "user-1", userKey, {
@@ -548,6 +548,13 @@ describe("persistMemoryCandidates", () => {
     assert.equal(
       deleteMemoryById(db, "user-1", memory.id, { allowLongTerm: true }),
       false
+    );
+    assert.equal(
+      deleteMemoryById(db, "user-1", memory.id, {
+        allowLongTerm: true,
+        allowAboutYou: true,
+      }),
+      true
     );
   });
 

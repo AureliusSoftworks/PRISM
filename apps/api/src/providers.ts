@@ -1,5 +1,11 @@
 import { getAppConfig } from "@localai/config";
 
+/**
+ * Caps how long `/api/models` hangs while probing `/api/tags` or OpenAI’s model list.
+ * Without this, unreachable hosts often stall until the TCP stack times out (~minutes).
+ */
+const REMOTE_TAGS_PROBE_TIMEOUT_MS = 15_000;
+
 export interface ProviderMessage {
   role: "user" | "assistant" | "system";
   content: string;
@@ -19,6 +25,8 @@ export interface ModelCatalogEntry {
   isDefault?: boolean;
   localHost?: "primary" | "secondary";
   hostLabel?: string;
+  /** When set, this entry is only for the Images panel (not chat text models). */
+  imageSource?: "ollama" | "comfyui";
 }
 
 export interface ModelCatalog {
@@ -65,6 +73,44 @@ const OPENAI_CHAT_MODEL_PREFIXES = [
   "o3",
   "o4",
 ] as const;
+
+/**
+ * Chat models whose API shape differs from classic GPT-4: completion token
+ * field name and fixed sampling (temperature must be omitted — only default).
+ */
+function openAiReasoningStyleChatApi(modelId: string): boolean {
+  const normalized = modelId.trim().toLowerCase();
+  if (!normalized) return false;
+  if (
+    normalized.startsWith("o1") ||
+    normalized.startsWith("o3") ||
+    normalized.startsWith("o4")
+  ) {
+    return true;
+  }
+  if (normalized.startsWith("gpt-5")) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Some chat models reject `max_tokens` and require `max_completion_tokens`
+ * instead (same meaning: cap on tokens generated in the reply). OpenAI does
+ * not publish a single exhaustive list; we match known families and extend
+ * when new models surface the same 400.
+ */
+export function openAiModelUsesMaxCompletionTokens(modelId: string): boolean {
+  return openAiReasoningStyleChatApi(modelId);
+}
+
+/**
+ * Reasoning-style models reject non-default `temperature`; omit the field so
+ * the API uses its default (1).
+ */
+export function openAiModelUsesFixedDefaultTemperature(modelId: string): boolean {
+  return openAiReasoningStyleChatApi(modelId);
+}
 
 /**
  * Cap on how many characters of an OpenAI error body we echo back through
@@ -205,7 +251,7 @@ function encodeSecondaryOllamaModelId(id: string): string {
   return `${SECONDARY_OLLAMA_MODEL_PREFIX}${id.trim()}`;
 }
 
-function parseSecondaryOllamaModelId(id: string): string | null {
+export function parseSecondaryOllamaModelId(id: string): string | null {
   const trimmed = id.trim();
   if (!trimmed.startsWith(SECONDARY_OLLAMA_MODEL_PREFIX)) {
     return null;
@@ -254,7 +300,9 @@ function isAllowedOpenAiChatModel(id: string): boolean {
 
 async function discoverLocalModelIds(ollamaHost: string): Promise<string[]> {
   try {
-    const response = await fetch(`${ollamaHost}/api/tags`);
+    const response = await fetch(`${ollamaHost}/api/tags`, {
+      signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
+    });
     if (!response.ok) return [];
     const payload = (await response.json()) as {
       models?: Array<{ name?: unknown; model?: unknown }>;
@@ -318,7 +366,9 @@ export async function checkLocalModelHostStatus(
 
   for (const host of hostCandidates) {
     try {
-      const response = await fetch(`${host}/api/tags`);
+      const response = await fetch(`${host}/api/tags`, {
+        signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
+      });
       if (!response.ok) {
         continue;
       }
@@ -349,6 +399,7 @@ async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> 
   try {
     const response = await fetch("https://api.openai.com/v1/models", {
       headers: { authorization: `Bearer ${openAiApiKey}` },
+      signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
     });
     if (!response.ok) return [];
     const payload = (await response.json()) as {
@@ -481,15 +532,23 @@ export class OpenAiProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    const modelId = options?.model?.trim() || OPENAI_DEFAULT_MODEL;
     const requestBody: Record<string, unknown> = {
-      model: options?.model?.trim() || OPENAI_DEFAULT_MODEL,
+      model: modelId,
       messages
     };
-    if (typeof options?.temperature === "number") {
+    if (
+      typeof options?.temperature === "number" &&
+      !openAiModelUsesFixedDefaultTemperature(modelId)
+    ) {
       requestBody.temperature = options.temperature;
     }
     if (typeof options?.maxTokens === "number") {
-      requestBody.max_tokens = options.maxTokens;
+      if (openAiModelUsesMaxCompletionTokens(modelId)) {
+        requestBody.max_completion_tokens = options.maxTokens;
+      } else {
+        requestBody.max_tokens = options.maxTokens;
+      }
     }
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {

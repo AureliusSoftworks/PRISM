@@ -554,6 +554,8 @@ export function deleteMemoriesLinkedToMessages(
 
 interface DeleteMemoryOptions {
   allowLongTerm?: boolean;
+  /** User explicitly removed an “about you” line from the Memories panel. */
+  allowAboutYou?: boolean;
 }
 
 export function deleteMemoryById(
@@ -562,15 +564,17 @@ export function deleteMemoryById(
   memoryId: string,
   options: DeleteMemoryOptions = {}
 ): boolean {
+  const allowAboutYou = options.allowAboutYou ? 1 : 0;
+  const allowLongTerm = options.allowLongTerm ? 1 : 0;
   const result = db
     .prepare(
       `DELETE FROM memories
        WHERE id = ?
          AND user_id = ?
-         AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
+         AND (? = 1 OR COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}')
          AND (? = 1 OR COALESCE(tier, 'short_term') != 'long_term')`
     )
-    .run(memoryId, userId, options.allowLongTerm ? 1 : 0);
+    .run(memoryId, userId, allowAboutYou, allowLongTerm);
   return Number(result.changes ?? 0) > 0;
 }
 
