@@ -48,10 +48,10 @@ export function applyPlainTextWordBackspace(
 }
 
 /**
- * Committed `[label](prism-bot://…)` link when the caret lies on the label
- * (including the index of the closing `]`).
+ * Committed `[label](prism-bot://…)` when the caret touches the link: the
+ * bracket label, the `](…)` href tail, or the closing `)` (exclusive end).
  */
-function findPrismBotMarkdownLinkHitAtCaret(
+export function findPrismBotMarkdownLinkAtCaret(
   text: string,
   caret: number
 ): {
@@ -59,6 +59,7 @@ function findPrismBotMarkdownLinkHitAtCaret(
   wholeEndExclusive: number;
   labelStart: number;
   labelEndExclusive: number;
+  inHref: boolean;
 } | null {
   const re = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, PRISM_BOT_MARKDOWN_LINK_RE.flags);
   let m: RegExpExecArray | null;
@@ -74,6 +75,16 @@ function findPrismBotMarkdownLinkHitAtCaret(
         wholeEndExclusive,
         labelStart,
         labelEndExclusive,
+        inHref: false,
+      };
+    }
+    if (caret > labelEndExclusive && caret < wholeEndExclusive) {
+      return {
+        wholeStart: matchIndex,
+        wholeEndExclusive,
+        labelStart,
+        labelEndExclusive,
+        inHref: true,
       };
     }
   }
@@ -116,8 +127,8 @@ export function applyTaggedMentionWordBackspace(
     };
   }
 
-  const labelHit = findPrismBotMarkdownLinkHitAtCaret(value, caret);
-  if (labelHit) {
+  const labelHit = findPrismBotMarkdownLinkAtCaret(value, caret);
+  if (labelHit && !labelHit.inHref) {
     const { wholeStart, wholeEndExclusive, labelStart, labelEndExclusive } = labelHit;
     const middle = value.slice(labelStart, labelEndExclusive);
     const rel = caret - labelStart;

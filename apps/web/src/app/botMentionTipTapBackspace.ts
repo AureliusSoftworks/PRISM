@@ -16,31 +16,36 @@ export function findPrismBotLinkTextRange(
   fromCaret: number
 ): { from: number; to: number; linkAttrs: Record<string, unknown> } | null {
   const linkType = state.schema.marks.link;
-  if (!linkType || fromCaret < 1 || fromCaret > state.doc.content.size) {
+  if (!linkType || fromCaret < 0 || fromCaret > state.doc.content.size) {
     return null;
   }
-  const probe = fromCaret - 1;
-  const $p = state.doc.resolve(probe);
-  const linkMark = linkType.isInSet($p.marks()) as Mark | undefined;
-  if (!linkMark || !hrefIsPrismBot(linkMark.attrs.href)) return null;
-  const href = linkMark.attrs.href as string;
-
-  let from = probe;
-  let to = probe + 1;
   const docSize = state.doc.content.size;
-  while (from > 0) {
-    const $ = state.doc.resolve(from - 1);
-    const m = linkType.isInSet($.marks()) as Mark | undefined;
-    if (!m || m.attrs.href !== href) break;
-    from -= 1;
+  const probes =
+    fromCaret >= 1 ? [fromCaret - 1, fromCaret] : [fromCaret];
+  for (const probe of probes) {
+    if (probe < 0 || probe > docSize) continue;
+    const $p = state.doc.resolve(probe);
+    const linkMark = linkType.isInSet($p.marks()) as Mark | undefined;
+    if (!linkMark || !hrefIsPrismBot(linkMark.attrs.href)) continue;
+    const href = linkMark.attrs.href as string;
+
+    let from = probe;
+    let to = probe + 1;
+    while (from > 0) {
+      const $ = state.doc.resolve(from - 1);
+      const m = linkType.isInSet($.marks()) as Mark | undefined;
+      if (!m || m.attrs.href !== href) break;
+      from -= 1;
+    }
+    while (to < docSize) {
+      const $ = state.doc.resolve(to);
+      const m = linkType.isInSet($.marks()) as Mark | undefined;
+      if (!m || m.attrs.href !== href) break;
+      to += 1;
+    }
+    return { from, to, linkAttrs: { ...linkMark.attrs } };
   }
-  while (to < docSize) {
-    const $ = state.doc.resolve(to);
-    const m = linkType.isInSet($.marks()) as Mark | undefined;
-    if (!m || m.attrs.href !== href) break;
-    to += 1;
-  }
-  return { from, to, linkAttrs: { ...linkMark.attrs } };
+  return null;
 }
 
 /**
