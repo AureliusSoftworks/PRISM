@@ -24,6 +24,8 @@ function readBooleanEnv(name: string, fallback: boolean): boolean {
 
 const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
 const DEFAULT_QDRANT_URL = "http://127.0.0.1:6333";
+/** Default ComfyUI listen address (used only when `COMFYUI_HOST` is unset). */
+const DEFAULT_COMFYUI_HOST = "";
 
 /**
  * Turn whatever value is in OLLAMA_HOST into a URL that `fetch()` can use.
@@ -99,6 +101,39 @@ function normalizeQdrantUrl(value: string | undefined): string {
   return normalized;
 }
 
+/**
+ * Normalizes an optional ComfyUI base URL for `fetch()` (scheme, bind-all fix,
+ * no trailing slash). Empty input stays empty (ComfyUI is optional per user).
+ * Malformed values log a warning and return empty string.
+ */
+function normalizeComfyUiHost(value: string | undefined): string {
+  const raw = (value ?? "").trim();
+  if (!raw) {
+    return DEFAULT_COMFYUI_HOST;
+  }
+
+  let normalized = raw;
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `http://${normalized}`;
+  }
+  normalized = normalized.replace(
+    /\/\/0\.0\.0\.0(?=$|[:\/])/i,
+    "//127.0.0.1"
+  );
+  normalized = normalized.replace(/\/+$/, "");
+
+  try {
+    new URL(normalized);
+  } catch {
+    console.warn(
+      `COMFYUI_HOST value ${JSON.stringify(raw)} is not a valid URL; treating as unset`
+    );
+    return DEFAULT_COMFYUI_HOST;
+  }
+
+  return normalized;
+}
+
 export interface AppConfig {
   apiPort: number;
   serverName: string;
@@ -108,10 +143,14 @@ export interface AppConfig {
   encryptionMasterKey: string;
   ollamaHost: string;
   ollamaModel: string;
+  /** Single model id allowed for POST `/api/ollama/pull-primary` (default flux2-klein). */
+  ollamaInAppPullModel: string;
   ollamaAuxiliaryModel: string;
   ollamaEmbeddingModel: string;
   openAiApiKey?: string;
   qdrantUrl: string;
+  /** Optional default ComfyUI base URL from env (per-user setting overrides in practice). */
+  comfyUiHost: string;
 }
 
 export function getAppConfig(): AppConfig {
@@ -127,11 +166,14 @@ export function getAppConfig(): AppConfig {
     ),
     ollamaHost: normalizeOllamaHost(process.env.OLLAMA_HOST),
     ollamaModel: process.env.OLLAMA_MODEL ?? "llama3.2",
+    ollamaInAppPullModel:
+      process.env.OLLAMA_IN_APP_PULL_MODEL?.trim() || "flux2-klein",
     ollamaAuxiliaryModel: process.env.OLLAMA_AUXILIARY_MODEL ?? "llama3.2",
     ollamaEmbeddingModel: process.env.OLLAMA_EMBEDDING_MODEL ?? "nomic-embed-text",
     openAiApiKey: process.env.OPENAI_API_KEY,
     qdrantUrl: normalizeQdrantUrl(process.env.QDRANT_URL),
+    comfyUiHost: normalizeComfyUiHost(process.env.COMFYUI_HOST),
   };
 }
 
-export { DEFAULT_QDRANT_URL, normalizeQdrantUrl };
+export { DEFAULT_QDRANT_URL, normalizeComfyUiHost, normalizeQdrantUrl };
