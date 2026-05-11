@@ -17,9 +17,13 @@ export {
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
   stripPurposeStatementPrefixes,
+  ageFromIsoBirthday,
   buildImagePersonaContext,
   composeAugmentedImagePrompt,
   DEFAULT_IMAGE_PERSONA_CONTEXT_MAX_CHARS,
+  parseIsoYmdParts,
+  westernZodiacFromIsoBirthday,
+  westernZodiacSignFromMonthDay,
   type BotAppearanceProfile,
   type BotCoreProfile,
   type BotCustomFact,
@@ -33,6 +37,7 @@ export {
   type BotPurposeProfile,
   type BotVoicePreset,
   type BotWorldviewProfile,
+  type WesternZodiacSign,
 } from "./botProfile.js";
 
 export {
@@ -49,10 +54,33 @@ export {
   type AskQuestionPayload,
   type ParsedAssistantTurn,
   type ParsedStoredAssistantToolPayload,
+  type SentGeneratedImagePayload,
   type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
   type StoredMoodKey,
 } from "./prismTool.js";
+
+export {
+  OPENAI_IMAGE_MODEL_IDS,
+  OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
+  DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  DEFAULT_OLLAMA_IN_APP_PULL_MODEL,
+  isAllowedOpenAiImageModelId,
+  normalizeOpenAiImageModelId,
+  normalizeOpenAiImageGenerationParams,
+  catalogEntriesMatchingLocalImageHeuristic,
+  COMFYUI_MODEL_PREFIX,
+  encodeComfyUiModelId,
+  isComfyUiModelId,
+  parseComfyUiCheckpointName,
+  isAllowedInAppOllamaPullModelName,
+  type OpenAiImageModelId,
+  type NormalizedOpenAiImageSize,
+  type NormalizedOpenAiImageRequest,
+  type OpenAiImageSizeDalle3,
+  type OpenAiImageSizeDalle2,
+  type LocalImageModelCandidate,
+} from "./imageModels.js";
 
 export {
   ACCENT_LUMINANCE_MAX_LIGHT,
@@ -74,7 +102,8 @@ export {
   swatchBorderCompensation,
 } from "./color.js";
 
-import type { AskQuestionPayload } from "./prismTool.js";
+import type { AskQuestionPayload, SentGeneratedImagePayload } from "./prismTool.js";
+import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 
 export type UserRole = "user";
 
@@ -115,6 +144,8 @@ export interface ChatMessage {
   moodConfidence?: number;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
   askQuestion?: AskQuestionPayload;
+  /** When this assistant turn included a generated image shown in chat and the library. */
+  sentGeneratedImage?: SentGeneratedImagePayload;
 }
 
 /**
@@ -151,6 +182,24 @@ export interface CoffeeInterruptionEvent {
   socialConsequences: CoffeeInterruptionSocialDelta[];
 }
 
+export {
+  COFFEE_HISTORY_WINDOW_HARD_CAP,
+  COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD,
+  COFFEE_TABLE_REPLY_MAX_CHARS_HARD,
+  DEFAULT_COFFEE_SESSION_SETTINGS,
+  coffeeEffectiveHistoryLimit,
+  coffeeEffectiveMemoryCallbacks,
+  coffeeReplyLengthCaps,
+  coffeeRouterTailMessageCount,
+  coffeeRouterTemperature,
+  normalizeCoffeeSessionSettings,
+  type CoffeeCrossTalkLevel,
+  type CoffeeMemoryCallbacks,
+  type CoffeeResponseLengthPreset,
+  type CoffeeSessionSettings,
+  type CoffeeTableEnergy,
+} from "./coffeeSettings.js";
+
 export interface Conversation {
   id: string;
   userId: string;
@@ -186,6 +235,11 @@ export interface Conversation {
    * This is primarily consumed by dev diagnostics and prompt shaping.
    */
   coffeeBotSocialById?: Record<string, CoffeeBotSocialSnapshot>;
+  /**
+   * Coffee-only — table feel / reply length / focus knobs for this session.
+   * Omitted for non-coffee rows.
+   */
+  coffeeSettings?: CoffeeSessionSettings;
   /**
    * Private chat marker — once `true`, accent styling is suppressed to
    * grayscale, the thread stays client-held, and nothing is written to
@@ -252,6 +306,17 @@ export interface UserMemory {
 
 export type MemoryCategory = "general" | "user" | "bot_relation";
 export type MemoryTier = "short_term" | "long_term";
+
+export {
+  REQUIRED_LOCAL_MODELS,
+  REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  sanitizeHiddenModelIds,
+  resolveAutoModel,
+  type AutoModelProvider,
+  type CatalogShapeForAuto,
+  type ResolveAutoModelInput,
+  type ResolvedAutoModel,
+} from "./modelRouting.js";
 
 export { classifyMemoryCategoryFromText } from "./memoryClassification.js";
 
@@ -449,6 +514,8 @@ export type CoffeeArrivalScenario =
 export interface CoffeeSessionCreateRequest {
   /** Fixed five-seat table layout; null entries are empty chairs. */
   groupBotIds: Array<string | null>;
+  /** Optional session tuning; omitted rows use server defaults. */
+  coffeeSettings?: unknown;
 }
 
 /** Response body for `POST /api/coffee/sessions`. */
@@ -472,6 +539,11 @@ export interface CoffeeContinueRequest {
   directedSpeakerBotId?: string;
   /** Client hint used for rare bot-interrupt presentation while composing. */
   userIsComposing?: boolean;
+}
+
+/** Request body for `PATCH /api/coffee/sessions/:id/settings`. */
+export interface CoffeeSessionSettingsPatchRequest {
+  coffeeSettings: unknown;
 }
 
 /** Request body for `POST /api/coffee/turn`. */

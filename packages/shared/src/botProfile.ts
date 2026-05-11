@@ -420,6 +420,123 @@ function formatFactValueForDisplay(key: string, raw: string): string {
   }
 }
 
+const ISO_YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parses a strict ISO `YYYY-MM-DD` string into calendar parts when the date
+ * is valid (rejects impossible dates like `2001-02-30`).
+ */
+export function parseIsoYmdParts(
+  raw: string
+): { year: number; month: number; day: number } | null {
+  if (!ISO_YMD_RE.test(raw)) return null;
+  const [year, month, day] = raw.split("-").map((part) => Number(part));
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return null;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return null;
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return { year, month, day };
+}
+
+/**
+ * Whole years lived as of `reference`'s local calendar date. Returns `null`
+ * when the birthday is missing, invalid, or still in the future relative to
+ * `reference`.
+ */
+export function ageFromIsoBirthday(
+  iso: string,
+  reference: Date = new Date()
+): number | null {
+  const parts = parseIsoYmdParts(iso);
+  if (!parts) return null;
+  const y = reference.getFullYear();
+  const m = reference.getMonth() + 1;
+  const d = reference.getDate();
+  let age = y - parts.year;
+  if (m < parts.month || (m === parts.month && d < parts.day)) {
+    age -= 1;
+  }
+  return age >= 0 ? age : null;
+}
+
+/** Tropical (Western) zodiac sign derived from calendar month/day. */
+export interface WesternZodiacSign {
+  id: string;
+  label: string;
+  /** Unicode zodiac glyph (♈︎ … ♓︎). */
+  symbol: string;
+}
+
+/** Month (1–12) and day (1–31) on the birthday; invalid ranges yield `null`. */
+export function westernZodiacSignFromMonthDay(
+  month: number,
+  day: number
+): WesternZodiacSign | null {
+  if (!Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const md = month * 100 + day;
+  if ((md >= 1222 && md <= 1231) || (md >= 101 && md <= 119)) {
+    return { id: "capricorn", label: "Capricorn", symbol: "♑" };
+  }
+  if (md >= 120 && md <= 218) {
+    return { id: "aquarius", label: "Aquarius", symbol: "♒" };
+  }
+  if (md >= 219 && md <= 320) {
+    return { id: "pisces", label: "Pisces", symbol: "♓" };
+  }
+  if (md >= 321 && md <= 419) {
+    return { id: "aries", label: "Aries", symbol: "♈" };
+  }
+  if (md >= 420 && md <= 520) {
+    return { id: "taurus", label: "Taurus", symbol: "♉" };
+  }
+  if (md >= 521 && md <= 620) {
+    return { id: "gemini", label: "Gemini", symbol: "♊" };
+  }
+  if (md >= 621 && md <= 722) {
+    return { id: "cancer", label: "Cancer", symbol: "♋" };
+  }
+  if (md >= 723 && md <= 822) {
+    return { id: "leo", label: "Leo", symbol: "♌" };
+  }
+  if (md >= 823 && md <= 922) {
+    return { id: "virgo", label: "Virgo", symbol: "♍" };
+  }
+  if (md >= 923 && md <= 1022) {
+    return { id: "libra", label: "Libra", symbol: "♎" };
+  }
+  if (md >= 1023 && md <= 1121) {
+    return { id: "scorpio", label: "Scorpio", symbol: "♏" };
+  }
+  if (md >= 1122 && md <= 1221) {
+    return { id: "sagittarius", label: "Sagittarius", symbol: "♐" };
+  }
+  return null;
+}
+
+/** Zodiac sign for a valid ISO birthday, or `null` if the date cannot be parsed. */
+export function westernZodiacFromIsoBirthday(iso: string): WesternZodiacSign | null {
+  const parts = parseIsoYmdParts(iso);
+  if (!parts) return null;
+  return westernZodiacSignFromMonthDay(parts.month, parts.day);
+}
+
 export function listBotProfileFacts(
   facts: BotFactsProfile | undefined | null
 ): Array<{ key: string; label: string; value: string }> {
@@ -1510,6 +1627,8 @@ function buildRandomBotProfileCandidate(): BotProfileFields {
   profile.core.emotionalStability = randomScale(0.7);
   profile.core.boundaries = randomString(RANDOM_BOUNDARIES);
   if (chance(0.3)) profile.worldview.optimism = randomScale(1);
+  // Customizer "Character" → Political perspective: always roll a concrete scale
+  // so the die matches the slider (same 5-point track as OCEAN traits).
   profile.worldview.politicalView = randomItem(SCALE_VALUES);
   if (chance(0.85)) {
     const useFunnyBirthday =
@@ -1532,6 +1651,9 @@ function randomProfileSignature(profile: BotProfileFields): string {
     profile.identity.background,
     profile.appearance.description,
     profile.worldview.values,
+    profile.worldview.politicalView !== null
+      ? `politicalScale:${profile.worldview.politicalView}`
+      : "",
     profile.facts.birthday,
     ...profile.facts.customFacts.map((fact) => `${fact.label}:${fact.value}`),
   ]

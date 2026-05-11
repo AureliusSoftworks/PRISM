@@ -4,16 +4,20 @@ import {
   BOT_FACT_KEY_LABELS,
   BOT_PROFILE_META_END,
   BOT_PROFILE_META_START,
+  ageFromIsoBirthday,
   composeBotProfileProse,
   composeAugmentedImagePrompt,
   buildImagePersonaContext,
   DEFAULT_BOT_PROFILE_FIELDS,
   listBotProfileFacts,
+  parseIsoYmdParts,
   parseStoredBotPrompt,
   randomBotProfile,
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
   stripPurposeStatementPrefixes,
+  westernZodiacFromIsoBirthday,
+  westernZodiacSignFromMonthDay,
 } from "./botProfile.ts";
 
 describe("bot profile serialization", () => {
@@ -159,6 +163,18 @@ describe("bot profile serialization", () => {
     assert.equal(profile.v, 2);
     assert.match(prose, /Purpose:/);
     assert.match(stored, /"v":2/);
+  });
+
+  it("random die profiles always set political perspective for the customizer slider", () => {
+    const politicalScale = [-2, -1, 0, 1, 2] as const;
+    for (let i = 0; i < 48; i++) {
+      const profile = randomBotProfile("Roll");
+      assert.ok(
+        profile.worldview.politicalView !== null
+          && politicalScale.includes(profile.worldview.politicalView),
+        `expected politicalView in [-2..2], got ${String(profile.worldview.politicalView)}`
+      );
+    }
   });
 
   it("defaults a missing facts section to empty", () => {
@@ -362,6 +378,39 @@ describe("bot profile serialization", () => {
       parsed.facts.customFacts[0]?.rowId && parsed.facts.customFacts[0].rowId.length > 0,
       "expected a generated rowId"
     );
+  });
+});
+
+describe("birthday age and zodiac helpers", () => {
+  it("parseIsoYmdParts accepts real dates and rejects calendar impossibilities", () => {
+    assert.deepEqual(parseIsoYmdParts("2004-02-29"), {
+      year: 2004,
+      month: 2,
+      day: 29,
+    });
+    assert.equal(parseIsoYmdParts("2001-02-29"), null);
+    assert.equal(parseIsoYmdParts("not-a-date"), null);
+  });
+
+  it("computes whole-year age in the reference timezone's local calendar", () => {
+    const ref = new Date(2026, 4, 11);
+    assert.equal(ageFromIsoBirthday("1965-06-07", ref), 60);
+    assert.equal(ageFromIsoBirthday("1965-05-02", ref), 61);
+    assert.equal(ageFromIsoBirthday("2000-05-11", ref), 26);
+    assert.equal(ageFromIsoBirthday("2027-01-01", ref), null);
+  });
+
+  it("maps tropical zodiac from ISO birthdays and month/day boundaries", () => {
+    assert.equal(westernZodiacFromIsoBirthday("1965-06-07")?.id, "gemini");
+    assert.equal(westernZodiacFromIsoBirthday("1942-10-29")?.id, "scorpio");
+    assert.equal(westernZodiacFromIsoBirthday("invalid")?.id, undefined);
+
+    assert.equal(westernZodiacSignFromMonthDay(12, 21)?.id, "sagittarius");
+    assert.equal(westernZodiacSignFromMonthDay(12, 22)?.id, "capricorn");
+    assert.equal(westernZodiacSignFromMonthDay(1, 19)?.id, "capricorn");
+    assert.equal(westernZodiacSignFromMonthDay(1, 20)?.id, "aquarius");
+    assert.equal(westernZodiacSignFromMonthDay(3, 20)?.id, "pisces");
+    assert.equal(westernZodiacSignFromMonthDay(3, 21)?.id, "aries");
   });
 });
 

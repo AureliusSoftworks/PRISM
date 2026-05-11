@@ -25,6 +25,16 @@ export interface AskQuestionPayload {
   options: AskQuestionOption[];
 }
 
+/**
+ * Persisted attachment when the assistant runs image generation (`images` row).
+ */
+export interface SentGeneratedImagePayload {
+  imageId: string;
+  prompt: string;
+  displayUrl: string;
+  revisedPrompt?: string;
+}
+
 export type StoredMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained";
 
 export interface StoredAssistantMoodPayload {
@@ -36,6 +46,8 @@ export interface StoredAssistantToolEnvelope {
   v: 1;
   askQuestion?: AskQuestionPayload;
   mood?: StoredAssistantMoodPayload;
+  /** Persisted assistant-generated image attachment (never the raw model stub). */
+  sentGeneratedImage?: SentGeneratedImagePayload;
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -46,12 +58,18 @@ export interface ParsedAssistantTurn {
   displayContent: string;
   /** Parsed AskQuestion when the envelope was valid and complete. */
   askQuestion?: AskQuestionPayload;
+  /**
+   * Model asked to synthesize/describe an image for `sendGeneratedImage` tool JSON.
+   * Server runs generation and persists `SentGeneratedImagePayload` on `tool_payload`.
+   */
+  sendGeneratedImage?: { prompt: string };
 }
 
 export interface ParsedStoredAssistantToolPayload {
   askQuestion?: AskQuestionPayload;
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
+  sentGeneratedImage?: SentGeneratedImagePayload;
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -120,6 +138,75 @@ function normalizeAskQuestionEnvelope(parsed: unknown): AskQuestionPayload | und
       { id: "c", label: labels[2]! },
     ],
   };
+}
+
+/** Max chars for assistant image prompt request (protects pipelines from runaway blobs). */
+const SEND_GENERATED_IMAGE_PROMPT_CAP = 2000;
+
+function truncateSendGeneratedImagePrompt(prompt: string): string {
+  return prompt.length > SEND_GENERATED_IMAGE_PROMPT_CAP
+    ? prompt.slice(0, SEND_GENERATED_IMAGE_PROMPT_CAP)
+    : prompt;
+}
+
+function normalizeSendGeneratedImageRequestFromRecord(
+  row: Record<string, unknown>
+): { prompt: string } | undefined {
+  const sg = row.sendGeneratedImage;
+  if (!sg || typeof sg !== "object") return undefined;
+  const p = (sg as Record<string, unknown>).prompt;
+  if (typeof p !== "string" || !p.trim()) return undefined;
+  return { prompt: truncateSendGeneratedImagePrompt(p.trim()) };
+}
+
+function normalizeStoredSentGeneratedImagePayload(
+  value: unknown
+): SentGeneratedImagePayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const imageId = typeof row.imageId === "string" ? row.imageId.trim() : "";
+  const displayUrl = typeof row.displayUrl === "string" ? row.displayUrl.trim() : "";
+  const prompt = typeof row.prompt === "string" ? row.prompt.trim() : "";
+  if (!imageId || !displayUrl || !prompt) return undefined;
+  const revised =
+    typeof row.revisedPrompt === "string" && row.revisedPrompt.trim()
+      ? row.revisedPrompt.trim()
+      : undefined;
+  return { imageId, displayUrl, prompt, ...(revised ? { revisedPrompt: revised } : {}) };
+}
+
+/**
+ * Parses Prism tool-block JSON possibly containing AskQuestion, sendGeneratedImage request, or both.
+ */
+function normalizePrismToolBlockPayload(parsed: unknown): {
+  askQuestion?: AskQuestionPayload;
+  sendGeneratedImage?: { prompt: string };
+} {
+  const askFlat = normalizeAskQuestionEnvelope(parsed);
+  let pairSend: { prompt: string } | undefined;
+  if (parsed && typeof parsed === "object") {
+    pairSend = normalizeSendGeneratedImageRequestFromRecord(parsed as Record<string, unknown>);
+  }
+  if (askFlat) {
+    return {
+      askQuestion: askFlat,
+      ...(pairSend ? { sendGeneratedImage: pairSend } : {}),
+    };
+  }
+  if (!parsed || typeof parsed !== "object") return {};
+  const row = parsed as Record<string, unknown>;
+  let askNested: AskQuestionPayload | undefined;
+  if (row.askQuestion !== undefined) {
+    askNested = normalizeAskQuestionEnvelope(row.askQuestion);
+  }
+  pairSend = normalizeSendGeneratedImageRequestFromRecord(row);
+  const out: {
+    askQuestion?: AskQuestionPayload;
+    sendGeneratedImage?: { prompt: string };
+  } = {};
+  if (askNested) out.askQuestion = askNested;
+  if (pairSend) out.sendGeneratedImage = pairSend;
+  return out;
 }
 
 /** Locate the last Prism tool opener; prefers flexible pattern, then exact sentinel. */
@@ -194,32 +281,219 @@ function extractLastToolBlock(raw: string): {
   return { prose, innerJson };
 }
 
+/** Last fenced code block whose interior parses to a Prism-style tool envelope. */
+function extractLastStandaloneFencedToolJson(raw: string): {
+  innerJson: string;
+  prose: string;
+} | null {
+  const re = /```(?:[a-zA-Z0-9_-]+)?[\t ]*(?:\r?\n)?([\s\S]*?)```/g;
+  const matches: RegExpExecArray[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    matches.push(m);
+  }
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const match = matches[i]!;
+    const idx = match.index ?? 0;
+    const fenceLen = match[0].length;
+    const innerFence = match[1]?.trim() ?? "";
+    const jsonCandidate = stripMarkdownFences(innerFence);
+    try {
+      const parsed = JSON.parse(jsonCandidate) as unknown;
+      const block = normalizePrismToolBlockPayload(parsed);
+      if (!block.askQuestion && !block.sendGeneratedImage) {
+        continue;
+      }
+      const prose = `${raw.slice(0, idx)}${raw.slice(idx + fenceLen)}`.trimEnd();
+      return { innerJson: innerFence, prose };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * LM Studio / HF-style sentinel: `<|sendGeneratedImage|>` then JSON (full envelope or flat `{prompt}`).
+ */
+const ALT_SEND_GENERATED_IMAGE_TOKEN = /<\|\s*send\s*_?\s*generated\s*_?\s*image\s*\|>/gi;
+
+/**
+ * When `<|sendGeneratedImage|>` prefixes JSON, accept a flat `{"prompt":"..."}` (optional `v`)
+ * and coerce to the standard Prism envelope. Rejects extra keys to limit false positives.
+ */
+function coerceFlatPromptJsonAfterAltSentinel(parsed: unknown): string | null {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const row = parsed as Record<string, unknown>;
+  if (row.sendGeneratedImage !== undefined || row.askQuestion !== undefined) return null;
+  if (row.name !== undefined || row.options !== undefined) return null;
+  const promptRaw = row.prompt;
+  if (typeof promptRaw !== "string" || !promptRaw.trim()) return null;
+  for (const key of Object.keys(row)) {
+    if (key === "prompt") continue;
+    if (key === "v") {
+      const v = row.v;
+      const n =
+        typeof v === "number"
+          ? v
+          : typeof v === "string" && /^\d+$/.test(v.trim())
+            ? Number(v.trim())
+            : Number.NaN;
+      if (n !== 1) return null;
+      continue;
+    }
+    return null;
+  }
+  return JSON.stringify({
+    v: 1 as const,
+    sendGeneratedImage: { prompt: truncateSendGeneratedImagePrompt(promptRaw.trim()) },
+  });
+}
+
+/**
+ * Last `<|sendGeneratedImage|>` … JSON span: full tool envelope or flat `{prompt}` only after this token.
+ */
+function extractLastAltSendGeneratedImageSpan(raw: string): { innerJson: string; prose: string } | null {
+  ALT_SEND_GENERATED_IMAGE_TOKEN.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  let last: RegExpExecArray | null = null;
+  while ((m = ALT_SEND_GENERATED_IMAGE_TOKEN.exec(raw)) !== null) {
+    last = m;
+  }
+  if (!last?.[0] || last.index === undefined) return null;
+
+  const tokenStart = last.index;
+  const afterToken = raw.slice(tokenStart + last[0].length);
+  const leadingWs = afterToken.match(/^\s*/)?.[0]?.length ?? 0;
+  const jsonRegion = afterToken.slice(leadingWs);
+  if (!jsonRegion.includes("{")) return null;
+
+  const openAt: number[] = [];
+  for (let i = 0; i < jsonRegion.length; i++) {
+    if (jsonRegion[i] === "{") openAt.push(i);
+  }
+  for (let k = openAt.length - 1; k >= 0; k--) {
+    const openIdx = openAt[k]!;
+    const tail = jsonRegion.slice(openIdx);
+    try {
+      const parsed = JSON.parse(tail) as unknown;
+      const block = normalizePrismToolBlockPayload(parsed);
+      if (block.askQuestion || block.sendGeneratedImage) {
+        const spanEnd = tokenStart + last[0].length + leadingWs + openIdx + tail.length;
+        const prose = `${raw.slice(0, tokenStart)}${raw.slice(spanEnd)}`.trimEnd();
+        return { innerJson: tail, prose };
+      }
+      const coerced = coerceFlatPromptJsonAfterAltSentinel(parsed);
+      if (coerced) {
+        const spanEnd = tokenStart + last[0].length + leadingWs + openIdx + tail.length;
+        const prose = `${raw.slice(0, tokenStart)}${raw.slice(spanEnd)}`.trimEnd();
+        return { innerJson: coerced, prose };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Some models append raw JSON (no fences, no Prism markers) that matches our tool envelope.
+ */
+function extractTrailingBareToolJson(raw: string): { innerJson: string; prose: string } | null {
+  const s = raw.trimEnd();
+  if (!s.includes("{")) return null;
+
+  const openAt: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "{") openAt.push(i);
+  }
+  for (let k = openAt.length - 1; k >= 0; k--) {
+    const openIdx = openAt[k]!;
+    const tail = s.slice(openIdx);
+    try {
+      const parsed = JSON.parse(tail) as unknown;
+      const block = normalizePrismToolBlockPayload(parsed);
+      if (!block.askQuestion && !block.sendGeneratedImage) continue;
+      return {
+        innerJson: tail,
+        prose: s.slice(0, openIdx).trimEnd(),
+      };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * After extracting a Prism tool block, models often wrapped it in Markdown fences (` ```json `,
+ * trailing ` ``` `); that shell can remain and render as a bogus code block beside real prose.
+ */
+function sanitizeProseAfterPrismToolExtraction(prose: string): string {
+  let s = prose.trimEnd();
+  for (let i = 0; i < 8; i += 1) {
+    const before = s;
+    s = s.replace(/\n```[a-zA-Z0-9_-]*\s*\n\s*```\s*$/is, "");
+    s = s.replace(/\n```\s*$/is, "");
+    s = s.replace(/\n```[a-zA-Z0-9_-]*\s*$/is, "");
+    if (s === before) break;
+  }
+  return s.trimEnd();
+}
+
 /// True when `content` still embeds Prism tool framing (markers may have sloppy spacing).
 export function assistantContentHasPrismToolFraming(raw: string | undefined | null): boolean {
   if (typeof raw !== "string" || raw.length < 16) return false;
   PRISM_TOOL_START_PATTERN.lastIndex = 0;
-  return PRISM_TOOL_START_PATTERN.test(raw) || raw.includes(PRISM_TOOL_START);
+  if (PRISM_TOOL_START_PATTERN.test(raw) || raw.includes(PRISM_TOOL_START)) return true;
+  ALT_SEND_GENERATED_IMAGE_TOKEN.lastIndex = 0;
+  return ALT_SEND_GENERATED_IMAGE_TOKEN.test(raw);
 }
 
 /// Strip `<<<PRISM_TOOL>>>` … markers and optionally parse AskQuestion payloads from model output.
 export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssistantTurn {
   const trimmed = typeof rawAssistantText === "string" ? rawAssistantText : "";
-  const { prose, innerJson } = extractLastToolBlock(trimmed);
+  const prismSlice = extractLastToolBlock(trimmed);
+  let prose = prismSlice.prose;
+  let innerJson = prismSlice.innerJson;
+  if (!innerJson) {
+    const fencePick = extractLastStandaloneFencedToolJson(prose);
+    if (fencePick) {
+      innerJson = fencePick.innerJson;
+      prose = fencePick.prose;
+    }
+  }
+  if (!innerJson) {
+    const altPick = extractLastAltSendGeneratedImageSpan(prose);
+    if (altPick) {
+      innerJson = altPick.innerJson;
+      prose = altPick.prose;
+    }
+  }
+  if (!innerJson) {
+    const barePick = extractTrailingBareToolJson(prose);
+    if (barePick) {
+      innerJson = barePick.innerJson;
+      prose = barePick.prose;
+    }
+  }
   if (!innerJson) {
     return { displayContent: prose };
   }
+  const cleanedProse = sanitizeProseAfterPrismToolExtraction(prose);
   const jsonText = stripMarkdownFences(innerJson);
   try {
-    const normalized = normalizeAskQuestionEnvelope(JSON.parse(jsonText) as unknown);
-    if (!normalized) {
-      return { displayContent: prose };
+    const block = normalizePrismToolBlockPayload(JSON.parse(jsonText) as unknown);
+    if (!block.askQuestion && !block.sendGeneratedImage) {
+      return { displayContent: cleanedProse };
     }
     return {
-      displayContent: prose,
-      askQuestion: normalized,
+      displayContent: cleanedProse,
+      ...(block.askQuestion ? { askQuestion: block.askQuestion } : {}),
+      ...(block.sendGeneratedImage ? { sendGeneratedImage: block.sendGeneratedImage } : {}),
     };
   } catch {
-    return { displayContent: prose };
+    return { displayContent: cleanedProse };
   }
 }
 
@@ -239,11 +513,21 @@ export function parseStoredAssistantToolPayload(
     const parsed = JSON.parse(raw) as unknown;
     const normalizedAsk = normalizeAskQuestionEnvelope(parsed);
     if (normalizedAsk) {
-      return { askQuestion: normalizedAsk };
+      const root =
+        parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+      const sent =
+        root?.sentGeneratedImage !== undefined
+          ? normalizeStoredSentGeneratedImagePayload(root.sentGeneratedImage)
+          : undefined;
+      return {
+        askQuestion: normalizedAsk,
+        ...(sent ? { sentGeneratedImage: sent } : {}),
+      };
     }
     if (!parsed || typeof parsed !== "object") return {};
     const row = parsed as Record<string, unknown>;
     const askQuestion = normalizeAskQuestionEnvelope(row.askQuestion);
+    const sentOnly = normalizeStoredSentGeneratedImagePayload(row.sentGeneratedImage);
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -268,6 +552,7 @@ export function parseStoredAssistantToolPayload(
       ...(askQuestion ? { askQuestion } : {}),
       ...(moodKey ? { moodKey } : {}),
       ...(moodConfidence !== undefined ? { moodConfidence } : {}),
+      ...(sentOnly ? { sentGeneratedImage: sentOnly } : {}),
     };
   } catch {
     return {};
@@ -282,18 +567,9 @@ export function hydrateAssistantMessageParts(args: {
   askQuestion?: AskQuestionPayload;
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
+  sentGeneratedImage?: SentGeneratedImagePayload;
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
-  if (!assistantContentHasPrismToolFraming(args.content)) {
-    return {
-      content: args.content,
-      ...(stored.askQuestion ? { askQuestion: stored.askQuestion } : {}),
-      ...(stored.moodKey ? { moodKey: stored.moodKey } : {}),
-      ...(stored.moodConfidence !== undefined
-        ? { moodConfidence: stored.moodConfidence }
-        : {}),
-    };
-  }
   const reparsed = parseAssistantPrismTools(args.content);
   const askQuestion = stored.askQuestion ?? reparsed.askQuestion;
   return {
@@ -303,6 +579,7 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.moodConfidence !== undefined
       ? { moodConfidence: stored.moodConfidence }
       : {}),
+    ...(stored.sentGeneratedImage ? { sentGeneratedImage: stored.sentGeneratedImage } : {}),
   };
 }
 
@@ -316,20 +593,27 @@ export function serializeAssistantToolPayload(args: {
   askQuestion?: AskQuestionPayload;
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
+  sentGeneratedImage?: SentGeneratedImagePayload;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasMood = args.moodKey !== undefined;
-  if (!hasAsk && !hasMood) return null;
-  if (hasAsk && !hasMood) {
+  const hasImage = args.sentGeneratedImage !== undefined;
+  if (!hasAsk && !hasMood && !hasImage) return null;
+
+  if (!hasAsk && !hasMood && hasImage) {
+    return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
+  }
+  if (hasAsk && !hasMood && !hasImage) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
+
   const payload: StoredAssistantToolEnvelope = {
     v: 1,
-    ...(args.askQuestion ? { askQuestion: args.askQuestion } : {}),
-    ...(args.moodKey
+    ...(hasAsk ? { askQuestion: args.askQuestion! } : {}),
+    ...(hasMood
       ? {
           mood: {
-            key: args.moodKey,
+            key: args.moodKey!,
             ...(typeof args.moodConfidence === "number" &&
             Number.isFinite(args.moodConfidence)
               ? { confidence: Math.max(0, Math.min(1, args.moodConfidence)) }
@@ -337,6 +621,7 @@ export function serializeAssistantToolPayload(args: {
           },
         }
       : {}),
+    ...(hasImage ? { sentGeneratedImage: args.sentGeneratedImage! } : {}),
   };
   return JSON.stringify(payload);
 }
