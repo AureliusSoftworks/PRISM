@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Instrument_Sans, Lora, Raleway } from "next/font/google";
+import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
 import "./globals.css";
 
@@ -62,6 +63,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body>
+        <BlockBrowserInspection />
         <DisableNativeTooltips />
         {children}
       </body>
