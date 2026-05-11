@@ -119,7 +119,8 @@ user's network.
 | File | Host | When does it fire? |
 | --- | --- | --- |
 | `apps/api/src/providers.ts` (`LocalOllamaProvider`) | `OLLAMA_HOST` | Every LOCAL user-facing chat turn. Local by config. |
-| `apps/api/src/providers.ts` (`getAuxiliaryProvider`) | `OLLAMA_HOST` | Internal title, starter, summary, memory-critic, and memory-inference calls. Always local, pinned to `OLLAMA_AUXILIARY_MODEL`. |
+| `apps/api/src/providers.ts` (`getAuxiliaryProvider`) | `OLLAMA_HOST` | Internal title, starter, summary, memory-critic, memory-inference, and **image prompt suggestion** calls. Always local, pinned to `OLLAMA_AUXILIARY_MODEL`. |
+| `apps/api/src/image-prompt-suggestions.ts` (`inferBotImagePromptSuggestions`) | `OLLAMA_HOST` | `POST /api/images/prompt-suggestions` (Images panel, per-bot): short scene-request chips. Same auxiliary model. |
 | `apps/api/src/providers.ts` (`embedTextLocal`) | `OLLAMA_HOST` | All memory embeddings and Qdrant queries. Always local, pinned to `OLLAMA_EMBEDDING_MODEL`. |
 | `apps/api/src/providers.ts` (`OpenAiProvider`) | `api.openai.com` | Only when the effective mode is ONLINE for the user's actual chat reply. |
 | `apps/api/src/qdrant.ts` | `QDRANT_URL` | Memory summary vector read/write. Local by config. |

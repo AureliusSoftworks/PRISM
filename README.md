@@ -56,9 +56,9 @@ The repo today implements the API, web hub, memory engine, and provider wiring o
 
 ### Implemented
 
-- **Sandbox** — Full playground: bots, provider/model controls, fork and export, images (when online), memory behavior tuned for experimentation, advanced settings. Optional focus layout for a calmer single-thread view.
+- **Sandbox** — Full playground: bots, provider/model controls, fork and export, images (OpenAI when online, or local Ollama image checkpoints when offline), memory behavior tuned for experimentation, advanced settings. Optional focus layout for a calmer single-thread view.
 - **Chat** — Focused one-on-one conversation with a selected bot/model and continuity-oriented memory.
-- **Coffee** — Group-table mode: multiple bots in one session, autonomous reactions and turns, with room for you to join gently.
+- **Coffee** — Group-table mode: multiple bots in one session, autonomous reactions and turns, with room for you to join gently. **Table settings** (reply length, energy, cross-talk, rhythm sliders, “stay on thread,” “give me the last word”) are chosen **before you join** (Coffee setup on the hub), **saved per Coffee session** on the server, and shape both the **LLM prompts** and the **web client’s autoplay timing**. Your last choices are also remembered in the browser as defaults for the next new table. The API still exposes `PATCH /api/coffee/sessions/:id/settings` for programmatic updates. The memory option **“Recent sessions too”** currently behaves like **this session only** until true cross-thread recall exists, so the product does not over-promise.
 - **Hub & tenancy** — Authenticated accounts, strict per-user data isolation, pairing for native clients, and mode tiles mirrored in the URL (`?view=…`).
 
 ### Planned first-class modules
@@ -360,15 +360,19 @@ npm run dev
 | `ENCRYPTION_MASTER_KEY` | (dev default) | Master key for per-user key wrapping |
 | `OLLAMA_HOST` | `http://host.docker.internal:11434` | Ollama endpoint |
 | `OLLAMA_MODEL` | `llama3.2` | Default local model |
-| `OLLAMA_AUXILIARY_MODEL` | `llama3.2` | Mandatory local model for Prism's internal title, starter, summary, and memory-critic calls |
+| `OLLAMA_IN_APP_PULL_MODEL` | `flux2-klein` | Model name allowed for `POST /api/ollama/pull-primary` streaming pull (must remain a flux2-klein registry name) |
+| `OLLAMA_AUXILIARY_MODEL` | `llama3.2` | Mandatory local model for Prism's internal title, starter, summary, memory-critic, memory-inference, and **per-bot image prompt suggestions** (Images panel) |
 | `OLLAMA_EMBEDDING_MODEL` | `nomic-embed-text` | Mandatory local embedding model for memory vectors and Qdrant search |
 | `OPENAI_API_KEY` | (empty) | Global fallback OpenAI key |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant vector DB URL |
+| `COMFYUI_HOST` | (empty) | Optional dev default ComfyUI base URL (`http://127.0.0.1:8188`); per-user URL in Settings overrides |
+| `COMFYUI_GENERATION_TIMEOUT_MS` | `600000` | Max wait (ms) for ComfyUI to finish a txt2img job after `/prompt` — increase when large checkpoints take many minutes to load into VRAM (allowed range 120000–1800000) |
 | `NEXT_PUBLIC_API_BASE_URL` | `/api` | Frontend API base |
 
 ## Features
 
 - **Per-user auth** with encrypted session cookies
+- **Images panel** — Browse generated pictures; pick **DALL·E 2** or **DALL·E 3** when online, or a local image checkpoint when **LOCAL**. Options include **Ollama** checkpoints whose names match a simple heuristic (install with `ollama pull …`), and **ComfyUI** checkpoints discovered from the **ComfyUI server** URL you enter in Settings — so you can reuse models already in ComfyUI without duplicating weights in Ollama. Your chosen image model is **saved with your account** (survives API restarts). ComfyUI often listens on port **8188**; the Prism API must be able to reach that address (same Mac or LAN). The first release uses stock **CheckpointLoaderSimple** txt2img graphs (SDXL-style vs Flux-flavored sampling defaults inferred from the filename); unusual custom-node setups may error until more templates are added.
 - **Optional second Ollama host** — add another LAN Ollama machine from Settings, merge its offline models into Prism's local model lists, and route selected models back to the correct host.
 - **Dedicated system models** — user-facing chat can use local or OpenAI, but Prism's internal titles, starters, summaries, memory critic, and embeddings always stay local on mandatory Ollama models (`llama3.2` + `nomic-embed-text`).
 - **Native-client web gate** — the hosted web shell requires a paired Prism client access token, so direct browser visits show an app-required screen instead of bypassing the client.
@@ -391,15 +395,15 @@ npm run dev
 - **Use Sandbox when you want control** — testing different bots/models, trying tools, or running structured experiments.
 - **Use Coffee when you want a small group** — several bots in one room, emergent cross-talk, and a lighter way to drop in than running parallel solo chats.
 - **Rule of thumb:** Chat is for relationship continuity; Sandbox is for lab-style iteration; Coffee is for social, multi-bot energy.
-- **Customizable chatbots** with a structured profile builder, OCEAN-inspired personality sliders, temperature, model overrides, and optional delete protection for favorite bots (composed into the model system prompt)
+- **Customizable chatbots** with a structured profile builder, OCEAN-inspired personality sliders, temperature, chat-model overrides, optional **per-bot image model** defaults (local + OpenAI), a left-rail sheet for model routing, and optional delete protection for favorite bots (composed into the model system prompt)
 - **Expanded bot glyph picker** with hundreds of Lucide-backed glyphs alongside the original inline set
 - **Forkable chats** — branch from any message in a conversation (Sandbox)
 - **Auto-generated chat titles** — first replies trigger a background local `llama3.2` pass that gives saved conversations short sidebar titles.
-- **AskQuestion bot tool** — assistants can optionally end a turn with a Prism `<<<PRISM_TOOL>>>` JSON envelope; the transcript stores clean prose plus structured payload, and the chat surface shows three tappable chips (same visual language as "Talk to me!" starters) until the user sends another message.
+- **AskQuestion bot tool** — assistants can optionally end a turn with a Prism `<<<PRISM_TOOL>>>` JSON envelope; the transcript stores clean prose plus structured payload, and the chat surface shows three tappable chips (same visual language as "Talk to me!" starters) until the user sends another message. The same envelope may include **`sendGeneratedImage`** so the bot can synthesize an image **in-thread** (Chat or Sandbox): it saves to your **Images library** with the usual bot attribution and persona-aware prompting.
 - **Bot portability** — export/import individual bots as Markdown files (profile + settings + bot-scoped memories) from the Bots panel.
 - **Markdown in message bubbles** — assistant and user messages render GitHub-flavored Markdown safely in the thread (`react-markdown` + `remark-gfm`); the compose field is plain text.
 - **Per-chat deletion** — remove individual chats from the sidebar (subtle × that embosses red on hover, click-to-confirm) or from the chat header. **Press-and-hold any × (or the header Delete button) for ~1 s** to clear *every* chat at once: on pointerdown every × immediately glows red and tilts to its own small angle; at the 900 ms threshold the whole row shakes like iOS edit-mode while a centered confirmation modal ("Delete all chats?" · Cancel / Delete all) takes over the decision. Release before the threshold to snap the ×'s back. Messages and exports are purged; generated images and extracted memories are preserved.
-- **OpenAI image generation** (DALL-E 3) with gallery (Sandbox)
+- **OpenAI + local image generation** (DALL·E when online; Ollama/ComfyUI when LOCAL) with gallery; persona-aware prompts thread-linked images in **Chat** and **Sandbox**
 - **Conversation export** to Markdown files persisted in the database (Sandbox)
 - **Mobile-first UI** — responsive chat interface with slide-out sidebar
 - **Dark/light themes** per user
@@ -433,7 +437,7 @@ Production mode:
 - **Frontend** is built with Next.js `output: "standalone"` and served by `node .next/standalone/apps/web/server.js` on `0.0.0.0:18788`. `start.bat` also stages `.next/static/` and `public/` into the standalone bundle after each build — without this step the browser would load HTML successfully but all JS/CSS would 404.
 - **Composer `/dev …` shortcuts (web)** — intercepted locally only (`/dev askquestion` forces an AskQuestion chip preview; `/dev help` lists commands). On by default during `npm run dev`; enable in production builds with **`NEXT_PUBLIC_PRISM_DEV_COMMANDS=1`** in `.env.example`.
 
-Session cookies work same-origin because Next's `rewrites()` proxies `/api/*` to `127.0.0.1:18787` server-side. You only need to open **port 18788** on the LAN; port 18787 should stay closed unless pairing native clients.
+Session cookies work same-origin because the Next app **server-side** forwards `/api/*` to `127.0.0.1:18787` (see `apps/web/src/app/api/[[...path]]/route.ts` — this avoids the short default timeout on `next.config` rewrites, which would cut off long ComfyUI/Ollama image runs). You only need to open **port 18788** on the LAN; port 18787 should stay closed unless pairing native clients.
 
 Native Prism clients use a different path: they discover the API directly via
 Bonjour/DNS-SD (`_prism._tcp`) and then pair with a short-lived code generated
@@ -459,7 +463,7 @@ docker compose cp ./backup-localai.db api:/app/apps/api/data/localai.db
 docker compose restart api
 ```
 
-**Generated images** are also part of local data: each ONLINE DALL·E run downloads the image bytes at creation time into **`generated-images/{userId}/`** under the data root. When **`LOCALAI_DATA_DIR`** is set (native server apps and some deployments), that tree is anchored there **even if `DB_PATH` points elsewhere**. Rows in SQLite store a relative path (`local_rel_path`) and a **`/api/images/…/file`** URL for display — not the expiring provider-hosted link.
+**Generated images** are also part of local data: each run stores pixels under **`generated-images/{userId}/`** — downloaded from OpenAI when online, written from **Ollama** or **ComfyUI** when **LOCAL**. When **`LOCALAI_DATA_DIR`** is set (native server apps and some deployments), that tree is anchored there **even if `DB_PATH` points elsewhere**. Rows in SQLite store a relative path (`local_rel_path`) and a **`/api/images/…/file`** URL for display — not the expiring provider-hosted link from OpenAI.
 
 ### Qdrant
 ```bash
@@ -472,9 +476,9 @@ docker run --rm -v localai-local_qdrant_data:/data -v $(pwd):/backup alpine tar 
 Prism is built so that the `LOCAL` mode toggle is a real invariant, not a suggestion:
 
 - **LOCAL mode is strict**: chat routes exclusively through Ollama at `OLLAMA_HOST`. No heuristic can escalate a LOCAL turn to an external provider. Enforced by the unit test in `apps/api/src/__tests__/providers.test.ts`.
-- **OpenAI-only features are gated**: image generation calls OpenAI DALL-E, so it is refused server-side (and hidden client-side) whenever the effective mode is LOCAL.
+- **OpenAI vs local images**: when the effective mode is **ONLINE**, image generation uses OpenAI DALL·E. When **LOCAL**, Prism calls **Ollama** image-generation checkpoints that match the shared name heuristic (install models with `ollama pull`), or **ComfyUI** checkpoints from your configured ComfyUI server. Chat stays strictly on Ollama in LOCAL either way.
 - **No outbound telemetry**: Next.js anonymous telemetry is disabled via `NEXT_TELEMETRY_DISABLED=1` (set in the web Dockerfile and `.env.example`). If you run `npm run dev` directly on your shell instead of via Docker, export the same variable or run `npx next telemetry disable` once. The API process makes no telemetry calls.
-- **Outbound surface** (exhaustive): Ollama at `OLLAMA_HOST`, Qdrant at `QDRANT_URL`, and — only in ONLINE mode — `api.openai.com`. Any reviewer adding a new `fetch(` to a non-config host needs an explicit mode gate. See `DESIGN.md` for details.
+- **Outbound surface** (exhaustive): Ollama at `OLLAMA_HOST`, Qdrant at `QDRANT_URL`, the user's ComfyUI base URL when ComfyUI image generation runs, and — only in ONLINE mode — `api.openai.com`. Any reviewer adding a new `fetch(` to a non-config host needs an explicit mode gate. See `DESIGN.md` for details.
 
 ## Knowledge Base (Obsidian)
 
