@@ -1,13 +1,16 @@
+import type { ComfyUiWorkflowRegistration } from "@localai/shared";
+import { validateComfyUiWorkflowsPayload } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 
 /**
  * Pure validation + merge logic for PATCH /api/settings.
  *
  * Extracted from `server.ts` so the theme/provider/lock/openAiKey semantics
- * can be unit-tested without standing up an HTTP server. This file intentionally
- * has zero runtime dependencies beyond types — every branch is a plain function
- * of `body` and `current`, which is what makes it safe to pin in tests and
- * cheap to reason about when adding new fields.
+ * can be unit-tested without standing up an HTTP server. This file keeps
+ * runtime dependencies minimal (shared validation for ComfyUI workflow JSON);
+ * every merge branch is a plain function of `body` and `current`, which is
+ * what makes it safe to pin in tests and cheap to reason about when adding
+ * new fields.
  *
  * Any future setting added to the PATCH handler should be plumbed through
  * `resolveNextSettings` with a matching test case in
@@ -35,6 +38,8 @@ export interface CurrentSettings {
   providerLocked: number;
   autoMemory: number;
   composerWritingAssist: number;
+  /** 1 = show left-edge stripe on assistant bubbles when the copyright lenient fallback answered. */
+  fallbackModelMessageStripe: number;
   hiddenBotModelIds: string;
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
@@ -44,6 +49,12 @@ export interface CurrentSettings {
   comfyUiHost: string | null;
   preferredLocalImageModel: string | null;
   preferredOpenAiImageModel: string | null;
+  /** Parsed `users.comfyui_workflows` JSON; empty when unset or invalid. */
+  comfyUiWorkflows: ComfyUiWorkflowRegistration[];
+  /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
+  prismDefaultLlmModel: string | null;
+  /** Null/empty → use normal hub chat model for turns that emit `sendGeneratedImage`. */
+  prismImageToolLlmModel: string | null;
   primaryOllamaHost: string;
 }
 
@@ -55,6 +66,7 @@ export interface NextSettings {
   providerLocked: number;
   autoMemory: number;
   composerWritingAssist: number;
+  fallbackModelMessageStripe: number;
   hiddenBotModelIds: string[];
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
@@ -64,6 +76,9 @@ export interface NextSettings {
   comfyUiHost: string | null;
   preferredLocalImageModel: string | null;
   preferredOpenAiImageModel: string | null;
+  comfyUiWorkflows: ComfyUiWorkflowRegistration[];
+  prismDefaultLlmModel: string | null;
+  prismImageToolLlmModel: string | null;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -330,6 +345,10 @@ export function resolveNextSettings(
     typeof body.composerWritingAssist === "boolean"
       ? Number(body.composerWritingAssist)
       : current.composerWritingAssist;
+  const fallbackModelMessageStripe =
+    typeof body.fallbackModelMessageStripe === "boolean"
+      ? Number(body.fallbackModelMessageStripe)
+      : current.fallbackModelMessageStripe;
   const hiddenBotModelIds = readHiddenBotModelIds(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
@@ -371,6 +390,19 @@ export function resolveNextSettings(
     body.preferredOpenAiImageModel,
     current.preferredOpenAiImageModel
   );
+  const prismDefaultLlmModel = readPreferredModel(
+    body.prismDefaultLlmModel,
+    current.prismDefaultLlmModel
+  );
+  const prismImageToolLlmModel = readPreferredModel(
+    body.prismImageToolLlmModel,
+    current.prismImageToolLlmModel
+  );
+
+  const comfyUiWorkflows =
+    body.comfyUiWorkflows === undefined
+      ? current.comfyUiWorkflows
+      : validateComfyUiWorkflowsPayload(body.comfyUiWorkflows);
 
   let openAiKeyIntent: NextSettings["openAiKeyIntent"] = { action: "keep" };
   if (typeof body.openAiApiKey === "string") {
@@ -396,6 +428,7 @@ export function resolveNextSettings(
     providerLocked,
     autoMemory,
     composerWritingAssist,
+    fallbackModelMessageStripe,
     hiddenBotModelIds,
     preferredLocalModel,
     preferredOnlineModel,
@@ -405,6 +438,9 @@ export function resolveNextSettings(
     comfyUiHost,
     preferredLocalImageModel,
     preferredOpenAiImageModel,
+    comfyUiWorkflows,
+    prismDefaultLlmModel,
+    prismImageToolLlmModel,
     openAiKeyIntent,
   };
 }

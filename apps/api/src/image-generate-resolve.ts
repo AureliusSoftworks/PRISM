@@ -4,7 +4,7 @@ export type ConversationImageGateRow =
   | { ok: true; lockedBotId: string | null }
   | { ok: false; message: string };
 
-/** Loads the conversation row and allows thread-linked persona images in Chat + Sandbox. */
+/** Loads the conversation row and allows thread-linked persona images in Zen + Chat (playground) modes. */
 export function resolveConversationForSandboxImageGenerate(
   db: DatabaseSync,
   userId: string,
@@ -23,7 +23,7 @@ export function resolveConversationForSandboxImageGenerate(
   if (row.mode !== "sandbox" && row.mode !== "chat") {
     return {
       ok: false,
-      message: "Linked image generation works in Chat and Sandbox threads only.",
+      message: "Linked image generation works in Zen and Chat threads only.",
     };
   }
   return { ok: true, lockedBotId: row.lockedBotId };
@@ -96,7 +96,7 @@ export function resolveSandboxImageBotAttribution(options: {
     return {
       ok: false,
       message:
-        "That bot is not part of this Sandbox thread. Use a bot locked to this chat or one that has already replied here.",
+        "That bot is not part of this thread. Use a bot locked to this conversation or one that has already replied here.",
     };
   }
   return { ok: true, persistedBotId: botId, personaBotId: botId };

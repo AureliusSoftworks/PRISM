@@ -26,7 +26,7 @@ export interface ModelCatalogEntry {
   localHost?: "primary" | "secondary";
   hostLabel?: string;
   /** When set, this entry is only for the Images panel (not chat text models). */
-  imageSource?: "ollama" | "comfyui";
+  imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
 }
 
 export interface ModelCatalog {
@@ -489,7 +489,11 @@ export class LocalOllamaProvider implements LlmProvider {
     const requestBody: Record<string, unknown> = {
       model,
       stream: false,
-      messages
+      messages,
+      // Thinking-capable models (Qwen3, DeepSeek-R1, etc.) otherwise default to
+      // routing the visible reply into `message.thinking` and leave `content` empty,
+      // which breaks Prism chat (and any follow-up like sendGeneratedImage / Comfy).
+      think: false,
     };
     if (Object.keys(ollamaOptions).length > 0) {
       requestBody.options = ollamaOptions;
@@ -504,15 +508,35 @@ export class LocalOllamaProvider implements LlmProvider {
       throw new Error(`Local model request failed (${response.status})`);
     }
     const payload = (await response.json()) as {
-      message?: { content?: string };
+      message?: { content?: string; thinking?: string; tool_calls?: unknown };
     };
-    const content = payload.message?.content?.trim();
-    if (!content) {
-      // Surface empty responses as an error so the UI does not display a
-      // placeholder "assistant" message and no empty row is persisted.
-      throw new Error("Local model returned an empty response.");
+    const msg = payload.message;
+    const trimmedContent =
+      typeof msg?.content === "string" ? msg.content.trim() : "";
+    const trimmedThinking =
+      typeof msg?.thinking === "string" ? msg.thinking.trim() : "";
+    const toolCalls = msg?.tool_calls;
+    const hasToolCalls = Array.isArray(toolCalls) && toolCalls.length > 0;
+
+    let text = trimmedContent;
+    if (!text && trimmedThinking.length > 0) {
+      // Last resort when the server still omits `content` (older Ollama / edge builds).
+      text = trimmedThinking;
     }
-    return content;
+
+    if (!text) {
+      if (hasToolCalls) {
+        throw new Error(
+          "Local model returned tool calls instead of assistant text. Prism chat expects normal prose in `message.content` — disable native tool calling for this model in Ollama, or pick a different chat model."
+        );
+      }
+      throw new Error(
+        "Local chat model returned no assistant text (empty `message.content`). " +
+          "If you use a thinking-style model, update Ollama or try another chat model. " +
+          "This step is separate from ComfyUI: the Images button uses your local image model only after the assistant has produced a reply."
+      );
+    }
+    return text;
   }
 
   public async embedText(text: string): Promise<number[]> {
@@ -601,7 +625,21 @@ export class OpenAiProvider implements LlmProvider {
   }
 }
 
-export function getAuxiliaryProvider(): LlmProvider {
+/**
+ * Resolved local model for Prism-only lanes (titles, summarization, memory
+ * inference, Coffee router, image prompt suggestions). Per-user Settings
+ * override wins; otherwise `OLLAMA_AUXILIARY_MODEL` (default llama3.2).
+ */
+export function resolveAuxiliaryOllamaModel(prismDefaultLlmModel?: string | null): string {
+  const trimmed = typeof prismDefaultLlmModel === "string" ? prismDefaultLlmModel.trim() : "";
+  if (trimmed.length > 0) {
+    return trimmed;
+  }
+  return config.ollamaAuxiliaryModel || "llama3.2";
+}
+
+export function getAuxiliaryProvider(prismDefaultLlmModel?: string | null): LlmProvider {
+  const auxiliaryModel = resolveAuxiliaryOllamaModel(prismDefaultLlmModel);
   const inner = new LocalOllamaProvider();
   return {
     name: "local",
@@ -611,7 +649,7 @@ export function getAuxiliaryProvider(): LlmProvider {
     ): Promise<string> {
       return inner.generateResponse(messages, {
         ...options,
-        model: config.ollamaAuxiliaryModel || "llama3.2"
+        model: auxiliaryModel,
       });
     },
     async embedText(text: string): Promise<number[]> {

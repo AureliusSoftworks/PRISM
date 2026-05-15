@@ -358,7 +358,7 @@ describe("resolveImageGeneratePersistence (POST /api/images/generate)", () => {
     });
     assert.equal(r.ok, false);
     if (!r.ok) {
-      assert.match(r.message, /Sandbox|Chat/i);
+      assert.match(r.message, /Zen|Chat/i);
     }
   });
 });

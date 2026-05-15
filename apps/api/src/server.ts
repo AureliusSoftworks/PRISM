@@ -1,5 +1,4 @@
 import { createServer } from "node:http";
-import { existsSync, unlinkSync } from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { getAppConfig } from "@localai/config";
@@ -18,11 +17,20 @@ import { buildHealthResponse } from "./health.ts";
 import { consumePairingCode, createPairingCode } from "./pairing.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
+import { pollImageJobForUser, releaseImageSlot, tryAcquireImageSlot } from "./image-job-slot.ts";
 import {
+  createCoffeePreset,
+  createCoffeeGroup,
   createCoffeeConversation,
+  createCoffeeConversationFromGroup,
+  deleteCoffeePreset,
+  listCoffeeGroups,
+  listCoffeePresets,
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
+  updateCoffeePreset,
+  updateCoffeeGroup,
   updateCoffeeConversationSettings,
 } from "./coffee.ts";
 import {
@@ -74,8 +82,10 @@ import {
   composeAugmentedImagePrompt,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   encodeComfyUiModelId,
+  encodeComfyUiRemoteWorkflowModelId,
   hydrateAssistantMessageParts,
   isAllowedInAppOllamaPullModelName,
+  parseStoredComfyUiWorkflows,
   type BotOpinion,
   type BotOpinionBoundaryLevel,
   type ChatMessage,
@@ -89,6 +99,7 @@ import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback
 import {
   checkComfyUiHostStatus,
   fetchComfyUiCheckpointNames,
+  listComfyUiWorkflowJsonRelPaths,
   probeComfyUiHostReachable,
 } from "./comfyui-image.ts";
 import {
@@ -100,10 +111,10 @@ import {
   downloadRemoteImage,
   readGeneratedImageBytes,
   removeGeneratedImagesDirectoryForUser,
-  resolveAbsoluteUnderDataRoot,
   tryUnlinkGeneratedImageFile,
   writeGeneratedImageBytes,
 } from "./image-storage.ts";
+import { readOrCreateThumbBytes, tryGenerateThumbAfterPngWrite } from "./image-thumb.ts";
 import { inferBotImagePromptSuggestions, inferRandomImageSceneLine } from "./image-prompt-suggestions.ts";
 import {
   clearThreadCompactions,
@@ -146,6 +157,7 @@ interface UserDbRow {
   composer_writing_assist: number;
   auto_switch_model: number;
   hidden_bot_model_ids: string;
+  fallback_model_message_stripe: number;
   preferred_local_model: string | null;
   preferred_online_model: string | null;
   lenient_local_fallback_model: string | null;
@@ -154,6 +166,9 @@ interface UserDbRow {
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
   preferred_openai_image_model: string | null;
+  comfyui_workflows: string | null;
+  prism_default_llm_model: string | null;
+  prism_image_tool_llm_model: string | null;
   dev_memories_enabled: number;
   dev_memories_text: string;
   openai_key_ciphertext: string | null;
@@ -258,7 +273,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, preferred_local_image_model, preferred_openai_image_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -519,7 +534,7 @@ type ImageInsertPersistence = {
 };
 
 /** Persists a ComfyUI or Ollama image and returns the standard JSON success body. */
-function finalizeComfyOrOllamaGeneratedImageResponse(
+async function finalizeComfyOrOllamaGeneratedImageResponse(
   ctx: RequestContext,
   args: {
     imageId: string;
@@ -533,13 +548,15 @@ function finalizeComfyOrOllamaGeneratedImageResponse(
     modelUsed: string;
     provider: "comfyui" | "ollama";
   }
-): void {
+): Promise<void> {
   try {
     writeGeneratedImageBytes(args.localRelPath, args.imageBytes);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "write failed";
     throw new Error(`Could not save generated image (${detail}).`);
   }
+
+  await tryGenerateThumbAfterPngWrite(args.localRelPath);
 
   const storedUrl = `/api/images/${encodeURIComponent(args.imageId)}/file`;
 
@@ -818,7 +835,9 @@ function buildRoutes(): RouteDefinition[] {
       // + composer-dropdown sync the same way.
       const conversation = db
         .prepare(
-          `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids, c.coffee_settings, c.incognito, c.created_at, c.updated_at,
+          `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
+                  c.coffee_settings, c.coffee_group_id, c.coffee_duration_minutes,
+                  c.incognito, c.created_at, c.updated_at,
                   (SELECT m.bot_id FROM messages m
                      WHERE m.conversation_id = c.id
                        AND m.role = 'assistant'
@@ -842,6 +861,8 @@ function buildRoutes(): RouteDefinition[] {
             bot_id: string | null;
             bot_group_ids: string | null;
             coffee_settings: string | null;
+            coffee_group_id: string | null;
+            coffee_duration_minutes: number | null;
             incognito: number;
             created_at: string;
             updated_at: string;
@@ -981,8 +1002,17 @@ function buildRoutes(): RouteDefinition[] {
           mode: conversationModeOut,
           botId: conversation.bot_id ?? null,
           ...(botGroupIdsOut.length > 0 ? { botGroupIds: botGroupIdsOut } : {}),
+          ...(conversationModeOut === "coffee"
+            ? { coffeeGroupId: conversation.coffee_group_id ?? null }
+            : {}),
           ...(coffeeSeatBotIdsOut.length > 0 ? { coffeeSeatBotIds: coffeeSeatBotIdsOut } : {}),
           ...(coffeeSettingsOut !== undefined ? { coffeeSettings: coffeeSettingsOut } : {}),
+          ...(conversationModeOut === "coffee" &&
+          (conversation.coffee_duration_minutes === 1 ||
+            conversation.coffee_duration_minutes === 5 ||
+            conversation.coffee_duration_minutes === 10)
+            ? { coffeeSessionDurationMinutes: conversation.coffee_duration_minutes }
+            : {}),
           incognito: conversation.incognito === 1,
           lastBotId: conversation.last_bot_id ?? null,
           lastBotColor: conversation.last_bot_color ?? null,
@@ -1036,11 +1066,12 @@ function buildRoutes(): RouteDefinition[] {
         json(ctx.res, 200, { ok: true, summary: null });
         return;
       }
+      const user = getUserRow(userId);
       // Always run a refresh pass so display-copy improvements and format
       // updates can roll forward without requiring message activity.
       await summarizeSandboxBotStatus(
         db,
-        getAuxiliaryProvider(),
+        getAuxiliaryProvider(user.prism_default_llm_model),
         userId,
         botId,
         { reason: "manual", userKey }
@@ -1096,9 +1127,10 @@ function buildRoutes(): RouteDefinition[] {
         });
         return;
       }
+      const user = getUserRow(userId);
       const compacted = await summarizeThreadCompact(
         db,
-        getAuxiliaryProvider(),
+        getAuxiliaryProvider(user.prism_default_llm_model),
         userId,
         conversationId,
         { mode, reason, force: true }
@@ -1118,7 +1150,7 @@ function buildRoutes(): RouteDefinition[] {
           const userKey = decryptUserKey(userId);
           await summarizeSandboxBotStatus(
             db,
-            getAuxiliaryProvider(),
+            getAuxiliaryProvider(user.prism_default_llm_model),
             userId,
             conversationBotId,
             { reason: "mode_exit", userKey }
@@ -1459,6 +1491,8 @@ function buildRoutes(): RouteDefinition[] {
             starterPromptLabel,
             secondaryOllamaHost: user.secondary_ollama_host,
             lenientLocalFallbackModel: user.lenient_local_fallback_model,
+            prismDefaultLlmModel: user.prism_default_llm_model,
+            prismImageToolLlmModel: user.prism_image_tool_llm_model,
             devMemoriesEnabled: user.dev_memories_enabled === 1,
             devMemoriesText: user.dev_memories_text,
             assistantImageUserPrefs: {
@@ -1466,6 +1500,7 @@ function buildRoutes(): RouteDefinition[] {
               preferredOpenAiImageModel: user.preferred_openai_image_model,
               lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
               comfyuiHost: user.comfyui_host,
+              comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
               secondaryOllamaHost: user.secondary_ollama_host,
             },
             botId: effectiveBotId,
@@ -1495,6 +1530,7 @@ function buildRoutes(): RouteDefinition[] {
         opinion,
         botOpinion,
         summaryCompaction,
+        pendingImageJob,
       } = result;
       json(ctx.res, 200, {
         ok: true,
@@ -1505,12 +1541,125 @@ function buildRoutes(): RouteDefinition[] {
         ...(summaryCompaction ? { summaryCompaction } : {}),
         ...(memoryLearned ? { memoryLearned } : {}),
         ...(conversationStarters ? { conversationStarters } : {}),
+        ...(pendingImageJob ? { pendingImageJob } : {}),
       });
+    }),
+    route("GET", "/api/image-jobs/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const jobId = decodeURIComponent((ctx.params.id ?? "").trim());
+      if (!jobId) {
+        throw new HttpError(400, "Missing job id.");
+      }
+      const result = pollImageJobForUser(userId, jobId);
+      if (!result.ok) {
+        if (result.error === "forbidden") {
+          throw new HttpError(403, "Forbidden.");
+        }
+        throw new HttpError(404, "Image job not found.");
+      }
+      if (result.status === "running") {
+        json(ctx.res, 200, { ok: true, status: "running" });
+        return;
+      }
+      if (result.status === "succeeded") {
+        json(ctx.res, 200, { ok: true, status: "succeeded", messages: result.messages });
+        return;
+      }
+      json(ctx.res, 200, { ok: true, status: "failed", error: result.error });
     }),
     // Coffee mode (timed live sessions for 3-5 reactive bots). Lives on its own
     // endpoint rather than inside /api/chat so the lighter coffee
     // pipeline (router LLM + per-bot reply, no cross-thread memory) can
     // evolve independently of the heavier Chat/Sandbox flow.
+    route("GET", "/api/coffee/groups", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        groups: listCoffeeGroups(db, userId),
+      });
+    }),
+    route("GET", "/api/coffee/presets", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        presets: listCoffeePresets(db, userId),
+      });
+    }),
+    route("POST", "/api/coffee/presets", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const preset = createCoffeePreset(db, userId, {
+        name: body.name,
+        coffeeSettings: body.coffeeSettings,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        preset,
+      });
+    }),
+    route("PATCH", "/api/coffee/presets/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const preset = updateCoffeePreset(db, userId, ctx.params.id, {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.coffeeSettings !== undefined ? { coffeeSettings: body.coffeeSettings } : {}),
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        preset,
+      });
+    }),
+    route("DELETE", "/api/coffee/presets/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      deleteCoffeePreset(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/coffee/groups", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const groupBotIds = Array.isArray(body.groupBotIds)
+        ? body.groupBotIds
+        : undefined;
+      const group = createCoffeeGroup(db, userId, {
+        name: body.name,
+        groupBotIds,
+        coffeeSettings: body.coffeeSettings,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        group,
+      });
+    }),
+    route("PATCH", "/api/coffee/groups/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const groupBotIds = Array.isArray(body.groupBotIds)
+        ? body.groupBotIds
+        : undefined;
+      const group = updateCoffeeGroup(db, userId, ctx.params.id, {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(groupBotIds !== undefined ? { groupBotIds } : {}),
+        ...(body.coffeeSettings !== undefined ? { coffeeSettings: body.coffeeSettings } : {}),
+        ...(body.presetMode !== undefined ? { presetMode: body.presetMode } : {}),
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        group,
+      });
+    }),
+    route("POST", "/api/coffee/groups/:id/sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const result = createCoffeeConversationFromGroup(db, userId, ctx.params.id, {
+        coffeeSettings: body.coffeeSettings,
+        durationMinutes: body.durationMinutes,
+        presetId: body.presetId,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        ...result,
+      });
+    }),
     route("POST", "/api/coffee/sessions", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -1567,6 +1716,7 @@ function buildRoutes(): RouteDefinition[] {
           secondaryOllamaHost: user.secondary_ollama_host,
           userDisplayName: user.display_name,
           userKey,
+          prismDefaultLlmModel: user.prism_default_llm_model,
         },
         userIsComposing,
         directedSpeakerBotId
@@ -1630,6 +1780,7 @@ function buildRoutes(): RouteDefinition[] {
           secondaryOllamaHost: user.secondary_ollama_host,
           userDisplayName: user.display_name,
           userKey,
+          prismDefaultLlmModel: user.prism_default_llm_model,
         }
       );
       json(ctx.res, 200, {
@@ -1666,7 +1817,12 @@ function buildRoutes(): RouteDefinition[] {
           memoryInferenceCheckedAtByScope.get(inferenceScopeKey) !== latestDirectAt;
         if (shouldInfer) {
           try {
-            const auxiliaryProvider = getAuxiliaryProvider();
+            const prismModel = (
+              db.prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?").get(userId) as
+                | { m: string | null }
+                | undefined
+            )?.m;
+            const auxiliaryProvider = getAuxiliaryProvider(prismModel);
             await inferAndStoreBotMemories(db, auxiliaryProvider, userId, botId, userKey);
           } catch (error) {
             console.warn("Memory inference skipped:", error);
@@ -2012,19 +2168,24 @@ function buildRoutes(): RouteDefinition[] {
           providerLocked: Boolean(user.provider_locked),
           autoMemory: Boolean(user.auto_memory),
           composerWritingAssist: user.composer_writing_assist !== 0,
+          fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           preferredLocalModel: user.preferred_local_model ?? "",
           preferredOnlineModel: user.preferred_online_model ?? "",
           lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
           lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model ?? "",
+          prismDefaultLlmModel: user.prism_default_llm_model ?? "",
+          prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
           ollamaModel: config.ollamaModel,
+          ollamaAuxiliaryModel: config.ollamaAuxiliaryModel || "llama3.2",
           secondaryOllamaHost: user.secondary_ollama_host ?? "",
           comfyUiHost: user.comfyui_host ?? "",
           preferredLocalImageModel: user.preferred_local_image_model ?? "",
           preferredOpenAiImageModel: user.preferred_openai_image_model ?? "",
+          comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
           devMemoriesEnabled: user.dev_memories_enabled === 1,
           devMemoriesText: user.dev_memories_text ?? "",
         },
@@ -2045,31 +2206,47 @@ function buildRoutes(): RouteDefinition[] {
         comfyHostFromQuery && comfyHostFromQuery.length > 0
           ? comfyHostFromQuery
           : user.comfyui_host?.trim() ?? "";
-      let comfyUi:
-        | {
-            configured: boolean;
-            reachable: boolean;
-            checkpoints: Array<{
-              id: string;
-              label: string;
-              provider: "local";
-              imageSource: "comfyui";
-            }>;
-          }
-        | undefined;
+      let comfyUi: {
+        configured: boolean;
+        reachable: boolean;
+        checkpoints: Array<{
+          id: string;
+          label: string;
+          provider: "local";
+          imageSource: "comfyui" | "comfyui-remote";
+        }>;
+      };
       if (comfyHostRaw) {
         const names = await fetchComfyUiCheckpointNames(comfyHostRaw);
         const reachable =
           names.length > 0 || (await probeComfyUiHostReachable(comfyHostRaw));
+        const checkpointRows = names.map((name) => ({
+          id: encodeComfyUiModelId(name),
+          label: `${name} (ComfyUI)`,
+          provider: "local" as const,
+          imageSource: "comfyui" as const,
+        }));
+        let remoteDiskRows: Array<{
+          id: string;
+          label: string;
+          provider: "local";
+          imageSource: "comfyui-remote";
+        }> = [];
+        try {
+          const relPaths = await listComfyUiWorkflowJsonRelPaths(comfyHostRaw);
+          remoteDiskRows = relPaths.map((path) => ({
+            id: encodeComfyUiRemoteWorkflowModelId(path),
+            label: `${path} (ComfyUI disk)`,
+            provider: "local" as const,
+            imageSource: "comfyui-remote" as const,
+          }));
+        } catch {
+          remoteDiskRows = [];
+        }
         comfyUi = {
           configured: true,
           reachable,
-          checkpoints: names.map((name) => ({
-            id: encodeComfyUiModelId(name),
-            label: `${name} (ComfyUI)`,
-            provider: "local" as const,
-            imageSource: "comfyui" as const,
-          })),
+          checkpoints: [...checkpointRows, ...remoteDiskRows],
         };
       } else {
         comfyUi = {
@@ -2123,6 +2300,7 @@ function buildRoutes(): RouteDefinition[] {
         providerLocked: user.provider_locked,
         autoMemory: user.auto_memory,
         composerWritingAssist: user.composer_writing_assist,
+        fallbackModelMessageStripe: user.fallback_model_message_stripe,
         hiddenBotModelIds: user.hidden_bot_model_ids,
         preferredLocalModel: user.preferred_local_model,
         preferredOnlineModel: user.preferred_online_model,
@@ -2132,6 +2310,9 @@ function buildRoutes(): RouteDefinition[] {
         comfyUiHost: user.comfyui_host,
         preferredLocalImageModel: user.preferred_local_image_model,
         preferredOpenAiImageModel: user.preferred_openai_image_model,
+        comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+        prismDefaultLlmModel: user.prism_default_llm_model,
+        prismImageToolLlmModel: user.prism_image_tool_llm_model,
         primaryOllamaHost: config.ollamaHost,
       });
 
@@ -2155,9 +2336,9 @@ function buildRoutes(): RouteDefinition[] {
       // another migration.
       db.prepare(`
         UPDATE users
-        SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?,
+        SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?,
             preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
-            preferred_local_image_model = ?, preferred_openai_image_model = ?,
+            preferred_local_image_model = ?, preferred_openai_image_model = ?, comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
         WHERE id = ?
@@ -2168,6 +2349,7 @@ function buildRoutes(): RouteDefinition[] {
         next.providerLocked,
         next.autoMemory,
         next.composerWritingAssist,
+        next.fallbackModelMessageStripe,
         JSON.stringify(next.hiddenBotModelIds),
         next.preferredLocalModel,
         next.preferredOnlineModel,
@@ -2177,6 +2359,9 @@ function buildRoutes(): RouteDefinition[] {
         next.comfyUiHost,
         next.preferredLocalImageModel,
         next.preferredOpenAiImageModel,
+        JSON.stringify(next.comfyUiWorkflows),
+        next.prismDefaultLlmModel,
+        next.prismImageToolLlmModel,
         devMemoriesEnabled,
         devMemoriesText,
         openAiCipher,
@@ -2220,8 +2405,9 @@ function buildRoutes(): RouteDefinition[] {
       if (!row) {
         throw new HttpError(404, "Bot not found.");
       }
+      const user = getUserRow(userId);
       const suggestions = await inferBotImagePromptSuggestions(
-        getAuxiliaryProvider(),
+        getAuxiliaryProvider(user.prism_default_llm_model),
         { botName: row.name, systemPrompt: row.system_prompt }
       );
       json(ctx.res, 200, { ok: true, suggestions });
@@ -2247,10 +2433,14 @@ function buildRoutes(): RouteDefinition[] {
         botName = row.name;
         systemPrompt = row.system_prompt;
       }
-      const prompt = await inferRandomImageSceneLine(getAuxiliaryProvider(), {
-        botName,
-        systemPrompt,
-      });
+      const user = getUserRow(userId);
+      const prompt = await inferRandomImageSceneLine(
+        getAuxiliaryProvider(user.prism_default_llm_model),
+        {
+          botName,
+          systemPrompt,
+        }
+      );
       json(ctx.res, 200, { ok: true, prompt });
     }),
     route("POST", "/api/images/generate", async (ctx) => {
@@ -2327,16 +2517,33 @@ function buildRoutes(): RouteDefinition[] {
         (botPersona?.openai_image_model?.trim() ?? "") ||
         (user.preferred_openai_image_model?.trim() ?? "");
 
+      if (effectiveProvider === "local" && !resolvedLocalImageModel) {
+        throw new Error(
+          "Pick a local image model in the Images panel header, then try again."
+        );
+      }
+
+      const acqPanel = await tryAcquireImageSlot({
+        userId,
+        conversationId: conversationIdRaw.length > 0 ? conversationIdRaw : null,
+        botId: bodyBotId ?? null,
+        mode: "sandbox",
+        incognito: false,
+        captionPrompt: prompt,
+        userMessage: `[Images panel] ${prompt.slice(0, 500)}`,
+        source: "images_panel",
+      });
+      if (!acqPanel.ok) {
+        throw new HttpError(
+          503,
+          "Another image is generating right now. Wait for it to finish, then try again."
+        );
+      }
+
       const imageId = randomId(12);
       const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
 
       if (effectiveProvider === "local") {
-        if (!resolvedLocalImageModel) {
-          throw new Error(
-            "Pick a local image model in the Images panel header, then try again."
-          );
-        }
-
         const lenientImageFb = user.lenient_local_image_fallback_model?.trim() ?? "";
         const runLocalBytes = (modelId: string) =>
           generateLocalImageBytesByModelId({
@@ -2345,6 +2552,7 @@ function buildRoutes(): RouteDefinition[] {
             size,
             signal: imageGenAbort.signal,
             comfyUiHost: user.comfyui_host,
+            comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
             secondaryOllamaHost: user.secondary_ollama_host,
             primaryOllamaHost: config.ollamaHost,
           });
@@ -2364,7 +2572,7 @@ function buildRoutes(): RouteDefinition[] {
           }
         }
 
-        finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
+        await finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
           imageId,
           userId,
           persistence: {
@@ -2405,10 +2613,11 @@ function buildRoutes(): RouteDefinition[] {
             size,
             signal: imageGenAbort.signal,
             comfyUiHost: user.comfyui_host,
+            comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
             secondaryOllamaHost: user.secondary_ollama_host,
             primaryOllamaHost: config.ollamaHost,
           });
-          finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
+          await finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
             imageId,
             userId,
             persistence: {
@@ -2450,6 +2659,8 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error(`Could not save generated image (${detail}).`);
       }
 
+      await tryGenerateThumbAfterPngWrite(localRelPath);
+
       try {
         db.prepare(
           "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?)"
@@ -2486,6 +2697,7 @@ function buildRoutes(): RouteDefinition[] {
       });
       } finally {
         ctx.req.off("close", onImageGenClientClose);
+        await releaseImageSlot(userId);
       }
     }),
     route("POST", "/api/ollama/pull-primary", async (ctx) => {
@@ -2600,6 +2812,32 @@ function buildRoutes(): RouteDefinition[] {
       }>).map((row) => mapImageRowToClient(row));
       json(ctx.res, 200, { ok: true, images });
     }),
+    route("GET", "/api/images/:id/thumb", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const imageId = ctx.params.id;
+      const row = db
+        .prepare("SELECT user_id, local_rel_path FROM images WHERE id = ?")
+        .get(imageId) as
+        | { user_id: string; local_rel_path: string | null }
+        | undefined;
+      if (!row || row.user_id !== userId) {
+        throw new HttpError(404, "Image not found.");
+      }
+      const rel = row.local_rel_path?.trim();
+      if (!rel) {
+        throw new HttpError(404, "Image thumbnail not available.");
+      }
+      let bytes: Buffer;
+      try {
+        bytes = await readOrCreateThumbBytes(rel);
+      } catch {
+        throw new HttpError(404, "Image thumbnail not found.");
+      }
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", "image/webp");
+      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.end(bytes);
+    }),
     route("GET", "/api/images/:id/file", async (ctx) => {
       const userId = requireAuth(ctx);
       const imageId = ctx.params.id;
@@ -2648,10 +2886,7 @@ function buildRoutes(): RouteDefinition[] {
       const rel = row.local_rel_path?.trim();
       if (rel) {
         try {
-          const absolute = resolveAbsoluteUnderDataRoot(rel);
-          if (existsSync(absolute)) {
-            unlinkSync(absolute);
-          }
+          tryUnlinkGeneratedImageFile(rel);
         } catch (error) {
           console.error(
             `[images] orphan file after DB delete imageId=${imageId}: ${
@@ -2866,21 +3101,78 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const conversationId = ctx.params.id;
       const conversation = db.prepare(
-        "SELECT id, title, bot_id, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
-      ).get(conversationId, userId) as { id: string; title: string; bot_id: string | null; created_at: string; updated_at: string } | undefined;
+        "SELECT id, title, conversation_mode, bot_id, bot_group_ids, coffee_settings, coffee_group_id, coffee_duration_minutes, coffee_preset_id, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
+      ).get(conversationId, userId) as {
+        id: string;
+        title: string;
+        conversation_mode: string | null;
+        bot_id: string | null;
+        bot_group_ids: string | null;
+        coffee_settings: string | null;
+        coffee_group_id: string | null;
+        coffee_duration_minutes: number | null;
+        coffee_preset_id: string | null;
+        created_at: string;
+        updated_at: string;
+      } | undefined;
       if (!conversation) {
         throw new Error("Conversation not found.");
       }
       const messages = db.prepare(
-        "SELECT role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
-      ).all(conversationId, userId) as Array<{ role: string; content: string; created_at: string }>;
+        `SELECT m.role, m.content, m.created_at, b.name AS bot_name, b.color AS bot_color
+           FROM messages m
+           LEFT JOIN bots b ON b.id = m.bot_id
+          WHERE m.conversation_id = ? AND m.user_id = ?
+          ORDER BY m.created_at ASC`
+      ).all(conversationId, userId) as Array<{
+        role: string;
+        content: string;
+        created_at: string;
+        bot_name: string | null;
+        bot_color: string | null;
+      }>;
       const lines = [
         `# ${conversation.title}`,
         `> Exported ${new Date().toISOString()}`,
         "",
       ];
+      if (conversation.conversation_mode === "coffee") {
+        const botIds = parseConversationBotGroupIds(conversation.bot_group_ids);
+        const assistantMessages = messages.filter((message) => message.role === "assistant");
+        const speakerCounts = new Map<string, number>();
+        for (const message of assistantMessages) {
+          const name = message.bot_name ?? "Assistant";
+          speakerCounts.set(name, (speakerCounts.get(name) ?? 0) + 1);
+        }
+        lines.push("## Coffee Session");
+        lines.push("");
+        lines.push(`- Duration: ${conversation.coffee_duration_minutes ?? "legacy"} minute(s)`);
+        lines.push(`- Coffee Group: ${conversation.coffee_group_id ?? "legacy / ungrouped"}`);
+        lines.push(`- Preset: ${conversation.coffee_preset_id ?? "group defaults / legacy"}`);
+        lines.push(`- Bots: ${botIds.length > 0 ? botIds.join(", ") : "unknown"}`);
+        lines.push(`- Messages: ${messages.length}`);
+        lines.push(`- Bot replies: ${assistantMessages.length}`);
+        lines.push(
+          `- Speaker balance: ${
+            speakerCounts.size > 0
+              ? Array.from(speakerCounts.entries()).map(([name, count]) => `${name} ${count}`).join(", ")
+              : "none"
+          }`
+        );
+        lines.push(`- Started: ${conversation.created_at}`);
+        lines.push(`- Updated: ${conversation.updated_at}`);
+        lines.push("");
+        lines.push("## Transcript");
+        lines.push("");
+      }
       for (const msg of messages) {
-        lines.push(`**${msg.role === "assistant" ? "Assistant" : "You"}** _(${msg.created_at})_`);
+        const speaker =
+          msg.role === "assistant"
+            ? msg.bot_name ?? "Assistant"
+            : msg.role === "user"
+              ? "You"
+              : "System";
+        lines.push(`**${speaker}** _(${msg.created_at})_`);
         lines.push("");
         lines.push(msg.content);
         lines.push("");

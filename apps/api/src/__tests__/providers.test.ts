@@ -261,6 +261,46 @@ describe("LocalOllamaProvider secondary routing", () => {
     assert.equal(response, "hello from secondary");
     assert.equal(requestedUrl, "http://192.168.1.50:11434/api/chat");
     assert.equal(requestedBody.model, "mistral:latest");
+    assert.equal(requestedBody.think, false);
+  });
+
+  it("sends think:false and falls back to message.thinking when content is empty", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          message: { content: "", thinking: "  final answer via thinking field  " },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    const response = await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "qwen3:latest",
+    });
+    assert.equal(requestedBody.think, false);
+    assert.equal(response, "final answer via thinking field");
+  });
+
+  it("throws a clear error when the model returns only tool_calls", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: "",
+            tool_calls: [{ function: { name: "noop", arguments: "{}" } }],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    await assert.rejects(
+      () => provider.generateResponse([{ role: "user", content: "hi" }]),
+      /tool calls instead of assistant text/
+    );
   });
 
   it("does not silently route stale secondary model ids to the primary host", async () => {
@@ -303,7 +343,27 @@ describe("system-owned local lanes", () => {
     assert.equal(response, "aux ok");
     assert.equal(provider.name, "local");
     assert.equal(requestedBody.model, "llama3.2");
+    assert.equal(requestedBody.think, false);
     assert.deepEqual(requestedBody.options, { temperature: 0.2, num_predict: 40 });
+  });
+
+  it("honors a per-user Prism auxiliary override when supplied", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ message: { content: "aux ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const provider = getAuxiliaryProvider("mistral:latest");
+    await provider.generateResponse([{ role: "user", content: "title this" }], {
+      model: "gpt-4o",
+      temperature: 0.1,
+      maxTokens: 20,
+    });
+    assert.equal(requestedBody.model, "mistral:latest");
   });
 
   it("pins local embeddings to nomic-embed-text", async () => {
