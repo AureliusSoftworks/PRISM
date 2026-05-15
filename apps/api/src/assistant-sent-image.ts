@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { ChatMode, SentGeneratedImagePayload } from "@localai/shared";
+import type { ChatMode, ComfyUiWorkflowRegistration, SentGeneratedImagePayload } from "@localai/shared";
 import { composeAugmentedImagePrompt } from "@localai/shared";
 import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
@@ -13,6 +13,7 @@ import {
   tryUnlinkGeneratedImageFile,
   writeGeneratedImageBytes,
 } from "./image-storage.ts";
+import { tryGenerateThumbAfterPngWrite } from "./image-thumb.ts";
 
 const config = getAppConfig();
 
@@ -31,6 +32,8 @@ export interface AssistantSentImageUserPrefs {
   preferredOpenAiImageModel: string | null;
   lenientLocalImageFallbackModel: string | null;
   comfyuiHost: string | null;
+  /** Parsed from `users.comfyui_workflows` for `comfyui-workflow:` image model ids. */
+  comfyUiWorkflows: readonly ComfyUiWorkflowRegistration[];
   secondaryOllamaHost: string | null;
 }
 
@@ -136,11 +139,13 @@ export async function runAssistantSentImageGeneration(args: {
   };
 
   const successPayload = (
-    revised: string | undefined
+    revised: string | undefined,
+    imageModel: string
   ): SentGeneratedImagePayload => ({
     imageId,
     prompt,
     displayUrl,
+    imageModel: imageModel.trim(),
     ...(revised ? { revisedPrompt: revised } : {}),
   });
 
@@ -159,6 +164,7 @@ export async function runAssistantSentImageGeneration(args: {
           size: ASSISTANT_SENT_IMAGE_SIZE,
           signal,
           comfyUiHost: args.prefs.comfyuiHost,
+          comfyUiWorkflows: args.prefs.comfyUiWorkflows,
           secondaryOllamaHost: args.prefs.secondaryOllamaHost,
           primaryOllamaHost: config.ollamaHost,
         });
@@ -182,13 +188,14 @@ export async function runAssistantSentImageGeneration(args: {
         }
       }
       writeGeneratedImageBytes(localRelPath, localOut.imageBytes);
+      await tryGenerateThumbAfterPngWrite(localRelPath);
       insertRow({
         revisedPrompt: prompt,
         urlForDb: displayUrl,
         providerTag: localOut.provider,
         modelUsed: localOut.modelUsed,
       });
-      return successPayload(prompt);
+      return successPayload(prompt, localOut.modelUsed);
     }
 
     const apiKey = args.openAiApiKey ?? config.openAiApiKey;
@@ -215,13 +222,14 @@ export async function runAssistantSentImageGeneration(args: {
         tryUnlinkGeneratedImageFile(localRelPath);
         return undefined;
       }
+      await tryGenerateThumbAfterPngWrite(localRelPath);
       insertRow({
         revisedPrompt: openAiResult.revisedPrompt ?? null,
         urlForDb: openAiResult.url,
         providerTag: "openai",
         modelUsed: openAiResult.model,
       });
-      return successPayload(openAiResult.revisedPrompt ?? undefined);
+      return successPayload(openAiResult.revisedPrompt ?? undefined, openAiResult.model);
     } catch (primaryError) {
       if (
         !lenientFb ||
@@ -235,17 +243,19 @@ export async function runAssistantSentImageGeneration(args: {
         size: ASSISTANT_SENT_IMAGE_SIZE,
         signal,
         comfyUiHost: args.prefs.comfyuiHost,
+        comfyUiWorkflows: args.prefs.comfyUiWorkflows,
         secondaryOllamaHost: args.prefs.secondaryOllamaHost,
         primaryOllamaHost: config.ollamaHost,
       });
       writeGeneratedImageBytes(localRelPath, localOut.imageBytes);
+      await tryGenerateThumbAfterPngWrite(localRelPath);
       insertRow({
         revisedPrompt: prompt,
         urlForDb: displayUrl,
         providerTag: localOut.provider,
         modelUsed: localOut.modelUsed,
       });
-      return successPayload(prompt);
+      return successPayload(prompt, localOut.modelUsed);
     }
   } catch (err) {
     tryUnlinkGeneratedImageFile(localRelPath);

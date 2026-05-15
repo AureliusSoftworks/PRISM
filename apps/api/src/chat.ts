@@ -50,6 +50,7 @@ import type {
   OpinionBand,
   OpinionTrend,
   SessionOpinion,
+  SentGeneratedImagePayload,
 } from "@localai/shared";
 import {
   hydrateAssistantMessageParts,
@@ -58,10 +59,12 @@ import {
   parseAssistantPrismTools,
   serializeAssistantToolPayload,
 } from "@localai/shared";
+import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
 import {
-  runAssistantSentImageGeneration,
-  type AssistantSentImageUserPrefs,
-} from "./assistant-sent-image.ts";
+  peekActiveImageJobForUser,
+  tryAcquireImageSlot,
+  startChatImageBackgroundJob,
+} from "./image-job-slot.ts";
 
 const config = getAppConfig();
 
@@ -70,6 +73,7 @@ const DEFAULT_ASSISTANT_IMAGE_USER_PREFS: AssistantSentImageUserPrefs = {
   preferredOpenAiImageModel: null,
   lenientLocalImageFallbackModel: null,
   comfyuiHost: null,
+  comfyUiWorkflows: [],
   secondaryOllamaHost: null,
 };
 
@@ -77,6 +81,37 @@ function assistantImagePrefsForTurn(
   settings: UserChatSettings
 ): AssistantSentImageUserPrefs {
   return settings.assistantImageUserPrefs ?? DEFAULT_ASSISTANT_IMAGE_USER_PREFS;
+}
+
+/**
+ * Diagnostic record for a single tool-call attempt during a chat turn. Surfaces in the
+ * developer-only chat metrics stream so we can see what the model tried (and whether it
+ * actually wired through to a job) without ever leaking framing to the player UI.
+ */
+export type ChatToolCallEventName =
+  | "sendGeneratedImage"
+  | "askQuestion"
+  | "unknown";
+
+export type ChatToolCallEventStatus =
+  /** Parser successfully extracted a tool envelope from the assistant reply. */
+  | "detected"
+  /** Image-pipeline slot was acquired and a background job was scheduled. */
+  | "acquired"
+  /** Image-pipeline was busy; the assistant got the "pipeline busy" note appended. */
+  | "busy"
+  /** Raw reply looked tool-shaped but no envelope could be parsed (regression smell). */
+  | "dropped";
+
+export interface ChatToolCallEvent {
+  name: ChatToolCallEventName;
+  status: ChatToolCallEventStatus;
+  /** Truncated tool prompt or AskQuestion prompt when relevant. */
+  prompt?: string;
+  /** Background image-job id once acquired. */
+  jobId?: string;
+  /** Short human-readable note (e.g. why a tool call was dropped or what the option count was). */
+  detail?: string;
 }
 
 /** POST /api/chat returns this shape; `conversationStarters` is present only after a starter turn. */
@@ -104,6 +139,18 @@ export interface ProcessChatMessageResult {
     latestSummary?: string;
     latestSummaryAt?: string;
   };
+  /** Present when assistant started an async in-thread image; client polls GET /api/image-jobs/:id */
+  pendingImageJob?: {
+    jobId: string;
+    conversationId: string | null;
+  };
+  /**
+   * Per-turn tool-call diagnostics. Only emitted when we observe a tool-shaped output
+   * (detected envelope, slot acquired/busy, or a raw reply that looks like it tried to
+   * call a tool but parsing failed). Surfaced in the dev metrics stream so we can see
+   * whether sendGeneratedImage is actually firing or being silently dropped.
+   */
+  toolCalls?: ChatToolCallEvent[];
   memoryLearned?: {
     created: Array<{
       id: string;
@@ -600,6 +647,64 @@ function normalizeModelValue(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * True when the user's raw message likely asks for an in-thread generated image
+ * (Prism `sendGeneratedImage` path), for optional per-turn chat model override.
+ */
+export function userMessageSuggestsInChatImageRequest(message: string): boolean {
+  const t = message.trim().toLowerCase();
+  if (t.length === 0) return false;
+
+  const negative =
+    /\b(don't|do not|dont)\s+(draw|paint|sketch|illustrate|generate)\b/.test(t) ||
+    /\bno\s+(image|picture|drawing|artwork)\b/.test(t) ||
+    /\b(text|words)\s+only\b/.test(t) ||
+    /\bwithout\s+(an\s+)?(image|picture|drawing)\b/.test(t) ||
+    /\bnot\s+(an\s+)?(image|drawing|picture)\b/.test(t);
+  if (negative) return false;
+
+  return (
+    /\b(draw|paint|sketch|illustrat(e|ion))\b/.test(t) ||
+    /\b(image|picture|photo)\s+of\b/.test(t) ||
+    /\b(generate|create|make)\s+(an?\s+)?(image|picture|illustration)\b/.test(t) ||
+    /\b(show|give)\s+me\s+(an?\s+)?(image|picture|drawing)\b/.test(t) ||
+    t.includes("sendgeneratedimage")
+  );
+}
+
+export function resolvePrimaryChatProviderForPossibleImageToolTurn(args: {
+  isStarterPrompt: boolean;
+  rawUserMessage: string;
+  baseProvider: LlmProvider;
+  botOverrides: GenerateOptions | undefined;
+  secondaryOllamaHost?: string | null;
+  prismImageToolLlmModel?: string | null;
+}): { provider: LlmProvider; botOverrides: GenerateOptions | undefined } {
+  const imageModel =
+    typeof args.prismImageToolLlmModel === "string"
+      ? args.prismImageToolLlmModel.trim()
+      : "";
+  if (
+    !args.isStarterPrompt &&
+    imageModel.length > 0 &&
+    userMessageSuggestsInChatImageRequest(args.rawUserMessage)
+  ) {
+    return {
+      provider: new LocalOllamaProvider({
+        secondaryOllamaHost: args.secondaryOllamaHost,
+      }),
+      botOverrides: {
+        ...args.botOverrides,
+        model: imageModel,
+      },
+    };
+  }
+  return {
+    provider: args.baseProvider,
+    botOverrides: args.botOverrides,
+  };
 }
 
 async function generateWithLenientLocalFallback(args: {
@@ -1146,8 +1251,19 @@ export async function refreshConversationTitle(
     return null;
   }
 
+  let prismAuxiliaryModel: string | null | undefined;
+  try {
+    prismAuxiliaryModel = (
+      db.prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?").get(userId) as
+        | { m: string | null }
+        | undefined
+    )?.m;
+  } catch {
+    // Test/minimal DB fixtures may omit the users table; fall back to server defaults.
+    prismAuxiliaryModel = undefined;
+  }
   const title = await inferRefreshedConversationTitle(
-    getAuxiliaryProvider(),
+    getAuxiliaryProvider(prismAuxiliaryModel ?? null),
     recentMessages,
     conversation.title,
     conversation.last_bot_name
@@ -1218,6 +1334,18 @@ export interface UserChatSettings {
   /** Optional local-only fallback model used when copyright refusals happen. */
   lenientLocalFallbackModel?: string | null;
   /**
+   * Per-account override for Prism internal local LLM calls (titles, summaries,
+   * memory inference, Coffee router, image prompt hints). Empty uses the
+   * server's OLLAMA_AUXILIARY_MODEL.
+   */
+  prismDefaultLlmModel?: string | null;
+  /**
+   * Optional local Ollama chat model for turns where the user's message looks like
+   * an in-thread image request (`sendGeneratedImage`). Empty uses the normal hub model.
+   * Does not change the separate image render pipeline (Comfy / Ollama image / OpenAI images).
+   */
+  prismImageToolLlmModel?: string | null;
+  /**
    * Which post-auth surface the request originated from. Changes what
    * "memory" means for this turn:
    *   - "chat": cross-thread personal-fact memory + Qdrant summary recall.
@@ -1243,6 +1371,136 @@ export interface UserChatSettings {
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
 const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
 
+/** Appended to assistant prose when `sendGeneratedImage` parsed but image pipeline returned nothing. */
+const ASSISTANT_IMAGE_GEN_UNAVAILABLE_NOTE =
+  "I couldn't generate that image just now. You can try again in a moment, or check your image model settings under Settings → Defaults & fallbacks.";
+
+/** When another thread (or panel) already holds the single image slot. */
+const ASSISTANT_IMAGE_SLOT_BUSY_NOTE =
+  "I'm already tied up finishing another picture on this account — I can't start a new one until that finishes. Ask me again in a little while.";
+
+/** Max chars persisted in `ChatToolCallEvent.prompt` / `detail` so devtools never carry runaway blobs. */
+const TOOL_CALL_DIAG_PREVIEW_CAP = 200;
+
+function truncateToolCallPreview(text: string, max = TOOL_CALL_DIAG_PREVIEW_CAP): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max)}…`;
+}
+
+/**
+ * Patterns that strongly suggest the model attempted a Prism tool call even if the parser
+ * extracted nothing. We require either the formal sentinel/HF-style tokens OR a
+ * JSON-key-shaped occurrence of the tool name (e.g. `"sendGeneratedImage":` or
+ * `"name":"AskQuestion"`). Bare prose mentions like
+ * "I will use sendGeneratedImage next turn" or "let me ask a question" must NOT
+ * trip this heuristic — those are false positives that would spam the dev surface.
+ */
+const TOOL_CALL_RAW_HINT_PATTERNS: ReadonlyArray<RegExp> = [
+  /"\s*sendGeneratedImage\s*"\s*:/i,
+  /"\s*askQuestion\s*"\s*:/i,
+  /"\s*name\s*"\s*:\s*"\s*AskQuestion\s*"/i,
+  /<\|\s*send\s*_?\s*generated\s*_?\s*image\s*\|>/i,
+  /<<<\s*PRISM\s*_?\s*TOOL\s*>>>/i,
+];
+
+const SEND_GENERATED_IMAGE_NAME_HINTS: ReadonlyArray<RegExp> = [
+  /"\s*sendGeneratedImage\s*"\s*:/i,
+  /<\|\s*send\s*_?\s*generated\s*_?\s*image\s*\|>/i,
+];
+
+const ASK_QUESTION_NAME_HINTS: ReadonlyArray<RegExp> = [
+  /"\s*askQuestion\s*"\s*:/i,
+  /"\s*name\s*"\s*:\s*"\s*AskQuestion\s*"/i,
+];
+
+function inferDroppedToolNameFromRaw(raw: string): ChatToolCallEventName {
+  if (SEND_GENERATED_IMAGE_NAME_HINTS.some((rx) => rx.test(raw))) {
+    return "sendGeneratedImage";
+  }
+  if (ASK_QUESTION_NAME_HINTS.some((rx) => rx.test(raw))) {
+    return "askQuestion";
+  }
+  return "unknown";
+}
+
+/** Smallest snippet starting at the first `{` that includes any of the tool keywords. */
+function extractDroppedToolSnippet(raw: string): string {
+  const firstBrace = raw.indexOf("{");
+  const source = firstBrace >= 0 ? raw.slice(firstBrace) : raw;
+  return truncateToolCallPreview(source);
+}
+
+interface BuildAssistantToolCallEventsArgs {
+  rawReply: string;
+  parsedSendGeneratedImage?: { prompt: string };
+  parsedAskQuestion?: AskQuestionPayload;
+  /**
+   * What happened on the image-slot acquisition path for this turn:
+   *  - "acquired" → we scheduled a background job (use `imageJobId`)
+   *  - "busy" → pipeline busy, assistant got the busy note
+   *  - "none" → no `sendGeneratedImage` envelope was parsed
+   */
+  imageSlot: "acquired" | "busy" | "none";
+  imageJobId?: string;
+}
+
+/**
+ * Build the per-turn tool-call diagnostic events for the dev metrics stream.
+ *
+ * Visible for unit tests. Pure function: never throws, never mutates inputs.
+ */
+export function buildAssistantToolCallEvents(
+  args: BuildAssistantToolCallEventsArgs
+): ChatToolCallEvent[] {
+  const events: ChatToolCallEvent[] = [];
+
+  if (args.parsedAskQuestion) {
+    events.push({
+      name: "askQuestion",
+      status: "detected",
+      prompt: truncateToolCallPreview(args.parsedAskQuestion.prompt),
+      detail: `${args.parsedAskQuestion.options.length} option(s)`,
+    });
+  }
+
+  if (args.parsedSendGeneratedImage) {
+    const promptPreview = truncateToolCallPreview(args.parsedSendGeneratedImage.prompt);
+    events.push({
+      name: "sendGeneratedImage",
+      status: "detected",
+      prompt: promptPreview,
+    });
+    if (args.imageSlot === "acquired") {
+      events.push({
+        name: "sendGeneratedImage",
+        status: "acquired",
+        prompt: promptPreview,
+        ...(args.imageJobId ? { jobId: args.imageJobId } : {}),
+      });
+    } else if (args.imageSlot === "busy") {
+      events.push({
+        name: "sendGeneratedImage",
+        status: "busy",
+        prompt: promptPreview,
+        detail: "image pipeline busy",
+      });
+    }
+  } else if (
+    typeof args.rawReply === "string" &&
+    args.rawReply.length > 0 &&
+    TOOL_CALL_RAW_HINT_PATTERNS.some((rx) => rx.test(args.rawReply))
+  ) {
+    events.push({
+      name: inferDroppedToolNameFromRaw(args.rawReply),
+      status: "dropped",
+      detail: `raw reply mentions tool but parser produced no envelope: ${extractDroppedToolSnippet(args.rawReply)}`,
+    });
+  }
+
+  return events;
+}
+
 const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "Prism assistant tools — optional:",
   `When you want the user to pick exactly one tap-to-reply chip, append ONE trailing block AFTER your readable prose.`,
@@ -1253,8 +1511,13 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   `${PRISM_TOOL_END}`,
   "Rules:",
   "- Keep normal conversation in plain prose BEFORE the delimiter block.",
-  "- Do NOT wrap the Prism <<<PRISM_TOOL>>> … <<<END_PRISM_TOOL>>> block in Markdown code fences (` ```json ` … ` ``` `): that leaves empty code boxes in chat.",
+  "- Preferred format (copy these exact tokens on their own lines, then JSON between them):",
+  `  ${PRISM_TOOL_START}`,
+  `  {"v":1,"sendGeneratedImage":{"prompt":"…"}}   (or AskQuestion JSON as in the example above)`,
+  `  ${PRISM_TOOL_END}`,
+  "- Do NOT wrap that Prism block in Markdown code fences (` ```json ` … ` ``` `): that leaves empty code boxes in chat.",
   "- Do NOT paste the tool JSON alone on its own line; use the Prism block (or a single fenced code block). Bare JSON shows up as junk text in chat.",
+  "- Prefer the three-angle-bracket tokens above. Single-angle XML-style `<PRISM_TOOL>` … `</PRISM_TOOL>` is also accepted, but triple brackets are the reliable default.",
   "- AskQuestion represents one question in this turn; never output a quiz or multi-question list.",
   "- Inside JSON only: emit exactly three options with ids a, b, c (distinct).",
   "- In JSON, `prompt` is ONLY the short chooser line shown above the chip row (never the main quiz question).",
@@ -1264,9 +1527,12 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- Add a `sendGeneratedImage` object with a single `prompt` field: a concrete image-model description (scene, style, subject).",
   "- You may combine AskQuestion and sendGeneratedImage in one JSON object: {\"v\":1,\"askQuestion\":{...},\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
   "- Or image-only: {\"v\":1,\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
+  "- After you write your visible prose, Prism shows the picture as a separate follow-up bubble (so the user reads your message first, then sees the image).",
   "- Use sparingly when a picture truly helps; never use for every turn.",
   "",
-  "Do NOT use Hugging Face / LM Studio style tool tokens such as <|sendGeneratedImage|> — the supported, reliable path is the Prism block (or one fenced / trailing JSON envelope as above). Prefer that format every time.",
+  "When a separate system message says the image pipeline is busy or an image is still generating, follow those rules exactly: do NOT output sendGeneratedImage until the message says you may.",
+  "",
+  "Alternate (supported but less preferred): after your prose you may use a Hugging Face / LM Studio style `<|sendGeneratedImage|>` token immediately followed by the same JSON object (full envelope or flat `{\"prompt\":\"...\"}`). Prefer the triple-bracket Prism block when possible.",
 ].join("\n");
 
 /** Injected only when the turn text references `prism-bot://` links (Teams-style @ mentions). */
@@ -2406,6 +2672,28 @@ function upsertSessionOpinion(args: {
   return buildOpinion(score, trend, evaluation.reason, reasons, updatedAt);
 }
 
+function buildImageSlotSystemHint(
+  userId: string,
+  activeConversationId: string | null | undefined
+): string | null {
+  const job = peekActiveImageJobForUser(userId);
+  if (!job) return null;
+  const cur = activeConversationId?.trim() || null;
+  const jobC = job.conversationId?.trim() || null;
+  const sameThread = cur !== null && jobC !== null && cur === jobC;
+  if (sameThread) {
+    return (
+      `Prism image pipeline (system): You already started an in-thread image for this conversation; it is still generating (started ${job.startedAt}). ` +
+      `If the user asks how it is going, answer naturally (still processing). Do NOT output another sendGeneratedImage until that run finishes.`
+    );
+  }
+  return (
+    `Prism image pipeline (system): Another image is already generating for this account (started ${job.startedAt}` +
+    (jobC ? ", different conversation" : "") +
+    `). You MUST NOT output sendGeneratedImage on this turn. Stay in character: politely say you cannot draw a new picture right now; they can try again after that run finishes. You may chat about unrelated topics.`
+  );
+}
+
 /**
  * Assemble the final system+history payload the provider actually sees.
  *
@@ -2436,6 +2724,8 @@ function buildPromptMessages(args: {
   chatHistory: ChatMessage[];
   userMessage: string;
   askQuestionMode: "off" | "explicit" | "continuation";
+  /** Prism single-slot image job hint (busy / in-flight status). */
+  imageSlotSystemHint?: string | null;
 }): ProviderMessage[] {
   const promptMessages: ProviderMessage[] = [];
   const trimmedBot = args.botSystemPrompt?.trim();
@@ -2506,6 +2796,10 @@ function buildPromptMessages(args: {
         .map((line) => `- ${line}`)
         .join("\n")}`,
     });
+  }
+  const hint = args.imageSlotSystemHint?.trim();
+  if (hint && hint.length > 0) {
+    promptMessages.push({ role: "system", content: hint });
   }
   const transcriptMentionsPrismBot =
     args.userMessage.includes("prism-bot://") ||
@@ -2780,7 +3074,7 @@ export async function processChatMessage(
     settings.openAiApiKey,
     settings.secondaryOllamaHost
   );
-  const auxiliaryProvider = getAuxiliaryProvider();
+  const auxiliaryProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel);
 
   if (incognitoForTurn) {
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
@@ -2807,7 +3101,18 @@ export async function processChatMessage(
       chatHistory: history,
       userMessage: promptUserMessage,
       askQuestionMode,
+      imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
     });
+
+    const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
+      resolvePrimaryChatProviderForPossibleImageToolTurn({
+        isStarterPrompt,
+        rawUserMessage: message,
+        baseProvider: provider,
+        botOverrides: settings.botOverrides,
+        secondaryOllamaHost: settings.secondaryOllamaHost,
+        prismImageToolLlmModel: settings.prismImageToolLlmModel,
+      });
 
     const {
       assistantReplyRaw,
@@ -2815,9 +3120,9 @@ export async function processChatMessage(
       modelUsed,
       fallbackInvocation,
     } = await generateWithLenientLocalFallback({
-      provider,
+      provider: primaryProvider,
       promptMessages,
-      botOverrides: settings.botOverrides,
+      botOverrides: primaryBotOverrides,
       secondaryOllamaHost: settings.secondaryOllamaHost,
       lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
     });
@@ -2845,7 +3150,7 @@ export async function processChatMessage(
       parsedAssistant.displayContent,
       askQuestionForTurn
     );
-    const assistantDisplay = isStarterPrompt
+    let assistantDisplay = isStarterPrompt
       ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
       : assistantDisplayRaw;
     const turnEvaluation = isStarterPrompt
@@ -2859,27 +3164,67 @@ export async function processChatMessage(
       toneDelta: turnEvaluation?.delta,
       repairSignal,
     });
-    const sendImgPromptInc = parsedAssistant.sendGeneratedImage?.prompt?.trim();
-    const sentGeneratedImageInc =
-      sendImgPromptInc === undefined || sendImgPromptInc.length === 0
-        ? undefined
-        : await runAssistantSentImageGeneration({
-            db,
-            userId,
-            mode,
-            conversationId: null,
-            botIdTriState: activeBotId,
-            captionPrompt: sendImgPromptInc,
-            preferredProvider: effectiveProvider,
-            openAiApiKey: settings.openAiApiKey,
-            prefs: assistantImagePrefsForTurn(settings),
-          });
+    const sendImgPromptIncRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
+    let sendImgPromptInc =
+      sendImgPromptIncRaw && sendImgPromptIncRaw.length > 0 ? sendImgPromptIncRaw : undefined;
+    let pendingImageJobIncognito: ProcessChatMessageResult["pendingImageJob"] | undefined;
+    let incognitoImageSlot: "acquired" | "busy" | "none" = sendImgPromptInc ? "busy" : "none";
+    let incognitoImageJobId: string | undefined;
+    if (sendImgPromptInc) {
+      const acq = await tryAcquireImageSlot({
+        userId,
+        conversationId: conversationId ?? null,
+        botId: activeBotId ?? null,
+        mode,
+        incognito: true,
+        captionPrompt: sendImgPromptInc,
+        userMessage: message,
+        source: "chat_tool",
+      });
+      if (!acq.ok) {
+        sendImgPromptInc = undefined;
+        assistantDisplay =
+          assistantDisplay.trim().length > 0
+            ? `${assistantDisplay.trimEnd()}\n\n${ASSISTANT_IMAGE_SLOT_BUSY_NOTE}`
+            : ASSISTANT_IMAGE_SLOT_BUSY_NOTE;
+        incognitoImageSlot = "busy";
+      } else {
+        startChatImageBackgroundJob({
+          db,
+          job: acq.job,
+          preferredProvider: effectiveProvider,
+          openAiApiKey: settings.openAiApiKey,
+          prefs: assistantImagePrefsForTurn(settings),
+          prismDefaultLlmModel: settings.prismDefaultLlmModel,
+          chatModelUsed: modelUsed,
+          chatProviderName: providerNameUsed,
+          botName: settings.starterPromptLabel,
+          botSystemPrompt: settings.botSystemPrompt,
+        });
+        sendImgPromptInc = undefined;
+        pendingImageJobIncognito = {
+          jobId: acq.job.id,
+          conversationId: conversationId ?? null,
+        };
+        incognitoImageSlot = "acquired";
+        incognitoImageJobId = acq.job.id;
+      }
+    }
+    const incognitoToolCallEvents = buildAssistantToolCallEvents({
+      rawReply: assistantReplyRaw,
+      ...(parsedAssistant.sendGeneratedImage
+        ? { parsedSendGeneratedImage: parsedAssistant.sendGeneratedImage }
+        : {}),
+      ...(askQuestionForTurn ? { parsedAskQuestion: askQuestionForTurn } : {}),
+      imageSlot: incognitoImageSlot,
+      ...(incognitoImageJobId ? { imageJobId: incognitoImageJobId } : {}),
+    });
     const assistantCreatedAt = new Date().toISOString();
     const activeBotName =
       typeof activeBotId === "string"
         ? settings.starterPromptLabel?.trim() ?? ""
         : "";
-    const assistantMessage: ChatMessage = {
+    const assistantMessageProse: ChatMessage = {
       id: randomId(12),
       role: "assistant",
       content: assistantDisplay,
@@ -2890,8 +3235,8 @@ export async function processChatMessage(
       moodConfidence: assistantMood.confidence,
       ...(activeBotName ? { botName: activeBotName } : {}),
       ...(askQuestionForTurn ? { askQuestion: askQuestionForTurn } : {}),
-      ...(sentGeneratedImageInc ? { sentGeneratedImage: sentGeneratedImageInc } : {}),
     };
+    const assistantTail: ChatMessage[] = [assistantMessageProse];
     const nextMessages: ChatMessage[] = [
       ...history,
       ...(
@@ -2904,7 +3249,7 @@ export async function processChatMessage(
               createdAt: now,
             }]
       ),
-      assistantMessage,
+      ...assistantTail,
     ];
     const conversationIncognito: Conversation = {
       id: conversationId ?? randomId(12),
@@ -2957,6 +3302,10 @@ export async function processChatMessage(
       conversation: conversationIncognito,
       ...(fallbackInvocation ? { fallbackInvocation } : {}),
       opinion: incognitoOpinion,
+      ...(pendingImageJobIncognito ? { pendingImageJob: pendingImageJobIncognito } : {}),
+      ...(incognitoToolCallEvents.length > 0
+        ? { toolCalls: incognitoToolCallEvents }
+        : {}),
       ...(conversationStartersIncognito
         ? { conversationStarters: conversationStartersIncognito }
         : {}),
@@ -3123,6 +3472,7 @@ export async function processChatMessage(
     chatHistory: history,
     userMessage: promptUserMessage,
     askQuestionMode: memoryClarification ? "explicit" : askQuestionMode,
+    imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
   });
 
   let userMessageId: string | null = null;
@@ -3133,15 +3483,25 @@ export async function processChatMessage(
     ).run(userMessageId, activeConversationId, userId, message, now);
   }
 
+  const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
+    resolvePrimaryChatProviderForPossibleImageToolTurn({
+      isStarterPrompt,
+      rawUserMessage: message,
+      baseProvider: provider,
+      botOverrides: settings.botOverrides,
+      secondaryOllamaHost: settings.secondaryOllamaHost,
+      prismImageToolLlmModel: settings.prismImageToolLlmModel,
+    });
+
   const {
     assistantReplyRaw,
     providerNameUsed,
     modelUsed,
     fallbackInvocation,
   } = await generateWithLenientLocalFallback({
-    provider,
+    provider: primaryProvider,
     promptMessages,
-    botOverrides: settings.botOverrides,
+    botOverrides: primaryBotOverrides,
     secondaryOllamaHost: settings.secondaryOllamaHost,
     lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
   });
@@ -3169,7 +3529,7 @@ export async function processChatMessage(
     parsedAssistant.displayContent,
     askQuestionForTurn
   );
-  const assistantDisplay = isStarterPrompt
+  let assistantDisplay = isStarterPrompt
     ? enforceStarterOpeningQuestion(
         assistantDisplayRaw,
         memoryLines,
@@ -3189,42 +3549,116 @@ export async function processChatMessage(
     botOpinion: existingBotOpinion,
     repairSignal,
   });
-  const sendImgPromptPersisted = parsedAssistant.sendGeneratedImage?.prompt?.trim();
-  const sentGeneratedImagePersisted =
-    sendImgPromptPersisted === undefined || sendImgPromptPersisted.length === 0
-      ? undefined
-      : await runAssistantSentImageGeneration({
-          db,
-          userId,
-          mode,
-          conversationId: activeConversationId,
-          botIdTriState: activeBotId,
-          captionPrompt: sendImgPromptPersisted,
-          preferredProvider: effectiveProvider,
-          openAiApiKey: settings.openAiApiKey,
-          prefs: assistantImagePrefsForTurn(settings),
-        });
-  const toolPayloadStored = serializeAssistantToolPayload({
+  let sendImgPromptPersisted = parsedAssistant.sendGeneratedImage?.prompt?.trim();
+  let pendingImageJob: ProcessChatMessageResult["pendingImageJob"] | undefined;
+  let sentGeneratedImagePersisted: SentGeneratedImagePayload | undefined;
+  let persistedImageSlot: "acquired" | "busy" | "none" =
+    sendImgPromptPersisted && sendImgPromptPersisted.length > 0 ? "busy" : "none";
+  let persistedImageJobId: string | undefined;
+  if (sendImgPromptPersisted && sendImgPromptPersisted.length > 0) {
+    const acq = await tryAcquireImageSlot({
+      userId,
+      conversationId: activeConversationId,
+      botId: activeBotId ?? null,
+      mode,
+      incognito: false,
+      captionPrompt: sendImgPromptPersisted,
+      userMessage: message,
+      source: "chat_tool",
+    });
+    if (!acq.ok) {
+      sendImgPromptPersisted = undefined;
+      assistantDisplay =
+        assistantDisplay.trim().length > 0
+          ? `${assistantDisplay.trimEnd()}\n\n${ASSISTANT_IMAGE_SLOT_BUSY_NOTE}`
+          : ASSISTANT_IMAGE_SLOT_BUSY_NOTE;
+      sentGeneratedImagePersisted = undefined;
+      persistedImageSlot = "busy";
+    } else {
+      startChatImageBackgroundJob({
+        db,
+        job: acq.job,
+        preferredProvider: effectiveProvider,
+        openAiApiKey: settings.openAiApiKey,
+        prefs: assistantImagePrefsForTurn(settings),
+        prismDefaultLlmModel: settings.prismDefaultLlmModel,
+        chatModelUsed: modelUsed,
+        chatProviderName: providerNameUsed,
+        botName: settings.starterPromptLabel,
+        botSystemPrompt: settings.botSystemPrompt,
+      });
+      sendImgPromptPersisted = undefined;
+      pendingImageJob = {
+        jobId: acq.job.id,
+        conversationId: activeConversationId,
+      };
+      sentGeneratedImagePersisted = undefined;
+      persistedImageSlot = "acquired";
+      persistedImageJobId = acq.job.id;
+    }
+  }
+  const persistedToolCallEvents = buildAssistantToolCallEvents({
+    rawReply: assistantReplyRaw,
+    ...(parsedAssistant.sendGeneratedImage
+      ? { parsedSendGeneratedImage: parsedAssistant.sendGeneratedImage }
+      : {}),
+    ...(askQuestionForTurn ? { parsedAskQuestion: askQuestionForTurn } : {}),
+    imageSlot: persistedImageSlot,
+    ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
+  });
+  const toolPayloadProseOnly = serializeAssistantToolPayload({
     askQuestion: askQuestionForTurn,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
-    sentGeneratedImage: sentGeneratedImagePersisted,
   });
+  const toolPayloadImageOnly = sentGeneratedImagePersisted
+    ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
+    : null;
+
   const assistantCreatedAt = new Date().toISOString();
-  const assistantMessageId = randomId(12);
+  const imageFollowUpCreatedAt = sentGeneratedImagePersisted
+    ? new Date(Date.now() + 2).toISOString()
+    : assistantCreatedAt;
+  const assistantProseMessageId = randomId(12);
+  const assistantImageMessageId = randomId(12);
+
+  const assistantCountBefore = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'"
+      )
+      .get(activeConversationId, userId) as { n: number }
+  ).n;
+
   db.prepare(
     "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)"
   ).run(
-    assistantMessageId,
+    assistantProseMessageId,
     activeConversationId,
     userId,
     assistantDisplay,
     providerNameUsed,
     modelUsed,
     activeBotId ?? null,
-    toolPayloadStored,
+    toolPayloadProseOnly,
     assistantCreatedAt
   );
+
+  if (sentGeneratedImagePersisted && toolPayloadImageOnly) {
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)"
+    ).run(
+      assistantImageMessageId,
+      activeConversationId,
+      userId,
+      "",
+      providerNameUsed,
+      sentGeneratedImagePersisted.imageModel?.trim() || modelUsed,
+      activeBotId ?? null,
+      toolPayloadImageOnly,
+      imageFollowUpCreatedAt
+    );
+  }
 
   // Persist a mid-thread bot switch here (not at request-parse time) so
   // the change only "takes" if the new bot successfully produced a
@@ -3297,7 +3731,7 @@ export async function processChatMessage(
       )
       .get(activeConversationId, userId) as { n: number }
   ).n;
-  if (assistantMessageCount === 1) {
+  if (assistantCountBefore === 0 && assistantMessageCount >= 1) {
     const starterFallbackTitle = isStarterPrompt
       ? inferStarterConversationTitleFromOpening(assistantDisplay, settings.starterPromptLabel)
       : null;
@@ -3310,7 +3744,7 @@ export async function processChatMessage(
     const titleUserId = userId;
     const titleUserMessage = message;
     const titleAssistantReply = assistantDisplay;
-    const titleAssistantMessageId = assistantMessageId;
+    const titleAssistantMessageId = assistantProseMessageId;
     const titlePersonaLabel = settings.starterPromptLabel;
     const titleOverrides = settings.botOverrides;
     queueMicrotask(() => {
@@ -3326,13 +3760,6 @@ export async function processChatMessage(
             ? (isGenericStarterTitle(title) ? starterFallbackTitle : (title ?? starterFallbackTitle))
             : title;
           if (!chosenTitle) return;
-          const currentAssistantCount = (
-            db
-              .prepare(
-                "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'"
-              )
-              .get(titleConversationId, titleUserId) as { n: number }
-          ).n;
           const sourceAssistant = db
             .prepare(
               "SELECT id FROM messages WHERE id = ? AND conversation_id = ? AND user_id = ? AND role = 'assistant'"
@@ -3340,7 +3767,7 @@ export async function processChatMessage(
             .get(titleAssistantMessageId, titleConversationId, titleUserId) as
             | { id: string }
             | undefined;
-          if (currentAssistantCount !== 1 || !sourceAssistant?.id) return;
+          if (!sourceAssistant?.id) return;
           db.prepare(
             "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?"
           ).run(chosenTitle, new Date().toISOString(), titleConversationId, titleUserId);
@@ -3648,6 +4075,10 @@ export async function processChatMessage(
     ...(memoryLearned ? { memoryLearned } : {}),
     ...(conversationStartersPersisted
       ? { conversationStarters: conversationStartersPersisted }
+      : {}),
+    ...(pendingImageJob ? { pendingImageJob } : {}),
+    ...(persistedToolCallEvents.length > 0
+      ? { toolCalls: persistedToolCallEvents }
       : {}),
   };
 }

@@ -1,16 +1,25 @@
 import {
   catalogEntriesMatchingLocalImageHeuristic,
+  findComfyUiWorkflowRegistration,
   parseComfyUiCheckpointName,
+  parseComfyUiRemoteWorkflowPath,
+  parseComfyUiWorkflowSlug,
 } from "@localai/shared";
-import { generateImageWithComfyUi, fetchComfyUiCheckpointNames } from "./comfyui-image.ts";
+import type { ComfyUiWorkflowRegistration } from "@localai/shared";
+import {
+  generateImageWithComfyUi,
+  generateImageWithComfyUiRegisteredWorkflow,
+  generateImageWithComfyUiRemoteUserdataWorkflow,
+  fetchComfyUiCheckpointNames,
+} from "./comfyui-image.ts";
 import { generateImageWithOllama } from "./ollama-image.ts";
 import { parseSecondaryOllamaModelId } from "./providers.ts";
 import { normalizeOllamaHostForStatusCheck } from "./settings.ts";
 
 /**
- * Runs local image generation (ComfyUI checkpoint or Ollama image model) for a
- * concrete model id. Shared by the primary `/api/images/generate` path and the
- * lenient local image fallback retry.
+ * Runs local image generation (ComfyUI checkpoint, user ComfyUI workflow, or
+ * Ollama image model) for a concrete model id. Shared by the primary
+ * `/api/images/generate` path and the lenient local image fallback retry.
  */
 export async function generateLocalImageBytesByModelId(args: {
   modelId: string;
@@ -18,12 +27,83 @@ export async function generateLocalImageBytesByModelId(args: {
   size: string;
   signal: AbortSignal;
   comfyUiHost: string | null | undefined;
+  /** User-saved bindings (`comfyui-workflow:`) and patch overrides for ComfyUI disk workflows (`comfyui-remote:`). */
+  comfyUiWorkflows?: readonly ComfyUiWorkflowRegistration[] | null;
   secondaryOllamaHost: string | null | undefined;
   primaryOllamaHost: string;
 }): Promise<{ imageBytes: Buffer; modelUsed: string; provider: "comfyui" | "ollama" }> {
   const bodyModel = args.modelId.trim();
   if (!bodyModel) {
     throw new Error("Local image model is required.");
+  }
+
+  const list = args.comfyUiWorkflows ?? [];
+
+  const remotePickPath = parseComfyUiRemoteWorkflowPath(bodyModel);
+  if (remotePickPath) {
+    const comfyHost = args.comfyUiHost?.trim();
+    if (!comfyHost) {
+      throw new Error("ComfyUI server URL is not configured. Add it in Settings.");
+    }
+    const comfyResult = await generateImageWithComfyUiRemoteUserdataWorkflow({
+      comfyUiHost: comfyHost,
+      remotePath: remotePickPath,
+      bindings: list,
+      prompt: args.promptForModel,
+      size: args.size,
+      signal: args.signal,
+    });
+    return {
+      imageBytes: comfyResult.imageBytes,
+      modelUsed: comfyResult.modelUsed,
+      provider: "comfyui",
+    };
+  }
+
+  const workflowSlug = parseComfyUiWorkflowSlug(bodyModel);
+  if (workflowSlug) {
+    const comfyHost = args.comfyUiHost?.trim();
+    if (!comfyHost) {
+      throw new Error("ComfyUI server URL is not configured. Add it in Settings.");
+    }
+    const registration = findComfyUiWorkflowRegistration(list, workflowSlug);
+    if (!registration) {
+      throw new Error(
+        "That ComfyUI workflow is not in your saved bindings. Add it under Settings → Extra servers, then Save."
+      );
+    }
+    if (registration.remotePath?.trim()) {
+      const comfyResult = await generateImageWithComfyUiRemoteUserdataWorkflow({
+        comfyUiHost: comfyHost,
+        remotePath: registration.remotePath.trim(),
+        bindings: list,
+        prompt: args.promptForModel,
+        size: args.size,
+        signal: args.signal,
+      });
+      return {
+        imageBytes: comfyResult.imageBytes,
+        modelUsed: comfyResult.modelUsed,
+        provider: "comfyui",
+      };
+    }
+    if (!registration.workflow) {
+      throw new Error(
+        "That workflow binding has no inline graph and no remotePath — edit it in Settings."
+      );
+    }
+    const comfyResult = await generateImageWithComfyUiRegisteredWorkflow({
+      comfyUiHost: comfyHost,
+      registration,
+      prompt: args.promptForModel,
+      size: args.size,
+      signal: args.signal,
+    });
+    return {
+      imageBytes: comfyResult.imageBytes,
+      modelUsed: comfyResult.modelUsed,
+      provider: "comfyui",
+    };
   }
 
   const comfyCheckpoint = parseComfyUiCheckpointName(bodyModel);

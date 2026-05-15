@@ -1,8 +1,20 @@
 /**
- * ComfyUI HTTP API — checkpoint discovery and vanilla txt2img via `/prompt`.
+ * ComfyUI HTTP API — checkpoint discovery and vanilla txt2img via `/prompt`,
+ * plus user-registered API-format workflows with explicit prompt/size patch maps.
  */
 import { randomUUID } from "node:crypto";
+import type { ComfyUiWorkflowPatchMap, ComfyUiWorkflowRegistration } from "@localai/shared";
+import {
+  encodeComfyUiRemoteWorkflowModelId,
+  encodeComfyUiWorkflowModelId,
+  findComfyUiWorkflowBindingByRemotePath,
+  isComfyUiApiWorkflowNode,
+} from "@localai/shared";
 import { HttpError } from "./utils.http.ts";
+import {
+  loadComfyUiDiskWorkflowAsApiGraph,
+  parseComfyUiDiskWorkflowJson,
+} from "./comfyui-ui-workflow-to-api.ts";
 import {
   looksLikeBackendModelWarmupMessage,
   MODEL_TIMEOUT_USER_MESSAGE,
@@ -200,6 +212,303 @@ export async function checkComfyUiHostStatus(
   }
 }
 
+const USERDATA_FETCH_TIMEOUT_MS = 15_000;
+const MAX_REMOTE_WORKFLOW_JSON_BYTES = 12_000_000;
+const MAX_LISTED_WORKFLOW_FILES = 400;
+
+export interface ComfyUiUserdataListEntry {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+}
+
+async function comfyUiTryFetch(
+  base: string,
+  pathAndQuery: string,
+  signal?: AbortSignal
+): Promise<Response | null> {
+  const b = base.replace(/\/$/, "");
+  const p = pathAndQuery.startsWith("/") ? pathAndQuery : `/${pathAndQuery}`;
+  const candidates = [`${b}${p}`];
+  if (!p.startsWith("/api/")) {
+    candidates.push(`${b}/api${p}`);
+  }
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        signal: signal ?? AbortSignal.timeout(USERDATA_FETCH_TIMEOUT_MS),
+      });
+      if (res.ok) return res;
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+/**
+ * Lists one userdata directory using ComfyUI v1 or v2 userdata routes (tries `/api/…` and root paths).
+ */
+export async function fetchComfyUiUserdataDirectory(
+  baseUrl: string,
+  dirPath: string,
+  signal?: AbortSignal
+): Promise<ComfyUiUserdataListEntry[]> {
+  const v2 = await comfyUiTryFetch(
+    baseUrl,
+    `/v2/userdata?${new URLSearchParams({ path: dirPath })}`,
+    signal
+  );
+  if (v2) {
+    try {
+      const data = (await v2.json()) as unknown;
+      if (!Array.isArray(data)) return [];
+      const out: ComfyUiUserdataListEntry[] = [];
+      for (const item of data) {
+        if (!item || typeof item !== "object") continue;
+        const o = item as Record<string, unknown>;
+        const name = typeof o.name === "string" ? o.name : "";
+        const path = typeof o.path === "string" ? o.path : "";
+        const type = o.type === "file" || o.type === "directory" ? o.type : null;
+        if (!name || !path || !type) continue;
+        out.push({ name, path, type });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  const v1 = await comfyUiTryFetch(
+    baseUrl,
+    `/userdata?${new URLSearchParams({
+      dir: dirPath,
+      recurse: "false",
+      full_info: "true",
+    })}`,
+    signal
+  );
+  if (!v1) return [];
+  try {
+    const data = (await v1.json()) as unknown;
+    if (!Array.isArray(data)) return [];
+    const out: ComfyUiUserdataListEntry[] = [];
+    for (const item of data) {
+      if (typeof item === "string" && item.trim()) {
+        const name = item.trim();
+        const joinPath = dirPath.replace(/\/$/, "");
+        out.push({
+          name,
+          path: joinPath.length > 0 ? `${joinPath}/${name}` : name,
+          type: name.endsWith("/") ? "directory" : "file",
+        });
+        continue;
+      }
+      if (!item || typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      const name = typeof o.name === "string" ? o.name : "";
+      const path = typeof o.path === "string" ? o.path : "";
+      const type = o.type === "file" || o.type === "directory" ? o.type : null;
+      if (name && path && type) out.push({ name, path, type });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Recursively collects `.json` userdata paths that look like saved workflows.
+ */
+export async function listComfyUiWorkflowJsonRelPaths(
+  baseUrl: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const roots = ["workflows", "default/workflows", ""];
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > 12 || out.length >= MAX_LISTED_WORKFLOW_FILES) return;
+    const entries = await fetchComfyUiUserdataDirectory(baseUrl, dir, signal);
+    for (const e of entries) {
+      if (e.type === "directory") {
+        await walk(e.path, depth + 1);
+      } else if (
+        e.type === "file" &&
+        /\.json$/i.test(e.name) &&
+        !/\.pending\.json$/i.test(e.name)
+      ) {
+        if (!seen.has(e.path)) {
+          seen.add(e.path);
+          out.push(e.path);
+        }
+      }
+    }
+  }
+
+  for (const r of roots) {
+    await walk(r, 0);
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
+export async function fetchComfyUiUserdataFileText(
+  baseUrl: string,
+  relativePath: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const enc = encodeURIComponent(relativePath);
+  const res = await comfyUiTryFetch(baseUrl, `/userdata/${enc}`, signal);
+  if (!res) {
+    throw new Error(
+      `Could not read workflow file from ComfyUI userdata ("${relativePath}"). Is this ComfyUI new enough to expose /userdata or /api/userdata?`
+    );
+  }
+  const text = await res.text();
+  if (new TextEncoder().encode(text).length > MAX_REMOTE_WORKFLOW_JSON_BYTES) {
+    throw new Error("That ComfyUI workflow file is too large for Prism to load safely.");
+  }
+  return text;
+}
+
+/**
+ * Parses a userdata workflow file that is **already** in API `/prompt` graph shape.
+ * Graph-editor (litegraph) saves are rejected here — use {@link loadComfyUiDiskWorkflowAsApiGraph} at runtime.
+ */
+export function parseComfyUiUserdataWorkflowFileToApiGraph(jsonText: string): Record<string, unknown> {
+  const parsed = parseComfyUiDiskWorkflowJson(jsonText);
+  if (parsed.kind === "ui") {
+    throw new Error(
+      "That file is ComfyUI graph-editor JSON, not an API graph. Prism converts graph saves automatically when you run them — this helper only accepts API-format JSON."
+    );
+  }
+  return parsed.graph;
+}
+
+/** Best-effort patch map for simple txt2img-style API graphs when no binding exists. */
+export function inferComfyUiWorkflowPatchMap(workflow: Record<string, unknown>): ComfyUiWorkflowPatchMap {
+  const clipEncodes: ComfyUiWorkflowPatchMap["positivePrompt"][] = [];
+  const latentIds: string[] = [];
+  let lastSaveImage: string | undefined;
+  for (const [nodeId, node] of Object.entries(workflow)) {
+    if (!isComfyUiApiWorkflowNode(node)) continue;
+    const classType = String((node as { class_type?: unknown }).class_type ?? "").trim();
+    if (classType === "CLIPTextEncode") {
+      const inputs = (node as { inputs?: Record<string, unknown> }).inputs;
+      if (inputs && "text" in inputs) {
+        clipEncodes.push({ nodeId, inputKey: "text" });
+      }
+    }
+    if (classType === "EmptyLatentImage") {
+      latentIds.push(nodeId);
+    }
+    if (classType === "SaveImage") {
+      lastSaveImage = nodeId;
+    }
+  }
+  if (clipEncodes.length < 1) {
+    throw new Error(
+      "Prism could not infer where to put the text prompt (no CLIPTextEncode with a `text` input). Try a simpler txt2img-style graph, or export the workflow in API format from ComfyUI and adjust node ids."
+    );
+  }
+  const positivePrompt = clipEncodes[0]!;
+  const negativePrompt = clipEncodes.length >= 2 ? clipEncodes[1] : undefined;
+  const latent0 = latentIds[0];
+  const width =
+    latent0 !== undefined ? { nodeId: latent0, inputKey: "width" } : undefined;
+  const height =
+    latent0 !== undefined ? { nodeId: latent0, inputKey: "height" } : undefined;
+  return {
+    positivePrompt,
+    negativePrompt,
+    width,
+    height,
+    outputNodeId: lastSaveImage,
+  };
+}
+
+function assertPatchAgainstWorkflow(
+  workflow: Record<string, unknown>,
+  patch: ComfyUiWorkflowPatchMap
+): void {
+  const check = (ref: ComfyUiWorkflowPatchMap["positivePrompt"], label: string) => {
+    const node = workflow[ref.nodeId];
+    if (!isComfyUiApiWorkflowNode(node)) {
+      throw new Error(`Patch ${label} points to missing node "${ref.nodeId}".`);
+    }
+    const inputs = (node as { inputs: Record<string, unknown> }).inputs;
+    if (!(ref.inputKey in inputs)) {
+      throw new Error(`Patch ${label}: node "${ref.nodeId}" has no input "${ref.inputKey}".`);
+    }
+  };
+  check(patch.positivePrompt, "positivePrompt");
+  if (patch.negativePrompt) check(patch.negativePrompt, "negativePrompt");
+  if (patch.width) check(patch.width, "width");
+  if (patch.height) check(patch.height, "height");
+}
+
+/**
+ * Loads a workflow JSON from ComfyUI userdata and prepares a runnable registration
+ * (saved patch binding wins; otherwise Prism infers CLIP / latent / SaveImage wiring).
+ */
+export async function resolveComfyUiRemoteWorkflowForGeneration(options: {
+  comfyUiHost: string;
+  remotePath: string;
+  bindings: readonly ComfyUiWorkflowRegistration[];
+  signal?: AbortSignal;
+}): Promise<{ registration: ComfyUiWorkflowRegistration; modelUsedTag: string }> {
+  const text = await fetchComfyUiUserdataFileText(options.comfyUiHost, options.remotePath, options.signal);
+  const workflow = await loadComfyUiDiskWorkflowAsApiGraph({
+    baseUrl: options.comfyUiHost,
+    jsonText: text,
+    signal: options.signal,
+  });
+  const binding = findComfyUiWorkflowBindingByRemotePath(options.bindings, options.remotePath);
+  const patch =
+    binding !== undefined ? binding.patch : inferComfyUiWorkflowPatchMap(workflow);
+  assertPatchAgainstWorkflow(workflow, patch);
+  const modelUsedTag = encodeComfyUiRemoteWorkflowModelId(options.remotePath);
+  const baseName =
+    options.remotePath.split("/").pop()?.replace(/\.json$/i, "") ?? "workflow";
+  return {
+    registration: {
+      id: binding?.id ?? baseName,
+      label: binding?.label ?? baseName,
+      workflow,
+      patch,
+    },
+    modelUsedTag,
+  };
+}
+
+export async function generateImageWithComfyUiRemoteUserdataWorkflow(options: {
+  comfyUiHost: string;
+  remotePath: string;
+  bindings: readonly ComfyUiWorkflowRegistration[];
+  prompt: string;
+  negativePrompt?: string;
+  size: string;
+  signal?: AbortSignal;
+}): Promise<{ imageBytes: Buffer; modelUsed: string }> {
+  const resolved = await resolveComfyUiRemoteWorkflowForGeneration({
+    comfyUiHost: options.comfyUiHost,
+    remotePath: options.remotePath,
+    bindings: options.bindings,
+    signal: options.signal,
+  });
+  return generateImageWithComfyUiRegisteredWorkflow({
+    comfyUiHost: options.comfyUiHost,
+    registration: resolved.registration,
+    prompt: options.prompt,
+    negativePrompt: options.negativePrompt,
+    size: options.size,
+    signal: options.signal,
+    modelUsedTag: resolved.modelUsedTag,
+  });
+}
+
 /**
  * Builds a minimal API-format txt2img workflow (CheckpointLoaderSimple → KSampler → SaveImage).
  */
@@ -277,28 +586,84 @@ export function buildTxt2ImgWorkflow(options: {
   };
 }
 
-interface ComfyHistoryEntry {
-  outputs?: Record<
-    string,
-    {
-      images?: Array<{ filename?: string; subfolder?: string; type?: string }>;
-    }
-  >;
+type ComfyHistoryImageRef = {
+  filename?: string;
+  subfolder?: string;
+  type?: string;
+};
+
+/**
+ * Normalizes `images` from a Comfy `/history` output slot: arrays, or a single `{ filename }` object.
+ */
+function normalizeComfyHistoryImageList(images: unknown): ComfyHistoryImageRef[] | null {
+  if (images === undefined || images === null) return null;
+  if (Array.isArray(images)) return images as ComfyHistoryImageRef[];
+  if (typeof images === "object") {
+    const o = images as Record<string, unknown>;
+    if (typeof o.filename === "string") return [o as ComfyHistoryImageRef];
+  }
+  return null;
 }
 
-function firstOutputImageFromHistory(historyPayload: Record<string, unknown>): {
-  filename: string;
-  subfolder: string;
-  type: string;
-} | null {
+/**
+ * Stock ComfyUI stores `outputs[nodeId]` as `{ images: [...] }`. Some builds, cached UI, or
+ * custom nodes nest the same list under `ui` / `output` — unwrap those so polling can fetch the file.
+ */
+function extractImageListFromHistoryOutputSlot(nodeOutput: unknown): ComfyHistoryImageRef[] | null {
+  if (!nodeOutput || typeof nodeOutput !== "object") return null;
+  const o = nodeOutput as Record<string, unknown>;
+  const tryBucket = (images: unknown): ComfyHistoryImageRef[] | null => {
+    const list = normalizeComfyHistoryImageList(images);
+    return list && list.length > 0 ? list : null;
+  };
+  const direct = tryBucket(o.images);
+  if (direct) return direct;
+  const ui = o.ui;
+  if (ui && typeof ui === "object") {
+    const nested = tryBucket((ui as Record<string, unknown>).images);
+    if (nested) return nested;
+  }
+  const output = o.output;
+  if (output && typeof output === "object") {
+    const nested = tryBucket((output as Record<string, unknown>).images);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function resolveComfyHistoryOutputsMap(
+  historyPayload: Record<string, unknown>,
+  promptId: string
+): Record<string, unknown> | null {
+  const pid = promptId.trim();
+  if (pid.length > 0) {
+    const byId = historyPayload[pid];
+    if (byId && typeof byId === "object") {
+      const out = (byId as Record<string, unknown>).outputs;
+      if (out && typeof out === "object") return out as Record<string, unknown>;
+    }
+  }
   const keys = Object.keys(historyPayload);
-  if (keys.length === 0) return null;
-  const entry = historyPayload[keys[0]] as ComfyHistoryEntry;
-  const outputs = entry?.outputs;
-  if (!outputs || typeof outputs !== "object") return null;
-  for (const nodeId of Object.keys(outputs)) {
-    const images = outputs[nodeId]?.images;
-    if (!Array.isArray(images)) continue;
+  if (keys.length === 1) {
+    const only = historyPayload[keys[0]!];
+    if (only && typeof only === "object") {
+      const out = (only as Record<string, unknown>).outputs;
+      if (out && typeof out === "object") return out as Record<string, unknown>;
+    }
+  }
+  // Bare history entry (`{ outputs, status, … }`) — some proxies or forks omit the outer prompt id.
+  const top = historyPayload.outputs;
+  if (top && typeof top === "object") return top as Record<string, unknown>;
+  return null;
+}
+
+function firstImageRefFromOutputsMap(
+  outputs: Record<string, unknown>,
+  nodeIdOrder: string[]
+): { filename: string; subfolder: string; type: string } | null {
+  for (const nodeId of nodeIdOrder) {
+    const images = extractImageListFromHistoryOutputSlot(outputs[nodeId]);
+    if (!images) continue;
     for (const img of images) {
       const filename = typeof img.filename === "string" ? img.filename.trim() : "";
       if (!filename) continue;
@@ -308,6 +673,26 @@ function firstOutputImageFromHistory(historyPayload: Record<string, unknown>): {
     }
   }
   return null;
+}
+
+/**
+ * Finds the first image file reference in a `/history/{promptId}` (or equivalent) JSON payload.
+ * Exported for unit tests and for diagnosing Comfy response-shape mismatches in the field.
+ */
+export function extractFirstOutputImageFromComfyHistoryJson(
+  historyPayload: Record<string, unknown>,
+  promptId: string,
+  preferredOutputNodeId?: string | null
+): { filename: string; subfolder: string; type: string } | null {
+  const outputs = resolveComfyHistoryOutputsMap(historyPayload, promptId);
+  if (!outputs) return null;
+  const outKeys = Object.keys(outputs);
+  const pref = preferredOutputNodeId?.trim() ?? "";
+  const order =
+    pref.length > 0 && outKeys.includes(pref)
+      ? [pref, ...outKeys.filter((k) => k !== pref)]
+      : outKeys;
+  return firstImageRefFromOutputsMap(outputs, order);
 }
 
 async function fetchHistorySnapshot(
@@ -329,14 +714,19 @@ async function fetchHistorySnapshot(
 async function waitForOutputImage(
   base: string,
   promptId: string,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  preferredOutputNodeId?: string | null
 ): Promise<{ filename: string; subfolder: string; type: string }> {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (signal?.aborted) throw abortError();
     const snapshot = await fetchHistorySnapshot(base, promptId, signal);
     if (snapshot) {
-      const img = firstOutputImageFromHistory(snapshot);
+      const img = extractFirstOutputImageFromComfyHistoryJson(
+        snapshot,
+        promptId,
+        preferredOutputNodeId
+      );
       if (img) return img;
     }
     await abortableSleep(POLL_INTERVAL_MS, signal);
@@ -367,6 +757,178 @@ async function fetchImageView(
   return buf;
 }
 
+export function cloneComfyUiApiWorkflow(workflow: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(workflow)) as Record<string, unknown>;
+}
+
+/**
+ * Writes prompt / optional negative / dimensions into a cloned API workflow using
+ * the user's patch map (node id + input key per field).
+ */
+export function applyComfyUiWorkflowRuntimePatches(options: {
+  workflow: Record<string, unknown>;
+  patch: ComfyUiWorkflowPatchMap;
+  positive: string;
+  negative: string;
+  width: number;
+  height: number;
+}): void {
+  const setInput = (nodeId: string, inputKey: string, value: unknown) => {
+    const node = options.workflow[nodeId];
+    if (!node || typeof node !== "object") {
+      throw new Error(`ComfyUI workflow has no node "${nodeId}".`);
+    }
+    const inputs = (node as Record<string, unknown>).inputs;
+    if (!inputs || typeof inputs !== "object") {
+      throw new Error(`ComfyUI workflow node "${nodeId}" has no inputs object.`);
+    }
+    (inputs as Record<string, unknown>)[inputKey] = value;
+  };
+  const p = options.patch;
+  setInput(p.positivePrompt.nodeId, p.positivePrompt.inputKey, options.positive);
+  if (p.negativePrompt) {
+    setInput(p.negativePrompt.nodeId, p.negativePrompt.inputKey, options.negative);
+  }
+  if (p.width) {
+    setInput(p.width.nodeId, p.width.inputKey, options.width);
+  }
+  if (p.height) {
+    setInput(p.height.nodeId, p.height.inputKey, options.height);
+  }
+}
+
+function formatComfyPromptFailureMessage(
+  status: number,
+  payload: {
+    error?: { message?: string; details?: string; type?: string };
+    node_errors?: Record<string, unknown>;
+  },
+  rawText: string
+): string {
+  const err = payload.error;
+  const parts: string[] = [];
+  const msg = typeof err?.message === "string" ? err.message.trim() : "";
+  const details = typeof err?.details === "string" ? err.details.trim() : "";
+  if (msg) parts.push(msg);
+  if (details) parts.push(details);
+  const ne = payload.node_errors;
+  if (ne && typeof ne === "object" && Object.keys(ne).length > 0) {
+    parts.push(JSON.stringify(ne).slice(0, 1800));
+  }
+  if (parts.length === 0 && rawText.trim()) {
+    parts.push(rawText.trim().slice(0, 800));
+  }
+  return `ComfyUI prompt failed (${status}): ${parts.join(" — ")}`;
+}
+
+async function postComfyUiPromptAndReadImage(options: {
+  base: string;
+  workflow: Record<string, unknown>;
+  signal?: AbortSignal;
+  preferredOutputNodeId?: string | null;
+  modelUsedTag: string;
+}): Promise<{ imageBytes: Buffer; modelUsed: string }> {
+  const clientId = randomUUID();
+  const promptResponse = await fetch(`${options.base}/prompt`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      prompt: options.workflow,
+      client_id: clientId,
+    }),
+    signal: options.signal,
+  });
+
+  const promptText = await promptResponse.text();
+  let promptPayload: {
+    prompt_id?: string;
+    error?: { message?: string; details?: string; type?: string };
+    node_errors?: Record<string, unknown>;
+  };
+  try {
+    promptPayload = JSON.parse(promptText) as typeof promptPayload;
+  } catch {
+    throw new Error(
+      `ComfyUI returned invalid JSON (${promptResponse.status}): ${promptText.trim().slice(0, 400)}`
+    );
+  }
+
+  if (!promptResponse.ok) {
+    const detail = formatComfyPromptFailureMessage(promptResponse.status, promptPayload, promptText);
+    if (looksLikeBackendModelWarmupMessage(detail)) {
+      throw new HttpError(503, MODEL_WARMUP_USER_MESSAGE);
+    }
+    throw new Error(detail);
+  }
+
+  if (promptPayload.node_errors && Object.keys(promptPayload.node_errors).length > 0) {
+    const serialized = JSON.stringify(promptPayload.node_errors).slice(0, 600);
+    if (looksLikeBackendModelWarmupMessage(serialized)) {
+      throw new HttpError(503, MODEL_WARMUP_USER_MESSAGE);
+    }
+    throw new Error(`ComfyUI reported node errors: ${serialized}`);
+  }
+
+  const promptId = promptPayload.prompt_id?.trim();
+  if (!promptId) {
+    throw new Error("ComfyUI did not return a prompt_id.");
+  }
+
+  const outputRef = await waitForOutputImage(
+    options.base,
+    promptId,
+    options.signal,
+    options.preferredOutputNodeId
+  );
+  const imageBytes = await fetchImageView(options.base, outputRef, options.signal);
+
+  if (imageBytes.length === 0) {
+    throw new Error("ComfyUI returned an empty image.");
+  }
+
+  return {
+    imageBytes,
+    modelUsed: options.modelUsedTag,
+  };
+}
+
+export async function generateImageWithComfyUiRegisteredWorkflow(options: {
+  comfyUiHost: string;
+  registration: ComfyUiWorkflowRegistration;
+  prompt: string;
+  negativePrompt?: string;
+  size: string;
+  signal?: AbortSignal;
+  /** When set (e.g. `comfyui-remote:…`), overrides the default `comfyui-workflow:<registration.id>` tag. */
+  modelUsedTag?: string;
+}): Promise<{ imageBytes: Buffer; modelUsed: string }> {
+  const base = options.comfyUiHost.replace(/\/$/, "");
+  const { width, height } = parseComfyUiDimensions(options.size);
+  const wf = options.registration.workflow;
+  if (!wf || typeof wf !== "object") {
+    throw new Error("Internal error: workflow graph missing on registration.");
+  }
+  const workflow = cloneComfyUiApiWorkflow(wf as Record<string, unknown>);
+  applyComfyUiWorkflowRuntimePatches({
+    workflow,
+    patch: options.registration.patch,
+    positive: options.prompt,
+    negative: options.negativePrompt?.trim() ?? "",
+    width,
+    height,
+  });
+  const pref = options.registration.patch.outputNodeId?.trim();
+  const modelUsedTag =
+    options.modelUsedTag?.trim() ?? encodeComfyUiWorkflowModelId(options.registration.id);
+  return postComfyUiPromptAndReadImage({
+    base,
+    workflow,
+    signal: options.signal,
+    preferredOutputNodeId: pref && pref.length > 0 ? pref : null,
+    modelUsedTag,
+  });
+}
+
 export async function generateImageWithComfyUi(options: {
   comfyUiHost: string;
   checkpointName: string;
@@ -389,65 +951,11 @@ export async function generateImageWithComfyUi(options: {
     kind,
   });
 
-  const clientId = randomUUID();
-  const promptResponse = await fetch(`${base}/prompt`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      prompt: workflow,
-      client_id: clientId,
-    }),
+  return postComfyUiPromptAndReadImage({
+    base,
+    workflow,
     signal: options.signal,
+    preferredOutputNodeId: null,
+    modelUsedTag: `comfyui:${options.checkpointName.trim()}`,
   });
-
-  const promptText = await promptResponse.text();
-  let promptPayload: {
-    prompt_id?: string;
-    error?: { message?: string };
-    node_errors?: Record<string, unknown>;
-  };
-  try {
-    promptPayload = JSON.parse(promptText) as typeof promptPayload;
-  } catch {
-    throw new Error(
-      `ComfyUI returned invalid JSON (${promptResponse.status}): ${promptText.trim().slice(0, 400)}`
-    );
-  }
-
-  if (!promptResponse.ok) {
-    const fromNodes = promptPayload.node_errors
-      ? JSON.stringify(promptPayload.node_errors).slice(0, 500)
-      : "";
-    const detail =
-      promptPayload.error?.message ?? (fromNodes || promptText.trim().slice(0, 400));
-    if (looksLikeBackendModelWarmupMessage(detail)) {
-      throw new HttpError(503, MODEL_WARMUP_USER_MESSAGE);
-    }
-    throw new Error(`ComfyUI prompt failed (${promptResponse.status}): ${detail}`);
-  }
-
-  if (promptPayload.node_errors && Object.keys(promptPayload.node_errors).length > 0) {
-    const serialized = JSON.stringify(promptPayload.node_errors).slice(0, 600);
-    if (looksLikeBackendModelWarmupMessage(serialized)) {
-      throw new HttpError(503, MODEL_WARMUP_USER_MESSAGE);
-    }
-    throw new Error(`ComfyUI reported node errors: ${serialized}`);
-  }
-
-  const promptId = promptPayload.prompt_id?.trim();
-  if (!promptId) {
-    throw new Error("ComfyUI did not return a prompt_id.");
-  }
-
-  const outputRef = await waitForOutputImage(base, promptId, options.signal);
-  const imageBytes = await fetchImageView(base, outputRef, options.signal);
-
-  if (imageBytes.length === 0) {
-    throw new Error("ComfyUI returned an empty image.");
-  }
-
-  return {
-    imageBytes,
-    modelUsed: `comfyui:${options.checkpointName.trim()}`,
-  };
 }

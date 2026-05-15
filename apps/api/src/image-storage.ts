@@ -28,6 +28,17 @@ export function buildGeneratedImageRelativePath(userId: string, imageId: string)
 }
 
 /**
+ * Sidecar WebP thumbnail for a stored PNG (`*.png` → `*.thumb.webp`).
+ */
+export function thumbWebpRelativePathFromPngRelativePath(localRelPath: string): string {
+  const t = localRelPath.trim();
+  if (!t.endsWith(".png")) {
+    throw new Error("Expected generated image path to end with .png.");
+  }
+  return `${t.slice(0, -".png".length)}.thumb.webp`;
+}
+
+/**
  * Resolves a DB-relative path to an absolute path under the data root.
  * Rejects values that escape the root (path traversal).
  */
@@ -56,16 +67,26 @@ export function readGeneratedImageBytes(localRelPath: string): Buffer {
   return readFileSync(absolute);
 }
 
-/** Best-effort delete of one stored file; ignores missing files. */
+/** Best-effort delete of stored PNG and its `.thumb.webp` sidecar; ignores missing files. */
 export function tryUnlinkGeneratedImageFile(localRelPath: string | null | undefined): void {
   if (!localRelPath?.trim()) return;
+  const rel = localRelPath.trim();
   try {
-    const absolute = resolveAbsoluteUnderDataRoot(localRelPath.trim());
+    const absolute = resolveAbsoluteUnderDataRoot(rel);
     if (existsSync(absolute)) {
       unlinkSync(absolute);
     }
   } catch {
     // Caller logs persistence cleanup failures.
+  }
+  try {
+    const thumbRel = thumbWebpRelativePathFromPngRelativePath(rel);
+    const thumbAbs = resolveAbsoluteUnderDataRoot(thumbRel);
+    if (existsSync(thumbAbs)) {
+      unlinkSync(thumbAbs);
+    }
+  } catch {
+    // ignore
   }
 }
 

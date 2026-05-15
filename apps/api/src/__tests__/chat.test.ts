@@ -2,16 +2,18 @@ import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  buildAssistantToolCallEvents,
   extractPrismBotMentionIdsFromMessage,
   parseTitleResponse,
   processChatMessage,
   refreshConversationTitle,
+  resolvePrimaryChatProviderForPossibleImageToolTurn,
   sanitizeConversationTitle,
+  userMessageSuggestsInChatImageRequest,
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates } from "../memory.ts";
-import { fallbackEmbedding } from "../providers.ts";
-
+import { fallbackEmbedding, LocalOllamaProvider, type LlmProvider } from "../providers.ts";
 const originalFetch = globalThis.fetch;
 
 /** 32 bytes for AES-256-GCM used by memory encryption in tests. */
@@ -1541,7 +1543,7 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.deepEqual(lastAssistant?.askQuestion, askPayload);
 
     const row = db.prepare(
-      "SELECT content, tool_payload FROM messages WHERE role = ?"
+      "SELECT content, tool_payload FROM messages WHERE role = ? ORDER BY created_at ASC LIMIT 1"
     ).get("assistant") as { content: string; tool_payload: string };
 
     assert.equal(row.content, "Turn here softly.");
@@ -2639,5 +2641,204 @@ describe("extractPrismBotMentionIdsFromMessage", () => {
     const text =
       "Hey [SpongeBob](prism-bot://sb) and [Pat](prism-bot://pat%201) — also [SpongeBob](prism-bot://sb) again";
     assert.deepEqual(extractPrismBotMentionIdsFromMessage(text), ["sb", "pat 1"]);
+  });
+});
+
+function stubOpenAiProvider(): LlmProvider {
+  return {
+    name: "openai",
+    async generateResponse() {
+      return "";
+    },
+    async embedText() {
+      return [];
+    },
+  };
+}
+
+describe("userMessageSuggestsInChatImageRequest", () => {
+  it("returns true for common image phrasing", () => {
+    assert.equal(userMessageSuggestsInChatImageRequest("draw a red balloon"), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("Please sketch a hillside."), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("generate an image of a sunset"), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("show me a picture of a cat"), true);
+  });
+
+  it("returns false for non-image text", () => {
+    assert.equal(userMessageSuggestsInChatImageRequest("What is the capital of France?"), false);
+    assert.equal(userMessageSuggestsInChatImageRequest(""), false);
+  });
+
+  it("returns false when user negates image intent", () => {
+    assert.equal(userMessageSuggestsInChatImageRequest("don't draw anything"), false);
+    assert.equal(userMessageSuggestsInChatImageRequest("text only please"), false);
+  });
+});
+
+describe("resolvePrimaryChatProviderForPossibleImageToolTurn", () => {
+  it("switches to LocalOllama with forced model when intent matches and setting is set", () => {
+    const base = stubOpenAiProvider();
+    const out = resolvePrimaryChatProviderForPossibleImageToolTurn({
+      isStarterPrompt: false,
+      rawUserMessage: "draw a cat",
+      baseProvider: base,
+      botOverrides: { model: "gpt-4o-mini" },
+      secondaryOllamaHost: null,
+      prismImageToolLlmModel: "mistral:latest",
+    });
+    assert.ok(out.provider instanceof LocalOllamaProvider);
+    assert.equal(out.botOverrides?.model, "mistral:latest");
+  });
+
+  it("keeps hub provider when message is not image-like", () => {
+    const base = stubOpenAiProvider();
+    const out = resolvePrimaryChatProviderForPossibleImageToolTurn({
+      isStarterPrompt: false,
+      rawUserMessage: "hello there",
+      baseProvider: base,
+      botOverrides: { model: "gpt-4o-mini" },
+      secondaryOllamaHost: null,
+      prismImageToolLlmModel: "mistral:latest",
+    });
+    assert.strictEqual(out.provider, base);
+    assert.equal(out.botOverrides?.model, "gpt-4o-mini");
+  });
+
+  it("keeps hub provider when setting is empty or starter prompt", () => {
+    const base = stubOpenAiProvider();
+    const emptySetting = resolvePrimaryChatProviderForPossibleImageToolTurn({
+      isStarterPrompt: false,
+      rawUserMessage: "draw a cat",
+      baseProvider: base,
+      botOverrides: undefined,
+      secondaryOllamaHost: null,
+      prismImageToolLlmModel: null,
+    });
+    assert.strictEqual(emptySetting.provider, base);
+
+    const starter = resolvePrimaryChatProviderForPossibleImageToolTurn({
+      isStarterPrompt: true,
+      rawUserMessage: "draw a cat",
+      baseProvider: base,
+      botOverrides: { model: "x" },
+      secondaryOllamaHost: null,
+      prismImageToolLlmModel: "mistral:latest",
+    });
+    assert.strictEqual(starter.provider, base);
+    assert.equal(starter.botOverrides?.model, "x");
+  });
+});
+
+describe("buildAssistantToolCallEvents", () => {
+  it("emits no events when the assistant reply is plain prose", () => {
+    const events = buildAssistantToolCallEvents({
+      rawReply: "Just a thoughtful sentence with no tools.",
+      imageSlot: "none",
+    });
+    assert.deepEqual(events, []);
+  });
+
+  it("ignores bare prose mentions of the tool names (no JSON shape)", () => {
+    /// Model is allowed to TALK about the tool names without actually trying to call
+    /// one — e.g. "I won't use askQuestion this turn". Those mentions must not
+    /// trigger a dropped event, or the dev metrics will be spammed on plain turns.
+    const prosey = [
+      "I considered using askQuestion here, but I think a direct answer is better.",
+      "Later, sendGeneratedImage might be a fun option for the scene we're imagining.",
+      "Some models call this the AskQuestion or the sendGeneratedImage path.",
+    ].join("\n\n");
+    const events = buildAssistantToolCallEvents({
+      rawReply: prosey,
+      imageSlot: "none",
+    });
+    assert.deepEqual(events, []);
+  });
+
+  it("emits detected + acquired for a parsed sendGeneratedImage that scheduled a job", () => {
+    const events = buildAssistantToolCallEvents({
+      rawReply:
+        '<<<PRISM_TOOL>>>\n{"v":1,"sendGeneratedImage":{"prompt":"A cozy portrait, soft lighting"}}\n<<<END_PRISM_TOOL>>>',
+      parsedSendGeneratedImage: { prompt: "A cozy portrait, soft lighting" },
+      imageSlot: "acquired",
+      imageJobId: "job-abc",
+    });
+    assert.equal(events.length, 2);
+    assert.equal(events[0]?.name, "sendGeneratedImage");
+    assert.equal(events[0]?.status, "detected");
+    assert.equal(events[0]?.prompt, "A cozy portrait, soft lighting");
+    assert.equal(events[1]?.name, "sendGeneratedImage");
+    assert.equal(events[1]?.status, "acquired");
+    assert.equal(events[1]?.jobId, "job-abc");
+  });
+
+  it("emits detected + busy when the image pipeline was already taken", () => {
+    const events = buildAssistantToolCallEvents({
+      rawReply:
+        '<<<PRISM_TOOL>>>\n{"v":1,"sendGeneratedImage":{"prompt":"A storm over hills"}}\n<<<END_PRISM_TOOL>>>',
+      parsedSendGeneratedImage: { prompt: "A storm over hills" },
+      imageSlot: "busy",
+    });
+    assert.equal(events.length, 2);
+    assert.equal(events[1]?.status, "busy");
+    assert.equal(events[1]?.detail, "image pipeline busy");
+    assert.equal(events[1]?.jobId, undefined);
+  });
+
+  it("flags a dropped tool when raw reply has bare JSON sandwiched between prose", () => {
+    /// Mirrors the screenshot: model emitted `{"v":1,"sendGeneratedImage":{"prompt":"..."}}`
+    /// inline between prose paragraphs, so the parser walked away with nothing.
+    const raw = [
+      "Sure thing, Jared! Here's the image for your turn:",
+      '{"v":1,"sendGeneratedImage":{"prompt":"A cozy portrait with soft lighting"}}',
+      "How does that look to you?",
+    ].join("\n");
+    const events = buildAssistantToolCallEvents({
+      rawReply: raw,
+      imageSlot: "none",
+    });
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.name, "sendGeneratedImage");
+    assert.equal(events[0]?.status, "dropped");
+    assert.match(
+      events[0]?.detail ?? "",
+      /raw reply mentions tool but parser produced no envelope/i
+    );
+    assert.match(events[0]?.detail ?? "", /sendGeneratedImage/);
+  });
+
+  it("emits a detected event when an AskQuestion envelope was parsed", () => {
+    const events = buildAssistantToolCallEvents({
+      rawReply: "prose then chips",
+      parsedAskQuestion: {
+        v: 1,
+        name: "AskQuestion",
+        prompt: "Which option do you choose?",
+        options: [
+          { id: "a", label: "First" },
+          { id: "b", label: "Second" },
+          { id: "c", label: "Third" },
+        ],
+      },
+      imageSlot: "none",
+    });
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.name, "askQuestion");
+    assert.equal(events[0]?.status, "detected");
+    assert.equal(events[0]?.prompt, "Which option do you choose?");
+    assert.equal(events[0]?.detail, "3 option(s)");
+  });
+
+  it("truncates very long prompts in the diagnostic preview", () => {
+    const longPrompt = "x".repeat(500);
+    const events = buildAssistantToolCallEvents({
+      rawReply: `<<<PRISM_TOOL>>>{"v":1,"sendGeneratedImage":{"prompt":"${longPrompt}"}}<<<END_PRISM_TOOL>>>`,
+      parsedSendGeneratedImage: { prompt: longPrompt },
+      imageSlot: "acquired",
+      imageJobId: "job-trim",
+    });
+    const detected = events[0];
+    assert.ok(detected, "expected a detected event");
+    assert.ok(detected!.prompt!.length <= 201, "prompt should be capped to roughly 200 chars");
+    assert.ok(detected!.prompt!.endsWith("…"), "long prompts should be marked with an ellipsis");
   });
 });
