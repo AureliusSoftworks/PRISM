@@ -32,6 +32,8 @@ import {
   coffeeHeadPlateFaceScaleYFromGazeTargetSide,
   coffeeSeatIsTopHead,
 } from "./coffee-seat-gaze";
+import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
+import { Image as ImageGlyph } from "lucide-react";
 import styles from "./page.module.css";
 import {
   BOT_FACT_KEY_LABELS,
@@ -63,6 +65,7 @@ import {
   type BotProfileScaleValue,
   type BotVoicePreset,
   type BotMoodKey,
+  type ComfyUiWorkflowRegistration,
   type SentGeneratedImagePayload,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
@@ -79,7 +82,17 @@ import {
   type BotMentionPick,
 } from "./botMention";
 import { applyPrismBotLinkBackspace } from "./botMentionTipTapBackspace";
+import {
+  applyPrismBotLinkArrowKey,
+  isCollapsedCaretInsidePrismBotLink,
+  shouldBlockPrintableInPrismBotLink,
+} from "./botMentionTipTapArrow";
 import { applyTaggedMentionWordBackspace } from "./plainTextWordBackspace";
+import {
+  isCaretInPrismBotMarkdownLockedRegion,
+  prismBotMarkdownArrowCaret,
+  shouldBlockPlainTextKeyInPrismBotLockedRegion,
+} from "./prismBotMarkdownNav";
 import {
   applyComposeMentionTabToEditor,
   applyMentionTabToEditor,
@@ -352,7 +365,7 @@ const PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY = "prism_dev_bot_import_paste";
 const PRISM_DEV_CHAT_METRICS_STORAGE_KEY = "prism_dev_chat_metrics";
 /** When set, local slash dev commands like `/forget` are enabled in composer. */
 const PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY = "prism_dev_slash_commands";
-/** When set, Chat mode shows a local debug echo composer above the default composer. */
+/** When set, Zen mode (`view === "chat"`) shows a local debug echo composer above the default composer. */
 const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
 /** Stores the floating dev-tools toggle button's last placed position as `{x,y}` JSON. */
 const PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY = "prism_dev_tools_button_position";
@@ -2108,6 +2121,9 @@ const COFFEE_BOT_REVEAL_DELAY_MAX_MS = 3400;
 const COFFEE_BOT_REVEAL_MS_PER_WORD = 90;
 const COFFEE_INTERRUPTION_CUE_HIDE_MS = 3200;
 const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
+const COFFEE_SESSION_DURATION_OPTIONS: readonly CoffeeSessionDurationMinutes[] = [1, 5, 10];
+const COFFEE_DEFAULT_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
+const COFFEE_AUTO_PRESET_ID = "__auto__";
 const COFFEE_CUP_ROTATION_BIAS_DEGREES = 45;
 
 /** Browser default for Coffee table-tuning sliders before a live session loads from the API. */
@@ -2150,6 +2166,16 @@ function formatCoffeeSessionRemainingMs(remainingMs: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function coffeeSessionDurationMs(
+  conversation: Pick<CoffeeConversationState, "coffeeSessionDurationMinutes"> | null | undefined
+): number {
+  const minutes = conversation?.coffeeSessionDurationMinutes;
+  if (minutes === 1 || minutes === 5 || minutes === 10) {
+    return minutes * 60 * 1000;
+  }
+  return COFFEE_SESSION_DURATION_MS;
 }
 
 function randomCoffeeAutonomousDelayMs(
@@ -2270,6 +2296,7 @@ interface CoffeeConversationState {
   mode?: "coffee";
   botId?: string | null;
   botGroupIds?: string[];
+  coffeeGroupId?: string | null;
   coffeeSeatBotIds?: Array<string | null>;
   incognito?: boolean;
   lastBotId?: string | null;
@@ -2277,9 +2304,33 @@ interface CoffeeConversationState {
   hasAssistantReply?: boolean;
   coffeeBotSocialById?: Record<string, CoffeeBotSocialSnapshot>;
   coffeeSettings?: CoffeeSessionSettings;
+  coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
   createdAt?: string;
   updatedAt?: string;
   messages: CoffeeConversationMessage[];
+}
+
+interface CoffeeGroupState {
+  id: string;
+  name: string;
+  botGroupIds: string[];
+  coffeeSeatBotIds: Array<string | null>;
+  coffeeSettings: CoffeeSessionSettings;
+  presetMode: "manual" | "auto";
+  moodSummary?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+type CoffeeSessionDurationMinutes = 1 | 5 | 10;
+
+interface CoffeePresetState {
+  id: string;
+  name: string;
+  settings: CoffeeSessionSettings;
+  builtIn: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 /** Staged {@link queueCoffeeReveal} call after the user-line center typewriter finishes. */
@@ -2328,6 +2379,10 @@ interface ConversationSummary {
   botId: string | null;
   /** Coffee-only bot lineup frozen when the Coffee Session starts. */
   botGroupIds?: string[];
+  /** Coffee-only durable parent group id, null for legacy sessions. */
+  coffeeGroupId?: string | null;
+  /** Coffee-only timed session duration once group-owned sessions are used. */
+  coffeeSessionDurationMinutes?: 1 | 5 | 10;
   /** Private chat flag — drives the sidebar privacy marker and, when opened, the grayscale-shell override. */
   incognito: boolean;
   /** Bot id of the most recent assistant message; null for Default-last OR no-reply-yet (disambiguate via hasAssistantReply). */
@@ -3124,20 +3179,24 @@ function getConversationPendingAskQuestionState(
   messages: Message[] | undefined
 ): { askQuestion: NonNullable<Message["askQuestion"]>; assistantMessageId: string } | undefined {
   if (!messages || messages.length === 0) return undefined;
-  let lastAssistIndex = -1;
+  let lastUserIndex = -1;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === "assistant") {
-      lastAssistIndex = i;
+    if (messages[i]?.role === "user") {
+      lastUserIndex = i;
       break;
     }
   }
-  if (lastAssistIndex < 0) return undefined;
-  const lastAssistant = messages[lastAssistIndex]!;
-  const qa = resolveAssistantAskQuestion(lastAssistant);
-  if (!qa || qa.name !== "AskQuestion" || qa.options.length !== 3) return undefined;
-  const afterAssistant = messages.slice(lastAssistIndex + 1);
-  if (afterAssistant.some((m) => m.role === "user")) return undefined;
-  return { askQuestion: qa, assistantMessageId: lastAssistant.id };
+  const tail = lastUserIndex < 0 ? messages : messages.slice(lastUserIndex + 1);
+  if (tail.some((m) => m.role === "user")) return undefined;
+
+  for (const m of tail) {
+    if (m.role !== "assistant") continue;
+    const qa = resolveAssistantAskQuestion(m);
+    if (qa && qa.name === "AskQuestion" && qa.options.length === 3) {
+      return { askQuestion: qa, assistantMessageId: m.id };
+    }
+  }
+  return undefined;
 }
 
 function stripEmojiFromAskQuestionLabel(label: string): string {
@@ -3686,6 +3745,27 @@ interface ChatPostEnvelope {
     rejected?: MemoryRejectedEventPayload[];
     maxConfidence?: number;
   };
+  /** Async in-thread image job — poll GET /api/image-jobs/:jobId until done. */
+  pendingImageJob?: {
+    jobId: string;
+    conversationId: string | null;
+  };
+  /**
+   * Per-turn tool-call diagnostics for the developer metrics stream. Empty/omitted on
+   * turns where nothing tool-shaped was attempted. Used to surface what the assistant
+   * tried (e.g. `sendGeneratedImage`), whether the image slot was acquired or busy,
+   * and whether the parser silently dropped a tool-shaped reply.
+   */
+  toolCalls?: ChatToolCallEvent[];
+}
+type ChatToolCallEventName = "sendGeneratedImage" | "askQuestion" | "unknown";
+type ChatToolCallEventStatus = "detected" | "acquired" | "busy" | "dropped";
+interface ChatToolCallEvent {
+  name: ChatToolCallEventName;
+  status: ChatToolCallEventStatus;
+  prompt?: string;
+  jobId?: string;
+  detail?: string;
 }
 interface SessionOpinion {
   score: number;
@@ -3712,11 +3792,22 @@ interface UserSettings {
   providerLocked: boolean;
   autoMemory: boolean;
   composerWritingAssist: boolean;
+  /**
+   * When true (default), assistant bubbles that used the configured copyright
+   * lenient local fallback get the striped left-edge treatment.
+   */
+  fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
   hasOpenAiApiKey: boolean;
   ollamaModel: string;
+  /** Server OLLAMA_AUXILIARY_MODEL — Prism internal LLM when not overridden below. */
+  ollamaAuxiliaryModel: string;
   secondaryOllamaHost: string;
   comfyUiHost: string;
+  /** Empty string → use server auxiliary model (see ollamaAuxiliaryModel). */
+  prismDefaultLlmModel: string;
+  /** Empty → use hub chat model for turns that may emit in-thread image tool JSON. */
+  prismImageToolLlmModel: string;
   /** Empty string means server auto-picks from the visible catalog. */
   preferredLocalModel: string;
   preferredOnlineModel: string;
@@ -3725,6 +3816,11 @@ interface UserSettings {
   lenientLocalFallbackModel: string;
   /** Local ComfyUI / Ollama image model used when the primary image call is refused (online or local). */
   lenientLocalImageFallbackModel: string;
+  /**
+   * Legacy server field — bindings are no longer edited in the UI; disk workflows
+   * come from the ComfyUI host (`comfyui-remote:` in the Images picker).
+   */
+  comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
 }
@@ -3735,18 +3831,33 @@ interface PairingCode {
 interface DevChatDebugEvent {
   id: string;
   createdAt: string;
-  kind: "summary" | "memory" | "opinion";
+  kind: "summary" | "memory" | "opinion" | "tool";
   text: string;
 }
 
 function inferDevChatDebugKind(event: DevChatDebugEvent): DevChatDebugEvent["kind"] {
-  if (event.kind === "summary" || event.kind === "memory" || event.kind === "opinion") {
+  if (
+    event.kind === "summary" ||
+    event.kind === "memory" ||
+    event.kind === "opinion" ||
+    event.kind === "tool"
+  ) {
     return event.kind;
   }
   const line = event.text.toLowerCase();
+  if (line.includes("tool")) return "tool";
   if (line.includes("summary")) return "summary";
   if (line.includes("memories") || line.includes("memory")) return "memory";
   return "opinion";
+}
+
+/// Compose a single human-readable dev-metrics line for a tool-call diagnostic event.
+function formatChatToolCallDebugLine(prefix: string, event: ChatToolCallEvent): string {
+  const parts: string[] = [`${prefix} tool ${event.name}: ${event.status}`];
+  if (event.jobId) parts.push(`jobId=${event.jobId}`);
+  if (event.prompt && event.prompt.length > 0) parts.push(`prompt="${event.prompt}"`);
+  if (event.detail && event.detail.length > 0) parts.push(event.detail);
+  return parts.join(" — ");
 }
 interface SummaryCompactionDebug {
   mode: "chat" | "sandbox";
@@ -3833,7 +3944,7 @@ interface ModelCatalogEntry {
   localHost?: "primary" | "secondary";
   hostLabel?: string;
   /** Present for image-only catalog rows (ComfyUI checkpoints). */
-  imageSource?: "ollama" | "comfyui";
+  imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
 }
 interface ModelCatalog {
   local: ModelCatalogEntry[];
@@ -4155,6 +4266,7 @@ function botProfileCategoryCount(
 
 function botProfileFactCount(profile: BotProfileFields): number {
   let count = 0;
+  if (profile.facts?.basedOnRealPersonOrCharacter) count += 1;
   for (const key of BOT_FACT_KEY_ORDER) {
     if (profile.facts?.[key]?.trim()) count += 1;
   }
@@ -5384,6 +5496,19 @@ interface ImageRecord {
   provider?: string;
   model?: string | null;
   localRelPath?: string | null;
+}
+
+/** Authenticated WebP thumbnail for a locally stored generated image (`images.id`). */
+function apiGeneratedImageThumbUrl(imageId: string): string {
+  return `/api/images/${encodeURIComponent(imageId)}/thumb`;
+}
+
+/** Images panel grid tile: prefer `/thumb` for local files; remote-only rows keep full URL. */
+function galleryTileImageSrc(img: ImageRecord): string {
+  if (img.hasLocalFile === true) {
+    return apiGeneratedImageThumbUrl(img.id);
+  }
+  return img.displayUrl ?? img.url;
 }
 
 /** Short label for gallery thumbnails — catalog match when possible, else raw id. */
@@ -11748,6 +11873,15 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               return false;
             },
           },
+          handlePaste: (view, event) => {
+            const sel = view.state.selection;
+            if (!sel.empty) return false;
+            if (isCollapsedCaretInsidePrismBotLink(view.state, sel.from)) {
+              event.preventDefault();
+              return true;
+            }
+            return false;
+          },
           handleKeyDown: (view, event) => {
             const activeEditor = editorRef.current;
             if (
@@ -11764,6 +11898,29 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 queueMicrotask(() => syncMentionPopover(activeEditor));
                 return true;
               }
+            }
+            if (
+              activeEditor &&
+              (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+              !event.shiftKey &&
+              !event.altKey &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !(event as globalThis.KeyboardEvent).isComposing
+            ) {
+              const dir = event.key === "ArrowLeft" ? "left" : "right";
+              if (applyPrismBotLinkArrowKey(activeEditor, dir)) {
+                event.preventDefault();
+                queueMicrotask(() => syncMentionPopover(activeEditor));
+                return true;
+              }
+            }
+            if (
+              activeEditor &&
+              shouldBlockPrintableInPrismBotLink(activeEditor, event as globalThis.KeyboardEvent)
+            ) {
+              event.preventDefault();
+              return true;
             }
             if (activeEditor && !event.shiftKey) {
               if (event.key === "Tab") {
@@ -12228,6 +12385,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 const el = event.currentTarget;
                 syncTextareaMention(el);
               }}
+              onPaste={(event) => {
+                const el = textareaRef.current;
+                if (!el) return;
+                const start = el.selectionStart ?? 0;
+                const end = el.selectionEnd ?? 0;
+                if (isCaretInPrismBotMarkdownLockedRegion(el.value, start, end)) {
+                  event.preventDefault();
+                }
+              }}
               onKeyDown={(event) => {
                 const el = textareaRef.current;
                 if (!el) return;
@@ -12247,6 +12413,38 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     onValueChange(applied.value);
                     return;
                   }
+                }
+                if (
+                  (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+                  !event.shiftKey &&
+                  !event.altKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  const start = el.selectionStart ?? 0;
+                  const end = el.selectionEnd ?? 0;
+                  const dir = event.key === "ArrowLeft" ? "left" : "right";
+                  const next = prismBotMarkdownArrowCaret(el.value, start, dir);
+                  if (next !== null && next !== start) {
+                    event.preventDefault();
+                    el.setSelectionRange(next, next);
+                    queueMicrotask(() => {
+                      syncTextareaMention(el);
+                    });
+                    return;
+                  }
+                }
+                if (
+                  shouldBlockPlainTextKeyInPrismBotLockedRegion(
+                    el.value,
+                    el.selectionStart ?? 0,
+                    el.selectionEnd ?? 0,
+                    event.nativeEvent
+                  )
+                ) {
+                  event.preventDefault();
+                  return;
                 }
                 if (event.key === "Tab" && !event.shiftKey && taMentionRef.current.open) {
                   event.preventDefault();
@@ -12481,6 +12679,12 @@ function BotProfileBuilder({
     onProfileChange((previous) => ({
       ...previous,
       facts: { ...previous.facts, [field]: value },
+    }));
+  };
+  const updateKnownEntityToggle = (enabled: boolean) => {
+    onProfileChange((previous) => ({
+      ...previous,
+      facts: { ...previous.facts, basedOnRealPersonOrCharacter: enabled },
     }));
   };
   const updateCustomFact = (
@@ -12735,6 +12939,29 @@ function BotProfileBuilder({
                   not want to invent.
                 </small>
               </div>
+              <label className={`${styles.botProfileField} ${styles.botProfileKnownEntityToggle}`}>
+                <span>Based on a real person or character?</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={profile.facts.basedOnRealPersonOrCharacter}
+                  data-enabled={profile.facts.basedOnRealPersonOrCharacter ? "true" : undefined}
+                  onClick={() =>
+                    updateKnownEntityToggle(!profile.facts.basedOnRealPersonOrCharacter)
+                  }
+                >
+                  <strong>
+                    {profile.facts.basedOnRealPersonOrCharacter
+                      ? "Yes - use canonical likeness"
+                      : "No - use profile descriptors"}
+                  </strong>
+                  <small>
+                    {profile.facts.basedOnRealPersonOrCharacter
+                      ? "Image prompts prefer the most recognized canon appearance."
+                      : "Image prompts can use your visual description fields."}
+                  </small>
+                </button>
+              </label>
               {profile.facts.customFacts.length < MAX_CUSTOM_FACTS && (
                 <button
                   type="button"
@@ -13002,8 +13229,8 @@ function HomeContent(): React.JSX.Element {
   }, [clearViewSwitchOverlayTimers, viewSwitchOverlayPhase]);
   useEffect(() => clearViewSwitchOverlayTimers, [clearViewSwitchOverlayTimers]);
   const viewSwitchOverlayLabel = useMemo(() => {
-    if (viewSwitchTarget === "chat") return "Opening Chat";
-    if (viewSwitchTarget === "sandbox") return "Opening Sandbox";
+    if (viewSwitchTarget === "chat") return "Opening Zen";
+    if (viewSwitchTarget === "sandbox") return "Opening Chat";
     if (viewSwitchTarget === "coffee") return "Opening Coffee";
     if (viewSwitchTarget === "hub") return "Returning to Hub";
     return "Switching modes";
@@ -13130,9 +13357,12 @@ function HomeContent(): React.JSX.Element {
   const [canvasBotSwitchTransitioning, setCanvasBotSwitchTransitioning] = useState(false);
   const [canvasBotSwitchOverlayPhase, setCanvasBotSwitchOverlayPhase] =
     useState<"hidden" | "enter" | "exit">("hidden");
+  const [conversationSurfaceLoading, setConversationSurfaceLoading] = useState(false);
   const [canvasBotSwitchUnfoldSeed, setCanvasBotSwitchUnfoldSeed] = useState(0);
   const canvasBotSwitchTransitionStartedAtRef = useRef<number | null>(null);
   const canvasBotSwitchOverlayHideTimerRef = useRef<number | null>(null);
+  const conversationSurfaceLoadingStartedAtRef = useRef<number | null>(null);
+  const conversationSurfaceLoadingTokenRef = useRef(0);
   const pendingCanvasBotUnfoldRef = useRef(false);
   const [chatStartupSummary, setChatStartupSummary] = useState<string | null>(null);
   const [sandboxBotStatusSummary, setSandboxBotStatusSummary] = useState<string | null>(null);
@@ -13143,6 +13373,19 @@ function HomeContent(): React.JSX.Element {
   const [pendingReplyIsNewConversation, setPendingReplyIsNewConversation] =
     useState(false);
   const pendingReplyAbortControllerRef = useRef<AbortController | null>(null);
+  const [composerImageJobOrb, setComposerImageJobOrb] = useState<{
+    jobId: string;
+    conversationId: string;
+  } | null>(null);
+  const pendingImageJobPollTimersRef = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    return () => {
+      for (const [, handle] of pendingImageJobPollTimersRef.current) {
+        window.clearInterval(handle);
+      }
+      pendingImageJobPollTimersRef.current.clear();
+    };
+  }, []);
   const [unreadConversationIds, setUnreadConversationIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -13164,6 +13407,7 @@ function HomeContent(): React.JSX.Element {
   const [forceNewConversationOnNextSend, setForceNewConversationOnNextSend] = useState(false);
   const detailIdRef = useRef<string | null>(null);
   const CANVAS_BOT_SWITCH_MIN_LOADING_MS = 520;
+  const CONVERSATION_SURFACE_LOADING_MIN_MS = 360;
   const conversationGroupPointerDragRef = useRef<{
     key: string;
     pointerId: number;
@@ -13299,6 +13543,10 @@ function HomeContent(): React.JSX.Element {
   }, []);
   const [bots, setBots] = useState<Bot[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+  // Visual bot focus in the Sandbox canvas should only come from explicit
+  // bot-square picks in the grid, not from sidebar conversation navigation.
+  const [sandboxGridSelectedBotId, setSandboxGridSelectedBotId] =
+    useState<string | null>(null);
   const [chatModelChoiceByProvider, setChatModelChoiceByProvider] =
     useState<Record<Provider, string>>({
       local: AUTO_MODEL_CHOICE,
@@ -13380,9 +13628,6 @@ function HomeContent(): React.JSX.Element {
   >([]);
   const [imageLightbox, setImageLightbox] = useState<ImageRecord | null>(null);
   const [imagePrompt, setImagePrompt] = useState("");
-  const [imagePromptSuggestions, setImagePromptSuggestions] = useState<string[]>([]);
-  const [imagePromptSuggestionsBusy, setImagePromptSuggestionsBusy] =
-    useState(false);
   const [imageRandomPromptBusy, setImageRandomPromptBusy] = useState(false);
   const [imagePanelScope, setImagePanelScope] = useState<ImagePanelScope>("all");
   const imagePanelScopeRef = useRef<ImagePanelScope>("all");
@@ -14467,10 +14712,15 @@ function HomeContent(): React.JSX.Element {
     }
     if (view === "sandbox") {
       if (detail) {
-        return { botId: selectedBotId, explicitDefault: selectedBotId === null };
+        const conversationVisualBotId =
+          detail.lastBotId ?? detail.botId ?? selectedBotId;
+        return {
+          botId: conversationVisualBotId,
+          explicitDefault: conversationVisualBotId === null,
+        };
       }
       return {
-        botId: selectedBotId,
+        botId: sandboxGridSelectedBotId,
         explicitDefault: false,
       };
     } else if (view === "chat") {
@@ -14481,6 +14731,7 @@ function HomeContent(): React.JSX.Element {
   }, [
     view,
     selectedBotId,
+    sandboxGridSelectedBotId,
     detail,
     chatBotOverride,
     privateChatActive,
@@ -14492,6 +14743,22 @@ function HomeContent(): React.JSX.Element {
     bots,
     visualBotSelection.botId,
   ]);
+
+  /**
+   * Provider to actually treat as "preferred" for chat-side reads. When the
+   * active chat bot is locked to "Offline only" (`online_enabled === 0`),
+   * we override the user's saved global preference to `"local"` for the
+   * duration of that conversation — toggle, model pickers, send bodies,
+   * everything. The user's saved `settings.preferredProvider` is left
+   * untouched so it reasserts the moment they switch to a non-protected
+   * bot. Centralizing the override here means every chat/image picker
+   * automatically respects the offline-only lock instead of each one
+   * having to remember the rule independently.
+   */
+  const effectivePreferredProvider = useMemo<Provider>(() => {
+    if (activeBot?.online_enabled === 0) return "local";
+    return settings?.preferredProvider === "openai" ? "openai" : "local";
+  }, [activeBot, settings?.preferredProvider]);
   /** Chat Images panel: visual bot is often null for Prism-default chats; use conversation locks instead. */
   const chatScopedGalleryBotId = useMemo(() => {
     if (view !== "chat") return null;
@@ -14590,7 +14857,7 @@ function HomeContent(): React.JSX.Element {
       ? Math.floor((Date.now() - imageGenElapsedAnchorRef.current) / 1000)
       : 0;
   const imageGenLocalInflight =
-    imageGenInflightHere > 0 && settings?.preferredProvider !== "openai";
+    imageGenInflightHere > 0 && effectivePreferredProvider !== "openai";
 
   useEffect(() => {
     if (imageGenInflightHere <= 0) {
@@ -14746,7 +15013,7 @@ function HomeContent(): React.JSX.Element {
       return sandboxTitle && sandboxTitle.length > 0 ? sandboxTitle : null;
     }
     const modelProvider: Provider =
-      settings?.preferredProvider === "openai" ? "openai" : "local";
+      effectivePreferredProvider === "openai" ? "openai" : "local";
     const rawModelChoice = chatModelChoiceByProvider[modelProvider];
     const visibleModelChoice = visibleModelChoiceForProvider(
       settings,
@@ -14793,116 +15060,6 @@ function HomeContent(): React.JSX.Element {
     const comfy = comfyUiModelsPayload.checkpoints ?? [];
     return [...ollamaImage, ...comfy];
   }, [modelCatalog, settings, comfyUiModelsPayload]);
-  useEffect(() => {
-    if (panel !== "images" || imagePanelScope !== "bot" || !imagePanelBotId) {
-      setImagePromptSuggestions([]);
-      setImagePromptSuggestionsBusy(false);
-      return;
-    }
-    const canGenerate =
-      settings?.preferredProvider === "openai" ||
-      (settings?.preferredProvider === "local" && localImageModelCatalogEntries.length > 0);
-    if (!canGenerate) {
-      setImagePromptSuggestions([]);
-      setImagePromptSuggestionsBusy(false);
-      return;
-    }
-    const ac = new AbortController();
-    setImagePromptSuggestionsBusy(true);
-    setImagePromptSuggestions([]);
-    void (async () => {
-      try {
-        type SuggestionResponse = { ok: boolean; suggestions?: string[] };
-        const data = await api<SuggestionResponse>("/api/images/prompt-suggestions", {
-          method: "POST",
-          body: JSON.stringify({ botId: imagePanelBotId }),
-          signal: ac.signal,
-        });
-        if (!ac.signal.aborted) {
-          setImagePromptSuggestions(
-            Array.isArray(data.suggestions) ? data.suggestions : []
-          );
-        }
-      } catch (err) {
-        if (isAbortLikeError(err)) {
-          return;
-        }
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[prism] image prompt suggestions failed:", err);
-        }
-        if (!ac.signal.aborted) {
-          setImagePromptSuggestions([]);
-        }
-      } finally {
-        if (!ac.signal.aborted) {
-          setImagePromptSuggestionsBusy(false);
-        }
-      }
-    })();
-    return () => {
-      ac.abort();
-    };
-  }, [
-    panel,
-    imagePanelScope,
-    imagePanelBotId,
-    settings?.preferredProvider,
-    localImageModelCatalogEntries.length,
-  ]);
-
-  /** Positions + watercolor fills — mirrors short-term memory bubble layout (see `memoryBubbleLayoutById`). */
-  const imagePromptBubbleLayouts = useMemo(() => {
-    if (imagePromptSuggestions.length === 0) return [];
-    const accentHex =
-      imagePanelBot != null
-        ? normalizeAccentForTheme(imagePanelBot.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme)
-        : normalizeAccentForTheme(PRISM_DEFAULT_ACCENT, resolvedTheme);
-    const shadePattern = [0.08, 0.16, 0.24, 0.12, 0.28];
-    const shadeTarget = resolvedTheme === "dark" ? "#ffffff" : "#000000";
-    const pxToPct = 100 / 520;
-    const bounds = { minX: 7, maxX: 93, minY: 8, maxY: 88 };
-    const sizeRotation = [118, 110, 124, 100, 114];
-
-    return imagePromptSuggestions.map((text, idx) => {
-      const slot = MEMORY_BUBBLE_CLOUD_SLOTS[idx % MEMORY_BUBBLE_CLOUD_SLOTS.length];
-      const jitterX =
-        (stableUnitValue(`imgPromptBubble:${idx}:jx:${text.slice(0, 32)}`) - 0.5) * 7;
-      const jitterY =
-        (stableUnitValue(`imgPromptBubble:${idx}:jy:${text.slice(0, 32)}`) - 0.5) * 7;
-      const size = sizeRotation[idx % sizeRotation.length] ?? 112;
-      const radiusPct = (size / 2) * pxToPct;
-      let x = slot[0] + jitterX;
-      let y = slot[1] + jitterY;
-      x = Math.max(bounds.minX + radiusPct, Math.min(bounds.maxX - radiusPct, x));
-      y = Math.max(bounds.minY + radiusPct, Math.min(bounds.maxY - radiusPct, y));
-
-      const shade = mixHex(accentHex, shadeTarget, shadePattern[idx % shadePattern.length]);
-      const textLen = text.length;
-      const fontDivisor =
-        textLen > 92 ? 10.2 : textLen > 68 ? 9.2 : textLen > 46 ? 8.4 : 7.8;
-      const fontSize = Math.max(10.5, Math.min(13.5, Math.round(size / fontDivisor)));
-      const lineCount = size >= 114 ? 4 : 3;
-
-      return {
-        text,
-        style: {
-          "--memory-bubble-size": `${size}px`,
-          "--memory-bubble-color": shade,
-          "--memory-bubble-source-color": accentHex,
-          "--memory-bubble-ink": pickReadableText(shade),
-          "--memory-bubble-glow": accentHex,
-          "--memory-bubble-font-size": `${fontSize}px`,
-          "--memory-bubble-line-count": lineCount,
-          "--memory-cloud-x": `${x.toFixed(2)}%`,
-          "--memory-cloud-y": `${y.toFixed(2)}%`,
-          "--memory-bubble-tilt": `${Math.round(
-            (stableUnitValue(`imgPromptBubble:${idx}:tilt`) - 0.5) * 10
-          )}deg`,
-          "--memory-bubble-z": `${14 + idx}`,
-        } as React.CSSProperties,
-      };
-    });
-  }, [imagePromptSuggestions, imagePanelBot, resolvedTheme]);
 
   const hubPreferredLocalOptions = useMemo(
     () =>
@@ -14922,14 +15079,41 @@ function HomeContent(): React.JSX.Element {
       ),
     [modelCatalog, settings]
   );
+  const prismInternalLlmCallOptions = useMemo(
+    () =>
+      includeSelectedModelOption(
+        availableModelOptionsForProvider(modelCatalog, settings, "local"),
+        (settings?.prismDefaultLlmModel ?? "").trim(),
+        "local"
+      ),
+    [modelCatalog, settings]
+  );
+  const prismImageToolLlmCallOptions = useMemo(
+    () =>
+      includeSelectedModelOption(
+        availableModelOptionsForProvider(modelCatalog, settings, "local"),
+        (settings?.prismImageToolLlmModel ?? "").trim(),
+        "local"
+      ),
+    [modelCatalog, settings]
+  );
   const renderProviderModeToggle = (extraClassName = ""): React.ReactNode => {
-    const isLocal = settings?.preferredProvider === "local";
-    const providerDisabled = !settings;
+    // The toggle simply mirrors `effectivePreferredProvider`, which is
+    // already pinned to "local" when the active chat bot is offline-only.
+    // We keep the lock indicator + disabled flag tied to that same source
+    // of truth so it can never disagree with the model pickers below it.
+    const lockedByActiveBot = activeBot?.online_enabled === 0;
+    const isLocal = effectivePreferredProvider === "local";
+    const providerDisabled = !settings || lockedByActiveBot;
+    const lockTitle = lockedByActiveBot
+      ? `🔒 Locked to LOCAL — ${activeBot?.name ?? "this bot"} is set to Offline only.`
+      : null;
     return (
       <div
         className={`${styles.modeControl} ${
           providerDisabled ? styles.modeControlLocked : ""
         } ${extraClassName}`}
+        data-protected={lockedByActiveBot ? "true" : undefined}
       >
         <button
           type="button"
@@ -14937,22 +15121,21 @@ function HomeContent(): React.JSX.Element {
             providerDisabled ? styles.modeToggleTrackLocked : ""
           }`}
           data-response-mode={isLocal ? "local" : "online"}
+          data-protected={lockedByActiveBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
             void switchProvider(isLocal ? "openai" : "local");
           }}
           aria-label={
-            isLocal
-              ? "Response mode: Local. Click to switch to Online."
-              : "Response mode: Online. Click to switch to Local."
+            lockTitle
+              ? `${lockTitle} Toggle disabled.`
+              : isLocal
+                ? "Response mode: Local. Click to switch to Online."
+                : "Response mode: Online. Click to switch to Local."
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={
-            isLocal
-              ? "Switch to Online"
-              : "Switch to Local"
-          }
+          title={lockTitle ?? (isLocal ? "Switch to Online" : "Switch to Local")}
           disabled={providerDisabled}
         >
           <span
@@ -14960,12 +15143,21 @@ function HomeContent(): React.JSX.Element {
               isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
             }`}
           >
-            <span
-              className={`${styles.providerDot} ${
-                isLocal ? styles.providerDotLocal : styles.providerDotOnline
-              }`}
-              aria-hidden="true"
-            />
+            {lockedByActiveBot ? (
+              <span
+                className={styles.modeThumbLockGlyph}
+                aria-hidden="true"
+              >
+                🔒
+              </span>
+            ) : (
+              <span
+                className={`${styles.providerDot} ${
+                  isLocal ? styles.providerDotLocal : styles.providerDotOnline
+                }`}
+                aria-hidden="true"
+              />
+            )}
             <span className={styles.modeThumbLabel}>
               {isLocal ? "LOCAL" : "ONLINE"}
             </span>
@@ -14976,15 +15168,25 @@ function HomeContent(): React.JSX.Element {
   };
   /** Coffee-only provider rail: same `chatHeaderModeToggle` styling as the main
    *  chat header (bot-tinted rail + flush geometry); routes `coffeeProvider`
-   *  instead of mutating global Settings. */
+   *  instead of mutating global Settings.
+   *
+   *  Lock semantics: when at least one seated/selected bot is "Offline only",
+   *  the toggle is forced to LOCAL and disabled. The matching coercion
+   *  effect above keeps `coffeeProvider` itself pinned to "local" so request
+   *  bodies never disagree with the visible state. */
   const renderCoffeeProviderModeToggle = (): React.ReactNode => {
-    const providerDisabled = !settings;
-    const isLocal = coffeeProvider === "local";
+    const lockedByProtectedBot = coffeeAnyOfflineProtected;
+    const isLocal = lockedByProtectedBot ? true : coffeeProvider === "local";
+    const providerDisabled = !settings || lockedByProtectedBot;
+    const lockTitle = lockedByProtectedBot
+      ? "🔒 Locked to LOCAL — at least one seated bot is set to Offline only."
+      : null;
     return (
       <div
         className={`${styles.modeControl} ${
           providerDisabled ? styles.modeControlLocked : ""
         } ${styles.chatHeaderModeToggle}`}
+        data-protected={lockedByProtectedBot ? "true" : undefined}
       >
         <button
           type="button"
@@ -14992,19 +15194,22 @@ function HomeContent(): React.JSX.Element {
             providerDisabled ? styles.modeToggleTrackLocked : ""
           }`}
           data-response-mode={isLocal ? "local" : "online"}
+          data-protected={lockedByProtectedBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
             setCoffeeProvider(isLocal ? "openai" : "local");
             setCoffeeProviderTouched(true);
           }}
           aria-label={
-            isLocal
-              ? "Response mode: Local. Click to switch to Online."
-              : "Response mode: Online. Click to switch to Local."
+            lockTitle
+              ? `${lockTitle} Toggle disabled.`
+              : isLocal
+                ? "Response mode: Local. Click to switch to Online."
+                : "Response mode: Online. Click to switch to Local."
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={isLocal ? "Switch to Online" : "Switch to Local"}
+          title={lockTitle ?? (isLocal ? "Switch to Online" : "Switch to Local")}
           disabled={providerDisabled}
         >
           <span
@@ -15012,12 +15217,21 @@ function HomeContent(): React.JSX.Element {
               isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
             }`}
           >
-            <span
-              className={`${styles.providerDot} ${
-                isLocal ? styles.providerDotLocal : styles.providerDotOnline
-              }`}
-              aria-hidden="true"
-            />
+            {lockedByProtectedBot ? (
+              <span
+                className={styles.modeThumbLockGlyph}
+                aria-hidden="true"
+              >
+                🔒
+              </span>
+            ) : (
+              <span
+                className={`${styles.providerDot} ${
+                  isLocal ? styles.providerDotLocal : styles.providerDotOnline
+                }`}
+                aria-hidden="true"
+              />
+            )}
             <span className={styles.modeThumbLabel}>
               {isLocal ? "LOCAL" : "ONLINE"}
             </span>
@@ -15028,7 +15242,10 @@ function HomeContent(): React.JSX.Element {
   };
   const renderHeaderModelPicker = (): React.ReactNode => {
     if (!effectiveChatPresentation) return null;
-    const isLocal = settings?.preferredProvider !== "openai";
+    // Use the effective provider so the picker shows local options whenever
+    // the active bot is locked offline-only — even if the user's saved
+    // global preference is online.
+    const isLocal = effectivePreferredProvider !== "openai";
     const modelProvider: Provider = isLocal ? "local" : "openai";
     const rawModelChoice = chatModelChoiceByProvider[modelProvider];
     const visibleModelChoice = visibleModelChoiceForProvider(
@@ -15079,7 +15296,13 @@ function HomeContent(): React.JSX.Element {
   };
 
   const renderImagesPanelModelPicker = (): React.ReactNode => {
-    const isLocal = settings?.preferredProvider !== "openai";
+    // Image panel inherits the chat-side lock: when the active chat bot is
+    // offline-only, every image generation surface (including this picker)
+    // should show local options only. A future refinement can lock based
+    // on `imagePanelBot` independently when scope === "bot"; for now the
+    // chat-context lock covers the common case (user opens Images while
+    // chatting with a protected bot).
+    const isLocal = effectivePreferredProvider !== "openai";
     const modelProvider: Provider = isLocal ? "local" : "openai";
     const rawChoice = imageGenModelChoiceByProvider[modelProvider];
     const trimmedChoice = rawChoice?.trim() ?? "";
@@ -16025,7 +16248,9 @@ function HomeContent(): React.JSX.Element {
                 ? styles.devChatDebugEventSummary
                 : kind === "memory"
                   ? styles.devChatDebugEventMemory
-                  : styles.devChatDebugEventOpinion
+                  : kind === "tool"
+                    ? styles.devChatDebugEventTool
+                    : styles.devChatDebugEventOpinion
               }`}
             >
               <span className={styles.devChatDebugTimestamp}>
@@ -16153,6 +16378,21 @@ function HomeContent(): React.JSX.Element {
   const [coffeeConversation, setCoffeeConversation] =
     useState<CoffeeConversationState | null>(null);
   const [coffeeSelectedSessionId, setCoffeeSelectedSessionId] = useState<string | null>(null);
+  const [coffeeGroups, setCoffeeGroups] = useState<CoffeeGroupState[]>([]);
+  const [coffeeSelectedGroupId, setCoffeeSelectedGroupId] = useState<string | null>(null);
+  const [coffeeGroupsLoading, setCoffeeGroupsLoading] = useState(false);
+  const [coffeePresets, setCoffeePresets] = useState<CoffeePresetState[]>([]);
+  const [coffeePresetsLoading, setCoffeePresetsLoading] = useState(false);
+  const [coffeeSelectedDurationMinutes, setCoffeeSelectedDurationMinutes] =
+    useState<CoffeeSessionDurationMinutes>(COFFEE_DEFAULT_SESSION_DURATION_MINUTES);
+  const [coffeeSelectedPresetId, setCoffeeSelectedPresetId] = useState("");
+  const [coffeeSettingsModalOpen, setCoffeeSettingsModalOpen] = useState(false);
+  const [coffeeSettingsDraft, setCoffeeSettingsDraft] = useState<CoffeeSessionSettings>(() =>
+    loadCoffeeSettingsFromBrowser()
+  );
+  const [coffeeGroupNameDraft, setCoffeeGroupNameDraft] = useState("");
+  const [coffeePresetNameDraft, setCoffeePresetNameDraft] = useState("");
+  const [coffeeSettingsSaving, setCoffeeSettingsSaving] = useState(false);
   const [coffeeSearch, setCoffeeSearch] = useState("");
   const [coffeeDraft, setCoffeeDraft] = useState<string>("");
   const coffeeComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -16276,6 +16516,10 @@ function HomeContent(): React.JSX.Element {
   const coffeeContinueAbortRef = useRef<AbortController | null>(null);
   const coffeeAutoplayPausedRef = useRef(false);
   const coffeeDraftRef = useRef("");
+  const coffeeReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [coffeeReplayActive, setCoffeeReplayActive] = useState(false);
+  const [coffeeReplayPlaying, setCoffeeReplayPlaying] = useState(false);
+  const [coffeeReplayMessageIndex, setCoffeeReplayMessageIndex] = useState(0);
   const [coffeeSessionSettings, setCoffeeSessionSettings] = useState<CoffeeSessionSettings>(() =>
     loadCoffeeSettingsFromBrowser()
   );
@@ -16355,6 +16599,27 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     coffeeDraftRef.current = coffeeDraft;
   }, [coffeeDraft]);
+  useEffect(() => {
+    if (coffeeReplayTimerRef.current) {
+      clearTimeout(coffeeReplayTimerRef.current);
+      coffeeReplayTimerRef.current = null;
+    }
+    if (!coffeeReplayActive || !coffeeReplayPlaying || !coffeeConversation) return;
+    const messages = coffeeConversation.messages;
+    if (messages.length === 0 || coffeeReplayMessageIndex >= messages.length - 1) {
+      setCoffeeReplayPlaying(false);
+      return;
+    }
+    coffeeReplayTimerRef.current = setTimeout(() => {
+      setCoffeeReplayMessageIndex((index) => Math.min(messages.length - 1, index + 1));
+    }, 900);
+    return () => {
+      if (coffeeReplayTimerRef.current) {
+        clearTimeout(coffeeReplayTimerRef.current);
+        coffeeReplayTimerRef.current = null;
+      }
+    };
+  }, [coffeeReplayActive, coffeeReplayPlaying, coffeeReplayMessageIndex, coffeeConversation]);
   // Per-request provider override (mirrors the Sandbox toggle). The
   // user can flip it inside the Coffee shell without touching their
   // global setting; once they manually toggle, we stop syncing from
@@ -16519,6 +16784,8 @@ function HomeContent(): React.JSX.Element {
     if (view !== "coffee") {
       setCoffeeConversation(null);
       setCoffeeSelectedSessionId(null);
+      setCoffeeSelectedGroupId(null);
+      setCoffeeGroups([]);
       setCoffeeSelectedSeatBotIds(emptyCoffeeSeatBotIds());
       setCoffeeSearch("");
       setCoffeeDraft("");
@@ -16580,6 +16847,55 @@ function HomeContent(): React.JSX.Element {
     () => new Map(coffeeBotsLibrary.map((bot) => [bot.id, bot])),
     [coffeeBotsLibrary]
   );
+  const coffeeSelectedGroup = useMemo(
+    () => coffeeGroups.find((group) => group.id === coffeeSelectedGroupId) ?? null,
+    [coffeeGroups, coffeeSelectedGroupId]
+  );
+  const coffeeSessionsByGroupId = useMemo(() => {
+    const byGroup = new Map<string, ConversationSummary[]>();
+    for (const session of coffeeSessions) {
+      if (!session.coffeeGroupId) continue;
+      const list = byGroup.get(session.coffeeGroupId) ?? [];
+      list.push(session);
+      byGroup.set(session.coffeeGroupId, list);
+    }
+    return byGroup;
+  }, [coffeeSessions]);
+  const legacyCoffeeSessions = useMemo(
+    () => coffeeSessions.filter((session) => !session.coffeeGroupId),
+    [coffeeSessions]
+  );
+  const refreshCoffeeGroups = useCallback(async (): Promise<CoffeeGroupState[]> => {
+    setCoffeeGroupsLoading(true);
+    try {
+      const response = await api<{ ok: true; groups: CoffeeGroupState[] }>("/api/coffee/groups");
+      setCoffeeGroups(response.groups);
+      return response.groups;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to load Coffee Groups.");
+      return [];
+    } finally {
+      setCoffeeGroupsLoading(false);
+    }
+  }, []);
+  const refreshCoffeePresets = useCallback(async (): Promise<CoffeePresetState[]> => {
+    setCoffeePresetsLoading(true);
+    try {
+      const response = await api<{ ok: true; presets: CoffeePresetState[] }>("/api/coffee/presets");
+      setCoffeePresets(response.presets);
+      return response.presets;
+    } catch (err) {
+      console.warn("[coffee] failed to load Coffee presets", err);
+      return [];
+    } finally {
+      setCoffeePresetsLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (view !== "coffee") return;
+    void refreshCoffeeGroups();
+    void refreshCoffeePresets();
+  }, [view, refreshCoffeeGroups, refreshCoffeePresets]);
   const coffeeSelectedBotIds = useMemo(
     () => coffeeSelectedSeatBotIds.filter((id): id is string => typeof id === "string"),
     [coffeeSelectedSeatBotIds]
@@ -16655,6 +16971,28 @@ function HomeContent(): React.JSX.Element {
     (coffeeConversation
       ? coffeeSeatsFromBotIds(coffeeConversation.botGroupIds)
       : coffeeSelectedSeatBotIds);
+  /** True when at least one bot in the current Coffee scope (selected during
+   *  picking, or seated during a live session) is locked to "Offline only".
+   *  When this is true the Coffee provider toggle locks to LOCAL — a single
+   *  protected bot forces the whole table offline, matching the "🔒 This
+   *  session will run fully offline" notice the picker already shows. */
+  const coffeeAnyOfflineProtected = useMemo(() => {
+    for (const id of coffeeActiveBotIds) {
+      const bot = coffeeBotsById.get(id);
+      if (bot && bot.online_enabled === 0) return true;
+    }
+    return false;
+  }, [coffeeActiveBotIds, coffeeBotsById]);
+  // Keep the actual `coffeeProvider` value in sync with the visible lock so
+  // every API request the picker emits reflects what the toggle shows. The
+  // server still bot-downgrades online→local for protected speakers, but
+  // belt-and-suspenders: never let "openai" leak into a body for a session
+  // that's visibly locked offline.
+  useEffect(() => {
+    if (coffeeAnyOfflineProtected && coffeeProvider !== "local") {
+      setCoffeeProvider("local");
+    }
+  }, [coffeeAnyOfflineProtected, coffeeProvider]);
   const coffeeMentionBotPicks = useMemo((): BotMentionPick[] => {
     const out: BotMentionPick[] = [];
     const seen = new Set<string>();
@@ -16870,6 +17208,17 @@ function HomeContent(): React.JSX.Element {
     Boolean(selectedBotId) &&
     (canvasBotSwitchTransitioning || sandboxBotStatusBusy);
   const showCanvasBotSwitchOverlay = canvasBotSwitchOverlayPhase !== "hidden";
+  const showConversationSurfaceLoading =
+    conversationSurfaceLoading &&
+    (view === "chat" || view === "sandbox");
+  const showMessagesFrameStateLoadingOverlay =
+    showCanvasBotSwitchOverlay || showConversationSurfaceLoading;
+  const messagesFrameStateLoadingLabel = showConversationSurfaceLoading
+    ? "Loading conversation..."
+    : "Switching bot profile...";
+  const messagesFrameStateLoadingKind = showConversationSurfaceLoading
+    ? "conversation"
+    : "bot-switch";
   // Hero override is drag-only — the Prism triangle replaces a bot glyph
   // only while the user is actively pressing/touching the slider thumb.
   // When a bot is committed, the lens unmounts and the bot accent takes
@@ -17441,11 +17790,15 @@ function HomeContent(): React.JSX.Element {
   // `detail` / `selectedId` — so manual thread-open still works.
   useEffect(() => {
     if (view !== "sandbox" && view !== "chat") return;
+    conversationSurfaceLoadingTokenRef.current += 1;
+    conversationSurfaceLoadingStartedAtRef.current = null;
+    setConversationSurfaceLoading(false);
     setSelectedId(null);
     setDetail(null);
     setSessionOpinion(null);
     setBotOpinion(null);
     setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
     if (view === "chat") {
       setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
       chatSummaryRefreshMarkerRef.current = null;
@@ -17742,35 +18095,83 @@ function HomeContent(): React.JSX.Element {
   }
   async function refreshConversation(id: string): Promise<void> {
     clearConversationUnread(id);
-    const d = await api<{ conversation: ConversationDetail; opinion?: SessionOpinion; botOpinion?: BotOpinion }>(
-      `/api/conversations/${id}`
-    );
-    setDetail(applyExplicitAskQuestionFallback(d.conversation));
-    setSessionOpinion(d.opinion ?? null);
-    setBotOpinion(d.botOpinion ?? null);
-    setSelectedId(id);
-    // Sync the composer's bot dropdown to match whoever was last active
-    // in the chat we're switching into. Without this, picking a chat
-    // where Spongebob last spoke still shows "Default" in the dropdown,
-    // and the user's next send goes to Default by accident.
-    //
-    // Priority order:
-    //   - hasAssistantReply: the conversation has a real history; use
-    //     lastBotId (which is null when Default was the last to speak,
-    //     collapsing the dropdown to "Default" — correct).
-    //   - else: no replies yet (edge case from a failed send), fall
-    //     back to the locked botId so the dropdown reflects the user's
-    //     original intent.
-    const nextPickedBotId = d.conversation.mode === "chat"
-      ? null
-      : d.conversation.hasAssistantReply
-        ? d.conversation.lastBotId
-        : d.conversation.botId;
-    setSelectedBotId(nextPickedBotId);
-    if (nextPickedBotId) {
-      await refreshBotMemories(nextPickedBotId);
-    } else {
-      setBotMemories([]);
+    const sameSurface =
+      selectedId === id && detail != null && detail.id === id;
+    const previousSelectedId = selectedId;
+    const previousDetail = detail;
+    const previousSessionOpinion = sessionOpinion;
+    const previousBotOpinion = botOpinion;
+    let conversationLoadingToken: number | null = null;
+
+    if (!sameSurface) {
+      conversationLoadingToken = conversationSurfaceLoadingTokenRef.current + 1;
+      conversationSurfaceLoadingTokenRef.current = conversationLoadingToken;
+      conversationSurfaceLoadingStartedAtRef.current = Date.now();
+      setConversationSurfaceLoading(true);
+      setSelectedId(id);
+      setDetail(null);
+      setSessionOpinion(null);
+      setBotOpinion(null);
+    }
+
+    try {
+      const d = await api<{ conversation: ConversationDetail; opinion?: SessionOpinion; botOpinion?: BotOpinion }>(
+        `/api/conversations/${id}`
+      );
+      if (selectedIdRef.current !== id) {
+        return;
+      }
+      setDetail(applyExplicitAskQuestionFallback(d.conversation));
+      setSessionOpinion(d.opinion ?? null);
+      setBotOpinion(d.botOpinion ?? null);
+      setSelectedId(id);
+      // Sync the composer's bot dropdown to match whoever was last active
+      // in the chat we're switching into. Without this, picking a chat
+      // where Spongebob last spoke still shows "Default" in the dropdown,
+      // and the user's next send goes to Default by accident.
+      //
+      // Priority order:
+      //   - hasAssistantReply: the conversation has a real history; use
+      //     lastBotId (which is null when Default was the last to speak,
+      //     collapsing the dropdown to "Default" — correct).
+      //   - else: no replies yet (edge case from a failed send), fall
+      //     back to the locked botId so the dropdown reflects the user's
+      //     original intent.
+      const nextPickedBotId = d.conversation.mode === "chat"
+        ? null
+        : d.conversation.hasAssistantReply
+          ? d.conversation.lastBotId
+          : d.conversation.botId;
+      setSandboxGridSelectedBotId(null);
+      setSelectedBotId(nextPickedBotId);
+      if (nextPickedBotId) {
+        await refreshBotMemories(nextPickedBotId);
+      } else {
+        setBotMemories([]);
+      }
+    } catch (err) {
+      if (!sameSurface && selectedIdRef.current === id) {
+        setSelectedId(previousSelectedId);
+        setDetail(previousDetail);
+        setSessionOpinion(previousSessionOpinion);
+        setBotOpinion(previousBotOpinion);
+      }
+      throw err;
+    } finally {
+      if (conversationLoadingToken !== null) {
+        const startedAt = conversationSurfaceLoadingStartedAtRef.current ?? Date.now();
+        const elapsed = Date.now() - startedAt;
+        const remaining = Math.max(0, CONVERSATION_SURFACE_LOADING_MIN_MS - elapsed);
+        if (remaining > 0) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(() => resolve(), remaining);
+          });
+        }
+        if (conversationSurfaceLoadingTokenRef.current === conversationLoadingToken) {
+          conversationSurfaceLoadingStartedAtRef.current = null;
+          setConversationSurfaceLoading(false);
+        }
+      }
     }
   }
   async function refreshConversationTitleAfterLeave(conversationId: string): Promise<void> {
@@ -17826,6 +18227,7 @@ function HomeContent(): React.JSX.Element {
       ...d.settings,
       displayName,
       composerWritingAssist: d.settings.composerWritingAssist !== false,
+      fallbackModelMessageStripe: d.settings.fallbackModelMessageStripe !== false,
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
         : [],
@@ -17849,11 +18251,26 @@ function HomeContent(): React.JSX.Element {
           : "",
       lenientLocalFallbackModel,
       lenientLocalImageFallbackModel,
+      comfyUiWorkflows: Array.isArray(d.settings.comfyUiWorkflows)
+        ? (d.settings.comfyUiWorkflows as ComfyUiWorkflowRegistration[])
+        : [],
       devMemoriesEnabled: d.settings.devMemoriesEnabled === true,
       devMemoriesText:
         typeof d.settings.devMemoriesText === "string"
           ? d.settings.devMemoriesText
           : "",
+      prismDefaultLlmModel:
+        typeof d.settings.prismDefaultLlmModel === "string"
+          ? d.settings.prismDefaultLlmModel
+          : "",
+      prismImageToolLlmModel:
+        typeof d.settings.prismImageToolLlmModel === "string"
+          ? d.settings.prismImageToolLlmModel
+          : "",
+      ollamaAuxiliaryModel:
+        typeof d.settings.ollamaAuxiliaryModel === "string"
+          ? d.settings.ollamaAuxiliaryModel
+          : "llama3.2",
     });
     return { comfyUiHost };
   }
@@ -17908,6 +18325,23 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       setPanelError(
         err instanceof Error ? err.message : "Could not save this image default."
+      );
+      await refreshSettings();
+    }
+  }
+
+  async function persistPrismImageToolLlmModelField(rawFromSelect: string) {
+    if (!settings) return;
+    const stored = rawFromSelect.trim();
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ prismImageToolLlmModel: stored }),
+      });
+      setSettings((prev) => (prev ? { ...prev, prismImageToolLlmModel: stored } : prev));
+    } catch (err) {
+      setPanelError(
+        err instanceof Error ? err.message : "Could not save in-chat image LLM choice."
       );
       await refreshSettings();
     }
@@ -18139,6 +18573,22 @@ function HomeContent(): React.JSX.Element {
           `${invocation.primaryProvider}:${invocation.primaryModel} -> local:${invocation.fallbackModel}`,
       });
     }
+    const toolCallEvents = envelope.toolCalls ?? [];
+    for (const event of toolCallEvents) {
+      lines.push({
+        kind: "tool",
+        text: formatChatToolCallDebugLine(prefix, event),
+      });
+    }
+    if (envelope.pendingImageJob) {
+      lines.push({
+        kind: "tool",
+        text:
+          `${prefix} tool sendGeneratedImage queued — pending image job ` +
+          `${envelope.pendingImageJob.jobId} ` +
+          `(conversation ${envelope.pendingImageJob.conversationId ?? "incognito"})`,
+      });
+    }
     return lines;
   }
   function captureFallbackMessageIdFromEnvelope(envelope: ChatPostEnvelope): void {
@@ -18172,7 +18622,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  /** Chat Mode: never load the global multi-bot mix into the Images grid. */
+  /** Zen mode: never load the global multi-bot mix into the Images grid. */
   async function refreshImagesChatGallery(): Promise<void> {
     if (chatScopedGalleryBotId) {
       await refreshImages(chatScopedGalleryBotId);
@@ -18504,7 +18954,10 @@ function HomeContent(): React.JSX.Element {
       : undefined;
     const mode: "chat" | "sandbox" =
       isChatMode || privateForSend ? "chat" : "sandbox";
-    const providerForSend = settings?.preferredProvider;
+    // Use the effective provider so a chat with an offline-only bot never
+    // even SENDS "openai" — the API would have downgraded it anyway, but
+    // matching the visible LOCAL lock keeps the request body honest.
+    const providerForSend = effectivePreferredProvider;
     const modelChoice = providerForSend
       ? visibleModelChoiceForProvider(
           settings,
@@ -18617,6 +19070,10 @@ function HomeContent(): React.JSX.Element {
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
         const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
         setDetail(patchedConversation);
+        wirePendingImageJobFromEnvelope(d, {
+          stillViewing: true,
+          activeConversationId: patchedConversation.id,
+        });
         setSessionOpinion(d.opinion ?? null);
         setBotOpinion(d.botOpinion ?? null);
         editedConversation = patchedConversation;
@@ -18648,6 +19105,10 @@ function HomeContent(): React.JSX.Element {
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
         const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
         setDetail(patchedConversation);
+        wirePendingImageJobFromEnvelope(d, {
+          stillViewing: true,
+          activeConversationId: patchedConversation.id,
+        });
         setSessionOpinion(d.opinion ?? null);
         setBotOpinion(d.botOpinion ?? null);
         editedConversation = patchedConversation;
@@ -18941,6 +19402,90 @@ function HomeContent(): React.JSX.Element {
     return false;
   }
 
+  function clearPendingImageJobPoll(jobId: string) {
+    const handle = pendingImageJobPollTimersRef.current.get(jobId);
+    if (handle !== undefined) {
+      window.clearInterval(handle);
+      pendingImageJobPollTimersRef.current.delete(jobId);
+    }
+  }
+
+  function startPendingImageJobPoll(jobId: string, conversationId: string) {
+    clearPendingImageJobPoll(jobId);
+    const tick = async () => {
+      try {
+        const poll = await api<{
+          ok: true;
+          status: "running" | "succeeded" | "failed";
+          messages?: Message[];
+          error?: string;
+        }>(`/api/image-jobs/${encodeURIComponent(jobId)}`);
+        if (poll.status === "running") return;
+        clearPendingImageJobPoll(jobId);
+        setComposerImageJobOrb((current) => (current?.jobId === jobId ? null : current));
+        if (poll.status === "failed") {
+          setError(poll.error ?? "Image generation did not finish.");
+          appendDevChatDebugLines([
+            {
+              kind: "tool",
+              text:
+                `[poll] tool sendGeneratedImage: failed — jobId=${jobId}` +
+                (poll.error ? ` — ${poll.error}` : ""),
+            },
+          ]);
+          return;
+        }
+        const incoming = poll.messages ?? [];
+        appendDevChatDebugLines([
+          {
+            kind: "tool",
+            text:
+              `[poll] tool sendGeneratedImage: succeeded — jobId=${jobId} — ` +
+              `${incoming.length} new message(s) attached`,
+          },
+        ]);
+        if (incoming.length === 0) return;
+        setDetail((current) => {
+          if (!current || current.id !== conversationId) return current;
+          const seen = new Set(current.messages.map((m) => m.id));
+          const toAdd = incoming.filter((m) => !seen.has(m.id));
+          if (toAdd.length === 0) return current;
+          return {
+            ...current,
+            messages: [...current.messages, ...toAdd],
+            hasAssistantReply: true,
+          };
+        });
+      } catch {
+        clearPendingImageJobPoll(jobId);
+        setComposerImageJobOrb((current) => (current?.jobId === jobId ? null : current));
+      }
+    };
+    const handle = window.setInterval(() => void tick(), 850);
+    pendingImageJobPollTimersRef.current.set(jobId, handle);
+    void tick();
+  }
+
+  function wirePendingImageJobFromEnvelope(
+    envelope: ChatPostEnvelope,
+    opts: { stillViewing: boolean; activeConversationId: string | null }
+  ) {
+    if (!opts.stillViewing || !envelope.pendingImageJob) return;
+    const convId =
+      envelope.pendingImageJob.conversationId ?? envelope.conversation.id;
+    if (
+      opts.activeConversationId !== null &&
+      convId !== opts.activeConversationId
+    ) {
+      return;
+    }
+    setComposerImageJobOrb({
+      jobId: envelope.pendingImageJob.jobId,
+      conversationId: convId,
+    });
+    startPendingImageJobPoll(envelope.pendingImageJob.jobId, convId);
+  }
+
   async function sendMessage(
     e: React.FormEvent | React.KeyboardEvent<HTMLTextAreaElement | HTMLFormElement>,
     options: {
@@ -19129,6 +19674,10 @@ function HomeContent(): React.JSX.Element {
           hardResetChatArchiveStateForConversation(d.conversation.id);
         }
         setDetail(applyExplicitAskQuestionFallback(d.conversation));
+        wirePendingImageJobFromEnvelope(d, {
+          stillViewing: stillViewingRequest,
+          activeConversationId: d.conversation.id,
+        });
         setSessionOpinion(d.opinion ?? null);
         setBotOpinion(d.botOpinion ?? null);
         setSelectedId(d.conversation.id);
@@ -19525,6 +20074,48 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
+  function renderImageJobOrbDock(): React.ReactNode {
+    const rail = getComposerChipRail();
+    if (rail?.kind === "askquestion" && rail.collapsed) return null;
+    if (!composerImageJobOrb || !detail || detail.id !== composerImageJobOrb.conversationId) {
+      return null;
+    }
+    const rawHex = activeBot?.color?.trim();
+    const accentHex = rawHex
+      ? normalizeAccentForTheme(rawHex, resolvedTheme)
+      : resolvedTheme === "light"
+        ? "#64748b"
+        : "#94a3b8";
+    const shadeTarget = resolvedTheme === "light" ? "#ffffff" : "#000000";
+    const shade = mixHex(accentHex, shadeTarget, 0.38);
+    const bubbleStyle = {
+      "--memory-bubble-size": "52px",
+      "--memory-bubble-color": shade,
+      "--memory-bubble-source-color": accentHex,
+      "--memory-bubble-ink": pickReadableText(shade),
+      "--memory-bubble-glow": accentHex,
+      "--memory-bubble-tilt": "0deg",
+      "--memory-bubble-z": "6",
+      "--memory-bubble-font-size": "1.25rem",
+      "--memory-bubble-line-count": 1,
+    } as React.CSSProperties;
+    return (
+      <div className={`${styles.askQuestionRecallBubbleDock} ${styles.imageJobOrbDock}`}>
+        <div
+          className={`${styles.memoryBubble} ${styles.askQuestionRecallBubble}`}
+          style={bubbleStyle}
+          aria-label="Image generating"
+          title="Image is generating…"
+          role="status"
+        >
+          <span className={styles.imageJobOrbGlyphWrap} aria-hidden="true">
+            <ImageGlyph className={styles.imageJobOrbGlyph} strokeWidth={2} size={22} />
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   function sendRandomConversationNudge(): void {
     if (pendingReply) return;
     const rail =
@@ -19572,7 +20163,6 @@ function HomeContent(): React.JSX.Element {
       chatAssistantTypingMechanicsActive &&
       detail?.id &&
       pendingAskQuestionState &&
-      pendingAskQuestionState.assistantMessageId === latestAssistantMessageId &&
       pendingAskQuestionAssistantMessage &&
       (() => {
         if (!pendingAskQuestionAssistantMessage) return false;
@@ -19894,7 +20484,7 @@ function HomeContent(): React.JSX.Element {
         method: "POST",
         body: JSON.stringify({
           text: currentDraft,
-          forceLocal: settings?.preferredProvider === "local",
+          forceLocal: effectivePreferredProvider === "local",
         }),
       });
       if (typeof response.text !== "string" || response.text.trim().length === 0) {
@@ -20665,6 +21255,22 @@ function HomeContent(): React.JSX.Element {
     const a = document.createElement("a"); a.href = url; a.download = `chat-${selectedId}.md`; a.click(); URL.revokeObjectURL(url);
   }
 
+  async function exportCoffeeSession(conversation: CoffeeConversationState | null): Promise<void> {
+    if (!conversation) return;
+    const data = await api<{ markdown: string }>(
+      `/api/conversations/${encodeURIComponent(conversation.id)}/export`,
+      { method: "POST", body: "{}" }
+    );
+    const slug = slugifyFileToken(conversation.title || "coffee-session");
+    const blob = new Blob([data.markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${slug}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   function slugifyFileToken(input: string): string {
     return input
       .toLowerCase()
@@ -21010,6 +21616,7 @@ function HomeContent(): React.JSX.Element {
   const resetEmptyStateBotSelection = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
     setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
   }, [cancelPendingEmptyStateSearchOpen]);
 
   const handleEmptyStateBackgroundClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -21029,6 +21636,7 @@ function HomeContent(): React.JSX.Element {
   const openEmptyStateBotSearch = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
     setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
     if (botPickerReturnEndAtRef.current > Date.now()) return;
     if (emptyStateSearchActive) {
       setEmptyStateSearchOpen(false);
@@ -21043,7 +21651,12 @@ function HomeContent(): React.JSX.Element {
     }
     setHueFilterCenter(null);
     setEmptyStateSearchOpen(true);
-  }, [cancelPendingEmptyStateSearchOpen, emptyStateSearchActive, hueFilterCenter, startBotPickerReturnToAll]);
+  }, [
+    cancelPendingEmptyStateSearchOpen,
+    emptyStateSearchActive,
+    hueFilterCenter,
+    startBotPickerReturnToAll,
+  ]);
 
   const closeEmptyStateBotSearch = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
@@ -21075,6 +21688,7 @@ function HomeContent(): React.JSX.Element {
 
   const commitEmptyStateBotSelection = useCallback((botId: string) => {
     if (selectedBotId === botId) {
+      setSandboxGridSelectedBotId(botId);
       focusDraftInput();
       return;
     }
@@ -21088,6 +21702,7 @@ function HomeContent(): React.JSX.Element {
     // slider while `shellStyle` lets the selected bot own the interface
     // color, so the hue lens no longer competes with the bot accent.
     setSelectedBotId(botId);
+    setSandboxGridSelectedBotId(botId);
     setEmptyStateSearchOpen(false);
     setEmptyStateBotNameFilter("");
     focusDraftInput();
@@ -21096,6 +21711,7 @@ function HomeContent(): React.JSX.Element {
   const openEmptyStateBotSearchFromTyping = useCallback((typedCharacter: string) => {
     cancelPendingEmptyStateSearchOpen();
     setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
     setEmptyStateBotNameFilter((current) =>
       current.length > 0 ? `${current}${typedCharacter}` : typedCharacter
     );
@@ -22934,6 +23550,9 @@ function HomeContent(): React.JSX.Element {
   }
 
   function performShowAllBotsView(): void {
+    setSelectedId(null);
+    setDetail(null);
+    setChatBotOverride(undefined);
     closeEmptyStateBotSearch();
     startBotPickerReturnToAll();
     setSelectedBotId(null);
@@ -24354,7 +24973,9 @@ function HomeContent(): React.JSX.Element {
       const { localModelId, openAiModelId } = resolveImagesPanelImageModels();
       // Match Images panel + chat header: anything other than explicit "openai"
       // counts as LOCAL for routing (same as `preferredProvider !== "openai"`).
-      if (settings?.preferredProvider === "openai") {
+      // Uses the EFFECTIVE provider so the body honors the offline-only lock
+      // when the active chat bot is protected.
+      if (effectivePreferredProvider === "openai") {
         body.preferredProvider = "openai";
         body.model = openAiModelId;
       } else if (settings) {
@@ -25062,7 +25683,6 @@ function HomeContent(): React.JSX.Element {
     headerGlowIndex: number
   ): React.JSX.Element => {
     const isExpanded = expandedConversationGroupKey === group.key;
-    const hasActiveConversation = selectedId !== null;
     const nestedListId = conversationGroupNestedListId(group.key);
     const headerButtonId = conversationGroupHeaderButtonId(group.key);
     const groupNameLabelId = `${headerButtonId}-name`;
@@ -25104,16 +25724,6 @@ function HomeContent(): React.JSX.Element {
                 return;
               }
               disarmDelete();
-              // Only sync sidebar group selection into shell accent when
-              // no conversation is currently active. While a chat is open,
-              // group toggles should be navigation-only and not restyle the shell.
-              if (!hasActiveConversation) {
-                if (group.botId) {
-                  commitEmptyStateBotSelection(group.botId);
-                } else {
-                  resetEmptyStateToPrismHome();
-                }
-              }
               setExpandedConversationGroupKey((prev) =>
                 prev === group.key ? null : group.key
               );
@@ -25525,10 +26135,8 @@ function HomeContent(): React.JSX.Element {
     const canExport = Boolean(detail && selectedId);
     const selectedBotCanDelete = Boolean(activeBot && activeBot.delete_protected !== 1);
     const canDelete = Boolean((detail && selectedId) || selectedBotCanDelete);
-    const headerActionsDisabled =
-      !effectiveChatPresentation &&
-      detail != null &&
-      (!detail.hasAssistantReply || pendingReply);
+    /** Always allow header tools (Sandbox non-zen was the only case that disabled during first reply / pending). */
+    const headerActionsDisabled = false;
     const isMobileGear = viewportWidth <= PHONE_MENU_BREAKPOINT;
     const imageReadySurface = THEME_SURFACE_BG[resolvedTheme];
     const chatToolbarImageReadyChip =
@@ -25705,7 +26313,7 @@ function HomeContent(): React.JSX.Element {
               aria-label={
                 zenPresentationActive
                   ? "Exit focus layout"
-                  : "Focus layout — calmer Sandbox chrome"
+                  : "Focus layout — calmer Chat chrome"
               }
               aria-pressed={zenPresentationActive}
               data-glyph-tooltip={
@@ -26011,10 +26619,8 @@ function HomeContent(): React.JSX.Element {
     const showChatThemeButton = view === "chat" || view === "sandbox";
     const showSandboxHubButton = view === "chat" || view === "sandbox";
     const canMemoryActions = true;
-    const headerActionsDisabled =
-      !effectiveChatPresentation &&
-      detail != null &&
-      (!detail.hasAssistantReply || pendingReply);
+    /** Keep in sync with `renderChatOverflowGear` — header tools stay enabled during pending / first reply. */
+    const headerActionsDisabled = false;
 
     const menuStyle = {
       left: `${canvasToolsContextMenu.x}px`,
@@ -26375,9 +26981,9 @@ function HomeContent(): React.JSX.Element {
               onChange={(event) => persistDevDebugComposerEnabled(event.currentTarget.checked)}
             />
             <span>
-              <strong>Show Chat debug composer</strong>
+              <strong>Show Zen debug composer</strong>
               <small>
-                Adds a debug-only composer above Chat mode&apos;s normal composer. Send echoes text
+                Adds a debug-only composer above Zen mode&apos;s normal composer. Send echoes text
                 locally as an assistant reply and skips model calls.
               </small>
             </span>
@@ -27806,6 +28412,14 @@ function HomeContent(): React.JSX.Element {
                           </span>
                         </span>
                       </label>
+                      <p className={styles.muted} style={{ margin: "10px 0 0", maxWidth: 520 }}>
+                        When Prism can reach this address, each workflow <code>.json</code> under ComfyUI’s user
+                        folders appears in the <strong>Images</strong> model list. The usual <strong>Save</strong>{" "}
+                        (canvas / graph-editor) format is converted automatically using ComfyUI’s{" "}
+                        <code>/object_info</code> (or <code>/workflow_to_prompt</code> when your build has it);{" "}
+                        <strong>Save (API format)</strong> still works as-is. ComfyUI’s default port is often{" "}
+                        <code>8188</code>.
+                      </p>
                       <p className={styles.muted} style={{ margin: 0 }}>
                         Use Save in Settings when you are done — values stay in sync with the main form.
                       </p>
@@ -27848,6 +28462,58 @@ function HomeContent(): React.JSX.Element {
                 <div className={styles.settingsAboutModalBody}>
                   {settings && (
                     <div className={`${styles.form} ${styles.formInModal}`}>
+                      <div className={styles.settingsDefaultsModalPairRow}>
+                        <label>
+                          Preferred default Prism LLM (internal calls)
+                          <select
+                            value={(settings.prismDefaultLlmModel ?? "").trim()}
+                            onChange={(event) => {
+                              const next = event.target.value.trim();
+                              setSettings((previous) =>
+                                previous
+                                  ? { ...previous, prismDefaultLlmModel: next }
+                                  : previous
+                              );
+                            }}
+                          >
+                            <option value="">
+                              Auto — server auxiliary (
+                              {(settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"})
+                            </option>
+                            {prismInternalLlmCallOptions.map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.label}
+                                {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Preferred LLM for in-chat image requests
+                          <select
+                            value={(settings.prismImageToolLlmModel ?? "").trim()}
+                            onChange={(event) => {
+                              const next = event.target.value.trim();
+                              setSettings((previous) =>
+                                previous
+                                  ? { ...previous, prismImageToolLlmModel: next }
+                                  : previous
+                              );
+                              void persistPrismImageToolLlmModelField(next);
+                            }}
+                          >
+                            <option value="">
+                              Auto — use hub chat model (no override)
+                            </option>
+                            {prismImageToolLlmCallOptions.map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.label}
+                                {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
                       <div className={styles.settingsDefaultsModalPairRow}>
                         <label>
                           Preferred offline model (LOCAL hub)
@@ -27961,6 +28627,27 @@ function HomeContent(): React.JSX.Element {
                           </select>
                         </label>
                       </div>
+                      <label
+                        className={styles.checkbox}
+                        style={{ display: "block", marginTop: 10 }}
+                        title="When a reply used your lenient local copyright-fallback model, the assistant bubble gets a diagonal striped accent on the left."
+                      >
+                        <input
+                          type="checkbox"
+                          checked={settings.fallbackModelMessageStripe !== false}
+                          onChange={(event) =>
+                            setSettings((previous) =>
+                              previous
+                                ? {
+                                    ...previous,
+                                    fallbackModelMessageStripe: event.target.checked,
+                                  }
+                                : previous
+                            )
+                          }
+                        />
+                        Show checkerboard stripe on copyright-fallback replies
+                      </label>
                       <div className={styles.settingsDefaultsModalPairRow}>
                         <label>
                           Local default image model
@@ -28054,8 +28741,16 @@ function HomeContent(): React.JSX.Element {
                         model instead of a fixed alphabetical order. The image copyright fallback is
                         used when the primary image request is blocked for policy reasons (local
                         retry, or switching from online to local when configured).{" "}
-                        <strong>Local and online image defaults save as soon as you change them.</strong>{" "}
-                        Chat hub defaults above still use Save on the main Settings screen.
+                        <strong>
+                          The Prism internal LLM (titles, summaries, memory hints, Coffee routing,
+                          image prompt suggestions) uses your choice above, or the server auxiliary
+                          model when set to Auto.
+                        </strong>{" "}
+                        <strong>
+                          In-chat image-request LLM and local/online image defaults save as soon as
+                          you change them.
+                        </strong>{" "}
+                        Chat hub defaults and the Prism internal LLM still use Save on the main Settings screen.
                       </p>
                     </div>
                   )}
@@ -28098,8 +28793,8 @@ function HomeContent(): React.JSX.Element {
                     PRISM is a playful, personal AI workspace: surreal in style, practical in interaction.
                   </p>
                   <p>
-                    The Hub currently centers two modes: Chat for grounded conversation and Sandbox for
-                    open-ended exploration.
+                    The Hub currently centers Zen for grounded conversation and Chat for open-ended
+                    exploration.
                   </p>
                   <p>
                     Bots let you shape personality, creativity, and response depth without permanently changing
@@ -28704,13 +29399,16 @@ function HomeContent(): React.JSX.Element {
                       role="switch"
                       aria-checked={newBotOnlineEnabled}
                       data-enabled={newBotOnlineEnabled ? "true" : undefined}
+                      data-locked={!newBotOnlineEnabled ? "true" : undefined}
                       onClick={() => setNewBotOnlineEnabled((enabled) => !enabled)}
                     >
-                      <strong>{newBotOnlineEnabled ? "Allowed" : "Offline only"}</strong>
+                      <strong>
+                        {newBotOnlineEnabled ? "Allowed" : "🔒 Offline only — Protected"}
+                      </strong>
                       <small>
                         {newBotOnlineEnabled
                           ? "This bot may use its preferred online model."
-                          : "Online model preference is ignored for this bot."}
+                          : "This bot will refuse online routing. Flip Allowed to lift the protection."}
                       </small>
                     </button>
                   </label>
@@ -29629,9 +30327,11 @@ function HomeContent(): React.JSX.Element {
         // ONLINE → OpenAI images; LOCAL → Ollama when at least one image-capable
         // checkpoint appears in the catalog (same heuristic as the header picker).
         const hasLocalImageModels = localImageModelCatalogEntries.length > 0;
+        // Honors the offline-only lock — when the active chat bot is
+        // protected, we evaluate "can generate?" against LOCAL only.
         const canGenerate =
-          settings?.preferredProvider === "openai" ||
-          (settings?.preferredProvider === "local" && hasLocalImageModels);
+          effectivePreferredProvider === "openai" ||
+          (effectivePreferredProvider === "local" && hasLocalImageModels);
         // PRISM (general) uses CSS `--images-panel-*` + rainbow rail (see
         // `.panelImages[data-image-scope="general"]`). Per-bot drill-down keeps
         // editor-bot ink wash via inline vars below.
@@ -29703,13 +30403,13 @@ function HomeContent(): React.JSX.Element {
             } as React.CSSProperties)
           : undefined;
         const genOverlayPrimary =
-          settings?.preferredProvider === "openai"
+          effectivePreferredProvider === "openai"
             ? "Creating image…"
             : imageGenLocalInflight && imageGenWarmupHintVisible
               ? "Warming up…"
               : "Generating…";
         const genOverlaySecondary =
-          settings?.preferredProvider === "openai"
+          effectivePreferredProvider === "openai"
             ? "Contacting OpenAI…"
             : imageGenLocalInflight && imageGenWarmupHintVisible
               ? "The image engine may still be loading the model into GPU memory — first runs after idle often take 1–5 minutes."
@@ -29717,7 +30417,7 @@ function HomeContent(): React.JSX.Element {
         const genModelLine = (() => {
           if (!settings) return null;
           const { localModelId, openAiModelId } = resolveImagesPanelImageModels();
-          const useOpenAi = settings.preferredProvider === "openai";
+          const useOpenAi = effectivePreferredProvider === "openai";
           const headerPick = useOpenAi
             ? imageGenModelChoiceByProvider.openai?.trim() ?? ""
             : imageGenModelChoiceByProvider.local?.trim() ?? "";
@@ -29824,49 +30524,11 @@ function HomeContent(): React.JSX.Element {
             ) : null}
             {canGenerate && view !== "chat" ? (
               <p className={styles.muted} role="note">
-                With a bot active in Chat or Sandbox, new images save under that bot.
+                With a bot active in Zen or Chat, new images save under that bot.
                 Otherwise they are stored as{" "}
                 <strong>PRISM (general)</strong> — open{" "}
                 <strong>Browse by bot</strong> to filter them.
               </p>
-            ) : null}
-            {canGenerate && imagePanelScope === "bot" && imagePanelBot ? (
-              <>
-                {imagePromptSuggestionsBusy ? (
-                  <p
-                    className={`${styles.muted} ${styles.imagePromptSuggestionsHint}`}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    Suggested prompts…
-                  </p>
-                ) : null}
-                {!imagePromptSuggestionsBusy && imagePromptBubbleLayouts.length > 0 ? (
-                  <ul
-                    className={`${styles.memoryBubbleCloud} ${styles.imagePromptBubbleCloud}`}
-                    aria-label="Suggested image prompts"
-                  >
-                    {imagePromptBubbleLayouts.map((bubble, idx) => (
-                      <li key={`${idx}-${bubble.text.slice(0, 48)}`} role="presentation">
-                        <button
-                          type="button"
-                          disabled={busy || imageGenInflightHere > 0}
-                          className={`${styles.memoryBubble} ${styles.imagePromptBubble}`}
-                          style={bubble.style}
-                          data-clickable="true"
-                          aria-label={`Use suggested prompt: ${bubble.text}`}
-                          onClick={() => {
-                            setImagePrompt(bubble.text);
-                            void runImageGeneration(bubble.text);
-                          }}
-                        >
-                          <p>{bubble.text}</p>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </>
             ) : null}
             {imageBotDirectoryEntries.length > 0 && view !== "chat" ? (
               <>
@@ -29926,7 +30588,7 @@ function HomeContent(): React.JSX.Element {
                         aria-label="View image larger"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={img.displayUrl ?? img.url} alt={img.prompt} />
+                        <img src={galleryTileImageSrc(img)} alt={img.prompt} />
                       </button>
                       <div className={styles.imageThumbActions}>
                         <span
@@ -30118,6 +30780,13 @@ function HomeContent(): React.JSX.Element {
       coffeeInterruptionCueTimerRef.current = null;
     }
     setCoffeeLiveInterruptionCue(null);
+    if (coffeeReplayTimerRef.current) {
+      clearTimeout(coffeeReplayTimerRef.current);
+      coffeeReplayTimerRef.current = null;
+    }
+    setCoffeeReplayActive(false);
+    setCoffeeReplayPlaying(false);
+    setCoffeeReplayMessageIndex(0);
     setCoffeeTurnRhythmState("idle");
   };
   const queueCoffeeReveal = (args: {
@@ -30221,6 +30890,49 @@ function HomeContent(): React.JSX.Element {
     (session.botGroupIds ?? [])
       .map((botId) => coffeeBotsById.get(botId))
       .filter((bot): bot is Bot => Boolean(bot));
+  const coffeeGroupBots = (group: Pick<CoffeeGroupState, "botGroupIds">): Bot[] =>
+    group.botGroupIds
+      .map((botId) => coffeeBotsById.get(botId))
+      .filter((bot): bot is Bot => Boolean(bot));
+  const coffeeGroupVisualStyle = (
+    group: Pick<CoffeeGroupState, "botGroupIds">
+  ): React.CSSProperties => {
+    const colors = group.botGroupIds
+      .map((botId) => coffeeBotsById.get(botId)?.color)
+      .filter((color): color is string => Boolean(color))
+      .map((color) => normalizeAccentForTheme(color, resolvedTheme));
+    const gradientColors = colors.length > 0 ? colors : ["rgba(255,255,255,0.22)", "rgba(255,255,255,0.06)"];
+    const step = gradientColors.length > 1 ? 100 / (gradientColors.length - 1) : 100;
+    const stops = gradientColors
+      .map((color, index) => `${color} ${Math.round(index * step)}%`)
+      .join(", ");
+    return {
+      "--coffee-group-gradient": `linear-gradient(135deg, ${stops})`,
+    } as React.CSSProperties;
+  };
+  const coffeeGroupMoodScore = (group: CoffeeGroupState): number => {
+    const raw = group.moodSummary?.score;
+    return typeof raw === "number" && Number.isFinite(raw)
+      ? Math.max(0, Math.min(100, Math.round(raw)))
+      : 50;
+  };
+  const coffeeGroupMoodLabel = (group: CoffeeGroupState): string => {
+    const raw = group.moodSummary?.label;
+    return typeof raw === "string" && raw.trim().length > 0 ? raw : "Warming up";
+  };
+  const randomCoffeeSettings = (): CoffeeSessionSettings => {
+    const pick = <T,>(values: readonly T[]): T => values[Math.floor(Math.random() * values.length)] ?? values[0]!;
+    return normalizeCoffeeSessionSettings({
+      responseLength: pick(["brief", "balanced", "detailed", "roomy"] as const),
+      responseDelayBias: Math.round(Math.random() * 100),
+      tableEnergy: pick(["still", "relaxed", "buzzy", "theatre"] as const),
+      crossTalk: pick(["rare", "normal", "chatty"] as const),
+      breathingRoom: Math.round(Math.random() * 100),
+      stayOnThread: Math.random() >= 0.35,
+      givePlayerLastWord: Math.random() >= 0.35,
+      memoryCallbacks: pick(["now", "this-session", "recent"] as const),
+    });
+  };
   const coffeeSearchTerm = coffeeSearch.trim().toLowerCase();
   const coffeeFilteredBots = coffeeBotsLibrary.filter((bot) => {
     if (!coffeeSearchTerm) return true;
@@ -30236,6 +30948,7 @@ function HomeContent(): React.JSX.Element {
     abortCoffeeRequests();
     setCoffeeConversation(null);
     setCoffeeSelectedSessionId(null);
+    setCoffeeSelectedGroupId(null);
     setCoffeeSelectedSeatBotIds(emptyCoffeeSeatBotIds());
     setCoffeeDraft("");
     setCoffeeBusy(false);
@@ -30244,6 +30957,30 @@ function HomeContent(): React.JSX.Element {
     setCoffeeError(null);
     closeCoffeeTranscript();
     setCoffeeArrivedBotIds([]);
+    assignCoffeeSessionEndsAtMs(null);
+    setCoffeeSessionPhase("selecting");
+  };
+  const openCoffeeGroup = (group: CoffeeGroupState) => {
+    clearCoffeeArrivalTimer();
+    clearCoffeeLoopTimer();
+    resetCoffeeRhythm();
+    abortCoffeeRequests();
+    setCoffeeConversation(null);
+    setCoffeeSelectedSessionId(null);
+    setCoffeeSelectedGroupId(group.id);
+    setCoffeeSelectedSeatBotIds(group.coffeeSeatBotIds);
+    setCoffeeSessionSettings(normalizeCoffeeSessionSettings(group.coffeeSettings));
+    setCoffeeSettingsDraft(normalizeCoffeeSessionSettings(group.coffeeSettings));
+    setCoffeeGroupNameDraft(group.name);
+    setCoffeeSelectedPresetId(group.presetMode === "auto" ? COFFEE_AUTO_PRESET_ID : "");
+    setCoffeeSelectedDurationMinutes(COFFEE_DEFAULT_SESSION_DURATION_MINUTES);
+    setCoffeeDraft("");
+    setCoffeeBusy(false);
+    setCoffeeAutoBusy(false);
+    setCoffeeAutoplayPausedValue(false);
+    setCoffeeError(null);
+    closeCoffeeTranscript();
+    setCoffeeArrivedBotIds(group.botGroupIds);
     assignCoffeeSessionEndsAtMs(null);
     setCoffeeSessionPhase("selecting");
   };
@@ -30292,7 +31029,7 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       coffeeArrivalTimerRef.current = setTimeout(() => {
-        const endsAt = Date.now() + COFFEE_SESSION_DURATION_MS;
+        const endsAt = Date.now() + coffeeSessionDurationMs(conversation);
         assignCoffeeSessionEndsAtMs(endsAt);
         setCoffeeSessionPhase("live");
         scheduleCoffeeAutonomousTurn(conversation.id, endsAt, true);
@@ -30353,6 +31090,189 @@ function HomeContent(): React.JSX.Element {
       setCoffeeBusy(false);
     }
   };
+  const createCoffeeGroupFromSelection = async (): Promise<CoffeeGroupState | null> => {
+    if (coffeeBusy || !coffeeSelectionValid) return null;
+    setCoffeeBusy(true);
+    setCoffeeError(null);
+    try {
+      const selectedBots = coffeeSelectedBotIds
+        .map((id) => coffeeBotsById.get(id))
+        .filter((bot): bot is Bot => Boolean(bot));
+      const fallbackName = selectedBots.length > 0
+        ? `Coffee with ${selectedBots.map((bot) => bot.name).join(", ")}`
+        : "Coffee Group";
+      const response = await api<{ ok: true; group: CoffeeGroupState }>("/api/coffee/groups", {
+        method: "POST",
+        body: JSON.stringify({
+          name: fallbackName,
+          groupBotIds: coffeeSelectedSeatBotIds,
+          coffeeSettings: coffeeSessionSettings,
+        }),
+      });
+      setCoffeeGroups((current) => [response.group, ...current.filter((group) => group.id !== response.group.id)]);
+      openCoffeeGroup(response.group);
+      void refreshCoffeeGroups();
+      return response.group;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to create Coffee Group.");
+      return null;
+    } finally {
+      setCoffeeBusy(false);
+    }
+  };
+  const createCoffeeGroupFromCurrentSession = async (): Promise<CoffeeGroupState | null> => {
+    if (!coffeeConversation || coffeeBusy) return null;
+    const groupBotIds =
+      coffeeConversation.coffeeSeatBotIds ??
+      coffeeSeatsFromBotIds(coffeeConversation.botGroupIds ?? []);
+    if (groupBotIds.filter((id): id is string => typeof id === "string").length < COFFEE_GROUP_MIN_SIZE_CLIENT) {
+      setCoffeeError("This Coffee Session does not have enough seated bots to save as a group.");
+      return null;
+    }
+    setCoffeeBusy(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{ ok: true; group: CoffeeGroupState }>("/api/coffee/groups", {
+        method: "POST",
+        body: JSON.stringify({
+          name: coffeeConversation.title,
+          groupBotIds,
+          coffeeSettings: coffeeConversation.coffeeSettings ?? coffeeSessionSettings,
+        }),
+      });
+      setCoffeeGroups((current) => [response.group, ...current.filter((group) => group.id !== response.group.id)]);
+      openCoffeeGroup(response.group);
+      void refreshCoffeeGroups();
+      return response.group;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to save Coffee Group.");
+      return null;
+    } finally {
+      setCoffeeBusy(false);
+    }
+  };
+  const startCoffeeSessionFromGroup = async (
+    group = coffeeSelectedGroup
+  ): Promise<CoffeeConversationState | null> => {
+    if (!group || coffeeBusy) return null;
+    setCoffeeBusy(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{
+        ok: true;
+        conversation: CoffeeConversationState;
+        arrivalScenario: CoffeeArrivalScenario;
+      }>(`/api/coffee/groups/${encodeURIComponent(group.id)}/sessions`, {
+        method: "POST",
+        body: JSON.stringify({
+          durationMinutes: coffeeSelectedDurationMinutes,
+          ...(coffeeSelectedPresetId ? { presetId: coffeeSelectedPresetId } : {}),
+        }),
+      });
+      setCoffeeConversation(response.conversation);
+      setCoffeeSelectedGroupId(group.id);
+      setCoffeeSessionSettings(
+        normalizeCoffeeSessionSettings(response.conversation.coffeeSettings ?? group.coffeeSettings)
+      );
+      setCoffeeSelectedSessionId(response.conversation.id);
+      setCoffeeSelectedSeatBotIds(
+        response.conversation.coffeeSeatBotIds ??
+          coffeeSeatsFromBotIds(response.conversation.botGroupIds ?? group.botGroupIds)
+      );
+      setCoffeeAutoplayPausedValue(false);
+      await refreshConversations();
+      void refreshCoffeeGroups();
+      startCoffeeArrivalSequence(response.conversation, response.arrivalScenario);
+      return response.conversation;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to start Coffee Session.");
+      setCoffeeSessionPhase("selecting");
+      return null;
+    } finally {
+      setCoffeeBusy(false);
+    }
+  };
+  const openCoffeeSettingsModal = (group = coffeeSelectedGroup) => {
+    if (!group) return;
+    setCoffeeGroupNameDraft(group.name);
+    setCoffeeSettingsDraft(normalizeCoffeeSessionSettings(group.coffeeSettings));
+    setCoffeePresetNameDraft("");
+    setCoffeeSettingsModalOpen(true);
+  };
+  const applyCoffeeGroupSettings = async () => {
+    const group = coffeeSelectedGroup;
+    if (!group || coffeeSettingsSaving) return;
+    setCoffeeSettingsSaving(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{ ok: true; group: CoffeeGroupState }>(
+        `/api/coffee/groups/${encodeURIComponent(group.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: coffeeGroupNameDraft,
+            coffeeSettings: coffeeSettingsDraft,
+            presetMode: coffeeSelectedPresetId === COFFEE_AUTO_PRESET_ID ? "auto" : "manual",
+          }),
+        }
+      );
+      setCoffeeGroups((current) =>
+        current.map((item) => (item.id === response.group.id ? response.group : item))
+      );
+      setCoffeeSessionSettings(normalizeCoffeeSessionSettings(response.group.coffeeSettings));
+      setCoffeeSettingsDraft(normalizeCoffeeSessionSettings(response.group.coffeeSettings));
+      setCoffeeGroupNameDraft(response.group.name);
+      setCoffeeSettingsModalOpen(false);
+      void refreshCoffeeGroups();
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to save Coffee Group settings.");
+    } finally {
+      setCoffeeSettingsSaving(false);
+    }
+  };
+  const saveCoffeePresetFromDraft = async () => {
+    const name = coffeePresetNameDraft.trim();
+    if (!name || coffeeSettingsSaving) return;
+    setCoffeeSettingsSaving(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{ ok: true; preset: CoffeePresetState }>("/api/coffee/presets", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          coffeeSettings: coffeeSettingsDraft,
+        }),
+      });
+      setCoffeePresets((current) => [
+        ...current.filter((preset) => preset.id !== response.preset.id),
+        response.preset,
+      ]);
+      setCoffeeSelectedPresetId(response.preset.id);
+      setCoffeePresetNameDraft("");
+      void refreshCoffeePresets();
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to save Coffee preset.");
+    } finally {
+      setCoffeeSettingsSaving(false);
+    }
+  };
+  const deleteCoffeePresetFromList = async (presetId: string) => {
+    if (coffeeSettingsSaving) return;
+    setCoffeeSettingsSaving(true);
+    setCoffeeError(null);
+    try {
+      await api<{ ok: true }>(`/api/coffee/presets/${encodeURIComponent(presetId)}`, {
+        method: "DELETE",
+      });
+      setCoffeePresets((current) => current.filter((preset) => preset.id !== presetId));
+      setCoffeeSelectedPresetId((current) => (current === presetId ? "" : current));
+      void refreshCoffeePresets();
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to delete Coffee preset.");
+    } finally {
+      setCoffeeSettingsSaving(false);
+    }
+  };
   const openCoffeeSession = async (conversationId: string) => {
     if (coffeeBusy || coffeeAutoBusy) return;
     clearCoffeeArrivalTimer();
@@ -30369,6 +31289,7 @@ function HomeContent(): React.JSX.Element {
       }
       const groupIds = response.conversation.botGroupIds ?? [];
       setCoffeeConversation(response.conversation);
+      setCoffeeSelectedGroupId(response.conversation.coffeeGroupId ?? null);
       setCoffeeSessionSettings(
         normalizeCoffeeSessionSettings(response.conversation.coffeeSettings ?? undefined)
       );
@@ -30393,7 +31314,7 @@ function HomeContent(): React.JSX.Element {
     clearCoffeeLoopTimer();
     abortCoffeeRequests();
     const groupIds = coffeeConversation.botGroupIds ?? [];
-    const endsAt = Date.now() + COFFEE_SESSION_DURATION_MS;
+    const endsAt = Date.now() + coffeeSessionDurationMs(coffeeConversation);
     setCoffeeArrivedBotIds(groupIds);
     assignCoffeeSessionEndsAtMs(endsAt);
     setCoffeeSessionPhase("live");
@@ -30471,7 +31392,7 @@ function HomeContent(): React.JSX.Element {
         coffeeContinueAbortRef.current?.abort();
         setCoffeeAutoBusy(false);
       } else if (coffeeSessionPhase === "live") {
-        const endsAt = coffeeSessionEndsAtMs ?? Date.now() + COFFEE_SESSION_DURATION_MS;
+        const endsAt = coffeeSessionEndsAtMs ?? Date.now() + coffeeSessionDurationMs(coffeeConversation);
         assignCoffeeSessionEndsAtMs(endsAt);
         scheduleCoffeeAutonomousTurn(coffeeConversation.id, endsAt, true);
       }
@@ -30528,12 +31449,12 @@ function HomeContent(): React.JSX.Element {
     if (!activeConversation) {
       activeConversation = await createCoffeeSession({ startArrival: false });
       if (!activeConversation) return;
-      activeEndsAt = Date.now() + COFFEE_SESSION_DURATION_MS;
+      activeEndsAt = Date.now() + coffeeSessionDurationMs(activeConversation);
       assignCoffeeSessionEndsAtMs(activeEndsAt);
     } else if (coffeeSessionPhase === "preview") {
       abortCoffeeRequests();
       const groupIds = activeConversation.botGroupIds ?? [];
-      activeEndsAt = Date.now() + COFFEE_SESSION_DURATION_MS;
+      activeEndsAt = Date.now() + coffeeSessionDurationMs(activeConversation);
       setCoffeeArrivedBotIds(groupIds);
       assignCoffeeSessionEndsAtMs(activeEndsAt);
       setCoffeeSessionPhase("live");
@@ -30577,7 +31498,7 @@ function HomeContent(): React.JSX.Element {
         });
       }
       if (coffeeSessionPhase !== "finished") {
-        const endsAt = activeEndsAt ?? Date.now() + COFFEE_SESSION_DURATION_MS;
+        const endsAt = activeEndsAt ?? Date.now() + coffeeSessionDurationMs(response.conversation);
         assignCoffeeSessionEndsAtMs(endsAt);
         setCoffeeSessionPhase("live");
         const userLine = extractCoffeeUserLineFromTurnMessages(response.conversation.messages);
@@ -30626,6 +31547,30 @@ function HomeContent(): React.JSX.Element {
     setCoffeeAutoplayPausedValue(false);
     assignCoffeeSessionEndsAtMs(null);
   };
+  const startCoffeeReplay = () => {
+    if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    clearCoffeeLoopTimer();
+    abortCoffeeRequests();
+    setCoffeeReplayActive(true);
+    setCoffeeReplayPlaying(true);
+    setCoffeeReplayMessageIndex(0);
+    setCoffeeTurnRhythmState("idle");
+  };
+  const restartCoffeeReplay = () => {
+    if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    setCoffeeReplayActive(true);
+    setCoffeeReplayPlaying(true);
+    setCoffeeReplayMessageIndex(0);
+  };
+  const exitCoffeeReplay = () => {
+    if (coffeeReplayTimerRef.current) {
+      clearTimeout(coffeeReplayTimerRef.current);
+      coffeeReplayTimerRef.current = null;
+    }
+    setCoffeeReplayActive(false);
+    setCoffeeReplayPlaying(false);
+    setCoffeeReplayMessageIndex(0);
+  };
   const returnToCoffeeStart = () => {
     resetCoffeeToPicker();
   };
@@ -30661,6 +31606,56 @@ function HomeContent(): React.JSX.Element {
       resetCoffeeToPicker();
     }
     await deleteConversation(sessionId);
+  };
+  const renderCoffeeGroupRow = (group: CoffeeGroupState): React.JSX.Element => {
+    const groupBots = coffeeGroupBots(group);
+    const groupSessions = coffeeSessionsByGroupId.get(group.id) ?? [];
+    const selected = group.id === coffeeSelectedGroupId && !coffeeConversation;
+    return (
+      <li key={group.id} className={styles.coffeeGroupRow} data-current={selected ? "true" : undefined}>
+        <button
+          type="button"
+          className={styles.coffeeGroupButton}
+          style={coffeeGroupVisualStyle(group)}
+          aria-current={selected ? "page" : undefined}
+          onClick={() => openCoffeeGroup(group)}
+        >
+          <span className={styles.coffeeSessionDots} aria-hidden="true">
+            {groupBots.slice(0, COFFEE_GROUP_MAX_SIZE_CLIENT).map((bot) => (
+              <span
+                key={bot.id}
+                className={styles.coffeeSessionDot}
+                style={coffeeBotVisualStyle(bot)}
+              />
+            ))}
+          </span>
+          <span className={styles.coffeeGroupTitle}>{group.name}</span>
+          <span className={styles.coffeeSessionMeta}>
+            {group.botGroupIds.length} bots · {groupSessions.length} sessions
+          </span>
+        </button>
+        {groupSessions.length > 0 ? (
+          <ul className={styles.coffeeGroupSessionList}>
+            {groupSessions.slice(0, 4).map((session) => (
+              <li key={session.id}>
+                <button
+                  type="button"
+                  className={styles.coffeeGroupSessionButton}
+                  data-current={session.id === coffeeSelectedSessionId ? "true" : undefined}
+                  onClick={() => void openCoffeeSession(session.id)}
+                >
+                  <span>{new Date(session.updatedAt).toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}</span>
+                  <span>{session.coffeeSessionDurationMinutes ? `${session.coffeeSessionDurationMinutes}m` : "Preview"}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </li>
+    );
   };
   const renderCoffeeSessionRow = (session: ConversationSummary): React.JSX.Element => {
     const sessionBots = coffeeSessionBots(session);
@@ -30712,14 +31707,21 @@ function HomeContent(): React.JSX.Element {
     const disabled =
       !selected &&
       coffeeSelectedBotIds.length >= COFFEE_GROUP_MAX_SIZE_CLIENT;
+    const offlineProtected = bot.online_enabled === 0;
     return (
       <li key={bot.id}>
         <button
           type="button"
           className={styles.coffeeBotPill}
           data-selected={selected ? "true" : undefined}
+          data-offline-protected={offlineProtected ? "true" : undefined}
           disabled={disabled}
           aria-pressed={selected}
+          aria-label={
+            offlineProtected
+              ? `${bot.name} (offline-only, protected)`
+              : undefined
+          }
           style={coffeeBotVisualStyle(bot)}
           onClick={() => toggleCoffeeBot(bot.id)}
         >
@@ -30727,30 +31729,45 @@ function HomeContent(): React.JSX.Element {
             <BotGlyph name={bot.glyph} size={18} strokeWidth={2} />
           </span>
           <span className={styles.coffeeBotPillText}>
-            <span className={styles.coffeeBotPillName}>{bot.name}</span>
+            <span className={styles.coffeeBotPillName}>
+              {bot.name}
+              {offlineProtected ? (
+                <span
+                  className={styles.coffeeBotPillLockBadge}
+                  aria-hidden="true"
+                  title="Protected as offline-only"
+                >
+                  🔒
+                </span>
+              ) : null}
+            </span>
             <span className={styles.coffeeBotPillSubtitle}>{coffeeBotSubtitle(bot)}</span>
           </span>
         </button>
       </li>
     );
   };
-  const renderCoffeeSessionSettingsFields = (): React.JSX.Element => (
+  const renderCoffeeSessionSettingsFields = (
+    settings = coffeeSessionSettings,
+    setSettings = setCoffeeSessionSettings,
+    idPrefix = "coffee"
+  ): React.JSX.Element => (
     <>
       <div>
         <p className={styles.coffeeSettingsSectionLabel}>Replies</p>
         <div className={styles.coffeeSettingsField}>
-          <label className={styles.coffeeSettingsFieldLabel} htmlFor="coffee-response-length">
+          <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-response-length`}>
             Response length
           </label>
           <p className={styles.coffeeSettingsHint}>
             How much room each bot has before the table moves on.
           </p>
           <select
-            id="coffee-response-length"
+            id={`${idPrefix}-response-length`}
             className={styles.coffeeSettingsSelect}
-            value={coffeeSessionSettings.responseLength}
+            value={settings.responseLength}
             onChange={(event) =>
-              setCoffeeSessionSettings((prev) => ({
+              setSettings((prev) => ({
                 ...prev,
                 responseLength: event.target.value as CoffeeSessionSettings["responseLength"],
               }))
@@ -30763,21 +31780,21 @@ function HomeContent(): React.JSX.Element {
           </select>
         </div>
         <div className={styles.coffeeSettingsField}>
-          <label className={styles.coffeeSettingsFieldLabel} htmlFor="coffee-delay-bias">
+          <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-delay-bias`}>
             Response delay bias
           </label>
           <p className={styles.coffeeSettingsHint}>
             Nudge pauses toward calmer table talk or snappier banter.
           </p>
           <input
-            id="coffee-delay-bias"
+            id={`${idPrefix}-delay-bias`}
             type="range"
             className={styles.coffeeSettingsRange}
             min={0}
             max={100}
-            value={coffeeSessionSettings.responseDelayBias}
+            value={settings.responseDelayBias}
             onChange={(event) =>
-              setCoffeeSessionSettings((prev) => ({
+              setSettings((prev) => ({
                 ...prev,
                 responseDelayBias: Number(event.target.value),
               }))
@@ -30796,18 +31813,18 @@ function HomeContent(): React.JSX.Element {
       <div>
         <p className={styles.coffeeSettingsSectionLabel}>Table feel</p>
         <div className={styles.coffeeSettingsField}>
-          <label className={styles.coffeeSettingsFieldLabel} htmlFor="coffee-energy">
+          <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-energy`}>
             Table energy
           </label>
           <p className={styles.coffeeSettingsHint}>
             Quieter circle versus a lively back-and-forth.
           </p>
           <select
-            id="coffee-energy"
+            id={`${idPrefix}-energy`}
             className={styles.coffeeSettingsSelect}
-            value={coffeeSessionSettings.tableEnergy}
+            value={settings.tableEnergy}
             onChange={(event) =>
-              setCoffeeSessionSettings((prev) => ({
+              setSettings((prev) => ({
                 ...prev,
                 tableEnergy: event.target.value as CoffeeSessionSettings["tableEnergy"],
               }))
@@ -30820,18 +31837,18 @@ function HomeContent(): React.JSX.Element {
           </select>
         </div>
         <div className={styles.coffeeSettingsField}>
-          <label className={styles.coffeeSettingsFieldLabel} htmlFor="coffee-crosstalk">
+          <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-crosstalk`}>
             Cross-talk
           </label>
           <p className={styles.coffeeSettingsHint}>
             How often bots react to each other versus the whole group.
           </p>
           <select
-            id="coffee-crosstalk"
+            id={`${idPrefix}-crosstalk`}
             className={styles.coffeeSettingsSelect}
-            value={coffeeSessionSettings.crossTalk}
+            value={settings.crossTalk}
             onChange={(event) =>
-              setCoffeeSessionSettings((prev) => ({
+              setSettings((prev) => ({
                 ...prev,
                 crossTalk: event.target.value as CoffeeSessionSettings["crossTalk"],
               }))
@@ -30843,21 +31860,21 @@ function HomeContent(): React.JSX.Element {
           </select>
         </div>
         <div className={styles.coffeeSettingsField}>
-          <label className={styles.coffeeSettingsFieldLabel} htmlFor="coffee-breathing-room">
+          <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-breathing-room`}>
             Breathing room between lines
           </label>
           <p className={styles.coffeeSettingsHint}>
             Extra cushion after a line before the next speaker.
           </p>
           <input
-            id="coffee-breathing-room"
+            id={`${idPrefix}-breathing-room`}
             type="range"
             className={styles.coffeeSettingsRange}
             min={0}
             max={100}
-            value={coffeeSessionSettings.breathingRoom}
+            value={settings.breathingRoom}
             onChange={(event) =>
-              setCoffeeSessionSettings((prev) => ({
+              setSettings((prev) => ({
                 ...prev,
                 breathingRoom: Number(event.target.value),
               }))
@@ -30877,16 +31894,16 @@ function HomeContent(): React.JSX.Element {
         <p className={styles.coffeeSettingsSectionLabel}>Focus</p>
         <div className={styles.coffeeSettingsToggleRow}>
           <input
-            id="coffee-stay-on-thread"
+            id={`${idPrefix}-stay-on-thread`}
             type="checkbox"
             className={styles.coffeeSettingsCheckbox}
-            checked={coffeeSessionSettings.stayOnThread}
+            checked={settings.stayOnThread}
             onChange={(event) =>
-              setCoffeeSessionSettings((prev) => ({ ...prev, stayOnThread: event.target.checked }))
+              setSettings((prev) => ({ ...prev, stayOnThread: event.target.checked }))
             }
           />
           <div>
-            <label className={styles.coffeeSettingsFieldLabel} htmlFor="coffee-stay-on-thread">
+            <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-stay-on-thread`}>
               Stay on the current thread
             </label>
             <p className={styles.coffeeSettingsHint}>
@@ -30896,19 +31913,19 @@ function HomeContent(): React.JSX.Element {
         </div>
         <div className={styles.coffeeSettingsToggleRow}>
           <input
-            id="coffee-player-last-word"
+            id={`${idPrefix}-player-last-word`}
             type="checkbox"
             className={styles.coffeeSettingsCheckbox}
-            checked={coffeeSessionSettings.givePlayerLastWord}
+            checked={settings.givePlayerLastWord}
             onChange={(event) =>
-              setCoffeeSessionSettings((prev) => ({
+              setSettings((prev) => ({
                 ...prev,
                 givePlayerLastWord: event.target.checked,
               }))
             }
           />
           <div>
-            <label className={styles.coffeeSettingsFieldLabel} htmlFor="coffee-player-last-word">
+            <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-player-last-word`}>
               Give you the last word more often
             </label>
             <p className={styles.coffeeSettingsHint}>
@@ -30917,7 +31934,7 @@ function HomeContent(): React.JSX.Element {
           </div>
         </div>
         <div className={styles.coffeeSettingsField}>
-          <label className={styles.coffeeSettingsFieldLabel} htmlFor="coffee-memory-callbacks">
+          <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-memory-callbacks`}>
             Memory callbacks
           </label>
           <p className={styles.coffeeSettingsHint}>
@@ -30925,11 +31942,11 @@ function HomeContent(): React.JSX.Element {
             same window as this session until cross-thread recall ships.
           </p>
           <select
-            id="coffee-memory-callbacks"
+            id={`${idPrefix}-memory-callbacks`}
             className={styles.coffeeSettingsSelect}
-            value={coffeeSessionSettings.memoryCallbacks}
+            value={settings.memoryCallbacks}
             onChange={(event) =>
-              setCoffeeSessionSettings((prev) => ({
+              setSettings((prev) => ({
                 ...prev,
                 memoryCallbacks: event.target.value as CoffeeSessionSettings["memoryCallbacks"],
               }))
@@ -31099,6 +32116,152 @@ function HomeContent(): React.JSX.Element {
       </>
     );
   };
+  const renderCoffeeGroupSettingsModal = (): React.JSX.Element | null => {
+    const group = coffeeSelectedGroup;
+    if (!coffeeSettingsModalOpen || !group) return null;
+    return (
+      <div className={styles.coffeeSettingsModalBackdrop} role="presentation">
+        <section
+          className={styles.coffeeSettingsModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="coffee-group-settings-title"
+        >
+          <header className={styles.coffeeSettingsModalHeader}>
+            <div>
+              <span className={styles.sectionLabel}>Coffee Group Settings</span>
+              <h2 id="coffee-group-settings-title">Tune this table</h2>
+              <p>These settings belong to this Coffee Group. New sessions take a frozen snapshot.</p>
+            </div>
+            <button
+              type="button"
+              className={styles.headerIconButton}
+              onClick={() => setCoffeeSettingsModalOpen(false)}
+              aria-label="Close Coffee Group settings"
+            >
+              ×
+            </button>
+          </header>
+
+          <div className={styles.coffeeSettingsModalGrid}>
+            <section className={styles.coffeeSettingsModalPane}>
+              <label className={styles.coffeeSettingsFieldLabel} htmlFor="coffee-group-name">
+                Group name
+              </label>
+              <input
+                id="coffee-group-name"
+                className={styles.input}
+                value={coffeeGroupNameDraft}
+                onChange={(event) => setCoffeeGroupNameDraft(event.target.value)}
+                placeholder="Coffee Group name"
+              />
+              <div className={styles.coffeeSettingsIntroRow}>
+                <p className={styles.coffeeSettingsIntro}>
+                  Adjust the table feel here, then Apply when it feels right.
+                </p>
+                <button
+                  type="button"
+                  className={styles.coffeeSettingsDiceButton}
+                  onClick={() => setCoffeeSettingsDraft(randomCoffeeSettings())}
+                  aria-label="Randomize Coffee settings"
+                  title="Randomize Coffee settings"
+                >
+                  ⚂
+                </button>
+              </div>
+              {renderCoffeeSessionSettingsFields(
+                coffeeSettingsDraft,
+                setCoffeeSettingsDraft,
+                "coffee-group-settings"
+              )}
+            </section>
+
+            <aside className={styles.coffeeSettingsModalPane}>
+              <p className={styles.coffeeSettingsSectionLabel}>Presets</p>
+              <div className={styles.coffeePresetList}>
+                {coffeePresetsLoading ? (
+                  <p className={styles.coffeeGroupEmptyNote}>Loading presets...</p>
+                ) : (
+                  coffeePresets.map((preset) => (
+                    <div key={preset.id} className={styles.coffeePresetRow}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCoffeeSettingsDraft(normalizeCoffeeSessionSettings(preset.settings));
+                          setCoffeeSelectedPresetId(preset.id);
+                        }}
+                      >
+                        <span>{preset.name}</span>
+                        <small>{preset.builtIn ? "Built-in" : "Saved"}</small>
+                      </button>
+                      {!preset.builtIn ? (
+                        <button
+                          type="button"
+                          className={styles.coffeePresetDeleteButton}
+                          onClick={() => void deleteCoffeePresetFromList(preset.id)}
+                          aria-label={`Delete ${preset.name}`}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </div>
+              <label className={styles.coffeeSettingsToggleRow}>
+                <input
+                  type="checkbox"
+                  className={styles.coffeeSettingsCheckbox}
+                  checked={coffeeSelectedPresetId === COFFEE_AUTO_PRESET_ID}
+                  onChange={(event) =>
+                    setCoffeeSelectedPresetId(event.target.checked ? COFFEE_AUTO_PRESET_ID : "")
+                  }
+                />
+                <span>
+                  Auto-pick a preset for each new session
+                  <small>PRISM chooses silently from built-in and saved presets.</small>
+                </span>
+              </label>
+              <div className={styles.coffeePresetSaveRow}>
+                <input
+                  className={styles.input}
+                  value={coffeePresetNameDraft}
+                  onChange={(event) => setCoffeePresetNameDraft(event.target.value)}
+                  placeholder="Preset name"
+                />
+                <button
+                  type="button"
+                  className={styles.coffeeSend}
+                  disabled={coffeeSettingsSaving || coffeePresetNameDraft.trim().length === 0}
+                  onClick={() => void saveCoffeePresetFromDraft()}
+                >
+                  Save preset
+                </button>
+              </div>
+            </aside>
+          </div>
+
+          <footer className={styles.coffeeSettingsModalFooter}>
+            <button
+              type="button"
+              className={styles.headerIconButton}
+              onClick={() => setCoffeeSettingsModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={styles.coffeeSend}
+              disabled={coffeeSettingsSaving}
+              onClick={() => void applyCoffeeGroupSettings()}
+            >
+              {coffeeSettingsSaving ? "Applying..." : "Apply"}
+            </button>
+          </footer>
+        </section>
+      </div>
+    );
+  };
   const renderCoffeeTableStage = (): React.JSX.Element => {
     const conversationActive = coffeeConversation !== null;
     const previewingSession = coffeeSessionPhase === "preview";
@@ -31110,6 +32273,10 @@ function HomeContent(): React.JSX.Element {
       !coffeeBusy &&
       !coffeeAutoBusy;
     const messages = coffeeConversation?.messages ?? [];
+    const replayMessage =
+      coffeeReplayActive && messages.length > 0
+        ? messages[Math.min(coffeeReplayMessageIndex, messages.length - 1)]
+        : null;
     const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
     const pendingLatestMessage =
       pendingMessages.length > 0 ? pendingMessages[pendingMessages.length - 1] : null;
@@ -31119,7 +32286,9 @@ function HomeContent(): React.JSX.Element {
         ? coffeeBotsById.get(coffeePendingSpeakerBotId ?? "")
         : null;
     const userLineTyping = coffeeTurnRhythmState === "userTableTyping";
-    const centerMessage = previewingSession
+    const centerMessage = replayMessage
+      ? replayMessage
+      : previewingSession
       ? null
       : messages.length > 0
         ? messages[messages.length - 1]
@@ -31227,27 +32396,41 @@ function HomeContent(): React.JSX.Element {
                     ? "Bots will arrive one at a time."
                   : coffeeSessionPhase === "preview"
                     ? "The bots are seated, but you have not joined the conversation yet."
-                    : "Select bots below, then start the session."}
+                    : coffeeSelectedGroup
+                    ? "This group is ready. Start a new session from the overview below."
+                    : "Select bots below, then create a Coffee Group."}
               </p>
             </div>
-            {coffeeSessionPhase === "selecting" && (
+            {coffeeSessionPhase === "selecting" && !coffeeSelectedGroup && (
               <button
                 type="button"
                 className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
                 disabled={coffeeBusy || !coffeeSelectionValid}
-                onClick={() => void createCoffeeSession()}
+                onClick={() => void createCoffeeGroupFromSelection()}
               >
-                {coffeeBusy ? "Preparing table..." : "Start Coffee Session →"}
+                {coffeeBusy ? "Creating group..." : "Create Coffee Group →"}
               </button>
             )}
             {previewingSession && (
-              <button
-                type="button"
-                className={styles.coffeeJoinSessionButton}
-                onClick={joinPreviewedCoffeeSession}
-              >
-                Join Coffee Session →
-              </button>
+              <div className={styles.coffeePreviewActions}>
+                {!coffeeConversation?.coffeeGroupId ? (
+                  <button
+                    type="button"
+                    className={styles.coffeeJoinSessionButton}
+                    disabled={coffeeBusy}
+                    onClick={() => void createCoffeeGroupFromCurrentSession()}
+                  >
+                    {coffeeBusy ? "Saving..." : "Save as Coffee Group"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={styles.coffeeJoinSessionButton}
+                  onClick={joinPreviewedCoffeeSession}
+                >
+                  Join Coffee Session →
+                </button>
+              </div>
             )}
           </div>
           {visibleCoffeeSeats.map(({ seatIndex, bot }, layoutIndex) => {
@@ -31375,7 +32558,11 @@ function HomeContent(): React.JSX.Element {
         {coffeeSessionJoinedDock ? (
           <div className={styles.coffeeAutoplayDock}>
             <p className={styles.coffeeAutoplayDockCaption}>
-              {coffeeAutoplayPaused
+              {coffeeReplayActive
+                ? "Replay mode — watching the saved session back with shorter pauses."
+                : coffeeSessionPhase === "finished"
+                  ? "Session recap — export it, replay it, or open Table talk."
+                : coffeeAutoplayPaused
                 ? "Director mode — tap a bot to choose who speaks next."
                 : "Autoplay on — bots take timed turns automatically."}
             </p>
@@ -31407,28 +32594,196 @@ function HomeContent(): React.JSX.Element {
                 )}
               </p>
             ) : null}
-            <button
-              type="button"
-              className={styles.coffeeAutoplayGlyphButton}
-              data-active={coffeeAutoplayPaused ? "true" : undefined}
-              disabled={coffeeSessionPhase === "finished"}
-              onClick={toggleCoffeeAutoplay}
-              aria-pressed={coffeeAutoplayPaused}
-              aria-label={
-                coffeeAutoplayPaused
-                  ? "Resume automatic Coffee bot replies"
-                  : "Pause automatic Coffee bot replies"
-              }
-              title={
-                coffeeAutoplayPaused
-                  ? "Resume automatic bot replies"
-                  : "Pause bot autoplay for director mode"
-              }
-            >
-              <CoffeeAutoplayGlyph paused={coffeeAutoplayPaused} dock />
-            </button>
+            {coffeeSessionPhase === "finished" ? (
+              <div className={styles.coffeeReplayControls}>
+                <button type="button" onClick={() => void exportCoffeeSession(coffeeConversation)}>
+                  Export
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    coffeeReplayActive
+                      ? setCoffeeReplayPlaying((playing) => !playing)
+                      : startCoffeeReplay()
+                  }
+                >
+                  {coffeeReplayActive ? (coffeeReplayPlaying ? "Pause replay" : "Play replay") : "Replay"}
+                </button>
+                {coffeeReplayActive ? (
+                  <>
+                    <button type="button" onClick={restartCoffeeReplay}>Restart</button>
+                    <button type="button" onClick={exitCoffeeReplay}>Exit replay</button>
+                  </>
+                ) : null}
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={styles.coffeeAutoplayGlyphButton}
+                data-active={coffeeAutoplayPaused ? "true" : undefined}
+                onClick={toggleCoffeeAutoplay}
+                aria-pressed={coffeeAutoplayPaused}
+                aria-label={
+                  coffeeAutoplayPaused
+                    ? "Resume automatic Coffee bot replies"
+                    : "Pause automatic Coffee bot replies"
+                }
+                title={
+                  coffeeAutoplayPaused
+                    ? "Resume automatic bot replies"
+                    : "Pause bot autoplay for director mode"
+                }
+              >
+                <CoffeeAutoplayGlyph paused={coffeeAutoplayPaused} dock />
+              </button>
+            )}
           </div>
         ) : null}
+      </section>
+    );
+  };
+  const renderCoffeeGroupOverview = (): React.JSX.Element | null => {
+    const group = coffeeSelectedGroup;
+    if (!group || coffeeConversation) return null;
+    const groupBots = coffeeGroupBots(group);
+    const groupSessions = coffeeSessionsByGroupId.get(group.id) ?? [];
+    const moodScore = coffeeGroupMoodScore(group);
+    const moodLabel = coffeeGroupMoodLabel(group);
+    return (
+      <section className={styles.coffeeGroupOverview} style={coffeeGroupVisualStyle(group)}>
+        <div className={styles.coffeeGroupOverviewHeader}>
+          <div>
+            <p className={styles.coffeeEyebrow}>Coffee Group</p>
+            <h2>{group.name}</h2>
+            <p>
+              {groupBots.length} seated bots · {groupSessions.length} saved sessions
+            </p>
+          </div>
+          <div className={styles.coffeeGroupStartPanel}>
+            <span className={styles.coffeeGroupStartLabel}>New session setup</span>
+            <div className={styles.coffeeDurationPicker} aria-label="Coffee Session duration">
+              {COFFEE_SESSION_DURATION_OPTIONS.map((duration) => (
+                <button
+                  key={duration}
+                  type="button"
+                  data-selected={coffeeSelectedDurationMinutes === duration ? "true" : undefined}
+                  onClick={() => setCoffeeSelectedDurationMinutes(duration)}
+                >
+                  {duration}m
+                </button>
+              ))}
+            </div>
+            <select
+              className={styles.coffeeSettingsSelect}
+              value={coffeeSelectedPresetId}
+              onChange={(event) => setCoffeeSelectedPresetId(event.target.value)}
+              aria-label="Coffee preset for new sessions"
+            >
+              <option value="">Group defaults</option>
+              <option value={COFFEE_AUTO_PRESET_ID}>Auto preset</option>
+              {coffeePresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={styles.coffeeSend}
+              disabled={coffeeBusy}
+              onClick={() => void startCoffeeSessionFromGroup(group)}
+            >
+              {coffeeBusy ? "Starting..." : `Start ${coffeeSelectedDurationMinutes}m session`}
+            </button>
+          </div>
+        </div>
+        <div className={styles.coffeeGroupOverviewGrid}>
+          <section className={styles.coffeeGroupOverviewCard}>
+            <h3>Current table</h3>
+            <ul className={styles.coffeeGroupBotList}>
+              {groupBots.map((bot) => (
+                <li key={bot.id} style={coffeeBotVisualStyle(bot)}>
+                  <span className={styles.coffeeSessionDot} aria-hidden="true" />
+                  <span>{bot.name}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className={styles.coffeeGroupOverviewCard}>
+            <h3>Group mood</h3>
+            <div
+              className={styles.coffeeGroupMoodMeter}
+              style={{
+                ...coffeeGroupVisualStyle(group),
+                "--coffee-group-mood-score": `${moodScore}%`,
+              } as React.CSSProperties}
+            >
+              <span />
+            </div>
+            <p className={styles.coffeeGroupMoodLabel}>
+              {moodLabel} · {moodScore}/100
+            </p>
+            <div className={styles.coffeeSettingsDivider} role="presentation" />
+            <h3>Group tools</h3>
+            <div className={styles.coffeeGroupActionGrid}>
+              <button
+                type="button"
+                className={styles.coffeeGroupToolButton}
+                aria-label="Configure Coffee Group settings and presets"
+                onClick={() => openCoffeeSettingsModal(group)}
+              >
+                <span className={styles.coffeeGroupToolButtonIcon} aria-hidden="true">
+                  <WrenchGlyph />
+                </span>
+                <span className={styles.coffeeGroupToolButtonText}>
+                  <span className={styles.coffeeGroupToolButtonTitle}>Configure settings</span>
+                  <span className={styles.coffeeGroupToolButtonSubtitle}>
+                    Settings, presets, auto
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={styles.coffeeGroupToolButton}
+                disabled
+                aria-disabled="true"
+                aria-label="Configure bots — coming soon"
+              >
+                <span className={styles.coffeeGroupToolButtonIcon} aria-hidden="true">
+                  <BotsGlyph />
+                </span>
+                <span className={styles.coffeeGroupToolButtonText}>
+                  <span className={styles.coffeeGroupToolButtonTitle}>Configure bots</span>
+                  <span className={styles.coffeeGroupToolButtonSubtitle}>Coming soon</span>
+                </span>
+              </button>
+            </div>
+          </section>
+          <section className={styles.coffeeGroupOverviewCard}>
+            <h3>Recent sessions</h3>
+            {groupSessions.length > 0 ? (
+              <ul className={styles.coffeeGroupRecentSessions}>
+                {groupSessions.slice(0, 5).map((session) => (
+                  <li key={session.id}>
+                    <button type="button" onClick={() => void openCoffeeSession(session.id)}>
+                      <span>{session.title}</span>
+                      <small>{new Date(session.updatedAt).toLocaleString([], {
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}</small>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className={styles.coffeeGroupEmptyNote}>
+                No sessions yet. Start one to create this group&apos;s first table memory.
+              </p>
+            )}
+          </section>
+        </div>
       </section>
     );
   };
@@ -31439,9 +32794,12 @@ function HomeContent(): React.JSX.Element {
     /** Picker ("new session") or any loaded conversation — transcript affordance is available. */
     const coffeeTranscriptToggleEnabled =
       conversationActive || coffeeSessionPhase === "selecting";
-    const coffeeStageTitle = coffeeConversation?.title ?? "Start a Coffee Session";
+    const coffeeStageTitle =
+      coffeeConversation?.title ?? coffeeSelectedGroup?.name ?? "Start a Coffee Session";
     const coffeeStageSubtitle =
-      coffeeSessionPhase === "selecting"
+      coffeeSessionPhase === "selecting" && coffeeSelectedGroup
+        ? "Coffee Group overview. Start a new session, review the table, or configure it later."
+        : coffeeSessionPhase === "selecting"
         ? "Choose 2-5 bots to invite to the PRISM coffee table."
         : coffeeSessionPhase === "preview"
           ? "Previewing this table. Join when you are ready."
@@ -31450,8 +32808,9 @@ function HomeContent(): React.JSX.Element {
             : coffeeSessionPhase === "finished"
               ? "The cups are empty. This Coffee Session has settled."
               : "Listen in, join gently, or let the bots talk.";
-    const coffeeComposerEnabled = conversationActive || coffeeSelectionValid;
-    const coffeeComposerVisible = coffeeSessionPhase === "selecting" || coffeeComposerEnabled;
+    const coffeeComposerEnabled = conversationActive || (!coffeeSelectedGroup && coffeeSelectionValid);
+    const coffeeComposerVisible =
+      (coffeeSessionPhase === "selecting" && !coffeeSelectedGroup) || coffeeComposerEnabled;
     const coffeeComposerPlaceholder =
       coffeeSessionPhase === "finished"
         ? "This Coffee Session has ended."
@@ -31536,7 +32895,7 @@ function HomeContent(): React.JSX.Element {
             <PrismWordmarkWithVersion size="sm" className={styles.hubHomeWordmark} />
           </button>
           <div className={styles.coffeeSidebarHeader}>
-            <span className={styles.sectionLabel}>Coffee Sessions</span>
+            <span className={styles.sectionLabel}>Coffee Groups</span>
             <div className={styles.coffeeSidebarHeaderActions}>
               <button
                 type="button"
@@ -31564,13 +32923,24 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
           <ul className={styles.coffeeSessionList}>
-            {coffeeSessions.length > 0 ? (
-              coffeeSessions.map(renderCoffeeSessionRow)
-            ) : (
+            {coffeeGroups.length > 0 ? (
+              coffeeGroups.map(renderCoffeeGroupRow)
+            ) : coffeeGroupsLoading ? (
               <li className={styles.coffeeSessionEmpty}>
-                No Coffee Sessions yet.
+                Loading Coffee Groups...
               </li>
-            )}
+            ) : null}
+            {legacyCoffeeSessions.length > 0 ? (
+              <>
+                <li className={styles.coffeeSidebarSubhead}>Legacy sessions</li>
+                {legacyCoffeeSessions.map(renderCoffeeSessionRow)}
+              </>
+            ) : null}
+            {coffeeGroups.length === 0 && legacyCoffeeSessions.length === 0 && !coffeeGroupsLoading ? (
+              <li className={styles.coffeeSessionEmpty}>
+                No Coffee Groups yet.
+              </li>
+            ) : null}
           </ul>
         </aside>
         )}
@@ -31736,8 +33106,28 @@ function HomeContent(): React.JSX.Element {
 
           {renderCoffeeTableStage()}
 
-          {!conversationActive && (
+          {renderCoffeeGroupOverview()}
+
+          {!conversationActive && !coffeeSelectedGroup && (
             <section className={styles.coffeePicker}>
+              {(() => {
+                const protectedNames: string[] = [];
+                for (const id of coffeeSelectedBotIds) {
+                  const bot = coffeeBotsById.get(id);
+                  if (bot && bot.online_enabled === 0) protectedNames.push(bot.name);
+                }
+                const message = buildCoffeeOfflineProtectionMessage(protectedNames);
+                if (!message) return null;
+                return (
+                  <p
+                    className={styles.coffeeOfflineProtectionNotice}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {message}
+                  </p>
+                );
+              })()}
               <label className={styles.coffeeSearchBar}>
                 <span aria-hidden="true">⌕</span>
                 <input
@@ -31808,6 +33198,15 @@ function HomeContent(): React.JSX.Element {
                   onKeyUp={() => {
                     resyncCoffeeComposerMention();
                   }}
+                  onPaste={(event) => {
+                    const el = coffeeComposerTextareaRef.current;
+                    if (!el) return;
+                    const start = el.selectionStart ?? 0;
+                    const end = el.selectionEnd ?? 0;
+                    if (isCaretInPrismBotMarkdownLockedRegion(el.value, start, end)) {
+                      event.preventDefault();
+                    }
+                  }}
                   onKeyDown={(event) => {
                     const el = coffeeComposerTextareaRef.current;
                     if (!el) return;
@@ -31830,6 +33229,38 @@ function HomeContent(): React.JSX.Element {
                         });
                         return;
                       }
+                    }
+                    if (
+                      (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+                      !event.shiftKey &&
+                      !event.altKey &&
+                      !event.ctrlKey &&
+                      !event.metaKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      const start = el.selectionStart ?? 0;
+                      const end = el.selectionEnd ?? 0;
+                      const dir = event.key === "ArrowLeft" ? "left" : "right";
+                      const next = prismBotMarkdownArrowCaret(el.value, start, dir);
+                      if (next !== null && next !== start) {
+                        event.preventDefault();
+                        el.setSelectionRange(next, next);
+                        queueMicrotask(() => {
+                          resyncCoffeeComposerMention();
+                        });
+                        return;
+                      }
+                    }
+                    if (
+                      shouldBlockPlainTextKeyInPrismBotLockedRegion(
+                        el.value,
+                        el.selectionStart ?? 0,
+                        el.selectionEnd ?? 0,
+                        event.nativeEvent
+                      )
+                    ) {
+                      event.preventDefault();
+                      return;
                     }
                     if (event.key === "Tab" && !event.shiftKey && coffeeComposerMentionRef.current.open) {
                       event.preventDefault();
@@ -31936,6 +33367,7 @@ function HomeContent(): React.JSX.Element {
           : coffeeTranscriptOpen && conversationActive
             ? renderCoffeeTranscriptPanel()
             : null}
+        {renderCoffeeGroupSettingsModal()}
 
         {renderDevToolsButton()}
         {renderSharedPanels()}
@@ -31993,7 +33425,7 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.hubTileGlyph}>
               <GlyphSandbox size={88} />
             </div>
-            <div className={styles.hubTileLabel}>Sandbox</div>
+            <div className={styles.hubTileLabel}>Chat</div>
             <div className={styles.hubTileTagline}>
               Full playground: bots, providers, memory, images, and more.
             </div>
@@ -32006,7 +33438,7 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.hubTileGlyph}>
               <GlyphChat size={88} />
             </div>
-            <div className={styles.hubTileLabel}>Chat</div>
+            <div className={styles.hubTileLabel}>Zen</div>
             <div className={styles.hubTileTagline}>
               A calm, personal chat with your AI. Just say hello.
             </div>
@@ -32235,12 +33667,12 @@ function HomeContent(): React.JSX.Element {
                 aria-label={
                   showHeaderShowAllBotsLink
                     ? "Return to all bots"
-                    : "Back to Chat start"
+                    : "Back to Zen start"
                 }
                 title={
                   showHeaderShowAllBotsLink
                     ? "Return to all bots"
-                    : "Back to Chat start"
+                    : "Back to Zen start"
                 }
               >
                 <span className={styles.chatHubWordmarkStack}>
@@ -32292,15 +33724,16 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
-          {showCanvasBotSwitchOverlay ? (
+          {showMessagesFrameStateLoadingOverlay ? (
             <div
               className={styles.messagesFrameBotSwitchLoading}
+              data-kind={messagesFrameStateLoadingKind}
               data-phase={canvasBotSwitchOverlayPhase}
               role="status"
               aria-live="polite"
             >
               <div className={styles.messagesFrameBotSwitchSpinner} aria-hidden="true" />
-              <p>Switching bot profile...</p>
+              <p>{messagesFrameStateLoadingLabel}</p>
             </div>
           ) : null}
           <div
@@ -32512,8 +33945,11 @@ function HomeContent(): React.JSX.Element {
                   ? styles.messageChatManifesting
                   : "";
             const modelLabel =
-              msg.role === "assistant" && typeof msg.model === "string"
-                ? msg.model.trim()
+              msg.role === "assistant"
+                ? (
+                    msg.sentGeneratedImage?.imageModel?.trim() ||
+                    (typeof msg.model === "string" ? msg.model.trim() : "")
+                  )
                 : "";
             const modelRevealLabel =
               modelLabel ||
@@ -32625,6 +34061,7 @@ function HomeContent(): React.JSX.Element {
               configuredFallbackModel: configuredFallbackModelId,
               fallbackMessageIds,
             });
+            const showFallbackModelStripe = settings?.fallbackModelMessageStripe !== false;
             const showMoodTooltip =
               msg.role === "assistant" &&
               !chatLikeSurface &&
@@ -32658,7 +34095,9 @@ function HomeContent(): React.JSX.Element {
                   chatLikeSurface && msg.id === latestUserMessageId ? "true" : undefined
                 }
                 data-private-user-role-header={privateUserRoleHeader ? "true" : undefined}
-                data-fallback-model-used={messageUsesFallbackModel ? "true" : undefined}
+                data-fallback-model-used={
+                  messageUsesFallbackModel && showFallbackModelStripe ? "true" : undefined
+                }
                 onContextMenuCapture={event => {
                   if (chatLikeSurface) return;
                   event.preventDefault();
@@ -32740,9 +34179,10 @@ function HomeContent(): React.JSX.Element {
                 {msg.role === "assistant" && msg.sentGeneratedImage ? (
                   <figure className={styles.assistantSentImageWrap}>
                     <img
-                      src={msg.sentGeneratedImage.displayUrl}
+                      src={apiGeneratedImageThumbUrl(msg.sentGeneratedImage.imageId)}
                       alt={msg.sentGeneratedImage.prompt}
                       loading="lazy"
+                      decoding="async"
                       className={styles.assistantSentImage}
                     />
                   </figure>
@@ -32834,6 +34274,7 @@ function HomeContent(): React.JSX.Element {
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
           {renderComposerChipRail()}
+          {renderImageJobOrbDock()}
         </div>
 
         <form
@@ -32866,7 +34307,7 @@ function HomeContent(): React.JSX.Element {
               <div className={styles.companionComposeHint} role="note">
                 <span className={styles.companionComposeHintTitle}>Companion timeline</span>
                 <span className={styles.companionComposeHintBody}>
-                  One steady companion. Chat remembers continuity across conversations.
+                  One steady companion. Zen remembers continuity across conversations.
                 </span>
               </div>
               {renderComposeUtilityActions()}
@@ -33113,10 +34554,10 @@ function HomeContent(): React.JSX.Element {
               <button
                 type="button"
                 className={styles.hubHomeButton}
-                onClick={handleSandboxHeaderWordmarkClick}
+                onClick={performShowAllBotsView}
                 data-home-affordance="identity"
-                aria-label="Back to Sandbox start"
-                title="Back to Sandbox start"
+                aria-label="Return to all bots"
+                title="Return to all bots"
               >
                 <span
                   className={styles.headerIdentity}
@@ -33157,12 +34598,12 @@ function HomeContent(): React.JSX.Element {
                   aria-label={
                     showHeaderShowAllBotsLink
                       ? "Return to all bots"
-                      : "Back to Sandbox start"
+                      : "Back to Chat start"
                   }
                   title={
                     showHeaderShowAllBotsLink
                       ? "Return to all bots"
-                      : "Back to Sandbox start"
+                      : "Back to Chat start"
                   }
                 >
                   <span className={styles.chatHubWordmarkStack}>
@@ -33215,15 +34656,16 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
-          {showCanvasBotSwitchOverlay ? (
+          {showMessagesFrameStateLoadingOverlay ? (
             <div
               className={styles.messagesFrameBotSwitchLoading}
+              data-kind={messagesFrameStateLoadingKind}
               data-phase={canvasBotSwitchOverlayPhase}
               role="status"
               aria-live="polite"
             >
               <div className={styles.messagesFrameBotSwitchSpinner} aria-hidden="true" />
-              <p>Switching bot profile...</p>
+              <p>{messagesFrameStateLoadingLabel}</p>
             </div>
           ) : null}
           <div
@@ -33564,7 +35006,7 @@ function HomeContent(): React.JSX.Element {
                             />
                           );
                         }
-                        const isSelected = selectedBotId === b.id;
+                        const isSelected = sandboxGridSelectedBotId === b.id;
                         const rawColor = b.color?.trim();
                         const accent = rawColor
                           ? normalizeAccentForTheme(rawColor, resolvedTheme)
@@ -33749,8 +35191,11 @@ function HomeContent(): React.JSX.Element {
                   ? styles.messageChatManifesting
                   : "";
             const modelLabel =
-              msg.role === "assistant" && typeof msg.model === "string"
-                ? msg.model.trim()
+              msg.role === "assistant"
+                ? (
+                    msg.sentGeneratedImage?.imageModel?.trim() ||
+                    (typeof msg.model === "string" ? msg.model.trim() : "")
+                  )
                 : "";
             const modelRevealLabel =
               modelLabel ||
@@ -33862,6 +35307,7 @@ function HomeContent(): React.JSX.Element {
               configuredFallbackModel: configuredFallbackModelId,
               fallbackMessageIds,
             });
+            const showFallbackModelStripe = settings?.fallbackModelMessageStripe !== false;
             const showMoodTooltip =
               msg.role === "assistant" &&
               !chatLikeSurface &&
@@ -33895,7 +35341,9 @@ function HomeContent(): React.JSX.Element {
                   chatLikeSurface && msg.id === latestUserMessageId ? "true" : undefined
                 }
                 data-private-user-role-header={privateUserRoleHeader ? "true" : undefined}
-                data-fallback-model-used={messageUsesFallbackModel ? "true" : undefined}
+                data-fallback-model-used={
+                  messageUsesFallbackModel && showFallbackModelStripe ? "true" : undefined
+                }
                 onContextMenuCapture={event => {
                   if (chatLikeSurface) return;
                   event.preventDefault();
@@ -33974,9 +35422,10 @@ function HomeContent(): React.JSX.Element {
                 {msg.role === "assistant" && msg.sentGeneratedImage ? (
                   <figure className={styles.assistantSentImageWrap}>
                     <img
-                      src={msg.sentGeneratedImage.displayUrl}
+                      src={apiGeneratedImageThumbUrl(msg.sentGeneratedImage.imageId)}
                       alt={msg.sentGeneratedImage.prompt}
                       loading="lazy"
+                      decoding="async"
                       className={styles.assistantSentImage}
                     />
                   </figure>
@@ -34070,6 +35519,7 @@ function HomeContent(): React.JSX.Element {
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
           {renderComposerChipRail()}
+          {renderImageJobOrbDock()}
         </div>
 
         <form
@@ -34142,54 +35592,17 @@ function HomeContent(): React.JSX.Element {
                 </>
               );
             })()}
+            {/* Composer-tools toggle: route through the helper so the
+                "active bot is offline-only" lock applies here too. The
+                previous inline copy of this JSX was the reason flipping
+                still appeared to work even though the API enforced the
+                offline-only rule. */}
+            {renderProviderModeToggle()}
             {(() => {
-              const isLocal = settings?.preferredProvider === "local";
-              const providerDisabled = !settings;
-              return (
-                <div className={`${styles.modeControl} ${providerDisabled ? styles.modeControlLocked : ""}`}>
-                  <button
-                    type="button"
-                    className={`${styles.modeToggleTrack} ${providerDisabled ? styles.modeToggleTrackLocked : ""}`}
-                    data-response-mode={isLocal ? "local" : "online"}
-                    onClick={() => {
-                      if (providerDisabled) return;
-                      void switchProvider(isLocal ? "openai" : "local");
-                    }}
-                    aria-label={
-                      isLocal
-                        ? "Response mode: Local. Click to switch to Online."
-                        : "Response mode: Online. Click to switch to Local."
-                    }
-                    aria-pressed={!isLocal}
-                    aria-disabled={providerDisabled}
-                    title={
-                      isLocal
-                        ? "Switch to Online"
-                        : "Switch to Local"
-                    }
-                    disabled={providerDisabled}
-                  >
-                    <span
-                      className={`${styles.modeThumb} ${
-                        isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
-                      }`}
-                    >
-                      <span
-                        className={`${styles.providerDot} ${
-                          isLocal ? styles.providerDotLocal : styles.providerDotOnline
-                        }`}
-                        aria-hidden="true"
-                      />
-                      <span className={styles.modeThumbLabel}>
-                        {isLocal ? "LOCAL" : "ONLINE"}
-                      </span>
-                    </span>
-                  </button>
-                </div>
-              );
-            })()}
-            {(() => {
-              const isLocal = settings?.preferredProvider !== "openai";
+              // Use the effective provider so this picker also reflects
+              // the offline-only lock when the active chat bot is
+              // protected (matches what `renderProviderModeToggle` shows).
+              const isLocal = effectivePreferredProvider !== "openai";
               const modelProvider: Provider = isLocal ? "local" : "openai";
               const rawModelChoice = chatModelChoiceByProvider[modelProvider];
               const visibleModelChoice = visibleModelChoiceForProvider(

@@ -4528,6 +4528,29 @@
   color: color-mix(in srgb, var(--fg) 84%, var(--fg-muted) 16%);
 }
 
+.messagesFrameBotSwitchLoading[data-kind="conversation"] {
+  background:
+    radial-gradient(
+      520px 280px at 50% 36%,
+      color-mix(in srgb, var(--accent-glow) 38%, transparent) 0%,
+      color-mix(in srgb, var(--accent-glow) 16%, transparent) 34%,
+      transparent 74%
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg-surface) 56%, transparent) 0%,
+      color-mix(in srgb, var(--bg-deep) 90%, #000 10%) 100%
+    );
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.messagesFrameBotSwitchLoading[data-kind="conversation"] p {
+  letter-spacing: 0.1em;
+  color: color-mix(in srgb, var(--fg) 90%, #fff 10%);
+  text-shadow: 0 1px 12px color-mix(in srgb, var(--accent-glow) 28%, transparent);
+}
+
 .messagesFrameBotSwitchSpinner {
   width: 24px;
   height: 24px;
@@ -4535,6 +4558,15 @@
   border: 2px solid color-mix(in srgb, var(--fg-muted) 48%, transparent);
   border-top-color: color-mix(in srgb, var(--accent) 66%, #fff 34%);
   animation: messagesFrameBotSwitchSpin 0.72s linear infinite;
+}
+
+.messagesFrameBotSwitchLoading[data-kind="conversation"] .messagesFrameBotSwitchSpinner {
+  width: 28px;
+  height: 28px;
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+  border-top-color: color-mix(in srgb, var(--accent) 74%, #fff 26%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-glow) 26%, transparent);
 }
 
 @keyframes messagesFrameBotSwitchSpin {
@@ -4844,7 +4876,52 @@
   padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
 }
 
-button.memoryBubble.askQuestionRecallBubble {
+/* In-thread async image job — same dock shell as AskQuestion recall, but sits
+   higher so it clears the compose strip / model row (emoji replaced by glyph). */
+.imageJobOrbDock {
+  padding-bottom: clamp(56px, 13dvh, 120px);
+}
+
+.imageJobOrbGlyphWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.imageJobOrbGlyph {
+  display: block;
+  flex-shrink: 0;
+  color: inherit;
+  transform-origin: center center;
+  animation: imageJobOrbGlyphPulse 1.35s ease-in-out infinite;
+}
+
+@keyframes imageJobOrbGlyphPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imageJobOrbGlyph {
+    animation: none;
+    opacity: 0.92;
+    transform: none;
+  }
+}
+
+/* AskQuestion recall + in-thread image job share this orb geometry; image job
+   uses a non-interactive div, so include div here — otherwise base .memoryBubble
+   keeps absolute centering + padding and the glyph drifts. */
+button.memoryBubble.askQuestionRecallBubble,
+div.memoryBubble.askQuestionRecallBubble {
   pointer-events: auto;
   position: relative;
   left: auto;
@@ -4857,6 +4934,14 @@ button.memoryBubble.askQuestionRecallBubble {
   min-height: min(var(--memory-bubble-size), 82vw);
   font-weight: 760;
   line-height: 1;
+}
+
+div.memoryBubble.askQuestionRecallBubble {
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
 }
 
 button.memoryBubble.askQuestionRecallBubble:focus-visible {
@@ -8639,6 +8724,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: color-mix(in srgb, #ff9f1c 14%, var(--bg-surface));
 }
 
+.devChatDebugEventTool {
+  border-color: color-mix(in srgb, #c779ff 62%, transparent);
+  background: color-mix(in srgb, #c779ff 14%, var(--bg-surface));
+}
+
 .devChatDebugTimestamp {
   font-size: 11px;
   color: color-mix(in srgb, var(--fg-muted) 74%, transparent);
@@ -8787,6 +8877,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock {
+  padding-bottom: 0;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock.imageJobOrbDock {
+  bottom: calc(108px + env(safe-area-inset-bottom, 0px));
   padding-bottom: 0;
 }
 
@@ -11235,6 +11330,69 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 0 4px var(--accent);
 }
 
+/* Padlock glyph that replaces the green/red `.providerDot` on the thumb
+   when the toggle is hard-locked because the active bot (regular chat)
+   or one of the seated bots (Coffee) is set to "Offline only". Same 7px
+   footprint as `.providerDot` so the thumb's flex layout doesn't shift
+   when the lock activates. */
+.modeThumbLockGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Protected lock — theme-complementary inky rail. Distinguishes the
+   protected state from the routine LOCAL track (which uses the bot-tinted
+   rail) without resorting to red. The rail tone is a muted blend of the
+   page foreground against the deep background, so it reads as "firmly
+   latched" in both light and dark themes. */
+.modeToggleTrack[data-protected="true"][data-response-mode="local"] {
+  cursor: not-allowed;
+}
+
+.themeDark .modeToggleTrack[data-protected="true"][data-response-mode="local"] {
+  --mode-toggle-track: color-mix(in srgb, var(--fg) 32%, var(--bg-deep) 68%);
+}
+
+.themeLight .modeToggleTrack[data-protected="true"][data-response-mode="local"] {
+  --mode-toggle-track: color-mix(in srgb, var(--fg) 36%, var(--bg-deep) 64%);
+}
+
+/* Protected control border picks up the same complementary tone — no red
+   accent, no extra ring. Just a slightly stronger line so the locked
+   pill reads as a solid unit. */
+.modeControl[data-protected="true"] {
+  border-color: color-mix(in srgb, var(--fg) 28%, var(--line) 72%);
+}
+
+/* Override the inherited `.modeControlLocked` double-shadow ring on the
+   thumb when the lock is the protected lock. The protected state should
+   read as a clean, calm chip — just the 🔒 glyph + LOCAL label inside a
+   plain pill — not a haloed "loading" pill. The base `.modeThumb` outer
+   ring (track-colored) still hides subpixel gaps; nothing else. */
+.modeControl[data-protected="true"].modeControlLocked .modeThumb {
+  background: var(--bg-surface);
+  border: none;
+  color: var(--fg);
+}
+
+.themeDark .modeControl[data-protected="true"].modeControlLocked .modeThumb {
+  background: #0b0a09;
+  box-shadow: 0 0 0 3px #0b0a09;
+  color: #eee7df;
+}
+
+.themeLight .modeControl[data-protected="true"].modeControlLocked .modeThumb {
+  background: #faf3e9;
+  box-shadow: 0 0 0 3px #faf3e9;
+  color: #0b0a09;
+}
+
 .composeInner {
   max-width: 100%;
   width: 100%;
@@ -12021,62 +12179,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .themeLight .panelImages[data-image-scope="bot"] .form button[type="submit"]:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--editor-bot-ink) 55%, var(--line));
-}
-
-/* Bot-scoped Images panel: suggestion bubble cloud (same visual language as Memories). */
-.imagePromptSuggestionsHint {
-  margin: 0.55rem 0 0.15rem;
-  font-size: 0.9rem;
-}
-
-/* Compact `.memoryBubbleCloud`: overlapping orbs + bot accent wash. */
-.imagePromptBubbleCloud {
-  height: clamp(220px, calc(46dvh - 120px), 320px);
-  margin-top: 0.4rem;
-  margin-bottom: 0.25rem;
-}
-
-.panelImages[data-image-scope="bot"] .imagePromptBubbleCloud {
-  background:
-    radial-gradient(
-      ellipse 72% 48% at 48% 46%,
-      color-mix(in srgb, var(--editor-bot-color) 8%, transparent),
-      transparent 70%
-    );
-}
-
-.themeLight .panelImages[data-image-scope="bot"] .imagePromptBubbleCloud {
-  background:
-    radial-gradient(
-      ellipse 72% 48% at 48% 46%,
-      color-mix(in srgb, var(--editor-bot-color) 11%, transparent),
-      transparent 70%
-    );
-}
-
-.imagePromptBubbleCloud > li {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-button.memoryBubble.imagePromptBubble {
-  appearance: none;
-  font: inherit;
-  cursor: pointer;
-}
-
-button.memoryBubble.imagePromptBubble:disabled {
-  cursor: not-allowed;
-  opacity: 0.48;
-  filter: saturate(0.58);
-}
-
-@media (max-width: 1080px) {
-  /* Narrow viewports: keep the Images suggestion cloud compact (memory panel raises `.memoryBubbleCloud` height). */
-  .memoryBubbleCloud.imagePromptBubbleCloud {
-    height: clamp(200px, calc(48dvh - 110px), 300px);
-  }
 }
 
 /* Images panel — PRISM (general): rainbow rail + cyan accent triad (same tokens as
@@ -13424,6 +13526,58 @@ button.memoryBubble.imagePromptBubble:disabled {
   display: grid;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.botProfileKnownEntityToggle button {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-deep);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.botProfileKnownEntityToggle button::after {
+  content: "";
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 10px 50%, var(--fg-muted) 0 6px, transparent 6.5px),
+    var(--line);
+  transition: background 0.16s ease;
+}
+
+.botProfileKnownEntityToggle button[data-enabled="true"] {
+  border-color: color-mix(in srgb, var(--accent-ink) 42%, var(--line) 58%);
+  background: color-mix(in srgb, var(--accent-ink) 10%, var(--bg) 90%);
+  color: var(--fg);
+}
+
+.botProfileKnownEntityToggle button[data-enabled="true"]::after {
+  background:
+    radial-gradient(circle at 24px 50%, var(--accent-ink) 0 6px, transparent 6.5px),
+    color-mix(in srgb, var(--accent-ink) 22%, var(--line));
+}
+
+.botProfileKnownEntityToggle strong {
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.botProfileKnownEntityToggle small {
+  grid-column: 1;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 /* Facts step: row list consumes remaining height under intro + add + birthday */
@@ -14851,6 +15005,39 @@ button.memoryBubble.imagePromptBubble:disabled {
   color: var(--fg-muted);
   font-size: 11px;
   line-height: 1.3;
+}
+
+/* "Offline only" is a protected state — it should *look* committed, like a
+   vault latch, not just an off switch. Uses the same theme-complementary
+   inky vocabulary as the global ONLINE/LOCAL toggle's lock so the two
+   read as one consistent affordance. The toggle still flips both ways
+   with a single tap; flipping it back to Allowed *is* the user's
+   intentional unlock action. */
+.botOnlineCapabilityToggle button[data-locked="true"] {
+  border-color: color-mix(in srgb, var(--fg) 32%, var(--line) 68%);
+  background: color-mix(in srgb, var(--fg) 5%, var(--bg-deep) 95%);
+  color: var(--fg);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--fg) 14%, transparent),
+    0 1px 0 color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+/* Thumb is shifted firmly to the closed side. Track + dot share the same
+   inky tone so the eye groups them as one solid lock. */
+.botOnlineCapabilityToggle button[data-locked="true"]::after {
+  background:
+    radial-gradient(circle at 10px 50%, color-mix(in srgb, var(--fg) 78%, var(--bg-deep)) 0 5.5px, transparent 6px),
+    color-mix(in srgb, var(--fg) 24%, var(--line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 22%, transparent);
+}
+
+.botOnlineCapabilityToggle button[data-locked="true"] strong {
+  color: var(--fg);
+  letter-spacing: 0.01em;
+}
+
+.botOnlineCapabilityToggle button[data-locked="true"] small {
+  color: var(--fg-muted);
 }
 
 .botParameterQuestionRow {
@@ -20930,11 +21117,27 @@ button.memoryBubble.imagePromptBubble:disabled {
   flex: 1 1 auto;
 }
 
+.coffeeSidebarSubhead {
+  margin: 6px 2px 0;
+  color: var(--coffee-muted);
+  font-size: 0.64rem;
+  font-weight: 760;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.coffeeGroupRow {
+  position: relative;
+  display: grid;
+  gap: 7px;
+}
+
 .coffeeSessionRow {
   position: relative;
   margin: 0;
 }
 
+.coffeeGroupButton,
 .coffeeSessionButton {
   width: 100%;
   display: grid;
@@ -20946,6 +21149,31 @@ button.memoryBubble.imagePromptBubble:disabled {
   color: #f8f8f8;
   background: rgba(255, 255, 255, 0.045);
   cursor: pointer;
+}
+
+.coffeeGroupButton {
+  position: relative;
+  overflow: hidden;
+  padding-left: 12px;
+  min-height: 98px;
+  background:
+    linear-gradient(135deg, rgba(0, 0, 0, 0.56), rgba(0, 0, 0, 0.78)),
+    var(--coffee-group-gradient);
+  border-color: rgba(255, 255, 255, 0.13);
+}
+
+.coffeeGroupButton::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--coffee-group-gradient);
+  opacity: 0.24;
+  pointer-events: none;
+}
+
+.coffeeGroupButton > * {
+  position: relative;
+  z-index: 1;
 }
 
 .coffeeSessionDeleteButton {
@@ -20986,6 +21214,13 @@ button.memoryBubble.imagePromptBubble:disabled {
   box-shadow: 0 0 28px rgba(255, 255, 255, 0.08);
 }
 
+.coffeeGroupRow[data-current="true"] .coffeeGroupButton {
+  border-color: rgba(120, 200, 255, 0.72);
+  box-shadow:
+    0 0 0 2px rgba(80, 180, 255, 0.42),
+    0 0 34px rgba(120, 200, 255, 0.14);
+}
+
 .coffeeSessionDots {
   display: flex;
   gap: 5px;
@@ -21004,6 +21239,42 @@ button.memoryBubble.imagePromptBubble:disabled {
   font-weight: 700;
 }
 
+.coffeeGroupTitle {
+  font-size: 1rem;
+  line-height: 1.12;
+  font-weight: 790;
+}
+
+.coffeeGroupSessionList {
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  margin: 0 0 2px 12px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.coffeeGroupSessionButton {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--coffee-muted);
+  background: transparent;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.coffeeGroupSessionButton:hover,
+.coffeeGroupSessionButton[data-current="true"] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .coffeeSessionMeta,
 .coffeeSessionEmpty {
   font-size: 0.76rem;
@@ -21012,6 +21283,28 @@ button.memoryBubble.imagePromptBubble:disabled {
 
 .coffeeSessionEmpty {
   padding: 14px 8px;
+}
+
+.coffeeCreateGroupButton {
+  align-self: flex-start;
+  padding: 9px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 0.82rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.coffeeCreateGroupButton:hover:not(:disabled) {
+  border-color: rgba(120, 200, 255, 0.45);
+  background: rgba(120, 200, 255, 0.12);
+}
+
+.coffeeCreateGroupButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .coffeeMain {
@@ -22140,6 +22433,402 @@ button.memoryBubble.imagePromptBubble:disabled {
   opacity: 0.72;
 }
 
+/* Lock glyph beside the pill name when a bot is offline-only. The badge
+   sits inline with the name so the protection is visible at-a-glance,
+   before the user adds the bot to a seat. Pairs with the picker-level
+   "this session will run fully offline" notice. */
+.coffeeBotPillLockBadge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  font-size: 0.78em;
+  line-height: 1;
+  opacity: 0.78;
+}
+
+.coffeeBotPill[data-offline-protected="true"] {
+  border-color: color-mix(in srgb, var(--coffee-bot-color) 50%, rgba(255, 255, 255, 0.28));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.coffeeBotPill[data-offline-protected="true"][data-selected="true"] .coffeeBotPillLockBadge {
+  opacity: 0.92;
+}
+
+/* Picker-level notice that the entire session will run offline because at
+   least one selected bot is offline-only. Sits at the top of the picker
+   section so it can't be missed before the user hits Start. Tone is
+   informational/reassuring rather than danger-red — the protection is the
+   feature, not an error. */
+.coffeeOfflineProtectionNotice {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.coffeeGroupOverview {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: 14px;
+  padding: clamp(16px, 2.5vw, 24px);
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.38), rgba(0, 0, 0, 0.62)),
+    var(--coffee-group-gradient);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 55px rgba(0, 0, 0, 0.26);
+}
+
+.coffeeGroupOverview::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--coffee-group-gradient);
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.coffeeGroupOverview > * {
+  position: relative;
+  z-index: 1;
+}
+
+.coffeeGroupOverviewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.coffeeGroupOverviewHeader h2 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(1.25rem, 2.5vw, 2rem);
+  line-height: 1.02;
+}
+
+.coffeeGroupOverviewHeader p {
+  margin: 5px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.86rem;
+}
+
+.coffeeGroupStartPanel {
+  display: grid;
+  gap: 8px;
+  min-width: min(260px, 42vw);
+}
+
+.coffeeGroupStartLabel {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.coffeeDurationPicker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.coffeeDurationPicker button {
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.84);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.coffeeDurationPicker button[data-selected="true"] {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.coffeePreviewActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.coffeeReplayControls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.coffeeReplayControls button {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 720;
+  cursor: pointer;
+}
+
+.coffeeReplayControls button:hover,
+.coffeeReplayControls button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.coffeeGroupOverviewGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.coffeeGroupOverviewCard {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-height: 128px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(0, 0, 0, 0.34);
+}
+
+.coffeeGroupOverviewCard h3 {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coffeeGroupBotList,
+.coffeeGroupRecentSessions {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.coffeeGroupBotList li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.88rem;
+  font-weight: 690;
+}
+
+.coffeeGroupBotList .coffeeSessionDot {
+  flex: 0 0 auto;
+}
+
+.coffeeGroupMoodMeter {
+  position: relative;
+  overflow: hidden;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.36);
+}
+
+.coffeeGroupMoodMeter::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--coffee-group-gradient);
+  opacity: 0.85;
+}
+
+.coffeeGroupMoodMeter span {
+  position: absolute;
+  inset: 0;
+  width: var(--coffee-group-mood-score, 50%);
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.38);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.22);
+}
+
+.coffeeGroupMoodLabel {
+  margin: -2px 0 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.78rem;
+}
+
+.coffeeGroupActionGrid {
+  display: grid;
+  gap: 10px;
+}
+
+/* Overview “tool” rows — read as primary actions (icon + label), not metric tiles. */
+.coffeeGroupToolButton {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  min-height: 52px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.94);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(255, 255, 255, 0.06) 55%,
+    rgba(0, 0, 0, 0.12) 100%
+  );
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 6px 16px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.coffeeGroupToolButton:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(0, 0, 0, 0.08) 100%
+  );
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 8px 20px rgba(0, 0, 0, 0.28);
+  transform: translateY(-1px);
+}
+
+.coffeeGroupToolButton:focus-visible {
+  outline: none;
+  border-color: rgba(120, 200, 255, 0.65);
+  box-shadow:
+    0 0 0 2px rgba(8, 12, 18, 0.85),
+    0 0 0 4px rgba(120, 200, 255, 0.35);
+}
+
+.coffeeGroupToolButton:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 3px 10px rgba(0, 0, 0, 0.26);
+}
+
+.coffeeGroupToolButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+}
+
+.coffeeGroupToolButton:disabled:hover {
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coffeeGroupToolButton {
+    transition: none;
+  }
+
+  .coffeeGroupToolButton:hover {
+    transform: none;
+  }
+}
+
+.coffeeGroupToolButtonIcon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.coffeeGroupToolButtonIcon svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.55;
+}
+
+.coffeeGroupToolButtonText {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.coffeeGroupToolButtonTitle {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+.coffeeGroupToolButtonSubtitle {
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.62);
+  line-height: 1.25;
+}
+
+.coffeeGroupRecentSessions button {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.coffeeGroupRecentSessions small,
+.coffeeGroupEmptyNote {
+  color: var(--coffee-muted);
+  font-size: 0.72rem;
+}
+
+.coffeeGroupRecentSessions button:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.coffeeGroupEmptyNote {
+  margin: 0;
+  line-height: 1.35;
+}
+
 /* Active thread — once a Coffee chat is started. */
 .coffeeThread {
   display: flex;
@@ -22300,6 +22989,136 @@ button.memoryBubble.imagePromptBubble:disabled {
   flex-shrink: 0;
   accent-color: rgba(120, 200, 255, 0.95);
   cursor: pointer;
+}
+
+.coffeeSettingsModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: flex-start;
+  padding: clamp(16px, 3vw, 28px);
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(18px);
+}
+
+.coffeeSettingsModal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  width: min(980px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.1), transparent 34%),
+    rgba(16, 15, 15, 0.96);
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.56);
+}
+
+.coffeeSettingsModalHeader,
+.coffeeSettingsModalFooter {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.coffeeSettingsModalHeader h2 {
+  margin: 4px 0;
+  font-size: clamp(1.3rem, 2vw, 1.8rem);
+}
+
+.coffeeSettingsModalHeader p {
+  margin: 0;
+  color: var(--coffee-muted);
+  font-size: 0.84rem;
+}
+
+.coffeeSettingsModalGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.8fr);
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.coffeeSettingsModalPane {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.coffeeSettingsIntroRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.coffeeSettingsDiceButton {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 1.35rem;
+  cursor: pointer;
+}
+
+.coffeePresetList {
+  display: grid;
+  gap: 8px;
+}
+
+.coffeePresetRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.coffeePresetRow > button:first-child {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  text-align: left;
+  cursor: pointer;
+}
+
+.coffeePresetRow small,
+.coffeeSettingsToggleRow small {
+  display: block;
+  margin-top: 2px;
+  color: var(--coffee-muted);
+  font-size: 0.7rem;
+}
+
+.coffeePresetDeleteButton {
+  width: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.coffeePresetSaveRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .coffeeMessages {
