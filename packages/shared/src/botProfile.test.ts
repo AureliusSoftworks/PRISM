@@ -181,6 +181,7 @@ describe("bot profile serialization", () => {
     const profile = parseStoredBotPrompt("").fields;
 
     assert.equal(profile.facts.birthday, "");
+    assert.equal(profile.facts.basedOnRealPersonOrCharacter, false);
     assert.deepEqual(profile.facts.customFacts, []);
   });
 
@@ -214,6 +215,20 @@ describe("bot profile serialization", () => {
     assert.match(prose, /Permanent facts \(canon, do not contradict\):/);
     assert.match(prose, /Birthday: October 29, 1942/);
     assert.match(prose, /Catchphrase: Happy little trees/);
+  });
+
+  it("uses canonical appearance guidance when flagged as real person/character", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.basedOnRealPersonOrCharacter = true;
+    profile.appearance.description = "old man with round spectacles";
+
+    const prose = composeBotProfileProse(profile, "Carl Jung");
+    assert.match(prose, /canonical real\/canon likeness/i);
+    assert.doesNotMatch(prose, /old man with round spectacles/i);
+
+    const rows = listBotProfileFacts(profile.facts);
+    assert.equal(rows[0]?.key, "known-entity");
+    assert.equal(rows[0]?.value, "Yes");
   });
 
   it("lists only filled facts, with a stable order and label", () => {
@@ -282,7 +297,9 @@ describe("bot profile serialization", () => {
       const profile = randomBotProfile("Random");
       const facts = profile.facts;
       const filled = Boolean(
-        facts.birthday.trim() || facts.customFacts.length > 0
+        facts.birthday.trim() ||
+        facts.basedOnRealPersonOrCharacter ||
+        facts.customFacts.length > 0
       );
       if (filled) withFacts += 1;
     }
@@ -454,5 +471,19 @@ describe("image persona context", () => {
     });
     assert.ok(full.includes("Scene request: reading under a tree"));
     assert.ok(full.startsWith("Character:"));
+  });
+
+  it("prefers canonical likeness when facts flag says this is a known person/character", () => {
+    const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+    fields.appearance.description = "old man with round glasses";
+    fields.facts.basedOnRealPersonOrCharacter = true;
+    const stored = serializeStoredBotPrompt(fields, "Carl Jung");
+    const ctx = buildImagePersonaContext({
+      botName: "Carl Jung",
+      systemPrompt: stored,
+      maxChars: 500,
+    });
+    assert.ok(ctx.includes("canonical likeness of Carl Jung"));
+    assert.ok(!ctx.includes("old man with round glasses"));
   });
 });

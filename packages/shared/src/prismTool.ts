@@ -13,6 +13,10 @@ export const PRISM_TOOL_END = "<<<END_PRISM_TOOL>>>";
 const PRISM_TOOL_START_PATTERN = /<<<\s*PRISM\s*_?\s*TOOL\s*>>>/gi;
 const PRISM_TOOL_END_PATTERN = /<<<\s*END\s*_?\s*PRISM\s*_?\s*TOOL\s*>>>/gi;
 
+/** Models sometimes emit XML-like `<PRISM_TOOL>…</PRISM_TOOL>` instead of `<<<PRISM_TOOL>>>`. */
+const XML_PRISM_TOOL_OPEN_PATTERN = /<\s*PRISM\s*_?\s*TOOL\s*>/gi;
+const XML_PRISM_TOOL_CLOSE_PATTERN = /<\s*\/\s*PRISM\s*_?\s*TOOL\s*>/gi;
+
 export interface AskQuestionOption {
   id: string;
   label: string;
@@ -33,6 +37,8 @@ export interface SentGeneratedImagePayload {
   prompt: string;
   displayUrl: string;
   revisedPrompt?: string;
+  /** Image pipeline model id (ComfyUI workflow, checkpoint id, Ollama image model, OpenAI image model, …). */
+  imageModel?: string;
 }
 
 export type StoredMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained";
@@ -172,7 +178,17 @@ function normalizeStoredSentGeneratedImagePayload(
     typeof row.revisedPrompt === "string" && row.revisedPrompt.trim()
       ? row.revisedPrompt.trim()
       : undefined;
-  return { imageId, displayUrl, prompt, ...(revised ? { revisedPrompt: revised } : {}) };
+  const imageModel =
+    typeof row.imageModel === "string" && row.imageModel.trim()
+      ? row.imageModel.trim()
+      : undefined;
+  return {
+    imageId,
+    displayUrl,
+    prompt,
+    ...(revised ? { revisedPrompt: revised } : {}),
+    ...(imageModel ? { imageModel } : {}),
+  };
 }
 
 /**
@@ -278,6 +294,56 @@ function extractLastToolBlock(raw: string): {
   const innerJson = raw.slice(startInfo.innerBegin, closing.innerEnd).trim();
   const prose =
     `${raw.slice(0, startInfo.matchStart)}${raw.slice(closing.closeEndExclusive)}`.trimEnd();
+  return { prose, innerJson };
+}
+
+/** Last `<PRISM_TOOL>…</PRISM_TOOL>` block (case-insensitive); inner must contain `{` to limit false positives. */
+function findLastXmlPrismToolOpen(raw: string): { matchStart: number; innerBegin: number } | null {
+  XML_PRISM_TOOL_OPEN_PATTERN.lastIndex = 0;
+  let chosen: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = XML_PRISM_TOOL_OPEN_PATTERN.exec(raw)) !== null) {
+    chosen = m;
+  }
+  if (!chosen?.[0] || chosen.index === undefined) return null;
+  const idx = chosen.index;
+  let innerBegin = idx + chosen[0].length;
+  const sliceAfter = raw.slice(innerBegin);
+  if (sliceAfter.startsWith("\r\n")) innerBegin += 2;
+  else if (sliceAfter.startsWith("\n")) innerBegin += 1;
+  return { matchStart: idx, innerBegin };
+}
+
+function findXmlPrismToolCloseSpan(
+  raw: string,
+  innerBegin: number
+): { innerEnd: number; closeEndExclusive: number } | null {
+  const tail = raw.slice(innerBegin);
+  XML_PRISM_TOOL_CLOSE_PATTERN.lastIndex = 0;
+  const m = XML_PRISM_TOOL_CLOSE_PATTERN.exec(tail);
+  if (!m || m.index === undefined) return null;
+  const innerEnd = innerBegin + m.index;
+  return {
+    innerEnd,
+    closeEndExclusive: innerEnd + m[0].length,
+  };
+}
+
+function extractLastXmlPrismToolBlock(raw: string): { prose: string; innerJson: string | null } {
+  const startInfo = findLastXmlPrismToolOpen(raw);
+  if (!startInfo) return { prose: raw, innerJson: null };
+
+  const closing = findXmlPrismToolCloseSpan(raw, startInfo.innerBegin);
+  if (!closing) {
+    const proseBeforeTail = raw.slice(0, startInfo.matchStart).trimEnd();
+    return { prose: proseBeforeTail, innerJson: null };
+  }
+  const innerJson = raw.slice(startInfo.innerBegin, closing.innerEnd).trim();
+  const prose =
+    `${raw.slice(0, startInfo.matchStart)}${raw.slice(closing.closeEndExclusive)}`.trimEnd();
+  if (!innerJson.includes("{")) {
+    return { prose, innerJson: null };
+  }
   return { prose, innerJson };
 }
 
@@ -446,6 +512,8 @@ export function assistantContentHasPrismToolFraming(raw: string | undefined | nu
   if (typeof raw !== "string" || raw.length < 16) return false;
   PRISM_TOOL_START_PATTERN.lastIndex = 0;
   if (PRISM_TOOL_START_PATTERN.test(raw) || raw.includes(PRISM_TOOL_START)) return true;
+  XML_PRISM_TOOL_OPEN_PATTERN.lastIndex = 0;
+  if (XML_PRISM_TOOL_OPEN_PATTERN.test(raw)) return true;
   ALT_SEND_GENERATED_IMAGE_TOKEN.lastIndex = 0;
   return ALT_SEND_GENERATED_IMAGE_TOKEN.test(raw);
 }
@@ -456,6 +524,13 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
   const prismSlice = extractLastToolBlock(trimmed);
   let prose = prismSlice.prose;
   let innerJson = prismSlice.innerJson;
+  if (!innerJson) {
+    const xmlPick = extractLastXmlPrismToolBlock(prose);
+    prose = xmlPick.prose;
+    if (xmlPick.innerJson) {
+      innerJson = xmlPick.innerJson;
+    }
+  }
   if (!innerJson) {
     const fencePick = extractLastStandaloneFencedToolJson(prose);
     if (fencePick) {

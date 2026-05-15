@@ -83,6 +83,27 @@ export {
 } from "./imageModels.js";
 
 export {
+  COMFYUI_REMOTE_WORKFLOW_PREFIX,
+  COMFYUI_WORKFLOW_MODEL_PREFIX,
+  MAX_COMFY_UI_WORKFLOW_REGISTRATIONS,
+  MAX_COMFY_UI_WORKFLOWS_STORED_JSON_BYTES,
+  encodeComfyUiRemoteWorkflowModelId,
+  encodeComfyUiWorkflowModelId,
+  findComfyUiWorkflowBindingByRemotePath,
+  findComfyUiWorkflowRegistration,
+  isComfyUiApiWorkflowNode,
+  isComfyUiRemoteWorkflowModelId,
+  isComfyUiWorkflowModelId,
+  parseComfyUiRemoteWorkflowPath,
+  parseComfyUiWorkflowSlug,
+  parseStoredComfyUiWorkflows,
+  validateComfyUiWorkflowsPayload,
+  type ComfyUiWorkflowInputRef,
+  type ComfyUiWorkflowPatchMap,
+  type ComfyUiWorkflowRegistration,
+} from "./comfyUiWorkflow.js";
+
+export {
   ACCENT_LUMINANCE_MAX_LIGHT,
   ACCENT_LUMINANCE_MAX_LIGHT_YELLOW,
   ACCENT_LIGHTNESS_MAX,
@@ -182,6 +203,44 @@ export interface CoffeeInterruptionEvent {
   socialConsequences: CoffeeInterruptionSocialDelta[];
 }
 
+export type CoffeeSessionDurationMinutes = 1 | 5 | 10;
+
+export const COFFEE_SESSION_DURATION_MINUTES = [1, 5, 10] as const;
+export const DEFAULT_COFFEE_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
+
+export type CoffeePresetMode = "manual" | "auto";
+
+export interface CoffeePreset {
+  id: string;
+  name: string;
+  settings: CoffeeSessionSettings;
+  builtIn: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CoffeeGroupEvent {
+  id: string;
+  groupId: string;
+  type: "created" | "renamed" | "settings_updated" | "roster_updated" | "session_created";
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CoffeeGroup {
+  id: string;
+  userId: string;
+  name: string;
+  botGroupIds: string[];
+  coffeeSeatBotIds: Array<string | null>;
+  coffeeSettings: CoffeeSessionSettings;
+  presetMode: CoffeePresetMode;
+  moodSummary?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+}
+
 export {
   COFFEE_HISTORY_WINDOW_HARD_CAP,
   COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD,
@@ -224,6 +283,8 @@ export interface Conversation {
    * Always undefined for `chat` and `sandbox` mode rows.
    */
   botGroupIds?: string[];
+  /** Coffee-only — durable parent group for recurring table sessions. */
+  coffeeGroupId?: string | null;
   /**
    * Coffee-only — fixed five-seat table layout. Entries are bot ids or null
    * for an empty chair. This preserves visual seat placement separately from
@@ -240,6 +301,8 @@ export interface Conversation {
    * Omitted for non-coffee rows.
    */
   coffeeSettings?: CoffeeSessionSettings;
+  /** Coffee-only — selected timed session duration, once group sessions own starts. */
+  coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
   /**
    * Private chat marker — once `true`, accent styling is suppressed to
    * grayscale, the thread stays client-held, and nothing is written to

@@ -118,6 +118,8 @@ function newCustomFactRowId(): string {
  */
 export interface BotFactsProfile {
   birthday: string;
+  /** True when this bot maps to a known real/canonical identity. */
+  basedOnRealPersonOrCharacter: boolean;
   customFacts: BotCustomFact[];
 }
 
@@ -131,7 +133,7 @@ export interface BotProfileV2 {
   facts: BotFactsProfile;
 }
 
-export type BotFactKey = Exclude<keyof BotFactsProfile, "customFacts">;
+export type BotFactKey = "birthday";
 
 export const BOT_FACT_KEY_ORDER: readonly BotFactKey[] = ["birthday"] as const;
 
@@ -211,6 +213,7 @@ export const DEFAULT_BOT_PROFILE_FIELDS: BotProfileFields = {
   },
   facts: {
     birthday: "",
+    basedOnRealPersonOrCharacter: false,
     customFacts: [],
   },
 };
@@ -254,6 +257,10 @@ function escapeRegex(s: string): string {
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   return typeof value === "string" ? value : "";
+}
+
+function readBoolean(record: Record<string, unknown>, key: string): boolean {
+  return record[key] === true;
 }
 
 function readObject(record: Record<string, unknown>, key: string): Record<string, unknown> {
@@ -542,6 +549,13 @@ export function listBotProfileFacts(
 ): Array<{ key: string; label: string; value: string }> {
   if (!facts) return [];
   const rows: Array<{ key: string; label: string; value: string }> = [];
+  if (facts.basedOnRealPersonOrCharacter) {
+    rows.push({
+      key: "known-entity",
+      label: "Real person/character",
+      value: "Yes",
+    });
+  }
   for (const key of BOT_FACT_KEY_ORDER) {
     const value = facts[key]?.trim();
     if (!value) continue;
@@ -714,13 +728,22 @@ export function composeBotProfileProse(
   );
 
   const appearance = profile.appearance;
-  blocks.push(
-    addLines("Appearance and presence", [
-      appearance.description ? `Appearance: ${appearance.description.trim()}` : "",
-      appearance.style ? `Style: ${appearance.style.trim()}` : "",
-      appearance.presence ? `Presence: ${appearance.presence.trim()}` : "",
-    ])
-  );
+  if (profile.facts.basedOnRealPersonOrCharacter) {
+    blocks.push(
+      addLines("Appearance and presence", [
+        "Use the most widely recognized canonical real/canon likeness for visual traits.",
+        "Ignore custom appearance descriptors when they conflict with canonical appearance.",
+      ])
+    );
+  } else {
+    blocks.push(
+      addLines("Appearance and presence", [
+        appearance.description ? `Appearance: ${appearance.description.trim()}` : "",
+        appearance.style ? `Style: ${appearance.style.trim()}` : "",
+        appearance.presence ? `Presence: ${appearance.presence.trim()}` : "",
+      ])
+    );
+  }
 
   const factsBlock = composeBotFactsBlock(profile.facts);
   if (factsBlock) blocks.push(factsBlock);
@@ -780,6 +803,7 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
     },
     facts: {
       birthday: readString(facts, "birthday"),
+      basedOnRealPersonOrCharacter: readBoolean(facts, "basedOnRealPersonOrCharacter"),
       customFacts: readCustomFacts(facts),
     },
   };
@@ -871,6 +895,10 @@ export function buildImagePersonaContext(options: {
   ]
     .filter(Boolean)
     .join("; ");
+  const canonicalAppearance =
+    fields.facts.basedOnRealPersonOrCharacter === true
+      ? `Use the widely recognized canonical likeness of ${name} for appearance and visual traits. Ignore user-authored appearance descriptors when they conflict with canon.`
+      : "";
 
   const prosePurpose = fields.purpose.statement.trim();
   const legacy = fields.purpose.legacyNotes.trim();
@@ -883,7 +911,7 @@ export function buildImagePersonaContext(options: {
   const core = [
     `Character: ${name}.`,
     identityBits,
-    appearanceBits ? `Look and presence: ${appearanceBits}.` : "",
+    canonicalAppearance || (appearanceBits ? `Look and presence: ${appearanceBits}.` : ""),
     clippedVoice ? `Persona: ${clippedVoice}` : "",
   ]
     .filter(Boolean)

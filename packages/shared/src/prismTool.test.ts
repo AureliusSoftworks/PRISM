@@ -269,6 +269,47 @@ describe("parseAssistantPrismTools", () => {
     assert.equal(out.displayContent, raw);
     assert.equal(out.sendGeneratedImage, undefined);
   });
+
+  it("parses sendGeneratedImage inside XML-style <PRISM_TOOL>…</PRISM_TOOL> (common model mistake)", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: {
+        prompt: "Sheldon J. Plankton, a small green copepod with a single large eye.",
+      },
+    });
+    const raw = `Sure thing!\n<PRISM_TOOL> ${inner} </PRISM_TOOL>`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Sure thing!");
+    assert.deepEqual(out.sendGeneratedImage, {
+      prompt: "Sheldon J. Plankton, a small green copepod with a single large eye.",
+    });
+  });
+
+  it("parses XML-style Prism tags case-insensitively", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: { prompt: "A red door." },
+    });
+    const raw = `Hi.\n<Prism_Tool>\n${inner}\n</Prism_Tool>`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Hi.");
+    assert.deepEqual(out.sendGeneratedImage, { prompt: "A red door." });
+  });
+
+  it("strips incomplete XML-style tool tails when closing tag is missing", () => {
+    const raw = "Hello.\n<PRISM_TOOL>\n{\"v\":1";
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent, "Hello.");
+    assert.equal(out.sendGeneratedImage, undefined);
+  });
+
+  it("strips XML-style block with non-JSON inner (no brace) without treating as tool", () => {
+    const raw = "Note.\n<PRISM_TOOL>not json at all</PRISM_TOOL>";
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Note.");
+    assert.equal(out.askQuestion, undefined);
+    assert.equal(out.sendGeneratedImage, undefined);
+  });
 });
 
 describe("hydrateAssistantMessageParts", () => {
@@ -282,6 +323,17 @@ describe("hydrateAssistantMessageParts", () => {
     });
     assert.equal(h.content, "Visible.");
     assert.deepEqual(h.askQuestion, payload);
+  });
+
+  it("strips XML-style sendGeneratedImage stub from content when tool_payload is absent", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: { prompt: "A sleepy cat." },
+    });
+    const leaky = `Sure.\n<PRISM_TOOL>${inner}</PRISM_TOOL>`;
+    const h = hydrateAssistantMessageParts({ content: leaky, toolPayload: undefined });
+    assert.equal(h.content.trim(), "Sure.");
+    assert.equal(h.sentGeneratedImage, undefined);
   });
 
   it("re-parses fenced JSON inside tool framing when tool_payload missing", () => {
@@ -310,6 +362,28 @@ describe("hydrateAssistantMessageParts", () => {
       imageId: "img1",
       displayUrl: "/api/images/img1/file",
       prompt: "A sleepy cat.",
+    });
+  });
+
+  it("preserves imageModel on persisted sentGeneratedImage payloads", () => {
+    const stored = JSON.stringify({
+      v: 1,
+      sentGeneratedImage: {
+        imageId: "img2",
+        displayUrl: "/api/images/img2/file",
+        prompt: "A red door.",
+        imageModel: "comfyui-remote:user/workflows/x.json",
+      },
+    });
+    const h = hydrateAssistantMessageParts({
+      content: "Here.",
+      toolPayload: stored,
+    });
+    assert.deepEqual(h.sentGeneratedImage, {
+      imageId: "img2",
+      displayUrl: "/api/images/img2/file",
+      prompt: "A red door.",
+      imageModel: "comfyui-remote:user/workflows/x.json",
     });
   });
 
