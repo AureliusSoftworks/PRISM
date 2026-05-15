@@ -102,6 +102,7 @@ export function createDatabase(): DatabaseSync {
       lenient_local_fallback_model TEXT,
       secondary_ollama_host TEXT,
       comfyui_host TEXT,
+      comfyui_workflows TEXT NOT NULL DEFAULT '[]',
       preferred_local_image_model TEXT,
       preferred_openai_image_model TEXT,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
@@ -148,6 +149,9 @@ export function createDatabase(): DatabaseSync {
       archive_batch_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       coffee_settings TEXT,
+      coffee_group_id TEXT,
+      coffee_duration_minutes INTEGER,
+      coffee_preset_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -295,6 +299,47 @@ export function createDatabase(): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS coffee_groups (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      coffee_settings TEXT NOT NULL,
+      preset_mode TEXT NOT NULL DEFAULT 'manual',
+      mood_summary TEXT NOT NULL DEFAULT '{}',
+      archived_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS coffee_group_seats (
+      user_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      seat_index INTEGER NOT NULL,
+      bot_id TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, group_id, seat_index),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(group_id) REFERENCES coffee_groups(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS coffee_presets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      coffee_settings TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS coffee_group_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(group_id) REFERENCES coffee_groups(id) ON DELETE CASCADE
+    );
   `);
   const userColumns = db
     .prepare("PRAGMA table_info(users)")
@@ -373,6 +418,31 @@ export function createDatabase(): DatabaseSync {
   if (!hasLenientLocalImageFallbackModel) {
     db.exec("ALTER TABLE users ADD COLUMN lenient_local_image_fallback_model TEXT;");
   }
+  const hasComfyuiWorkflows = userColumns.some((column) => column.name === "comfyui_workflows");
+  if (!hasComfyuiWorkflows) {
+    db.exec("ALTER TABLE users ADD COLUMN comfyui_workflows TEXT;");
+    db.exec(`UPDATE users SET comfyui_workflows = '[]' WHERE comfyui_workflows IS NULL;`);
+  }
+  const hasPrismDefaultLlmModel = userColumns.some(
+    (column) => column.name === "prism_default_llm_model"
+  );
+  if (!hasPrismDefaultLlmModel) {
+    db.exec("ALTER TABLE users ADD COLUMN prism_default_llm_model TEXT;");
+  }
+  const hasPrismImageToolLlmModel = userColumns.some(
+    (column) => column.name === "prism_image_tool_llm_model"
+  );
+  if (!hasPrismImageToolLlmModel) {
+    db.exec("ALTER TABLE users ADD COLUMN prism_image_tool_llm_model TEXT;");
+  }
+  const hasFallbackModelMessageStripe = userColumns.some(
+    (column) => column.name === "fallback_model_message_stripe"
+  );
+  if (!hasFallbackModelMessageStripe) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN fallback_model_message_stripe INTEGER NOT NULL DEFAULT 1;"
+    );
+  }
   db.exec(`
     UPDATE users
     SET last_active_at = COALESCE(last_active_at, created_at)
@@ -439,6 +509,24 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasConversationCoffeeSettingsColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_settings TEXT;");
+  }
+  const hasConversationCoffeeGroupIdColumn = conversationColumns.some(
+    (column) => column.name === "coffee_group_id"
+  );
+  if (!hasConversationCoffeeGroupIdColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_group_id TEXT;");
+  }
+  const hasConversationCoffeeDurationColumn = conversationColumns.some(
+    (column) => column.name === "coffee_duration_minutes"
+  );
+  if (!hasConversationCoffeeDurationColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_duration_minutes INTEGER;");
+  }
+  const hasConversationCoffeePresetColumn = conversationColumns.some(
+    (column) => column.name === "coffee_preset_id"
+  );
+  if (!hasConversationCoffeePresetColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_preset_id TEXT;");
   }
   const sweepBatchColumns = db
     .prepare("PRAGMA table_info(conversation_sweep_batches)")
@@ -719,6 +807,18 @@ export function createDatabase(): DatabaseSync {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);"
   );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_groups_user_updated ON coffee_groups (user_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_group_seats_group ON coffee_group_seats (user_id, group_id, seat_index);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_group_events_group ON coffee_group_events (user_id, group_id, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_conversations_coffee_group ON conversations (user_id, coffee_group_id, updated_at DESC);"
+  );
 
   return db;
 }
@@ -743,6 +843,8 @@ export function mapConversation(
     conversation_mode?: string | null;
     bot_id: string | null;
     bot_group_ids?: string | null;
+    coffee_group_id?: string | null;
+    coffee_duration_minutes?: number | null;
     incognito: number;
     last_bot_id?: string | null;
     last_bot_color?: string | null;
@@ -766,6 +868,10 @@ export function mapConversation(
     mode: conversationMode,
     botId: row.bot_id ?? null,
     ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
+    ...(conversationMode === "coffee" ? { coffeeGroupId: row.coffee_group_id ?? null } : {}),
+    ...(conversationMode === "coffee" && isCoffeeSessionDurationMinutes(row.coffee_duration_minutes)
+      ? { coffeeSessionDurationMinutes: row.coffee_duration_minutes }
+      : {}),
     incognito: row.incognito === 1,
     lastBotId: row.last_bot_id ?? null,
     lastBotColor: row.last_bot_color ?? null,
@@ -774,6 +880,10 @@ export function mapConversation(
     updatedAt: row.updated_at,
     messages
   };
+}
+
+function isCoffeeSessionDurationMinutes(value: unknown): value is 1 | 5 | 10 {
+  return value === 1 || value === 5 || value === 10;
 }
 
 function parseBotGroupIds(raw: string | null | undefined): string[] {

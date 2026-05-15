@@ -9,18 +9,31 @@ import {
   buildSpeakerPrompt,
   clampCoffeeSocialValue,
   clampCoffeeTableReplyText,
+  coffeeReplyLooksLikePromptLeak,
   computePlayerInterruptionConsequences,
   computeNextCoffeeSocialState,
+  createCoffeeGroup,
   createCoffeeConversation,
+  createCoffeeConversationFromGroup,
+  createCoffeePreset,
+  deleteCoffeePreset,
   updateCoffeeConversationSettings,
+  listCoffeePresets,
+  effectiveCoffeeSpeakerProvider,
   initializeCoffeeSocialState,
   maybeBuildBotInterruptionEvent,
   normalizeCoffeeGroupBotIds,
   normalizeCoffeeSeatBotIds,
+  parseStoredBotGroupIds,
+  parseStoredCoffeeSeatBotIds,
+  parseStoredCoffeeSessionSettings,
   parseRouterResponse,
   pickDirectedSpeaker,
   pickFallbackSpeaker,
+  sanitizeCoffeeTableReply,
   stripCoffeeSpeakerPrefix,
+  updateCoffeeGroup,
+  updateCoffeePreset,
   type CoffeeBotProfile,
 } from "../coffee.ts";
 import {
@@ -133,6 +146,30 @@ describe("normalizeCoffeeSeatBotIds", () => {
   });
 });
 
+/**
+ * Per-bot "Offline only" lock — the player marks a bot as protected in the
+ * bot editor (toggle commits to a 🔒 state). Coffee Sessions must respect
+ * that even when the rest of the table is willing to use the online
+ * provider: a single protected bot forces its own turn back to local, and
+ * the picker UI mirrors that with a "this session will run fully offline"
+ * notice. These tests pin the API-side enforcement so the trust isn't UI-
+ * deep only.
+ */
+describe("effectiveCoffeeSpeakerProvider", () => {
+  it("forces local when the speaker is offline-only and the table prefers openai", () => {
+    assert.equal(effectiveCoffeeSpeakerProvider(false, "openai"), "local");
+  });
+
+  it("keeps local when the table already prefers local, regardless of bot setting", () => {
+    assert.equal(effectiveCoffeeSpeakerProvider(false, "local"), "local");
+    assert.equal(effectiveCoffeeSpeakerProvider(true, "local"), "local");
+  });
+
+  it("allows openai when the speaker is online-enabled and the table prefers openai", () => {
+    assert.equal(effectiveCoffeeSpeakerProvider(true, "openai"), "openai");
+  });
+});
+
 function createCoffeeTestDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
   db.exec(`
@@ -144,6 +181,9 @@ function createCoffeeTestDb(): DatabaseSync {
       bot_id TEXT,
       bot_group_ids TEXT,
       coffee_settings TEXT,
+      coffee_group_id TEXT,
+      coffee_duration_minutes INTEGER,
+      coffee_preset_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -176,6 +216,41 @@ function createCoffeeTestDb(): DatabaseSync {
       leave_pressure REAL NOT NULL,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, conversation_id, bot_id)
+    );
+    CREATE TABLE coffee_groups (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      coffee_settings TEXT NOT NULL,
+      preset_mode TEXT NOT NULL DEFAULT 'manual',
+      mood_summary TEXT NOT NULL DEFAULT '{}',
+      archived_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE coffee_group_seats (
+      user_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      seat_index INTEGER NOT NULL,
+      bot_id TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, group_id, seat_index)
+    );
+    CREATE TABLE coffee_presets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      coffee_settings TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE coffee_group_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
     );
   `);
   return db;
@@ -291,6 +366,192 @@ describe("createCoffeeConversation", () => {
     });
     assert.equal(merged.responseLength, "roomy");
     assert.equal(merged.crossTalk, "chatty");
+  });
+});
+
+describe("Coffee group foundation", () => {
+  it("creates a durable Coffee group with fixed seats and settings", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const group = createCoffeeGroup(db, userId, {
+      name: "Bikini Bottom Table",
+      groupBotIds: [ALICE.id, null, BORIS.id, null, null],
+      coffeeSettings: { responseLength: "brief", crossTalk: "chatty" },
+    });
+
+    assert.equal(group.name, "Bikini Bottom Table");
+    assert.deepEqual(group.botGroupIds, [ALICE.id, BORIS.id]);
+    assert.deepEqual(group.coffeeSeatBotIds, [ALICE.id, null, BORIS.id, null, null]);
+    assert.equal(group.coffeeSettings.responseLength, "brief");
+    assert.equal(group.coffeeSettings.crossTalk, "chatty");
+    assert.equal(group.presetMode, "manual");
+
+    const events = db
+      .prepare("SELECT event_type FROM coffee_group_events WHERE group_id = ?")
+      .all(group.id) as Array<{ event_type: string }>;
+    assert.deepEqual(events.map((row) => row.event_type), ["created"]);
+  });
+
+  it("starts a session from a Coffee group and freezes its snapshot", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const group = createCoffeeGroup(db, userId, {
+      name: "Morning Table",
+      groupBotIds: [null, ALICE.id, BORIS.id, null, null],
+      coffeeSettings: { responseLength: "roomy" },
+    });
+    const result = createCoffeeConversationFromGroup(db, userId, group.id, {
+      durationMinutes: 10,
+    });
+
+    assert.equal(result.conversation.coffeeGroupId, group.id);
+    assert.equal(result.conversation.coffeeSessionDurationMinutes, 10);
+    assert.deepEqual(result.conversation.coffeeSeatBotIds, [
+      null,
+      ALICE.id,
+      BORIS.id,
+      null,
+      null,
+    ]);
+    assert.equal(result.conversation.coffeeSettings?.responseLength, "roomy");
+
+    const row = db
+      .prepare("SELECT coffee_group_id, coffee_duration_minutes, bot_group_ids FROM conversations WHERE id = ?")
+      .get(result.conversation.id) as {
+      coffee_group_id: string | null;
+      coffee_duration_minutes: number | null;
+      bot_group_ids: string;
+    };
+    assert.equal(row.coffee_group_id, group.id);
+    assert.equal(row.coffee_duration_minutes, 10);
+    assert.deepEqual(JSON.parse(row.bot_group_ids), [null, ALICE.id, BORIS.id, null, null]);
+  });
+
+  it("rejects unsupported group session durations", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+
+    assert.throws(
+      () => createCoffeeConversationFromGroup(db, userId, group.id, { durationMinutes: 15 }),
+      /1, 5, or 10 minutes/
+    );
+  });
+});
+
+describe("Coffee presets", () => {
+  it("lists built-in presets before user presets", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+
+    const created = createCoffeePreset(db, userId, {
+      name: "My Table",
+      coffeeSettings: { responseLength: "roomy" },
+    });
+    const presets = listCoffeePresets(db, userId);
+
+    assert.ok(presets.length >= 4);
+    assert.ok(presets.slice(0, 3).every((preset) => preset.builtIn));
+    assert.equal(presets.at(-1)?.id, created.id);
+  });
+
+  it("updates and deletes user presets but protects built-ins", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const created = createCoffeePreset(db, userId, {
+      name: "Draft",
+      coffeeSettings: { responseLength: "brief" },
+    });
+
+    const updated = updateCoffeePreset(db, userId, created.id, {
+      name: "Saved",
+      coffeeSettings: { responseLength: "detailed" },
+    });
+    assert.equal(updated.name, "Saved");
+    assert.equal(updated.settings.responseLength, "detailed");
+    assert.throws(
+      () => updateCoffeePreset(db, userId, "builtin:quiet-table", { name: "Nope" }),
+      /Built-in/
+    );
+    assert.throws(
+      () => deleteCoffeePreset(db, userId, "builtin:quiet-table"),
+      /Built-in/
+    );
+    deleteCoffeePreset(db, userId, created.id);
+    assert.equal(listCoffeePresets(db, userId).some((preset) => preset.id === created.id), false);
+  });
+
+  it("applies explicit and auto presets when starting group sessions", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      coffeeSettings: { responseLength: "brief" },
+    });
+    const preset = createCoffeePreset(db, userId, {
+      name: "Roomy",
+      coffeeSettings: { responseLength: "roomy" },
+    });
+
+    const explicit = createCoffeeConversationFromGroup(db, userId, group.id, {
+      durationMinutes: 1,
+      presetId: preset.id,
+    });
+    assert.equal(explicit.conversation.coffeeSettings?.responseLength, "roomy");
+
+    updateCoffeeGroup(db, userId, group.id, { presetMode: "auto" });
+    const auto = createCoffeeConversationFromGroup(db, userId, group.id, {
+      durationMinutes: 5,
+    });
+    assert.ok(auto.conversation.coffeeSettings);
+    const row = db
+      .prepare("SELECT coffee_preset_id FROM conversations WHERE id = ?")
+      .get(auto.conversation.id) as { coffee_preset_id: string | null };
+    assert.ok(row.coffee_preset_id, "auto preset should snapshot the chosen preset id");
+  });
+});
+
+describe("Coffee legacy compatibility helpers", () => {
+  it("parses legacy plain bot id arrays and fixed seat arrays", () => {
+    assert.deepEqual(parseStoredBotGroupIds(JSON.stringify([ALICE.id, BORIS.id])), [
+      ALICE.id,
+      BORIS.id,
+    ]);
+    assert.deepEqual(parseStoredBotGroupIds(JSON.stringify([null, ALICE.id, BORIS.id])), [
+      ALICE.id,
+      BORIS.id,
+    ]);
+    assert.deepEqual(parseStoredCoffeeSeatBotIds(JSON.stringify([null, ALICE.id, BORIS.id])), [
+      null,
+      ALICE.id,
+      BORIS.id,
+      null,
+      null,
+    ]);
+    assert.deepEqual(parseStoredCoffeeSeatBotIds(JSON.stringify([ALICE.id, BORIS.id])), []);
+  });
+
+  it("keeps null or malformed Coffee settings on defaults", () => {
+    assert.deepEqual(
+      parseStoredCoffeeSessionSettings(null),
+      normalizeCoffeeSessionSettings(undefined)
+    );
+    assert.deepEqual(
+      parseStoredCoffeeSessionSettings("{ broken"),
+      normalizeCoffeeSessionSettings(undefined)
+    );
   });
 });
 
@@ -554,6 +815,36 @@ describe("stripCoffeeSpeakerPrefix", () => {
     assert.equal(
       stripCoffeeSpeakerPrefix("Bob Ross: Let's add a little color.", "Bob Ross"),
       "Let's add a little color."
+    );
+  });
+});
+
+describe("coffee prompt leak cleanup", () => {
+  it("detects instruction-shaped prompt leakage", () => {
+    assert.equal(
+      coffeeReplyLooksLikePromptLeak("We need to respond as SpongeBob, one line, no speaker label."),
+      true
+    );
+  });
+
+  it("does not flag normal visible banter", () => {
+    assert.equal(coffeeReplyLooksLikePromptLeak("Yeah, that tracks."), false);
+  });
+
+  it("drops prompt-leak replies instead of showing them on the table", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "We need to respond as SpongeBob, one line, no speaker label.",
+        "SpongeBob"
+      ),
+      ""
+    );
+  });
+
+  it("keeps real bot lines and still strips copied speaker labels", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply("SpongeBob: Yeah, I can do that.", "SpongeBob"),
+      "Yeah, I can do that."
     );
   });
 });

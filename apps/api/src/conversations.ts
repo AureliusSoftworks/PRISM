@@ -8,6 +8,10 @@ export interface ConversationSummary {
   botId: string | null;
   /** Coffee-only — the 2-5 bot ids participating in this group thread. */
   botGroupIds?: string[];
+  /** Coffee-only — durable parent group for recurring table sessions. */
+  coffeeGroupId?: string | null;
+  /** Coffee-only — timed session duration once group-owned sessions are used. */
+  coffeeSessionDurationMinutes?: 1 | 5 | 10;
   incognito: boolean;
   lastBotId: string | null;
   lastBotColor: string | null;
@@ -221,7 +225,9 @@ export function listConversationSummaries(
   // the conversation, regardless of the conversation's locked bot_id.
   const rows = db
     .prepare(
-      `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids, c.incognito, c.created_at, c.updated_at,
+      `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
+              c.coffee_group_id, c.coffee_duration_minutes,
+              c.incognito, c.created_at, c.updated_at,
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
                    AND m.role = 'assistant'
@@ -246,6 +252,8 @@ export function listConversationSummaries(
     conversation_mode: string | null;
     bot_id: string | null;
     bot_group_ids: string | null;
+    coffee_group_id: string | null;
+    coffee_duration_minutes: number | null;
     incognito: number;
     created_at: string;
     updated_at: string;
@@ -268,6 +276,10 @@ export function listConversationSummaries(
       mode,
       botId: row.bot_id ?? null,
       ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
+      ...(mode === "coffee" ? { coffeeGroupId: row.coffee_group_id ?? null } : {}),
+      ...(mode === "coffee" && isCoffeeSessionDurationMinutes(row.coffee_duration_minutes)
+        ? { coffeeSessionDurationMinutes: row.coffee_duration_minutes }
+        : {}),
       incognito: row.incognito === 1,
       lastBotId: row.last_bot_id ?? null,
       lastBotColor: row.last_bot_color ?? null,
@@ -276,6 +288,10 @@ export function listConversationSummaries(
       updatedAt: row.updated_at,
     };
   });
+}
+
+function isCoffeeSessionDurationMinutes(value: unknown): value is 1 | 5 | 10 {
+  return value === 1 || value === 5 || value === 10;
 }
 
 function parseBotGroupIdsForSummary(raw: string | null): string[] {
