@@ -643,6 +643,14 @@ function shouldSuppressAssistantReply(raw: string): boolean {
   return broadDenialCuePatterns.some((pattern) => pattern.test(normalized));
 }
 
+export function shouldBypassSuppressionForImageIntent(
+  isStarterPrompt: boolean,
+  userMessage: string
+): boolean {
+  if (isStarterPrompt) return false;
+  return userMessageSuggestsInChatImageRequest(userMessage);
+}
+
 function normalizeModelValue(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -672,6 +680,28 @@ export function userMessageSuggestsInChatImageRequest(message: string): boolean 
     /\b(show|give)\s+me\s+(an?\s+)?(image|picture|drawing)\b/.test(t) ||
     t.includes("sendgeneratedimage")
   );
+}
+
+const AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS = 1200;
+
+/**
+ * If the assistant forgot to emit `sendGeneratedImage` for an obvious image
+ * request, synthesize a safe fallback prompt from the user's own words so the
+ * image job still gets submitted.
+ */
+export function autoBackfillSendGeneratedImagePrompt(args: {
+  isStarterPrompt: boolean;
+  userMessage: string;
+  parsedToolPrompt?: string | null;
+}): string | undefined {
+  const explicit = args.parsedToolPrompt?.trim();
+  if (explicit && explicit.length > 0) return explicit;
+  if (args.isStarterPrompt) return undefined;
+  if (!userMessageSuggestsInChatImageRequest(args.userMessage)) return undefined;
+  const normalized = args.userMessage.replace(/\s+/g, " ").trim();
+  if (!normalized) return undefined;
+  if (normalized.length <= AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS) return normalized;
+  return `${normalized.slice(0, AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS - 3).trimEnd()}...`;
 }
 
 export function resolvePrimaryChatProviderForPossibleImageToolTurn(args: {
@@ -3177,7 +3207,10 @@ export async function processChatMessage(
       secondaryOllamaHost: settings.secondaryOllamaHost,
       lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
     });
-    if (shouldSuppressAssistantReply(assistantReplyRaw)) {
+    if (
+      shouldSuppressAssistantReply(assistantReplyRaw) &&
+      !shouldBypassSuppressionForImageIntent(isStarterPrompt, message)
+    ) {
       throw createDeniedReplySuppressedError({
         fallbackConfigured: normalizeModelValue(settings.lenientLocalFallbackModel) !== null,
       });
@@ -3216,8 +3249,12 @@ export async function processChatMessage(
       repairSignal,
     });
     const sendImgPromptIncRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
-    let sendImgPromptInc =
-      sendImgPromptIncRaw && sendImgPromptIncRaw.length > 0 ? sendImgPromptIncRaw : undefined;
+    let sendImgPromptInc = autoBackfillSendGeneratedImagePrompt({
+      isStarterPrompt,
+      userMessage: message,
+      parsedToolPrompt: sendImgPromptIncRaw,
+    });
+    const sendImgPromptIncRequested = sendImgPromptInc;
     let pendingImageJobIncognito: ProcessChatMessageResult["pendingImageJob"] | undefined;
     let incognitoImageSlot: "acquired" | "busy" | "none" = sendImgPromptInc ? "busy" : "none";
     let incognitoImageJobId: string | undefined;
@@ -3263,8 +3300,12 @@ export async function processChatMessage(
     }
     const incognitoToolCallEvents = buildAssistantToolCallEvents({
       rawReply: assistantReplyRaw,
-      ...(parsedAssistant.sendGeneratedImage
-        ? { parsedSendGeneratedImage: parsedAssistant.sendGeneratedImage }
+      ...((parsedAssistant.sendGeneratedImage ||
+        sendImgPromptIncRaw !== sendImgPromptIncRequested) &&
+      sendImgPromptIncRequested
+        ? {
+            parsedSendGeneratedImage: { prompt: sendImgPromptIncRequested },
+          }
         : {}),
       ...(askQuestionForTurn ? { parsedAskQuestion: askQuestionForTurn } : {}),
       imageSlot: incognitoImageSlot,
@@ -3556,7 +3597,10 @@ export async function processChatMessage(
     secondaryOllamaHost: settings.secondaryOllamaHost,
     lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
   });
-  if (shouldSuppressAssistantReply(assistantReplyRaw)) {
+  if (
+    shouldSuppressAssistantReply(assistantReplyRaw) &&
+    !shouldBypassSuppressionForImageIntent(isStarterPrompt, message)
+  ) {
     throw createDeniedReplySuppressedError({
       fallbackConfigured: normalizeModelValue(settings.lenientLocalFallbackModel) !== null,
     });
@@ -3600,7 +3644,13 @@ export async function processChatMessage(
     botOpinion: existingBotOpinion,
     repairSignal,
   });
-  let sendImgPromptPersisted = parsedAssistant.sendGeneratedImage?.prompt?.trim();
+  const sendImgPromptPersistedRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
+  let sendImgPromptPersisted = autoBackfillSendGeneratedImagePrompt({
+    isStarterPrompt,
+    userMessage: message,
+    parsedToolPrompt: sendImgPromptPersistedRaw,
+  });
+  const sendImgPromptPersistedRequested = sendImgPromptPersisted;
   let pendingImageJob: ProcessChatMessageResult["pendingImageJob"] | undefined;
   let sentGeneratedImagePersisted: SentGeneratedImagePayload | undefined;
   let persistedImageSlot: "acquired" | "busy" | "none" =
@@ -3654,8 +3704,12 @@ export async function processChatMessage(
   }
   const persistedToolCallEvents = buildAssistantToolCallEvents({
     rawReply: assistantReplyRaw,
-    ...(parsedAssistant.sendGeneratedImage
-      ? { parsedSendGeneratedImage: parsedAssistant.sendGeneratedImage }
+    ...((parsedAssistant.sendGeneratedImage ||
+      sendImgPromptPersistedRaw !== sendImgPromptPersistedRequested) &&
+    sendImgPromptPersistedRequested
+      ? {
+          parsedSendGeneratedImage: { prompt: sendImgPromptPersistedRequested },
+        }
       : {}),
     ...(askQuestionForTurn ? { parsedAskQuestion: askQuestionForTurn } : {}),
     imageSlot: persistedImageSlot,

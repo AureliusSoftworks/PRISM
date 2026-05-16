@@ -10,6 +10,7 @@ import {
   buildSpeakerPrompt,
   clampCoffeeSocialValue,
   clampCoffeeTableReplyText,
+  coffeeReplyBreaksCharacterImmersion,
   coffeeReplyLooksLikePromptLeak,
   coffeeReplyRepeatsRecentAssistant,
   coffeeReplyRepeatsRecentMotifs,
@@ -738,6 +739,20 @@ describe("buildRouterPrompt", () => {
     assert.match(messages[0]!.content, /Do not force every bot to answer everything/);
   });
 
+  it("adds kickoff guidance when the first autonomous line starts a new session", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "A brand-new Coffee session is starting around the topic.",
+      lastSpeakerBotId: null,
+      turnKind: "autonomous",
+      sessionKickoff: true,
+    });
+    assert.match(messages[0]!.content, /very first line of a brand-new session/);
+    assert.match(messages[0]!.content, /open the table naturally/);
+    assert.match(messages[0]!.content, /fresh and specific/);
+  });
+
   it("formats prior bot messages as a clean transcript instead of bracketed assistant labels", () => {
     const messages = buildRouterPrompt({
       group: [ALICE, BORIS],
@@ -816,7 +831,7 @@ describe("buildRouterPrompt", () => {
 });
 
 describe("buildSpeakerPrompt", () => {
-  it("includes one-clause and balanced-cap tabletop guidance", () => {
+  it("includes varied-rhythm and balanced-cap tabletop guidance", () => {
     const messages = buildSpeakerPrompt({
       speaker: ALICE,
       group: [ALICE, BORIS, CARA],
@@ -836,9 +851,9 @@ describe("buildSpeakerPrompt", () => {
     );
     assert.ok(systemInstruction);
     assert.match(systemInstruction!.content, /no line breaks/);
-    assert.match(systemInstruction!.content, /ONE clause only/);
-    assert.match(systemInstruction!.content, /No second sentence/);
-    assert.match(systemInstruction!.content, /Do not end with a question by default/);
+    assert.match(systemInstruction!.content, /one or two short sentences max/i);
+    assert.match(systemInstruction!.content, /vary your rhythm across turns/i);
+    assert.match(systemInstruction!.content, /Questions are allowed when they naturally move the table/);
     assert.match(systemInstruction!.content, /cutting off another bot mid-sentence/);
     assert.match(systemInstruction!.content, /still warming up/);
     // Cap is now a soft target — the server no longer truncates, so the
@@ -846,6 +861,8 @@ describe("buildSpeakerPrompt", () => {
     assert.match(systemInstruction!.content, /soft target around 110 characters/);
     assert.match(systemInstruction!.content, /server no longer truncates/);
     assert.match(systemInstruction!.content, /Never repeat a recent table line exactly/);
+    assert.match(systemInstruction!.content, /Never claim to be an AI assistant/);
+    assert.match(systemInstruction!.content, /stay in persona/i);
     // Stage-direction format moved from a blanket prohibition to a canonical
     // single-asterisk rule so the renderer can lift `*…*` blocks above the speaker's seat.
     assert.match(systemInstruction!.content, /single asterisks/);
@@ -875,6 +892,27 @@ describe("buildSpeakerPrompt", () => {
     const joined = messages.map((m) => m.content).join("\n");
     assert.match(joined, /Tiny rituals that keep the week gentle/);
     assert.match(joined, /Table topic anchor/);
+  });
+
+  it("adds explicit kickoff guidance for a session-opening autonomous turn", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "Start the table.",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+      turnKind: "autonomous",
+      sessionKickoff: true,
+    });
+    const combined = messages.map((message) => message.content).join("\n");
+    assert.match(combined, /Session opening turn/);
+    assert.match(combined, /fresh first beat/);
+    assert.match(combined, /Do not imply unseen prior context/);
+    assert.match(combined, /again', 'as usual', 'still', or 'like last time'/);
   });
 
   it("uses roomy caps when session responseLength is roomy", () => {
@@ -1316,6 +1354,84 @@ describe("coffee prompt leak cleanup", () => {
     assert.equal(
       sanitizeCoffeeTableReply("SpongeBob: Yeah, I can do that.", "SpongeBob"),
       "Yeah, I can do that."
+    );
+  });
+
+  it("downgrades weak noun-like stage tags to plain prose", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply("*secrets* Snacks are fuel.", "Plankton"),
+      "secrets Snacks are fuel."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply("*enthusiasm* Keep going.", "Squidward"),
+      "enthusiasm Keep going."
+    );
+  });
+
+  it("keeps physical/social stage actions wrapped for seat badges", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply("*adjusting goggles* Snacks are fuel.", "Plankton"),
+      "*adjusting goggles* Snacks are fuel."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply("*places a hand over his heart* Growth begins now.", "Jesus Christ"),
+      "*places a hand over his heart* Growth begins now."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply("*sips tea* We continue.", "Mr. Krabs"),
+      "*sips tea* We continue."
+    );
+  });
+});
+
+describe("coffee character immersion guard", () => {
+  it("detects self-identifying AI/model disclaimers", () => {
+    assert.equal(
+      coffeeReplyBreaksCharacterImmersion(
+        "As a digital AI assistant, I can't physically take photos."
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplyBreaksCharacterImmersion("I am a language model, so I do not have a body."),
+      true
+    );
+  });
+
+  it("does not flag normal in-character lines", () => {
+    assert.equal(
+      coffeeReplyBreaksCharacterImmersion("I can sketch the scene right now if you want."),
+      false
+    );
+  });
+
+  it("detects capability denial lines about photos being impossible in chat", () => {
+    assert.equal(
+      coffeeReplyBreaksCharacterImmersion(
+        "I wish I could send you a photo, but I'm afraid that's not possible in this chat."
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplyBreaksCharacterImmersion("Sorry, photos aren't possible in this chat."),
+      true
+    );
+  });
+
+  it("drops immersion-breaking replies in sanitizeCoffeeTableReply", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "As an AI assistant, I don't have the ability to take photos.",
+        "Alan Watts"
+      ),
+      ""
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "I wish I could send you a photo, but I'm afraid that's not possible in this chat.",
+        "Alan Watts"
+      ),
+      ""
     );
   });
 });

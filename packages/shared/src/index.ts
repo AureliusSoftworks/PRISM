@@ -672,4 +672,9 @@ export interface CoffeeTurnResponse {
   routerReason?: string;
   /** Optional interruption event payload for live Coffee table presentation. */
   interruption?: CoffeeInterruptionEvent;
+  /** Present when a Coffee user turn started an async image generation job. */
+  pendingImageJob?: {
+    jobId: string;
+    conversationId: string | null;
+  };
 }

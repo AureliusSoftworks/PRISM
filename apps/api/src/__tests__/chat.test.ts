@@ -2,6 +2,7 @@ import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  autoBackfillSendGeneratedImagePrompt,
   buildAssistantToolCallEvents,
   extractPrismBotMentionIdsFromMessage,
   parseTitleResponse,
@@ -9,6 +10,7 @@ import {
   refreshConversationTitle,
   resolvePrimaryChatProviderForPossibleImageToolTurn,
   sanitizeConversationTitle,
+  shouldBypassSuppressionForImageIntent,
   userMessageSuggestsInChatImageRequest,
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
@@ -2672,6 +2674,71 @@ describe("userMessageSuggestsInChatImageRequest", () => {
   it("returns false when user negates image intent", () => {
     assert.equal(userMessageSuggestsInChatImageRequest("don't draw anything"), false);
     assert.equal(userMessageSuggestsInChatImageRequest("text only please"), false);
+  });
+});
+
+describe("autoBackfillSendGeneratedImagePrompt", () => {
+  it("keeps an explicit parsed tool prompt when present", () => {
+    const out = autoBackfillSendGeneratedImagePrompt({
+      isStarterPrompt: false,
+      userMessage: "send a wide photo of yourself",
+      parsedToolPrompt: "Widescreen portrait, chalkboard classroom, warm light",
+    });
+    assert.equal(out, "Widescreen portrait, chalkboard classroom, warm light");
+  });
+
+  it("backfills from user text when image intent exists but tool payload is missing", () => {
+    const out = autoBackfillSendGeneratedImagePrompt({
+      isStarterPrompt: false,
+      userMessage: "Please send me a widescreen photo of yourself teaching a class.",
+      parsedToolPrompt: undefined,
+    });
+    assert.equal(
+      out,
+      "Please send me a widescreen photo of yourself teaching a class."
+    );
+  });
+
+  it("does not backfill for starter prompts or non-image requests", () => {
+    assert.equal(
+      autoBackfillSendGeneratedImagePrompt({
+        isStarterPrompt: true,
+        userMessage: "send a photo",
+        parsedToolPrompt: undefined,
+      }),
+      undefined
+    );
+    assert.equal(
+      autoBackfillSendGeneratedImagePrompt({
+        isStarterPrompt: false,
+        userMessage: "How are you today?",
+        parsedToolPrompt: undefined,
+      }),
+      undefined
+    );
+  });
+});
+
+describe("shouldBypassSuppressionForImageIntent", () => {
+  it("bypasses suppression for non-starter image requests", () => {
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(
+        false,
+        "Please send me a widescreen photo of yourself teaching a class."
+      ),
+      true
+    );
+  });
+
+  it("does not bypass suppression for starter prompts or non-image turns", () => {
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(true, "send a photo"),
+      false
+    );
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(false, "Let's talk philosophy."),
+      false
+    );
   });
 });
 

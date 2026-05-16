@@ -67,6 +67,15 @@ import {
   coffeeRouterTemperature,
   normalizeCoffeeSessionSettings,
 } from "@localai/shared";
+import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
+import {
+  startChatImageBackgroundJob,
+  tryAcquireImageSlot,
+} from "./image-job-slot.ts";
+import {
+  autoBackfillSendGeneratedImagePrompt,
+  userMessageSuggestsInChatImageRequest,
+} from "./chat.ts";
 
 /** Coffee groups must have at least 2 and at most 5 bots. */
 export const COFFEE_GROUP_MIN_SIZE = 2;
@@ -127,6 +136,16 @@ const COFFEE_PLAYER_INTERRUPT_BASE_FRICTION_DELTA = 0.03;
 const COFFEE_PLAYER_INTERRUPT_THIRD_PARTY_FRICTION_DELTA = 0.012;
 const COFFEE_BOT_INTERRUPT_BASE_CHANCE = 0.03;
 const COFFEE_BOT_INTERRUPT_MAX_CHANCE = 0.16;
+const COFFEE_IMAGE_MODEL_TAG = "coffee-image-request";
+
+const DEFAULT_ASSISTANT_IMAGE_USER_PREFS: AssistantSentImageUserPrefs = {
+  preferredLocalImageModel: null,
+  preferredOpenAiImageModel: null,
+  lenientLocalImageFallbackModel: null,
+  comfyuiHost: null,
+  comfyUiWorkflows: [],
+  secondaryOllamaHost: null,
+};
 
 /**
  * Clamp a social metric to the normalized 0..1 range.
@@ -242,6 +261,16 @@ function recentCoffeeAssistantRepeatKeys(history: readonly ChatMessage[], limit 
     if (key) keys.add(key);
   }
   return keys;
+}
+
+function recentCoffeeAssistantTexts(history: readonly ChatMessage[], limit = 8): string[] {
+  const texts: string[] = [];
+  for (let index = history.length - 1; index >= 0 && texts.length < limit; index -= 1) {
+    const message = history[index];
+    if (!message || message.role !== "assistant") continue;
+    texts.push(message.content);
+  }
+  return texts;
 }
 
 export function coffeeReplyRepeatsRecentAssistant(
@@ -456,6 +485,42 @@ const COFFEE_PROMPT_LEAK_ANYWHERE_PATTERNS = [
 ] as const;
 
 const COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS = 48;
+const COFFEE_CHARACTER_IMMERSION_BREAK_PATTERNS = [
+  /\bas\s+(?:an?\s+)?(?:digital\s+)?ai\s+(?:assistant|model)\b/i,
+  /\bi\s+am\s+(?:an?\s+)?(?:digital\s+)?(?:ai|language model|chatbot|virtual assistant)\b/i,
+  /\bi(?:\s+do\s+not|\s+don't|\s+cannot|\s+can't)\s+(?:have|take|send|share)\s+(?:photos?|images?|a body|physical form)\b/i,
+  /\bi\s+wish\s+i\s+could\s+send\s+you\s+(?:a\s+)?(?:photo|image)\b/i,
+  /\b(?:photos?|images?)\s+(?:aren't|are not|can't be|cannot be|isn't|is not)\s+possible\s+in\s+this\s+chat\b/i,
+  /\b(?:not\s+possible|can't|cannot)\s+(?:in|within)\s+this\s+chat\b/i,
+  /\bi\s+do\s+not\s+(?:physically\s+)?(?:exist|have a physical form)\b/i,
+  /\bas\s+(?:an?\s+)?(?:llm|large language model)\b/i,
+] as const;
+
+const COFFEE_STAGE_ACTION_VERB_RE =
+  /^(?:adjusts?|blinks?|breathes?|chuckles?|crosses?|drums?|folds?|frowns?|gazes?|gestures?|glances?|grins?|grimaces?|laughs?|leans?|looks?|mutters?|nods?|pauses?|places?|points?|pours?|raises?|rolls?|rubs?|scoffs?|scratches?|shakes?|shrugs?|sighs?|sips?|smiles?|smirks?|snorts?|stares?|stirs?|straightens?|taps?|tilts?|turns?|waves?|winces?)\b/i;
+const COFFEE_STAGE_ACTION_BLOCK_RE = /\*+([^*\n]+?)\*+/g;
+
+function isValidCoffeeStageAction(action: string): boolean {
+  const normalized = action.trim();
+  if (!normalized) return false;
+  const tokenCount = normalized.split(/\s+/).filter(Boolean).length;
+  if (tokenCount > 6) return false;
+  const lower = normalized.toLowerCase();
+  if (COFFEE_STAGE_ACTION_VERB_RE.test(lower)) return true;
+  // Allow common verb-like morphology so we don't over-prune natural actions.
+  return /\b\p{L}+(?:ing|ed)\b/iu.test(lower);
+}
+
+function sanitizeCoffeeStageActions(raw: string): string {
+  if (!raw) return raw;
+  return raw.replace(COFFEE_STAGE_ACTION_BLOCK_RE, (full, inner) => {
+    const candidate = String(inner ?? "").trim();
+    if (!candidate) return "";
+    // Keep valid stage actions wrapped so the client can lift them into badges.
+    // Invalid tags degrade to plain prose instead of disappearing.
+    return isValidCoffeeStageAction(candidate) ? `*${candidate}*` : candidate;
+  });
+}
 
 /**
  * Strip wrapping noise so leaked instructions still match after models echo
@@ -495,6 +560,16 @@ export function coffeeReplyLooksLikePromptLeak(raw: string): boolean {
 }
 
 /**
+ * Detect persona breaks where a bot narrates itself as an AI assistant/model
+ * instead of staying fully in-character.
+ */
+export function coffeeReplyBreaksCharacterImmersion(raw: string): boolean {
+  const normalized = normalizedCoffeeReplyForLeakScan(raw);
+  if (!normalized) return false;
+  return COFFEE_CHARACTER_IMMERSION_BREAK_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/**
  * Normalize a raw speaker draft into something safe for the visible Coffee
  * table. Returning an empty string signals "do not show this".
  */
@@ -505,8 +580,10 @@ export function sanitizeCoffeeTableReply(
 ): string {
   const stripped = stripCoffeeSpeakerPrefix(raw, speakerName);
   if (!stripped) return "";
-  if (coffeeReplyLooksLikePromptLeak(stripped)) return "";
-  return clampCoffeeTableReplyText(stripped, maxChars);
+  const withStageActionsSanitized = sanitizeCoffeeStageActions(stripped);
+  if (coffeeReplyLooksLikePromptLeak(withStageActionsSanitized)) return "";
+  if (coffeeReplyBreaksCharacterImmersion(withStageActionsSanitized)) return "";
+  return clampCoffeeTableReplyText(withStageActionsSanitized, maxChars);
 }
 
 function buildCoffeePromptLeakRepairMessages(args: {
@@ -532,6 +609,7 @@ function buildCoffeePromptLeakRepairMessages(args: {
       `Return only ${args.speaker.name}'s visible table line.`,
       `Length: one clause only, max ${args.maxChars} characters including spaces.`,
       "No speaker label. No mention of prompts, instructions, transcripts, caps, or rewriting.",
+      "Never say you are an AI, model, assistant, or digital system. Stay fully in-character.",
     ].join("\n"),
   });
   return messages;
@@ -649,8 +727,22 @@ function buildCoffeeEmergencyFallbackReply(args: {
   maxChars: number;
 }): string {
   const options = /\?\s*$/.test(args.tableFocus.trim())
-    ? ["Yeah.", "I hear you.", "That tracks.", "Maybe so."]
-    : ["Mm.", "Right.", "Okay.", "Tiny pause.", "I get that.", "Let's move on."];
+    ? [
+        "Could be.",
+        "I hear the angle.",
+        "Maybe, with one tweak.",
+        "That checks out for now.",
+        "Fair question.",
+      ]
+    : [
+        "Let's ground it.",
+        "Hold that thought.",
+        "I hear the point.",
+        "Okay, keep it moving.",
+        "Let's pivot to something concrete.",
+        "Noted. One beat at a time.",
+        "Let's keep this simple.",
+      ];
   const seed = `${args.conversationId}:${args.speaker.id}:${args.historyLength}:${args.seedExtra ?? ""}:${args.tableFocus}`;
   const startIndex = Math.floor(stableUnitValue(seed) * options.length) % options.length;
   const avoidKeys = new Set((args.avoidTexts ?? []).map(coffeeReplyRepeatKey).filter(Boolean));
@@ -745,6 +837,8 @@ export interface CoffeeTurnSettings {
    * `modelOverride`).
    */
   sessionSpeakerModel?: string | null;
+  /** Optional per-user image model/workflow prefs (same shape as chat mode). */
+  assistantImageUserPrefs?: AssistantSentImageUserPrefs;
 }
 
 export interface CoffeeTurnInput {
@@ -802,6 +896,52 @@ function stableUnitValue(seed: string): number {
     hash = Math.imul(hash, 16777619);
   }
   return ((hash >>> 0) % 10000) / 10000;
+}
+
+function assistantImagePrefsForCoffeeTurn(settings: CoffeeTurnSettings): AssistantSentImageUserPrefs {
+  return settings.assistantImageUserPrefs ?? DEFAULT_ASSISTANT_IMAGE_USER_PREFS;
+}
+
+async function maybeQueueCoffeeImageJob(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  userMessage: string;
+  settings: CoffeeTurnSettings;
+}): Promise<CoffeeTurnResponse["pendingImageJob"] | undefined> {
+  if (!userMessageSuggestsInChatImageRequest(args.userMessage)) return undefined;
+  const captionPrompt = autoBackfillSendGeneratedImagePrompt({
+    isStarterPrompt: false,
+    userMessage: args.userMessage,
+    parsedToolPrompt: undefined,
+  });
+  if (!captionPrompt) return undefined;
+  const acq = await tryAcquireImageSlot({
+    userId: args.userId,
+    conversationId: args.conversationId,
+    botId: null,
+    mode: "chat",
+    incognito: false,
+    captionPrompt,
+    userMessage: args.userMessage,
+    source: "chat_tool",
+  });
+  if (!acq.ok) return undefined;
+  startChatImageBackgroundJob({
+    db: args.db,
+    job: acq.job,
+    preferredProvider: args.settings.preferredProvider,
+    openAiApiKey: args.settings.openAiApiKey,
+    prefs: assistantImagePrefsForCoffeeTurn(args.settings),
+    prismDefaultLlmModel: args.settings.prismDefaultLlmModel,
+    chatModelUsed: COFFEE_IMAGE_MODEL_TAG,
+    chatProviderName: args.settings.preferredProvider,
+    botName: "Coffee Table",
+  });
+  return {
+    jobId: acq.job.id,
+    conversationId: args.conversationId,
+  };
 }
 
 function interruptedSnippetFromTokenCount(fullText: string, visibleTokenCount: number): string {
@@ -1984,6 +2124,7 @@ export function buildRouterPrompt(args: {
   lastSpeakerBotId: string | null;
   socialByBotId?: Record<string, CoffeeBotSocialSnapshot>;
   turnKind?: CoffeeTurnKind;
+  sessionKickoff?: boolean;
   sessionSettings?: CoffeeSessionSettings;
   /** When set, router should prefer speakers who can advance this shared subject. */
   coffeeTopic?: string | null;
@@ -1997,6 +2138,7 @@ export function buildRouterPrompt(args: {
     lastSpeakerBotId,
     socialByBotId = {},
     turnKind = "user",
+    sessionKickoff = false,
     sessionSettings,
     coffeeTopic,
     sessionRemainingMs,
@@ -2033,6 +2175,14 @@ export function buildRouterPrompt(args: {
     history.length < 3
       ? "This table is still warming up. Bots know the visible names at the table, but should not imply prior friendship, shared memories, or deep familiarity unless the transcript establishes it."
       : "Use only the visible transcript as shared history. Do not invent off-screen relationships between bots.";
+  const kickoffRouterHint = sessionKickoff
+    ? [
+        "This is the very first line of a brand-new session.",
+        "Pick the bot most likely to open the table naturally and set a welcoming first beat tied to the topic.",
+        "Prefer an opener that sounds fresh and specific, not a callback to missing context.",
+        "Avoid choosing a speaker whose likely first move is a hard-negative or inside-joke opener unless the topic clearly calls for that tone.",
+      ].join(" ")
+    : "";
 
   const prismBotMentionHint = coffeeTranscriptContainsPrismBotMention(userMessage, history);
 
@@ -2054,6 +2204,7 @@ export function buildRouterPrompt(args: {
     "",
     recencyHint,
     earlyThreadHint,
+    ...(kickoffRouterHint ? [kickoffRouterHint] : []),
     ...topicAnchorLines,
     ...buildCoffeeWrapUpRouterAppendix(sessionRemainingMs),
     "",
@@ -2217,6 +2368,7 @@ export function buildSpeakerPrompt(args: {
   socialByBotId: Record<string, CoffeeBotSocialSnapshot>;
   userDisplayName?: string;
   turnKind?: CoffeeTurnKind;
+  sessionKickoff?: boolean;
   firstContactIntro?: boolean;
   sessionSettings?: CoffeeSessionSettings;
   coffeeTopic?: string | null;
@@ -2231,6 +2383,7 @@ export function buildSpeakerPrompt(args: {
     socialByBotId,
     userDisplayName,
     turnKind = "user",
+    sessionKickoff = false,
     firstContactIntro = false,
     sessionSettings,
     coffeeTopic,
@@ -2269,13 +2422,15 @@ export function buildSpeakerPrompt(args: {
     ...peerLines,
     "",
     "Stay in character. Respond as yourself only — do NOT speak on behalf of the other bots, do NOT include their names as speakers, and do NOT prefix your reply with your own name.",
+    "Never claim to be an AI assistant, language model, chatbot, virtual system, or digital entity. If challenged about being 'AI', stay in persona and answer from your character's worldview instead of validating that framing.",
+    "PRISM chat can generate and share images. Never say that photos/images are impossible to send in this chat.",
     "You may react directly to what another bot just said, agree, disagree, add one concrete thought, pause into a softer observation, or gently shift the topic when that fits your personality.",
     "The user is present, but Coffee should feel like a group conversation. Do not turn every reply back toward the user.",
-    "Reply as one line of plain prose (no line breaks). ONE clause only — a single short utterance, like a reaction bark or one breath. No second sentence, no semicolon piles, no em dash add-ons.",
+    "Reply as one line of plain prose (no line breaks). Prefer one or two short sentences max, and vary your rhythm across turns so the table doesn't sound templated.",
     `Aim for a soft target around ${tableReplyMaxChars} characters including spaces; brevity reads best on the table. The server no longer truncates, so a slightly longer line is fine, but please don't ramble — keep the table feeling like a single quick exchange.`,
     "Make the line concrete: pull one small image, opinion, object, motive, or emotional beat from your persona or the latest table moment.",
     "Never repeat a recent table line exactly; if the table keeps circling the same nouns or joke shape, change the concrete detail or social motion instead.",
-    "Do not end with a question by default. Ask a question only when it is genuinely the most natural next move; otherwise end with a statement, observation, or small offer.",
+    "Questions are allowed when they naturally move the table; avoid reflexively ending every line with one.",
     "Do not write as if you are cutting off another bot mid-sentence. Coffee only presents cutoffs when the app has explicit interruption metadata.",
     "Avoid long monologues; the table should feel like a shared room, not a speech.",
     "Leave room for another bot or the user to respond after a natural pause.",
@@ -2310,6 +2465,13 @@ export function buildSpeakerPrompt(args: {
       role: "system",
       content:
         "First meeting with this user: fit a tiny self-intro plus how-they-like-to-be-addressed in the same tabletop limit — prefer one short sentence; two very short ones only if necessary.",
+    });
+  }
+  if (sessionKickoff) {
+    messages.push({
+      role: "system",
+      content:
+        "Session opening turn: begin with a clear kickoff line that starts this new table conversation naturally. Ground it in the topic and give the group a fresh first beat. Do not imply unseen prior context with phrases like 'again', 'as usual', 'still', or 'like last time'. Keep it simple, present-moment, and immediately understandable as the first line.",
     });
   }
   if (history.length > 0) {
@@ -2928,6 +3090,7 @@ async function generateCoffeeBotReply(args: {
     group.map((bot) => bot.id)
   );
   const socialByBotId = initializeCoffeeSocialState(group, persistedSocialByBotId);
+  const sessionKickoff = turnKind === "autonomous" && history.length === 0;
   if (Object.keys(persistedSocialByBotId).length < group.length) {
     upsertCoffeeBotSocialState(db, userId, row.id, socialByBotId, new Date().toISOString());
   }
@@ -2960,6 +3123,7 @@ async function generateCoffeeBotReply(args: {
       lastSpeakerBotId,
       socialByBotId: preTurnSocialByBotId,
       turnKind,
+      sessionKickoff,
       sessionSettings,
       coffeeTopic: row.coffee_topic,
       sessionRemainingMs: settings.sessionRemainingMs,
@@ -3033,6 +3197,7 @@ async function generateCoffeeBotReply(args: {
     socialByBotId: preTurnSocialByBotId,
     userDisplayName: settings.userDisplayName,
     turnKind,
+    sessionKickoff,
     firstContactIntro: turnKind === "user" && shouldUseFirstContactIntro,
     sessionSettings,
     coffeeTopic: row.coffee_topic,
@@ -3078,6 +3243,7 @@ async function generateCoffeeBotReply(args: {
       speaker,
       conversationId: row.id,
       historyLength: history.length,
+      avoidTexts: recentCoffeeAssistantTexts(history),
       maxChars: replyCaps.tableReplyMaxChars,
     });
   }
@@ -3087,6 +3253,7 @@ async function generateCoffeeBotReply(args: {
       speaker,
       conversationId: row.id,
       historyLength: history.length,
+      avoidTexts: recentCoffeeAssistantTexts(history),
       maxChars: replyCaps.tableReplyMaxChars,
     });
   }
@@ -3120,10 +3287,7 @@ async function generateCoffeeBotReply(args: {
       conversationId: row.id,
       historyLength: history.length,
       seedExtra: "repeat",
-      avoidTexts: history
-        .filter((message) => message.role === "assistant")
-        .slice(-6)
-        .map((message) => message.content),
+      avoidTexts: recentCoffeeAssistantTexts(history),
       maxChars: replyCaps.tableReplyMaxChars,
     });
   }
@@ -3313,7 +3477,14 @@ export async function processCoffeeTurn(
      VALUES (?, ?, ?, 'user', ?, NULL, ?)`
   ).run(userMessageId, conversationRow.id, userId, message, now);
 
-  return generateCoffeeBotReply({
+  const pendingImageJob = await maybeQueueCoffeeImageJob({
+    db,
+    userId,
+    conversationId: conversationRow.id,
+    userMessage: message,
+    settings,
+  });
+  const turn = await generateCoffeeBotReply({
     db,
     userId,
     row: conversationRow,
@@ -3324,6 +3495,7 @@ export async function processCoffeeTurn(
     playerInterruption: input.playerInterruption,
     directedSpeakerBotId: input.directedSpeakerBotId,
   });
+  return pendingImageJob ? { ...turn, pendingImageJob } : turn;
 }
 
 /**
@@ -3373,7 +3545,9 @@ export async function processCoffeeAutonomousTurn(
     ? latest.role === "assistant" && latest.botName
       ? `${latest.botName} just said: ${latest.content}`
       : latest.content
-    : "The user has just arrived at the PRISM coffee table. Begin naturally, as if everyone is settling in with coffee.";
+    : topicTrim
+      ? `A brand-new Coffee session is starting around the topic "${topicTrim}". Open naturally with a first line that sets the conversation in motion.`
+      : "A brand-new Coffee session is starting. Open naturally with a first line that gets the table conversation moving.";
   return generateCoffeeBotReply({
     db,
     userId,
