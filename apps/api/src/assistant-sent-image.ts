@@ -17,8 +17,65 @@ import { tryGenerateThumbAfterPngWrite } from "./image-thumb.ts";
 
 const config = getAppConfig();
 
-const ASSISTANT_SENT_IMAGE_SIZE = "1024x1024";
+const ASSISTANT_SENT_IMAGE_DEFAULT_SIZE = "1024x1024";
+const ASSISTANT_SENT_IMAGE_ALLOWED_SIZES = new Set(["1024x1536", "1024x1024", "1536x1024"]);
 const ASSISTANT_SENT_IMAGE_QUALITY = "standard";
+const ASSISTANT_IMAGE_SIZE_TAGS = {
+  portrait: [
+    "selfie",
+    "portrait",
+    "headshot",
+    "close-up",
+    "closeup",
+    "vertical",
+    "9:16",
+    "phone wallpaper",
+    "profile photo",
+  ],
+  letterbox: ["square", "1:1", "avatar", "icon", "logo", "sticker", "profile pic"],
+  landscape: [
+    "landscape",
+    "widescreen",
+    "wide-screen",
+    "panorama",
+    "panoramic",
+    "cinematic",
+    "16:9",
+    "21:9",
+    "banner",
+  ],
+} as const;
+
+function scoreSizeTags(text: string, tags: readonly string[]): number {
+  let score = 0;
+  for (const tag of tags) {
+    if (text.includes(tag)) score += 1;
+  }
+  return score;
+}
+
+function inferAssistantSentImageSize(textRaw: string): string {
+  const text = textRaw.toLowerCase();
+  const portrait = scoreSizeTags(text, ASSISTANT_IMAGE_SIZE_TAGS.portrait);
+  const letterbox = scoreSizeTags(text, ASSISTANT_IMAGE_SIZE_TAGS.letterbox);
+  const landscape = scoreSizeTags(text, ASSISTANT_IMAGE_SIZE_TAGS.landscape);
+  if (portrait === 0 && letterbox === 0 && landscape === 0) {
+    return ASSISTANT_SENT_IMAGE_DEFAULT_SIZE;
+  }
+  if (portrait >= landscape && portrait >= letterbox) return "1024x1536";
+  if (landscape >= portrait && landscape >= letterbox) return "1536x1024";
+  return ASSISTANT_SENT_IMAGE_DEFAULT_SIZE;
+}
+
+function isMissingComfyWorkflowError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes("could not read workflow file") ||
+    message.includes("comfyui userdata") ||
+    message.includes("/api/userdata") ||
+    message.includes("workflow file")
+  );
+}
 
 type BotPersonaImageRow = {
   name: string;
@@ -47,7 +104,9 @@ export async function runAssistantSentImageGeneration(args: {
   mode: ChatMode;
   conversationId: string | null;
   botIdTriState: string | null | undefined;
+  userMessage: string;
   captionPrompt: string;
+  requestedSize?: string;
   preferredProvider: "local" | "openai";
   openAiApiKey: string | undefined;
   prefs: AssistantSentImageUserPrefs;
@@ -75,6 +134,10 @@ export async function runAssistantSentImageGeneration(args: {
 
   const prompt = args.captionPrompt.trim();
   let promptForModel = prompt;
+  const explicitRequestedSize = args.requestedSize?.trim() ?? "";
+  const requestedSize = ASSISTANT_SENT_IMAGE_ALLOWED_SIZES.has(explicitRequestedSize)
+    ? explicitRequestedSize
+    : inferAssistantSentImageSize(`${args.userMessage}\n${args.captionPrompt}`);
   let botPersona: BotPersonaImageRow | undefined;
   const personaBotId = persistence.personaBotId;
   if (personaBotId) {
@@ -93,9 +156,9 @@ export async function runAssistantSentImageGeneration(args: {
     }
   }
 
-  const resolvedLocalImageModel =
-    (botPersona?.local_image_model?.trim() ?? "") ||
-    (args.prefs.preferredLocalImageModel?.trim() ?? "");
+  const botLocalImageModel = botPersona?.local_image_model?.trim() ?? "";
+  const preferredLocalImageModel = args.prefs.preferredLocalImageModel?.trim() ?? "";
+  const resolvedLocalImageModel = botLocalImageModel || preferredLocalImageModel;
   const resolvedOpenAiImageModel =
     (botPersona?.openai_image_model?.trim() ?? "") ||
     (args.prefs.preferredOpenAiImageModel?.trim() ?? "");
@@ -129,7 +192,7 @@ export async function runAssistantSentImageGeneration(args: {
         prompt,
         argsInsert.revisedPrompt,
         argsInsert.urlForDb,
-        ASSISTANT_SENT_IMAGE_SIZE,
+        requestedSize,
         ASSISTANT_SENT_IMAGE_QUALITY,
         argsInsert.providerTag,
         argsInsert.modelUsed,
@@ -161,7 +224,7 @@ export async function runAssistantSentImageGeneration(args: {
         generateLocalImageBytesByModelId({
           modelId,
           promptForModel,
-          size: ASSISTANT_SENT_IMAGE_SIZE,
+          size: requestedSize,
           signal,
           comfyUiHost: args.prefs.comfyuiHost,
           comfyUiWorkflows: args.prefs.comfyUiWorkflows,
@@ -169,23 +232,48 @@ export async function runAssistantSentImageGeneration(args: {
           primaryOllamaHost: config.ollamaHost,
         });
 
-      let localOut: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+      let localOut: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>> | undefined;
       try {
         localOut = await runLocal(resolvedLocalImageModel);
       } catch (primaryError) {
+        const fallbackCandidates: string[] = [];
+        const primaryModel = resolvedLocalImageModel.trim();
+        const isWorkflowMissing = isMissingComfyWorkflowError(primaryError);
+        // Bot-specific model can point at a stale workflow; retry with account default.
+        if (
+          botLocalImageModel &&
+          preferredLocalImageModel &&
+          preferredLocalImageModel !== primaryModel
+        ) {
+          fallbackCandidates.push(preferredLocalImageModel);
+        }
         if (
           lenientFb &&
-          lenientFb !== resolvedLocalImageModel.trim() &&
-          shouldAttemptLenientLocalImageFallback(primaryError)
+          lenientFb !== primaryModel &&
+          (shouldAttemptLenientLocalImageFallback(primaryError) || isWorkflowMissing)
         ) {
-          localOut = await runLocal(lenientFb);
-        } else {
+          fallbackCandidates.push(lenientFb);
+        }
+        let fallbackSucceeded = false;
+        for (const candidate of fallbackCandidates) {
+          try {
+            localOut = await runLocal(candidate);
+            fallbackSucceeded = true;
+            break;
+          } catch {
+            // Try the next candidate.
+          }
+        }
+        if (!fallbackSucceeded) {
           console.warn(
             "[assistant-sent-image] local primary model failed:",
             primaryError instanceof Error ? primaryError.message : primaryError
           );
           return undefined;
         }
+      }
+      if (!localOut) {
+        return undefined;
       }
       writeGeneratedImageBytes(localRelPath, localOut.imageBytes);
       await tryGenerateThumbAfterPngWrite(localRelPath);
@@ -206,7 +294,7 @@ export async function runAssistantSentImageGeneration(args: {
     try {
       const openAiResult = await generateImage(promptForModel, apiKey, {
         model: resolvedOpenAiImageModel || undefined,
-        size: ASSISTANT_SENT_IMAGE_SIZE,
+        size: requestedSize,
         quality: ASSISTANT_SENT_IMAGE_QUALITY,
         signal,
       });
@@ -240,7 +328,7 @@ export async function runAssistantSentImageGeneration(args: {
       const localOut = await generateLocalImageBytesByModelId({
         modelId: lenientFb,
         promptForModel,
-        size: ASSISTANT_SENT_IMAGE_SIZE,
+        size: requestedSize,
         signal,
         comfyUiHost: args.prefs.comfyuiHost,
         comfyUiWorkflows: args.prefs.comfyUiWorkflows,

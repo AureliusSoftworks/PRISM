@@ -1379,6 +1379,57 @@ const ASSISTANT_IMAGE_GEN_UNAVAILABLE_NOTE =
 const ASSISTANT_IMAGE_SLOT_BUSY_NOTE =
   "I'm already tied up finishing another picture on this account — I can't start a new one until that finishes. Ask me again in a little while.";
 
+const CHAT_IMAGE_TOOL_VARIANT_TAGS = {
+  portrait: [
+    "selfie",
+    "portrait",
+    "headshot",
+    "close-up",
+    "closeup",
+    "vertical",
+    "9:16",
+    "phone wallpaper",
+    "profile photo",
+  ],
+  letterbox: ["square", "1:1", "avatar", "icon", "logo", "sticker", "profile pic"],
+  landscape: [
+    "landscape",
+    "widescreen",
+    "wide-screen",
+    "panorama",
+    "panoramic",
+    "cinematic",
+    "16:9",
+    "21:9",
+    "banner",
+  ],
+} as const;
+
+function scoreChatImageToolTags(text: string, tags: readonly string[]): number {
+  let score = 0;
+  for (const tag of tags) {
+    if (text.includes(tag)) score += 1;
+  }
+  return score;
+}
+
+function inferChatToolRequestedImageSize(textRaw: string): string {
+  const text = textRaw.toLowerCase();
+  const portrait = scoreChatImageToolTags(text, CHAT_IMAGE_TOOL_VARIANT_TAGS.portrait);
+  const letterbox = scoreChatImageToolTags(text, CHAT_IMAGE_TOOL_VARIANT_TAGS.letterbox);
+  const landscape = scoreChatImageToolTags(text, CHAT_IMAGE_TOOL_VARIANT_TAGS.landscape);
+  if (portrait === 0 && letterbox === 0 && landscape === 0) {
+    return "1024x1024";
+  }
+  if (portrait >= landscape && portrait >= letterbox) {
+    return "1024x1536";
+  }
+  if (landscape >= portrait && landscape >= letterbox) {
+    return "1536x1024";
+  }
+  return "1024x1024";
+}
+
 /** Max chars persisted in `ChatToolCallEvent.prompt` / `detail` so devtools never carry runaway blobs. */
 const TOOL_CALL_DIAG_PREVIEW_CAP = 200;
 
@@ -3556,6 +3607,9 @@ export async function processChatMessage(
     sendImgPromptPersisted && sendImgPromptPersisted.length > 0 ? "busy" : "none";
   let persistedImageJobId: string | undefined;
   if (sendImgPromptPersisted && sendImgPromptPersisted.length > 0) {
+    const chatToolRequestedSize = inferChatToolRequestedImageSize(
+      `${message}\n${sendImgPromptPersisted}`
+    );
     const acq = await tryAcquireImageSlot({
       userId,
       conversationId: activeConversationId,
@@ -3565,6 +3619,7 @@ export async function processChatMessage(
       captionPrompt: sendImgPromptPersisted,
       userMessage: message,
       source: "chat_tool",
+      requestedSize: chatToolRequestedSize,
     });
     if (!acq.ok) {
       sendImgPromptPersisted = undefined;

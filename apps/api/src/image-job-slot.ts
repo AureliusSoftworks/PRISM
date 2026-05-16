@@ -68,6 +68,7 @@ export type RunningImageJob = {
   captionPrompt: string;
   userMessage: string;
   source: ImageJobSource;
+  requestedSize: string;
   startedAt: string;
   abortController: AbortController;
 };
@@ -97,6 +98,7 @@ export async function tryAcquireImageSlot(args: {
   captionPrompt: string;
   userMessage: string;
   source: ImageJobSource;
+  requestedSize?: string;
 }): Promise<{ ok: true; job: RunningImageJob } | { ok: false; busyJob: RunningImageJob }> {
   return mutexFor(args.userId).runExclusive(() => {
     const existing = runningByUser.get(args.userId);
@@ -113,6 +115,7 @@ export async function tryAcquireImageSlot(args: {
       captionPrompt: args.captionPrompt.trim(),
       userMessage: args.userMessage.trim(),
       source: args.source,
+      requestedSize: args.requestedSize?.trim() || "1024x1024",
       startedAt: new Date().toISOString(),
       abortController: new AbortController(),
     };
@@ -359,7 +362,9 @@ export function startChatImageBackgroundJob(args: {
         mode: job.mode,
         conversationId: job.conversationId,
         botIdTriState: job.botId,
+        userMessage: job.userMessage,
         captionPrompt: job.captionPrompt,
+        requestedSize: job.requestedSize,
         preferredProvider,
         openAiApiKey,
         prefs,

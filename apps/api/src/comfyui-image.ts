@@ -797,6 +797,29 @@ export function applyComfyUiWorkflowRuntimePatches(options: {
   }
 }
 
+function fillMissingDimensionPatchRefs(
+  workflow: Record<string, unknown>,
+  patch: ComfyUiWorkflowPatchMap
+): ComfyUiWorkflowPatchMap {
+  if (patch.width && patch.height) {
+    return patch;
+  }
+  for (const [nodeId, node] of Object.entries(workflow)) {
+    if (!isComfyUiApiWorkflowNode(node)) continue;
+    const inputs = (node as { inputs?: Record<string, unknown> }).inputs;
+    if (!inputs || typeof inputs !== "object") continue;
+    const hasWidth = "width" in inputs;
+    const hasHeight = "height" in inputs;
+    if (!hasWidth && !hasHeight) continue;
+    return {
+      ...patch,
+      width: patch.width ?? (hasWidth ? { nodeId, inputKey: "width" } : undefined),
+      height: patch.height ?? (hasHeight ? { nodeId, inputKey: "height" } : undefined),
+    };
+  }
+  return patch;
+}
+
 function formatComfyPromptFailureMessage(
   status: number,
   payload: {
@@ -909,15 +932,21 @@ export async function generateImageWithComfyUiRegisteredWorkflow(options: {
     throw new Error("Internal error: workflow graph missing on registration.");
   }
   const workflow = cloneComfyUiApiWorkflow(wf as Record<string, unknown>);
+  const runtimePatch = fillMissingDimensionPatchRefs(workflow, options.registration.patch);
+  if (!runtimePatch.width || !runtimePatch.height) {
+    console.warn(
+      `[comfyui-image] workflow "${options.registration.label}" has no width/height patch mapping; requested size ${options.size} may be ignored by that graph.`
+    );
+  }
   applyComfyUiWorkflowRuntimePatches({
     workflow,
-    patch: options.registration.patch,
+    patch: runtimePatch,
     positive: options.prompt,
     negative: options.negativePrompt?.trim() ?? "",
     width,
     height,
   });
-  const pref = options.registration.patch.outputNodeId?.trim();
+  const pref = runtimePatch.outputNodeId?.trim();
   const modelUsedTag =
     options.modelUsedTag?.trim() ?? encodeComfyUiWorkflowModelId(options.registration.id);
   return postComfyUiPromptAndReadImage({
