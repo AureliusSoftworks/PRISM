@@ -21132,6 +21132,88 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   gap: 7px;
 }
 
+.coffeeGroupDeleteButton {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 4;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(0, 0, 0, 0.42);
+  cursor: pointer;
+  opacity: 0.88;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease, opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.coffeeGroupCollapseButton {
+  position: absolute;
+  top: 7px;
+  right: 42px;
+  z-index: 4;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(0, 0, 0, 0.36);
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease, opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.coffeeGroupCollapseButton:hover,
+.coffeeGroupCollapseButton:focus-visible {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
+  transform: scale(1.04);
+}
+
+.coffeeGroupCollapseButton:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.coffeeGroupCollapseChevron {
+  width: 8px;
+  height: 8px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.coffeeGroupRow[data-collapsed="true"] .coffeeGroupCollapseChevron {
+  transform: translateX(-1px) rotate(-45deg);
+}
+
+.coffeeGroupDeleteButton svg {
+  width: 15px;
+  height: 15px;
+}
+
+.coffeeGroupDeleteButton:hover,
+.coffeeGroupDeleteButton:focus-visible {
+  color: #ffffff;
+  border-color: rgba(255, 116, 116, 0.55);
+  background: rgba(187, 35, 35, 0.44);
+  opacity: 1;
+  outline: none;
+  transform: scale(1.04);
+}
+
 .coffeeSessionRow {
   position: relative;
   margin: 0;
@@ -21155,7 +21237,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   position: relative;
   overflow: hidden;
   padding-left: 12px;
-  min-height: 98px;
+  padding-top: 12px;
+  padding-right: 78px;
+  padding-bottom: 12px;
+  gap: 5px;
+  min-height: 86px;
   background:
     linear-gradient(135deg, rgba(0, 0, 0, 0.56), rgba(0, 0, 0, 0.78)),
     var(--coffee-group-gradient);
@@ -21240,7 +21326,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .coffeeGroupTitle {
-  font-size: 1rem;
+  font-size: 0.96rem;
   line-height: 1.12;
   font-weight: 790;
 }
@@ -21312,7 +21398,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-height: 100dvh;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
-  gap: 14px;
+  gap: 12px;
   padding: clamp(18px, 3vw, 30px);
 }
 
@@ -21548,46 +21634,130 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeStage[data-compact="true"] {
   grid-template-rows: 1fr;
-  padding-block: clamp(12px, 1.6vw, 18px);
+  padding-block: clamp(10px, 1.4vw, 16px);
 }
 
 .coffeeStage[data-compact="true"] .coffeeTableScene {
   grid-row: 1;
   align-self: stretch;
-  min-height: 260px;
+  /* Grow with the freed row height from a shorter overview; floor keeps small windows usable. */
+  min-height: clamp(240px, 36vh, 520px);
   transform: none;
 }
 
 .coffeeStage[data-compact="true"] .coffeeTableDisk {
-  width: min(48vw, 420px);
-  max-width: calc(100% - 72px);
+  width: min(42vw, 340px);
+  max-width: calc(100% - 56px);
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"] {
+  --coffee-ready-table-y: clamp(12px, 2vh, 24px);
+  --coffee-ready-seat-y: clamp(10px, 1.6vh, 18px);
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"] .coffeeTableScene {
+  transform: translateY(var(--coffee-ready-table-y));
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"] .coffeeSeat {
+  transform: translate(-50%, calc(-50% - var(--coffee-ready-seat-y)));
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="0"][data-layout-seat="0"] {
+  top: 9%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="1"][data-layout-seat="1"] {
+  left: 29%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="2"][data-layout-seat="2"] {
+  left: 71%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="3"][data-layout-seat="3"] {
+  left: 33%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="4"][data-layout-seat="4"] {
+  left: 67%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="5"][data-layout-seat="1"] {
+  left: 29%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="5"][data-layout-seat="2"] {
+  left: 71%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="5"][data-layout-seat="3"] {
+  left: 33%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="5"][data-layout-seat="4"] {
+  left: 67%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"] .coffeeTableGlow {
+  width: min(82%, 660px);
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"] .coffeeTableDisk {
+  width: clamp(356px, 46vw, 388px);
+  max-width: calc(100% - 48px);
 }
 
 .coffeeStage[data-compact="true"] .coffeeCenterMessage {
-  width: min(218px, 42vmin);
-  height: min(218px, 42vmin);
-  max-width: min(218px, 80%);
-  max-height: min(218px, 80%);
-  padding: 8px 9px;
-  border-radius: 12px;
+  width: min(168px, 34vmin);
+  height: min(168px, 34vmin);
+  max-width: min(168px, 72%);
+  max-height: min(168px, 72%);
+  padding: 6px 8px;
+  border-radius: 11px;
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"] .coffeeCenterMessage[data-empty="true"] {
+  width: min(240px, 64vw);
+  height: auto;
+  min-height: 184px;
+  max-width: min(240px, 84%);
+  max-height: none;
+  padding: 10px 12px;
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"]
+  .coffeeCenterMessage[data-empty="true"]
+  .coffeeCenterMessageScroll {
+  flex: 0 1 auto;
+  overflow-y: visible;
 }
 
 .coffeeStage[data-compact="true"] .coffeeCenterMessageScroll p {
-  font-size: clamp(0.86rem, 3.8vw, 1.02rem);
+  font-size: clamp(0.78rem, 3.2vw, 0.94rem);
 }
 
 .coffeeStage[data-compact="true"] .coffeeCenterIcon {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
 }
 
 .coffeeStage[data-compact="true"] .coffeeSeatGlowGlyph {
-  min-height: calc(2 * 1.1 * 0.76rem);
+  min-height: calc(2 * 1.05 * 0.7rem);
 }
 
 .coffeeStage[data-compact="true"] .coffeeSeatCluster {
-  width: clamp(70px, 8.4vw, 100px);
-  height: clamp(70px, 8.4vw, 100px);
+  width: clamp(54px, 6.5vw, 78px);
+  height: clamp(54px, 6.5vw, 78px);
 }
 
 .coffeeStage[data-compact="true"] .coffeeSeatPlate {
@@ -21595,28 +21765,37 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .coffeeStage[data-compact="true"] .coffeeSeatPlateEmoji {
-  font-size: clamp(1.76rem, 4.8vw, 2.6rem);
+  font-size: clamp(1.42rem, 4vw, 2.15rem);
 }
 
 .coffeeStage[data-compact="true"] .coffeeSeatGlowPill {
-  max-width: min(172px, 64vw);
-  min-width: min(118px, 50vw);
-  padding: 5px 9px;
-  column-gap: 7px;
-  border-radius: 12px;
+  max-width: min(148px, 58vw);
+  min-width: min(96px, 44vw);
+  padding: 4px 8px;
+  column-gap: 6px;
+  border-radius: 10px;
   margin-top: clamp(-3px, -0.35vw, 1px);
-  transform: translateX(-50%) translateY(clamp(-28px, -3.4vw, -14px));
+  transform: translateX(-50%) translateY(clamp(-24px, -3vw, -12px));
 }
 
 .coffeeStage[data-compact="true"] .coffeeSeatGlowText {
-  font-size: 0.76rem;
+  font-size: 0.7rem;
 }
 
 .coffeeStage[data-compact="true"] .coffeeCup {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   top: var(--coffee-cup-y, calc(50% + 30px));
   left: var(--coffee-cup-x, calc(50% + 20px));
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"] .coffeeCup {
+  display: none;
+}
+
+.coffeeStage[data-compact="true"] .coffeeStageStatus {
+  padding: 6px 10px;
+  font-size: 0.74rem;
 }
 
 .coffeeStage[data-preview="true"] .coffeeTableScene {
@@ -21677,15 +21856,110 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeTableScene {
   position: relative;
+  /* Flex centers the focal stack as a unit on the disk; seats/disk stay position:absolute. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
   min-height: clamp(420px, 54vh, 540px);
-  display: grid;
-  place-items: center;
+  flex: 1 1 auto;
   isolation: isolate;
   transform: none;
 }
 
+/* Banner + center card + topic chips — one vertical stack centered on the table. */
+.coffeeTableFocalColumn {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: min(800px, 96vw);
+  gap: clamp(6px, 1.2vh, 16px);
+  pointer-events: none;
+}
+
+.coffeeTableFocalColumn > * {
+  pointer-events: auto;
+}
+
+.coffeeTableFocalStack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  /* Extra air between the center card and topic row so chips sit lower toward the seats. */
+  gap: clamp(28px, 6.5vh, 80px);
+}
+
+/*
+ * Topic phase: rim seats sit high on the scene; keep the card + chips as one tight stack
+ * inside a slightly larger disk so we use the screen without clipping past the table edge.
+ */
+.coffeeStage[data-phase="topic"] .coffeeTableScene {
+  /* Use more of the main column — topic flow hides the group overview, so we can be tall. */
+  min-height: clamp(520px, min(68vh, 82dvh), 780px);
+  overflow: visible;
+}
+
+.coffeeStage[data-phase="topic"] .coffeeTableGlow {
+  width: min(92%, 780px);
+  transform: translate(-50%, calc(-50% + clamp(16px, 2.2vmin, 40px)));
+}
+
+.coffeeStage[data-phase="topic"] .coffeeTableDisk {
+  width: min(72vw, 640px);
+  max-width: calc(100% - 40px);
+  transform: translate(-50%, calc(-50% + clamp(16px, 2.2vmin, 40px)));
+}
+
+.coffeeStage[data-phase="topic"] .coffeeTableFocalColumn {
+  width: min(72vw, 640px);
+  max-width: calc(100% - 40px);
+  transform: translateY(clamp(16px, 2.2vmin, 40px));
+}
+
+.coffeeStage[data-phase="topic"] .coffeeTableFocalStack {
+  /* Keep the prompt and suggestions visually connected. */
+  gap: clamp(14px, 2.8vh, 34px);
+}
+
+.coffeeStage[data-phase="topic"] .coffeeCenterMessage {
+  width: min(312px, 46vmin);
+  height: min(280px, 40vmin);
+  max-width: min(312px, 92%);
+  max-height: min(280px, 52%);
+}
+
+/*
+ * Waiting copy is short — a full-size square box reads as “stuck high” in the disk.
+ * Let the card shrink to content for the empty-topic state so the chips sit nearer the visual middle.
+ */
+.coffeeStage[data-phase="topic"] .coffeeCenterMessage[data-empty="true"] {
+  width: min(260px, 78vw);
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  max-width: min(300px, 82vw);
+  padding: 4px 8px;
+  transform: translateY(clamp(10px, 1.8vh, 22px));
+}
+
+.coffeeStage[data-phase="topic"] .coffeeSeatCluster {
+  width: clamp(80px, 9.6vw, 120px);
+  height: clamp(80px, 9.6vw, 120px);
+}
+
 .coffeeTableGlow {
   position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: min(72%, 600px);
   aspect-ratio: 1;
   border-radius: 50%;
@@ -21698,6 +21972,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeTableDisk {
   position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: min(51vw, 468px);
   max-width: calc(100% - 100px);
   aspect-ratio: 1;
@@ -21794,6 +22071,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   align-self: center;
   margin-top: auto;
   width: min(100%, 198px);
+}
+
+.coffeeCenterMessage[data-start-ready="true"] {
+  width: min(304px, 44vmin);
+  height: auto;
+  min-height: min(212px, 34vmin);
+  max-height: none;
+  padding: 12px 14px;
+}
+
+.coffeeStage[data-compact="true"] .coffeeCenterMessage[data-start-ready="true"] {
+  width: min(276px, 68vw);
+  height: auto;
+  min-height: 184px;
+  max-width: min(276px, 88%);
+  max-height: none;
+  padding: 12px 14px;
+}
+
+.coffeeCenterMessage[data-start-ready="true"] .coffeeCenterMessageScroll {
+  flex: 0 1 auto;
+  overflow-y: visible;
+}
+
+.coffeeCenterMessage[data-start-ready="true"] .coffeeTableStartButton {
+  margin-top: 8px;
+  width: min(100%, 220px);
 }
 
 .coffeeTypewriter {
@@ -22475,10 +22779,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeGroupOverview {
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
   display: grid;
-  gap: 14px;
-  padding: clamp(16px, 2.5vw, 24px);
+  gap: 8px;
+  padding: clamp(10px, 1.45vw, 14px);
+  max-height: min(380px, 48vh);
   border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.11);
   background:
@@ -22504,37 +22811,187 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .coffeeGroupOverviewHeader {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 0.92fr);
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
 }
 
-.coffeeGroupOverviewHeader h2 {
+.coffeeGroupOverviewNameInput {
+  display: block;
+  width: 100%;
+  max-width: min(100%, 52ch);
   margin: 0;
+  padding: 3px 7px 5px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.22);
   color: #fff;
-  font-size: clamp(1.25rem, 2.5vw, 2rem);
-  line-height: 1.02;
+  font: inherit;
+  font-size: clamp(1rem, 1.75vw, 1.42rem);
+  font-weight: 780;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+
+.coffeeGroupOverviewNameInput::placeholder {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.coffeeGroupOverviewNameInput:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(0, 0, 0, 0.34);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.coffeeGroupOverviewNameInput:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
 }
 
 .coffeeGroupOverviewHeader p {
-  margin: 5px 0 0;
+  margin: 3px 0 0;
   color: rgba(255, 255, 255, 0.72);
-  font-size: 0.86rem;
+  font-size: 0.74rem;
 }
 
 .coffeeGroupStartPanel {
   display: grid;
-  gap: 8px;
-  min-width: min(260px, 42vw);
+  grid-template-columns: minmax(112px, 0.78fr) minmax(132px, 1fr);
+  align-items: end;
+  gap: 5px 8px;
+  min-width: min(380px, 48vw);
 }
 
 .coffeeGroupStartLabel {
+  grid-column: 1 / -1;
   color: rgba(255, 255, 255, 0.72);
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.coffeeAutoTopicToggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.coffeeGroupOverview .coffeeAutoTopicToggle {
+  grid-column: 1 / span 2;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 10px;
+  font-size: 0.76rem;
+  line-height: 1.2;
+}
+
+.coffeeGroupOverview .coffeeAutoTopicToggleHint {
+  display: none;
+}
+
+.coffeeAutoTopicToggle input {
+  margin-top: 3px;
+}
+
+.coffeeAutoTopicToggleHint {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.62);
+  font-weight: 600;
+}
+
+.coffeeTopicPickerWrap {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(320px, 82vw);
+  margin: 0 auto;
+  padding: 0 12px 14px;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.coffeeTopicPickerHint,
+.coffeeTopicPickerSubhint {
+  margin: 0;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  max-width: 100%;
+}
+
+.coffeeTopicPickerSubhint {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.64);
+}
+
+.coffeeTopicChipRow {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  max-width: min(260px, 100%);
+  margin: 0 auto;
+}
+
+.coffeeTopicChip {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  /* Floor for touch; text can wrap to several lines without clipping. */
+  min-height: 68px;
+  box-sizing: border-box;
+  padding: 16px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(10, 10, 12, 0.72);
+  color: rgba(255, 255, 255, 0.94);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.42;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.05s ease;
+}
+
+.coffeeTopicChip:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.38);
+  background: rgba(22, 22, 28, 0.88);
+}
+
+.coffeeTopicChip:focus-visible {
+  outline: 2px solid rgba(255, 200, 120, 0.65);
+  outline-offset: 2px;
+}
+
+.coffeeTopicChip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .coffeeDurationPicker {
@@ -22551,6 +23008,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: rgba(255, 255, 255, 0.84);
   font-weight: 750;
   cursor: pointer;
+}
+
+.coffeeGroupOverview .coffeeDurationPicker button {
+  min-height: 28px;
+  font-size: 0.78rem;
+}
+
+.coffeeGroupOverview .coffeeDurationPicker {
+  grid-column: 1;
+}
+
+.coffeeGroupOverview .coffeeSettingsDivider {
+  margin: 0;
 }
 
 .coffeeDurationPicker button[data-selected="true"] {
@@ -22592,17 +23062,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeGroupOverviewGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(158px, 0.82fr) minmax(210px, 1fr) minmax(220px, 1.1fr);
+  gap: 8px;
 }
 
 .coffeeGroupOverviewCard {
   display: grid;
-  gap: 10px;
+  gap: 5px;
   align-content: start;
-  min-height: 128px;
-  padding: 14px;
-  border-radius: 16px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px;
+  border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.11);
   background: rgba(0, 0, 0, 0.34);
 }
@@ -22610,7 +23081,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeGroupOverviewCard h3 {
   margin: 0;
   color: rgba(255, 255, 255, 0.9);
-  font-size: 0.82rem;
+  font-size: 0.68rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -22619,7 +23090,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeGroupRecentSessions {
   list-style: none;
   display: grid;
-  gap: 8px;
+  gap: 4px;
   margin: 0;
   padding: 0;
 }
@@ -22627,10 +23098,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeGroupBotList li {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
   color: rgba(255, 255, 255, 0.88);
-  font-size: 0.88rem;
+  font-size: 0.76rem;
   font-weight: 690;
 }
 
@@ -22638,10 +23109,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   flex: 0 0 auto;
 }
 
+.coffeeGroupBotList li span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .coffeeGroupMoodMeter {
   position: relative;
   overflow: hidden;
-  height: 14px;
+  height: 10px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(0, 0, 0, 0.36);
@@ -22667,12 +23145,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeGroupMoodLabel {
   margin: -2px 0 0;
   color: rgba(255, 255, 255, 0.78);
-  font-size: 0.78rem;
+  font-size: 0.68rem;
 }
 
 .coffeeGroupActionGrid {
   display: grid;
-  gap: 10px;
+  gap: 5px;
 }
 
 /* Overview “tool” rows — read as primary actions (icon + label), not metric tiles. */
@@ -22682,10 +23160,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  min-height: 52px;
-  border-radius: 14px;
+  gap: 8px;
+  padding: 6px 8px;
+  min-height: 38px;
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   color: rgba(255, 255, 255, 0.94);
   background: linear-gradient(
@@ -22782,41 +23260,76 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeGroupToolButtonText {
   display: grid;
-  gap: 3px;
+  gap: 1px;
   min-width: 0;
   flex: 1;
 }
 
 .coffeeGroupToolButtonTitle {
-  font-size: 0.92rem;
+  font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  line-height: 1.2;
+  line-height: 1.12;
 }
 
 .coffeeGroupToolButtonSubtitle {
-  font-size: 0.74rem;
+  font-size: 0.64rem;
   color: rgba(255, 255, 255, 0.62);
-  line-height: 1.25;
+  line-height: 1.15;
+}
+
+.coffeeGroupOverview .coffeeSend {
+  grid-column: 3;
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
+.coffeeGroupOverview .coffeeSettingsSelect {
+  grid-column: 2;
+  padding: 5px 8px;
+  font-size: 0.76rem;
+}
+
+.coffeeGroupOverview .coffeeGroupToolButtonIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+
+.coffeeGroupOverview .coffeeGroupToolButtonIcon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .coffeeGroupRecentSessions button {
   width: 100%;
   display: grid;
-  gap: 3px;
-  padding: 9px 10px;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 7px;
   text-align: left;
   cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: 9px;
   color: rgba(255, 255, 255, 0.86);
   background: rgba(255, 255, 255, 0.055);
+  font-size: 0.76rem;
+  line-height: 1.14;
+}
+
+.coffeeGroupRecentSessions button span,
+.coffeeGroupRecentSessions small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .coffeeGroupRecentSessions small,
 .coffeeGroupEmptyNote {
   color: var(--coffee-muted);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
 }
 
 .coffeeGroupRecentSessions button:hover {
@@ -23304,7 +23817,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   .coffeeStage[data-compact="true"] .coffeeTableScene {
-    min-height: 250px;
+    min-height: clamp(220px, 34vh, 420px);
+  }
+
+  .coffeeGroupOverview {
+    max-height: min(360px, 52vh);
   }
 
   .coffeeStage[data-compact="true"] .coffeeTableDisk {
@@ -23326,6 +23843,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     align-items: stretch;
   }
 
+  .coffeeGroupOverview {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .coffeeGroupOverviewHeader,
+  .coffeeGroupOverviewGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .coffeeGroupStartPanel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+  }
+
+  .coffeeGroupOverview .coffeeAutoTopicToggle,
+  .coffeeGroupOverview .coffeeSend {
+    grid-column: 1 / -1;
+  }
+
   .coffeeHeaderActions {
     justify-content: space-between;
     flex-wrap: wrap;
@@ -23334,6 +23871,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .coffeeTableDisk {
     width: min(78vw, 380px);
     max-width: calc(100% - 40px);
+  }
+
+  .coffeeStage[data-phase="topic"] .coffeeTableDisk {
+    width: min(94vw, 500px);
+    max-width: calc(100% - 24px);
   }
 
   .coffeeStage[data-compact="true"] {

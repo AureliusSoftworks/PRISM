@@ -61,6 +61,7 @@ import {
   type BotFactKey,
   type CoffeeBotSocialSnapshot,
   type CoffeeSessionSettings,
+  type CoffeeTopicSelectionMode,
   type BotProfileFields,
   type BotProfileScaleValue,
   type BotVoicePreset,
@@ -126,6 +127,18 @@ const HEADER_DELETE_KEY = "__header__";
 // Escape behaviour applies to it without any extra wiring.
 const DELETE_ALL_KEY = "__delete_all__";
 const DELETE_ALL_COFFEE_SESSIONS_KEY = "__delete_all_coffee_sessions__";
+/** Single Coffee Group delete — opens the same centered confirm modal as bulk deletes. */
+const DELETE_COFFEE_GROUP_KEY_PREFIX = "__delete_coffee_group__:";
+
+function coffeeGroupDeleteKey(groupId: string): string {
+  return `${DELETE_COFFEE_GROUP_KEY_PREFIX}${groupId}`;
+}
+
+function parseCoffeeGroupDeleteKey(key: string | null): string | null {
+  if (key == null || !key.startsWith(DELETE_COFFEE_GROUP_KEY_PREFIX)) return null;
+  const id = key.slice(DELETE_COFFEE_GROUP_KEY_PREFIX.length).trim();
+  return id.length > 0 ? id : null;
+}
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 const CONVERSATION_GROUP_ORDER_STORAGE_KEY = "prism_conversation_group_order";
@@ -2112,6 +2125,8 @@ const COFFEE_GROUP_MAX_SIZE_CLIENT = 5;
 const COFFEE_SESSION_DURATION_MS = 4 * 60 * 1000;
 const COFFEE_REPLY_DELAY_MIN_MS = 12000;
 const COFFEE_REPLY_DELAY_MAX_MS = 28000;
+const COFFEE_REPLY_DELAY_FAST_MIN_MS = 650;
+const COFFEE_REPLY_DELAY_FAST_MAX_MS = 2600;
 const COFFEE_ARRIVAL_STEP_MS = 850;
 const COFFEE_ARRIVAL_SETTLE_MS = 900;
 const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
@@ -2182,17 +2197,29 @@ function randomCoffeeAutonomousDelayMs(
   settings: CoffeeSessionSettings,
   delayMultiplier = 1
 ): number {
-  const range = COFFEE_REPLY_DELAY_MAX_MS - COFFEE_REPLY_DELAY_MIN_MS;
-  const slowLoungeUnit = Math.max(Math.random(), Math.random());
-  let ms = COFFEE_REPLY_DELAY_MIN_MS + Math.floor(slowLoungeUnit * range);
-  const bias = (settings.responseDelayBias - 50) / 50;
-  ms = Math.round(ms * (1 - bias * 0.2));
+  const speed = Math.max(0, Math.min(1, settings.responseDelayBias / 100));
+  const room = Math.max(0, Math.min(1, settings.breathingRoom / 100));
+  const minMs = Math.round(
+    COFFEE_REPLY_DELAY_MIN_MS +
+      (COFFEE_REPLY_DELAY_FAST_MIN_MS - COFFEE_REPLY_DELAY_MIN_MS) * speed
+  );
+  const maxMs = Math.round(
+    COFFEE_REPLY_DELAY_MAX_MS +
+      (COFFEE_REPLY_DELAY_FAST_MAX_MS - COFFEE_REPLY_DELAY_MAX_MS) * speed
+  );
+  const range = Math.max(0, maxMs - minMs);
+  const delayUnit =
+    settings.crossTalk === "chatty"
+      ? Math.min(Math.random(), Math.random())
+      : Math.max(Math.random(), Math.random());
+  let ms = minMs + Math.floor(delayUnit * range);
   const crossScale =
-    settings.crossTalk === "chatty" ? 0.9 : settings.crossTalk === "rare" ? 1.12 : 1;
-  ms = Math.round(ms * crossScale * delayMultiplier);
+    settings.crossTalk === "chatty" ? 0.72 : settings.crossTalk === "rare" ? 1.12 : 1;
+  const roomScale = 0.82 + room * 0.55;
+  ms = Math.round(ms * crossScale * roomScale * delayMultiplier);
   return Math.max(
-    COFFEE_REPLY_DELAY_MIN_MS,
-    Math.min(Math.round(COFFEE_REPLY_DELAY_MAX_MS * 1.35), ms)
+    settings.crossTalk === "chatty" && settings.responseDelayBias >= 95 ? 450 : minMs,
+    Math.min(Math.round(maxMs * 1.35), ms)
   );
 }
 
@@ -2203,10 +2230,15 @@ function randomCoffeeRevealDelayMs(
   const wordCount = Math.max(1, (messageText.match(/\S+/g) ?? []).length);
   let minMs = COFFEE_BOT_REVEAL_DELAY_MIN_MS;
   let maxMs = COFFEE_BOT_REVEAL_DELAY_MAX_MS;
-  const bias = (settings.responseDelayBias - 50) / 50;
-  minMs = Math.round(minMs * (1 - bias * 0.15));
-  maxMs = Math.round(maxMs * (1 - bias * 0.18));
-  minMs = Math.max(900, minMs);
+  const speed = Math.max(0, Math.min(1, settings.responseDelayBias / 100));
+  const crossScale =
+    settings.crossTalk === "chatty" ? 0.72 : settings.crossTalk === "rare" ? 1.08 : 1;
+  minMs = Math.round(minMs * (1 - speed * 0.35) * crossScale);
+  maxMs = Math.round(maxMs * (1 - speed * 0.42) * crossScale);
+  minMs = Math.max(
+    settings.crossTalk === "chatty" && settings.responseDelayBias >= 95 ? 360 : 700,
+    minMs
+  );
   maxMs = Math.max(minMs + 300, maxMs);
   const lengthBiasMs = Math.min(maxMs - minMs, wordCount * COFFEE_BOT_REVEAL_MS_PER_WORD);
   const jitterMs = Math.floor(Math.random() * Math.max(1, maxMs - minMs));
@@ -2238,7 +2270,7 @@ type CoffeeArrivalScenario =
   | "user-first"
   | "partial-table-in-progress"
   | "full-table-present";
-type CoffeeSessionPhase = "selecting" | "preview" | "arriving" | "live" | "finished";
+type CoffeeSessionPhase = "selecting" | "preview" | "topic" | "arriving" | "live" | "finished";
 type CoffeeTurnRhythmState =
   | "idle"
   | "botThinking"
@@ -2305,6 +2337,8 @@ interface CoffeeConversationState {
   coffeeBotSocialById?: Record<string, CoffeeBotSocialSnapshot>;
   coffeeSettings?: CoffeeSessionSettings;
   coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
+  /** Server-persisted anchor topic for this Coffee session. */
+  coffeeTopic?: string | null;
   createdAt?: string;
   updatedAt?: string;
   messages: CoffeeConversationMessage[];
@@ -2317,6 +2351,8 @@ interface CoffeeGroupState {
   coffeeSeatBotIds: Array<string | null>;
   coffeeSettings: CoffeeSessionSettings;
   presetMode: "manual" | "auto";
+  /** When `auto`, new sessions pick a random generated topic server-side. */
+  topicSelectionMode?: CoffeeTopicSelectionMode;
   moodSummary?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -4115,6 +4151,12 @@ function conversationModelScopeKey(
   if (selectedId && selectedId.length > 0) return `c:${selectedId}`;
   if (detailId === "pending") return "p:pending";
   return "p:none";
+}
+
+/** Remember Coffee header model picks per active conversation (mirrors chat scope keys). */
+function coffeeModelScopeKey(conversationId: string | null | undefined): string {
+  if (conversationId && conversationId.length > 0) return `coffee:${conversationId}`;
+  return "coffee:none";
 }
 
 function createDefaultChatModelChoiceByProvider(): Record<Provider, string> {
@@ -13552,6 +13594,16 @@ function HomeContent(): React.JSX.Element {
       local: AUTO_MODEL_CHOICE,
       openai: AUTO_MODEL_CHOICE,
     });
+  /** Per-session Coffee header model picks (LOCAL + ONLINE slots). */
+  const [coffeeModelChoiceByProvider, setCoffeeModelChoiceByProvider] =
+    useState<Record<Provider, string>>(createDefaultChatModelChoiceByProvider());
+  /** Remember picks when hopping Coffee threads or leaving Coffee view. */
+  const coffeeModelChoiceByScopeRef = useRef<Map<string, Record<Provider, string>>>(
+    new Map()
+  );
+  const lastCoffeeModelScopeKeyRef = useRef<string | null>(null);
+  const coffeeModelChoiceByProviderWriteRef = useRef(coffeeModelChoiceByProvider);
+  coffeeModelChoiceByProviderWriteRef.current = coffeeModelChoiceByProvider;
   /** Per-thread compose model picks (Chat + Sandbox); keyed by `conversationModelScopeKey`. */
   const conversationModelChoiceByScopeRef = useRef<
     Map<string, Record<Provider, string>>
@@ -15240,6 +15292,50 @@ function HomeContent(): React.JSX.Element {
       </div>
     );
   };
+  const renderCoffeeHeaderModelPicker = (): React.ReactNode => {
+    if (!settings) return null;
+    const lockedByProtectedBot = coffeeAnyOfflineProtected;
+    const isLocal = lockedByProtectedBot ? true : coffeeProvider === "local";
+    const modelProvider: Provider = isLocal ? "local" : "openai";
+    const rawModelChoice = coffeeModelChoiceByProvider[modelProvider];
+    const visibleModelChoice = visibleModelChoiceForProvider(
+      settings,
+      rawModelChoice
+    );
+    const modelOptions = includeSelectedModelOption(
+      availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+      visibleModelChoice,
+      modelProvider
+    );
+    return (
+      <ComposerModelPicker
+        value={visibleModelChoice}
+        onChange={(nextChoice) => {
+          setCoffeeModelChoiceByProvider((previous) => {
+            const next = { ...previous, [modelProvider]: nextChoice };
+            persistCoffeeModelChoicesForScope(next);
+            return next;
+          });
+        }}
+        options={modelOptions}
+        provider={modelProvider}
+        disabled={coffeeBusy || coffeeAutoBusy}
+        title={`Coffee model (${isLocal ? "LOCAL" : "ONLINE"} — overrides each seated bot)`}
+        ariaLabel={`Coffee session model for ${isLocal ? "local" : "online"} replies`}
+        placement="down"
+        minMenuWidthPx={180}
+        autoOptionMetaOverride={
+          modelProvider === "local"
+            ? "Per-bot default local model when Auto"
+            : "Per-bot default online model when Auto"
+        }
+        settingsDefaultModelId={chatSettingsSavedDefaultModelId(
+          settings,
+          modelProvider
+        )}
+      />
+    );
+  };
   const renderHeaderModelPicker = (): React.ReactNode => {
     if (!effectiveChatPresentation) return null;
     // Use the effective provider so the picker shows local options whenever
@@ -16380,6 +16476,9 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSelectedSessionId, setCoffeeSelectedSessionId] = useState<string | null>(null);
   const [coffeeGroups, setCoffeeGroups] = useState<CoffeeGroupState[]>([]);
   const [coffeeSelectedGroupId, setCoffeeSelectedGroupId] = useState<string | null>(null);
+  const [coffeeCollapsedGroupIds, setCoffeeCollapsedGroupIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [coffeeGroupsLoading, setCoffeeGroupsLoading] = useState(false);
   const [coffeePresets, setCoffeePresets] = useState<CoffeePresetState[]>([]);
   const [coffeePresetsLoading, setCoffeePresetsLoading] = useState(false);
@@ -16393,6 +16492,8 @@ function HomeContent(): React.JSX.Element {
   const [coffeeGroupNameDraft, setCoffeeGroupNameDraft] = useState("");
   const [coffeePresetNameDraft, setCoffeePresetNameDraft] = useState("");
   const [coffeeSettingsSaving, setCoffeeSettingsSaving] = useState(false);
+  const [coffeeGroupOverviewRenameBusy, setCoffeeGroupOverviewRenameBusy] = useState(false);
+  const [coffeeAutoTopicToggleBusy, setCoffeeAutoTopicToggleBusy] = useState(false);
   const [coffeeSearch, setCoffeeSearch] = useState("");
   const [coffeeDraft, setCoffeeDraft] = useState<string>("");
   const coffeeComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -16476,12 +16577,17 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSeatMoodDevCycleIndex, setCoffeeSeatMoodDevCycleIndex] = useState(0);
   const [coffeeSessionPhase, setCoffeeSessionPhase] =
     useState<CoffeeSessionPhase>("selecting");
+  /** Scenario for arrival animation — held while the user picks a starter topic. */
+  const [coffeePendingArrivalScenario, setCoffeePendingArrivalScenario] =
+    useState<CoffeeArrivalScenario>("user-first");
+  const [coffeeStarterTopics, setCoffeeStarterTopics] = useState<string[]>([]);
   const [, setCoffeeArrivalScenario] =
     useState<CoffeeArrivalScenario>("user-first");
   const [coffeeArrivedBotIds, setCoffeeArrivedBotIds] = useState<string[]>([]);
   const [coffeeSessionEndsAtMs, setCoffeeSessionEndsAtMs] = useState<number | null>(null);
   /** Mirrors {@link coffeeSessionEndsAtMs} for timers/async paths (state alone can be stale in callbacks). */
   const coffeeSessionEndsAtRef = useRef<number | null>(null);
+  const coffeeConversationRef = useRef<CoffeeConversationState | null>(null);
   const assignCoffeeSessionEndsAtMs = (value: number | null) => {
     coffeeSessionEndsAtRef.current = value;
     setCoffeeSessionEndsAtMs(value);
@@ -16565,6 +16671,9 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionEndsAtRef.current = coffeeSessionEndsAtMs;
   }, [coffeeSessionEndsAtMs]);
   useEffect(() => {
+    coffeeConversationRef.current = coffeeConversation;
+  }, [coffeeConversation]);
+  useEffect(() => {
     coffeeSessionSettingsRef.current = coffeeSessionSettings;
   }, [coffeeSessionSettings]);
   useEffect(() => {
@@ -16575,6 +16684,7 @@ function HomeContent(): React.JSX.Element {
     const shouldTick =
       coffeeConversation != null &&
       coffeeSessionPhase !== "preview" &&
+      coffeeSessionPhase !== "topic" &&
       coffeeSessionEndsAtMs != null &&
       coffeeSessionPhase === "live";
     if (!shouldTick) return;
@@ -16865,6 +16975,16 @@ function HomeContent(): React.JSX.Element {
     () => coffeeSessions.filter((session) => !session.coffeeGroupId),
     [coffeeSessions]
   );
+  useEffect(() => {
+    if (!coffeeSelectedGroupId) return;
+    setCoffeeCollapsedGroupIds((current) => {
+      if (!current.has(coffeeSelectedGroupId)) return current;
+      const next = new Set(current);
+      next.delete(coffeeSelectedGroupId);
+      return next;
+    });
+  }, [coffeeSelectedGroupId]);
+
   const refreshCoffeeGroups = useCallback(async (): Promise<CoffeeGroupState[]> => {
     setCoffeeGroupsLoading(true);
     try {
@@ -16993,6 +17113,73 @@ function HomeContent(): React.JSX.Element {
       setCoffeeProvider("local");
     }
   }, [coffeeAnyOfflineProtected, coffeeProvider]);
+
+  const persistCoffeeModelChoicesForScope = useCallback(
+    (next: Record<Provider, string>) => {
+      if (view !== "coffee") return;
+      const key = coffeeModelScopeKey(coffeeConversation?.id ?? null);
+      coffeeModelChoiceByScopeRef.current.set(key, next);
+    },
+    [view, coffeeConversation?.id]
+  );
+
+  useEffect(() => {
+    if (view !== "coffee") {
+      const pk = lastCoffeeModelScopeKeyRef.current;
+      if (pk !== null) {
+        coffeeModelChoiceByScopeRef.current.set(pk, {
+          ...coffeeModelChoiceByProviderWriteRef.current,
+        });
+        lastCoffeeModelScopeKeyRef.current = null;
+      }
+      return;
+    }
+    const nextKey = coffeeModelScopeKey(coffeeConversation?.id ?? null);
+    const prevKey = lastCoffeeModelScopeKeyRef.current;
+    if (prevKey === nextKey) return;
+
+    if (prevKey !== null) {
+      coffeeModelChoiceByScopeRef.current.set(prevKey, {
+        ...coffeeModelChoiceByProviderWriteRef.current,
+      });
+    }
+    lastCoffeeModelScopeKeyRef.current = nextKey;
+
+    let stored = coffeeModelChoiceByScopeRef.current.get(nextKey);
+    if (
+      !stored &&
+      prevKey === "coffee:none" &&
+      nextKey.startsWith("coffee:") &&
+      nextKey !== "coffee:none"
+    ) {
+      stored = coffeeModelChoiceByScopeRef.current.get("coffee:none");
+      if (stored) {
+        coffeeModelChoiceByScopeRef.current.set(nextKey, { ...stored });
+      }
+    }
+
+    setCoffeeModelChoiceByProvider(
+      stored ? { ...stored } : createDefaultChatModelChoiceByProvider()
+    );
+  }, [view, coffeeConversation?.id]);
+
+  const coffeeSessionModelOverride = useMemo((): string | undefined => {
+    if (!settings) return undefined;
+    const locked = coffeeAnyOfflineProtected;
+    const effectiveProv = locked ? "local" : coffeeProvider;
+    const modelProvider: Provider = effectiveProv === "openai" ? "openai" : "local";
+    const visible = visibleModelChoiceForProvider(
+      settings,
+      coffeeModelChoiceByProvider[modelProvider]
+    );
+    return visible !== AUTO_MODEL_CHOICE ? visible : undefined;
+  }, [
+    settings,
+    coffeeAnyOfflineProtected,
+    coffeeProvider,
+    coffeeModelChoiceByProvider,
+  ]);
+
   const coffeeMentionBotPicks = useMemo((): BotMentionPick[] => {
     const out: BotMentionPick[] = [];
     const seen = new Set<string>();
@@ -22081,7 +22268,8 @@ function HomeContent(): React.JSX.Element {
     if (
       key === DELETE_ALL_KEY ||
       key === DELETE_ALL_COFFEE_SESSIONS_KEY ||
-      key === DELETE_ALL_BOTS_KEY
+      key === DELETE_ALL_BOTS_KEY ||
+      key.startsWith(DELETE_COFFEE_GROUP_KEY_PREFIX)
     ) return;
     pendingDeleteTimerRef.current = setTimeout(() => {
       setPendingDeleteKey(null);
@@ -22196,10 +22384,12 @@ function HomeContent(): React.JSX.Element {
   // other confirm surface in the app. Both the chat-scoped and bot-scoped
   // armed-all states share this contract so the two modals behave
   // identically from the keyboard / screen-reader side.
+  const pendingCoffeeGroupDeleteIdForModal = parseCoffeeGroupDeleteKey(pendingDeleteKey);
   const isDeleteAllActive =
     pendingDeleteKey === DELETE_ALL_KEY ||
     pendingDeleteKey === DELETE_ALL_COFFEE_SESSIONS_KEY ||
-    pendingDeleteKey === DELETE_ALL_BOTS_KEY;
+    pendingDeleteKey === DELETE_ALL_BOTS_KEY ||
+    pendingCoffeeGroupDeleteIdForModal !== null;
   useEffect(() => {
     if (!isDeleteAllActive) {
       // On close, return focus to the element that opened the modal
@@ -22230,6 +22420,14 @@ function HomeContent(): React.JSX.Element {
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [isDeleteAllActive, disarmDelete]);
+
+  useEffect(() => {
+    const id = parseCoffeeGroupDeleteKey(pendingDeleteKey);
+    if (!id) return;
+    if (!coffeeGroups.some((group) => group.id === id)) {
+      disarmDelete();
+    }
+  }, [pendingDeleteKey, coffeeGroups, disarmDelete]);
 
   // Single-bot delete from the Bots panel header uses its own modal; if any
   // sidebar/header delete affordance arms, drop the header modal so only one
@@ -22573,6 +22771,24 @@ function HomeContent(): React.JSX.Element {
       await refreshConversations();
     } catch (err) {
       setCoffeeError(err instanceof Error ? err.message : "Delete Coffee Sessions failed.");
+      await refreshConversations().catch(() => undefined);
+    }
+  }
+
+  async function deleteCoffeeGroupConfirmed(groupId: string) {
+    setCoffeeError(null);
+    setError(null);
+    disarmDelete();
+    try {
+      await api(`/api/coffee/groups/${encodeURIComponent(groupId)}`, { method: "DELETE" });
+      if (coffeeSelectedGroupId === groupId || coffeeConversation?.coffeeGroupId === groupId) {
+        resetCoffeeToPicker();
+      }
+      await refreshCoffeeGroups();
+      await refreshConversations();
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to delete Coffee Group.");
+      await refreshCoffeeGroups().catch(() => undefined);
       await refreshConversations().catch(() => undefined);
     }
   }
@@ -25823,56 +26039,74 @@ function HomeContent(): React.JSX.Element {
   //
   // Escape: handled globally in the same effect, so any focus target can cancel.
   const renderDeleteAllModal = () => {
+    const pendingCoffeeGroupDeleteId = parseCoffeeGroupDeleteKey(pendingDeleteKey);
+    const isCoffeeGroupDelete = pendingCoffeeGroupDeleteId !== null;
+    const groupForDelete =
+      isCoffeeGroupDelete && pendingCoffeeGroupDeleteId
+        ? coffeeGroups.find((group) => group.id === pendingCoffeeGroupDeleteId)
+        : undefined;
+
     const isChats = pendingDeleteKey === DELETE_ALL_KEY;
     const isCoffeeSessions = pendingDeleteKey === DELETE_ALL_COFFEE_SESSIONS_KEY;
     const isBots = pendingDeleteKey === DELETE_ALL_BOTS_KEY;
-    if (!isChats && !isCoffeeSessions && !isBots) return null;
-    // One component, two modes. The sidebar Conversations × targets
-    // conversations; the bot hold targets bots. We derive every
-    // user-visible string + the confirm action from the armed key so both
-    // contexts share every a11y / focus / dismissal affordance without
-    // forking the JSX.
+    if (!isChats && !isCoffeeSessions && !isBots && !isCoffeeGroupDelete) return null;
+    if (isCoffeeGroupDelete && !groupForDelete) return null;
+
     const protectedBotCount = isBots
       ? bots.filter((bot) => bot.delete_protected === 1).length
       : 0;
-    const count = isChats
-      ? conversations.length
-      : isCoffeeSessions
-        ? coffeeSessions.length
-        : Math.max(0, bots.length - protectedBotCount);
-    const noun = isChats
-      ? count === 1 ? "conversation" : "conversations"
-      : isCoffeeSessions
-        ? count === 1 ? "Coffee Session" : "Coffee Sessions"
-      : count === 1 ? "bot" : "bots";
-    const title = isChats
-      ? "Delete all chats?"
-      : isCoffeeSessions
-        ? "Delete all Coffee Sessions?"
-        : "Delete all unprotected bots?";
-    const body = isChats
-      ? count === 1
-        ? "This will permanently remove your only conversation."
-        : `This will permanently remove all ${count} conversations.`
-      : isCoffeeSessions
+    const count = isCoffeeGroupDelete
+      ? 1
+      : isChats
+        ? conversations.length
+        : isCoffeeSessions
+          ? coffeeSessions.length
+          : Math.max(0, bots.length - protectedBotCount);
+    const noun = isCoffeeGroupDelete
+      ? "Coffee Group"
+      : isChats
+        ? count === 1 ? "conversation" : "conversations"
+        : isCoffeeSessions
+          ? count === 1 ? "Coffee Session" : "Coffee Sessions"
+          : count === 1 ? "bot" : "bots";
+    const title = isCoffeeGroupDelete
+      ? `Delete “${groupForDelete!.name}”?`
+      : isChats
+        ? "Delete all chats?"
+        : isCoffeeSessions
+          ? "Delete all Coffee Sessions?"
+          : "Delete all unprotected bots?";
+    const body = isCoffeeGroupDelete
+      ? "This removes the saved Coffee Group from your sidebar — the named group card, table layout, and group shortcuts. Sessions that belonged to this group stay in your account as legacy Coffee sessions (same transcript and messages; they just move under Legacy sessions)."
+      : isChats
         ? count === 1
-          ? "This will permanently remove your only Coffee Session."
-          : `This will permanently remove all ${count} Coffee Sessions.`
-      : count === 1
-        ? "This will permanently remove your only unprotected bot."
-        : `This will permanently remove all ${count} unprotected ${noun}.`;
-    // What stays behind after the wipe — different trailing copy because
-    // the two scopes have different "untouched" surfaces.
-    const coda = isChats
-      ? " Images and memories stay."
-      : isCoffeeSessions
-        ? " Other chats, bots, images, and memories stay."
-      : `${protectedBotCount > 0 ? " Protected bots will be kept." : ""} Chats using deleted bots stay (they fall back to Default).`;
+          ? "This will permanently remove your only conversation."
+          : `This will permanently remove all ${count} conversations.`
+        : isCoffeeSessions
+          ? count === 1
+            ? "This will permanently remove your only Coffee Session."
+            : `This will permanently remove all ${count} Coffee Sessions.`
+          : count === 1
+            ? "This will permanently remove your only unprotected bot."
+            : `This will permanently remove all ${count} unprotected ${noun}.`;
+    const coda = isCoffeeGroupDelete
+      ? " Other Coffee Groups, chats, bots, images, and memories stay."
+      : isChats
+        ? " Images and memories stay."
+        : isCoffeeSessions
+          ? " Coffee Groups and other chats stay; only session transcripts are removed."
+          : `${protectedBotCount > 0 ? " Protected bots will be kept." : ""} Chats using deleted bots stay (they fall back to Default).`;
     const onConfirm = () => {
-      if (isChats) void deleteAllConversations();
+      if (isCoffeeGroupDelete && pendingCoffeeGroupDeleteId) {
+        void deleteCoffeeGroupConfirmed(pendingCoffeeGroupDeleteId);
+      } else if (isChats) void deleteAllConversations();
       else if (isCoffeeSessions) void deleteAllCoffeeSessions();
       else void deleteAllBots();
     };
+    const confirmLabel = isCoffeeGroupDelete ? "Delete group" : "Delete all";
+    const confirmAria = isCoffeeGroupDelete
+      ? `Delete Coffee Group ${groupForDelete!.name}`
+      : `Delete all ${noun}`;
     return (
       <div
         className={styles.deleteAllModalBackdrop}
@@ -25918,9 +26152,9 @@ function HomeContent(): React.JSX.Element {
               type="button"
               className={styles.deleteAllModalConfirm}
               onClick={onConfirm}
-              aria-label={`Delete all ${noun}`}
+              aria-label={confirmAria}
             >
-              Delete all
+              {confirmLabel}
             </button>
           </div>
         </div>
@@ -30933,6 +31167,28 @@ function HomeContent(): React.JSX.Element {
       memoryCallbacks: pick(["now", "this-session", "recent"] as const),
     });
   };
+  const buildLocalCoffeeStarterTopicSuggestions = (
+    seatBotIds: readonly (string | null)[]
+  ): string[] => {
+    const names = seatBotIds
+      .map((id) => (typeof id === "string" ? coffeeBotsById.get(id)?.name : null))
+      .filter((name): name is string => Boolean(name && name.trim().length > 0));
+    if (names.length === 0) {
+      return [
+        "Light small talk while everyone settles",
+        "One honest check-in",
+        "A cozy what-are-we-doing thread",
+      ];
+    }
+    const a = names[0]!;
+    const b = names[1] ?? names[0]!;
+    const c = names[2] ?? a;
+    return [
+      `Something ${a} would defend passionately (kindly)`,
+      `One shared curiosity between ${a} and ${b}`,
+      `A tiny story ${c} could unfold slowly`,
+    ];
+  };
   const coffeeSearchTerm = coffeeSearch.trim().toLowerCase();
   const coffeeFilteredBots = coffeeBotsLibrary.filter((bot) => {
     if (!coffeeSearchTerm) return true;
@@ -30959,6 +31215,8 @@ function HomeContent(): React.JSX.Element {
     setCoffeeArrivedBotIds([]);
     assignCoffeeSessionEndsAtMs(null);
     setCoffeeSessionPhase("selecting");
+    setCoffeeStarterTopics([]);
+    setCoffeePendingArrivalScenario("user-first");
   };
   const openCoffeeGroup = (group: CoffeeGroupState) => {
     clearCoffeeArrivalTimer();
@@ -30991,6 +31249,10 @@ function HomeContent(): React.JSX.Element {
     delayMultiplier = 1
   ) => {
     clearCoffeeLoopTimer();
+    const activeConv = coffeeConversationRef.current;
+    if (activeConv && activeConv.id === conversationId && !activeConv.coffeeTopic?.trim()) {
+      return;
+    }
     const effectiveEndsAt = coffeeSessionEndsAtRef.current ?? endsAtHint ?? null;
     if (!effectiveEndsAt || Date.now() >= effectiveEndsAt) {
       setCoffeeSessionPhase("finished");
@@ -31037,6 +31299,28 @@ function HomeContent(): React.JSX.Element {
     };
     coffeeArrivalTimerRef.current = setTimeout(advance, COFFEE_ARRIVAL_STEP_MS);
   };
+  const persistCoffeeTopicToServer = async (
+    topic: string,
+    conversation: CoffeeConversationState,
+    scenario: CoffeeArrivalScenario
+  ): Promise<boolean> => {
+    const trimmed = topic.trim();
+    if (!trimmed) return false;
+    try {
+      const response = await api<{ ok: true; conversation: CoffeeConversationState }>(
+        `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/topic`,
+        { method: "POST", body: JSON.stringify({ topic: trimmed }) }
+      );
+      setCoffeeConversation(response.conversation);
+      setCoffeeStarterTopics([]);
+      startCoffeeArrivalSequence(response.conversation, scenario);
+      void refreshConversations();
+      return true;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to save the table topic.");
+      return false;
+    }
+  };
   const createCoffeeSession = async (
     options: { startArrival?: boolean } = {}
   ): Promise<CoffeeConversationState | null> => {
@@ -31055,6 +31339,7 @@ function HomeContent(): React.JSX.Element {
         ok: true;
         conversation: CoffeeConversationState;
         arrivalScenario: CoffeeArrivalScenario;
+        coffeeStarterTopics?: string[];
       }>("/api/coffee/sessions", {
         method: "POST",
         body: JSON.stringify({
@@ -31072,15 +31357,30 @@ function HomeContent(): React.JSX.Element {
           coffeeSeatsFromBotIds(response.conversation.botGroupIds ?? coffeeSelectedBotIds)
       );
       setCoffeeAutoplayPausedValue(false);
+      const serverStarters = response.coffeeStarterTopics ?? [];
+      const seatLayout =
+        response.conversation.coffeeSeatBotIds ??
+        coffeeSeatsFromBotIds(response.conversation.botGroupIds ?? coffeeSelectedBotIds);
+      const starterList =
+        serverStarters.length >= 3 ? serverStarters : buildLocalCoffeeStarterTopicSuggestions(seatLayout);
+      const topicReady = Boolean(response.conversation.coffeeTopic?.trim());
+      setCoffeePendingArrivalScenario(response.arrivalScenario);
+      setCoffeeStarterTopics(topicReady ? [] : starterList);
       if (!shouldStartArrival) {
         setCoffeeArrivedBotIds(response.conversation.botGroupIds ?? []);
         assignCoffeeSessionEndsAtMs(null);
-        setCoffeeSessionPhase("live");
+        setCoffeeSessionPhase(topicReady ? "live" : "topic");
         await refreshConversations();
         return response.conversation;
       }
       await refreshConversations();
-      startCoffeeArrivalSequence(response.conversation, response.arrivalScenario);
+      if (topicReady) {
+        startCoffeeArrivalSequence(response.conversation, response.arrivalScenario);
+      } else {
+        setCoffeeSessionPhase("topic");
+        setCoffeeArrivedBotIds([]);
+        assignCoffeeSessionEndsAtMs(null);
+      }
       return response.conversation;
     } catch (err) {
       setCoffeeError(err instanceof Error ? err.message : "Failed to start Coffee Session.");
@@ -31162,6 +31462,7 @@ function HomeContent(): React.JSX.Element {
         ok: true;
         conversation: CoffeeConversationState;
         arrivalScenario: CoffeeArrivalScenario;
+        coffeeStarterTopics?: string[];
       }>(`/api/coffee/groups/${encodeURIComponent(group.id)}/sessions`, {
         method: "POST",
         body: JSON.stringify({
@@ -31180,9 +31481,24 @@ function HomeContent(): React.JSX.Element {
           coffeeSeatsFromBotIds(response.conversation.botGroupIds ?? group.botGroupIds)
       );
       setCoffeeAutoplayPausedValue(false);
+      const serverStarters = response.coffeeStarterTopics ?? [];
+      const seatLayout =
+        response.conversation.coffeeSeatBotIds ??
+        coffeeSeatsFromBotIds(response.conversation.botGroupIds ?? group.botGroupIds);
+      const starterList =
+        serverStarters.length >= 3 ? serverStarters : buildLocalCoffeeStarterTopicSuggestions(seatLayout);
+      const topicReady = Boolean(response.conversation.coffeeTopic?.trim());
+      setCoffeePendingArrivalScenario(response.arrivalScenario);
+      setCoffeeStarterTopics(topicReady ? [] : starterList);
       await refreshConversations();
       void refreshCoffeeGroups();
-      startCoffeeArrivalSequence(response.conversation, response.arrivalScenario);
+      if (topicReady) {
+        startCoffeeArrivalSequence(response.conversation, response.arrivalScenario);
+      } else {
+        setCoffeeSessionPhase("topic");
+        setCoffeeArrivedBotIds([]);
+        assignCoffeeSessionEndsAtMs(null);
+      }
       return response.conversation;
     } catch (err) {
       setCoffeeError(err instanceof Error ? err.message : "Failed to start Coffee Session.");
@@ -31228,6 +31544,37 @@ function HomeContent(): React.JSX.Element {
       setCoffeeError(err instanceof Error ? err.message : "Failed to save Coffee Group settings.");
     } finally {
       setCoffeeSettingsSaving(false);
+    }
+  };
+  const commitCoffeeGroupOverviewRename = async () => {
+    const group = coffeeSelectedGroup;
+    if (!group || coffeeGroupOverviewRenameBusy || coffeeSettingsSaving) return;
+    const trimmed = coffeeGroupNameDraft.trim();
+    if (trimmed.length === 0) {
+      setCoffeeGroupNameDraft(group.name);
+      return;
+    }
+    if (trimmed === group.name) return;
+    setCoffeeGroupOverviewRenameBusy(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{ ok: true; group: CoffeeGroupState }>(
+        `/api/coffee/groups/${encodeURIComponent(group.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ name: trimmed }),
+        }
+      );
+      setCoffeeGroups((current) =>
+        current.map((item) => (item.id === response.group.id ? response.group : item))
+      );
+      setCoffeeGroupNameDraft(response.group.name);
+      void refreshCoffeeGroups();
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to rename Coffee Group.");
+      setCoffeeGroupNameDraft(group.name);
+    } finally {
+      setCoffeeGroupOverviewRenameBusy(false);
     }
   };
   const saveCoffeePresetFromDraft = async () => {
@@ -31314,6 +31661,22 @@ function HomeContent(): React.JSX.Element {
     clearCoffeeLoopTimer();
     abortCoffeeRequests();
     const groupIds = coffeeConversation.botGroupIds ?? [];
+    const needsTopic =
+      !coffeeConversation.coffeeTopic?.trim() &&
+      (coffeeConversation.messages?.length ?? 0) === 0;
+    if (needsTopic) {
+      const seats =
+        coffeeConversation.coffeeSeatBotIds ??
+        coffeeSeatsFromBotIds(coffeeConversation.botGroupIds ?? []);
+      setCoffeeStarterTopics(buildLocalCoffeeStarterTopicSuggestions(seats));
+      setCoffeePendingArrivalScenario("user-first");
+      setCoffeeSessionPhase("topic");
+      setCoffeeArrivedBotIds([]);
+      assignCoffeeSessionEndsAtMs(null);
+      closeCoffeeTranscript();
+      setCoffeeAutoplayPausedValue(false);
+      return;
+    }
     const endsAt = Date.now() + coffeeSessionDurationMs(coffeeConversation);
     setCoffeeArrivedBotIds(groupIds);
     assignCoffeeSessionEndsAtMs(endsAt);
@@ -31328,6 +31691,10 @@ function HomeContent(): React.JSX.Element {
     directedSpeakerBotId?: string
   ) => {
     if (!conversationId || coffeeBusy || coffeeAutoBusy) return;
+    const convSnap = coffeeConversationRef.current;
+    if (convSnap && convSnap.id === conversationId && !convSnap.coffeeTopic?.trim()) {
+      return;
+    }
     const endsAtLive = coffeeSessionEndsAtRef.current ?? endsAtOverride ?? null;
     if (endsAtLive && Date.now() >= endsAtLive) {
       setCoffeeSessionPhase("finished");
@@ -31353,6 +31720,9 @@ function HomeContent(): React.JSX.Element {
           preferredProvider: coffeeProvider,
           userIsComposing: coffeeDraftRef.current.trim().length > 0,
           ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
+          ...(coffeeSessionModelOverride
+            ? { modelOverride: coffeeSessionModelOverride }
+            : {}),
         }),
         signal: abortController.signal,
       });
@@ -31459,6 +31829,22 @@ function HomeContent(): React.JSX.Element {
       assignCoffeeSessionEndsAtMs(activeEndsAt);
       setCoffeeSessionPhase("live");
       setCoffeeAutoplayPausedValue(false);
+    } else if (coffeeSessionPhase === "topic" && activeConversation?.id) {
+      setCoffeeBusy(true);
+      setCoffeeError(null);
+      try {
+        const ok = await persistCoffeeTopicToServer(
+          trimmed,
+          activeConversation,
+          coffeePendingArrivalScenario
+        );
+        if (ok) {
+          setCoffeeDraft("");
+        }
+      } finally {
+        setCoffeeBusy(false);
+      }
+      return;
     }
     setCoffeeBusy(true);
     setCoffeeTurnRhythmState("playerComposing");
@@ -31479,6 +31865,9 @@ function HomeContent(): React.JSX.Element {
           message: trimmed,
           preferredProvider: coffeeProvider,
           ...(playerInterruption ? { playerInterruption } : {}),
+          ...(coffeeSessionModelOverride
+            ? { modelOverride: coffeeSessionModelOverride }
+            : {}),
         }),
         signal: abortController.signal,
       });
@@ -31607,12 +31996,66 @@ function HomeContent(): React.JSX.Element {
     }
     await deleteConversation(sessionId);
   };
+  const toggleCoffeeGroupCollapsed = (groupId: string) => {
+    if (groupId === coffeeSelectedGroupId) return;
+    setCoffeeCollapsedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
   const renderCoffeeGroupRow = (group: CoffeeGroupState): React.JSX.Element => {
     const groupBots = coffeeGroupBots(group);
     const groupSessions = coffeeSessionsByGroupId.get(group.id) ?? [];
-    const selected = group.id === coffeeSelectedGroupId && !coffeeConversation;
+    const isSelectedGroup = group.id === coffeeSelectedGroupId;
+    const selected = isSelectedGroup && !coffeeConversation;
+    const collapsed = !isSelectedGroup && coffeeCollapsedGroupIds.has(group.id);
+    const sessionListId = `coffee-group-sessions-${group.id}`;
     return (
-      <li key={group.id} className={styles.coffeeGroupRow} data-current={selected ? "true" : undefined}>
+      <li
+        key={group.id}
+        className={styles.coffeeGroupRow}
+        data-current={selected ? "true" : undefined}
+        data-collapsed={collapsed ? "true" : undefined}
+      >
+        <button
+          type="button"
+          className={styles.coffeeGroupCollapseButton}
+          aria-label={`${collapsed ? "Expand" : "Collapse"} Coffee Group ${group.name} sessions`}
+          aria-expanded={!collapsed}
+          aria-controls={groupSessions.length > 0 ? sessionListId : undefined}
+          disabled={isSelectedGroup}
+          title={
+            isSelectedGroup
+              ? "Current Coffee Group stays expanded"
+              : collapsed
+                ? "Show saved sessions"
+                : "Hide saved sessions"
+          }
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleCoffeeGroupCollapsed(group.id);
+          }}
+        >
+          <span className={styles.coffeeGroupCollapseChevron} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className={styles.coffeeGroupDeleteButton}
+          aria-label={`Delete Coffee Group ${group.name}`}
+          title="Delete Coffee Group"
+          data-delete-affordance="true"
+          onClick={(event) => {
+            event.stopPropagation();
+            armDelete(coffeeGroupDeleteKey(group.id));
+          }}
+        >
+          <IconTrash />
+        </button>
         <button
           type="button"
           className={styles.coffeeGroupButton}
@@ -31634,8 +32077,8 @@ function HomeContent(): React.JSX.Element {
             {group.botGroupIds.length} bots · {groupSessions.length} sessions
           </span>
         </button>
-        {groupSessions.length > 0 ? (
-          <ul className={styles.coffeeGroupSessionList}>
+        {groupSessions.length > 0 && !collapsed ? (
+          <ul id={sessionListId} className={styles.coffeeGroupSessionList}>
             {groupSessions.slice(0, 4).map((session) => (
               <li key={session.id}>
                 <button
@@ -32302,6 +32745,11 @@ function HomeContent(): React.JSX.Element {
       : centerMessage?.role === "user"
         ? "You"
         : "PRISM";
+    const centerBotGlyph =
+      tableTypingBot?.glyph ??
+      (!userLineTyping && centerMessage?.role === "assistant"
+        ? centerMessage.botGlyph
+        : null);
     const tableTypingAssistantFullText =
       pendingLatestMessage?.role === "assistant" ? pendingLatestMessage.content : "";
     const userTypingDisplayText = coffeeUserRevealText;
@@ -32322,8 +32770,13 @@ function HomeContent(): React.JSX.Element {
           !arrivedBotIds.has(entry.botId)
         );
       });
-    const coffeeSessionJoinedDock = conversationActive && !previewingSession;
-    const compactCoffeeStage = coffeeSessionPhase === "selecting";
+    const coffeeSessionJoinedDock =
+      conversationActive && !previewingSession && coffeeSessionPhase !== "topic";
+    /** Compact table only before a session exists — once a conversation is loaded, use full-size assets. */
+    const compactCoffeeStage =
+      coffeeSessionPhase === "selecting" && coffeeConversation === null;
+    const coffeeGroupReadyToStart =
+      coffeeSessionPhase === "selecting" && coffeeConversation === null && coffeeSelectedGroup !== null;
     const coffeeGazeNameToId = new Map<string, string>(
       visibleCoffeeSeats.map(({ bot }) => [bot.name, bot.id])
     );
@@ -32336,7 +32789,8 @@ function HomeContent(): React.JSX.Element {
       <section
         className={styles.coffeeStage}
         data-phase={coffeeSessionPhase}
-        data-compact={coffeeSessionPhase === "selecting" ? "true" : undefined}
+        data-compact={compactCoffeeStage ? "true" : undefined}
+        data-group-ready={coffeeGroupReadyToStart ? "true" : undefined}
         data-preview={previewingSession ? "true" : undefined}
         data-autoplay-dock={coffeeSessionJoinedDock ? "true" : undefined}
         aria-label="Coffee table"
@@ -32351,87 +32805,136 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.coffeeTableScene}>
           <div className={styles.coffeeTableGlow} aria-hidden="true" />
           <div className={styles.coffeeTableDisk} aria-hidden="true" />
-          <div
-            className={styles.coffeeCenterMessage}
-            data-empty={!centerMessage && !tableTypingBot && !userLineTyping ? "true" : undefined}
-          >
-            <span className={styles.coffeeCenterIcon} aria-hidden="true">☕</span>
-            <strong>
-              {tableTypingBot || userLineTyping || centerMessage ? centerSpeaker : "The table is waiting"}
-            </strong>
-            <div className={styles.coffeeCenterMessageScroll}>
-              <p>
-                {tableTypingBot ? (
-                  <span className={styles.coffeeTableTypingLine}>
-                    <span className={styles.coffeeTypewriter} aria-hidden="true">
-                      {tableTypingAssistantFullText.slice(0, coffeeTypewriterLength)}
-                      {coffeeTypewriterLength < tableTypingAssistantFullText.length ? (
-                        <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
-                          │
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className={styles.srOnly}>{`${tableTypingBot.name} is speaking.`}</span>
-                  </span>
-                ) : userLineTyping ? (
-                  <span className={styles.coffeeTableTypingLine}>
-                    <span className={styles.coffeeTypewriter} aria-hidden="true">
-                      {userTypingDisplayText.slice(0, coffeeTypewriterLength)}
-                      {coffeeTypewriterLength < userTypingDisplayText.length ? (
-                        <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
-                          │
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className={styles.srOnly}>You are speaking.</span>
-                  </span>
-                ) : centerMessage
-                  ? renderPlainTextWithBotMentions(centerMessage.content, {
-                      keyPrefix: centerMessage.id,
-                      botsById: chatEnabledBotMentionMap,
-                      resolvedTheme,
-                      normalizeAccentForTheme,
-                    })
-                  : coffeeSessionPhase === "arriving"
-                    ? "Bots will arrive one at a time."
-                  : coffeeSessionPhase === "preview"
-                    ? "The bots are seated, but you have not joined the conversation yet."
-                    : coffeeSelectedGroup
-                    ? "This group is ready. Start a new session from the overview below."
-                    : "Select bots below, then create a Coffee Group."}
-              </p>
-            </div>
-            {coffeeSessionPhase === "selecting" && !coffeeSelectedGroup && (
-              <button
-                type="button"
-                className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
-                disabled={coffeeBusy || !coffeeSelectionValid}
-                onClick={() => void createCoffeeGroupFromSelection()}
+          <div className={styles.coffeeTableFocalColumn}>
+            <div className={styles.coffeeTableFocalStack}>
+              <div
+                className={styles.coffeeCenterMessage}
+                data-empty={!centerMessage && !tableTypingBot && !userLineTyping ? "true" : undefined}
+                data-start-ready={coffeeGroupReadyToStart ? "true" : undefined}
               >
-                {coffeeBusy ? "Creating group..." : "Create Coffee Group →"}
-              </button>
-            )}
-            {previewingSession && (
-              <div className={styles.coffeePreviewActions}>
-                {!coffeeConversation?.coffeeGroupId ? (
+                <span className={styles.coffeeCenterIcon} aria-hidden="true">
+                  {centerBotGlyph ? (
+                    <BotGlyph name={centerBotGlyph} size={16} strokeWidth={2} />
+                  ) : (
+                    "☕"
+                  )}
+                </span>
+                <strong>
+                  {tableTypingBot || userLineTyping || centerMessage ? centerSpeaker : "The table is waiting"}
+                </strong>
+                <div className={styles.coffeeCenterMessageScroll}>
+                  <p>
+                    {tableTypingBot ? (
+                      <span className={styles.coffeeTableTypingLine}>
+                        <span className={styles.coffeeTypewriter} aria-hidden="true">
+                          {tableTypingAssistantFullText.slice(0, coffeeTypewriterLength)}
+                          {coffeeTypewriterLength < tableTypingAssistantFullText.length ? (
+                            <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
+                              │
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className={styles.srOnly}>{`${tableTypingBot.name} is speaking.`}</span>
+                      </span>
+                    ) : userLineTyping ? (
+                      <span className={styles.coffeeTableTypingLine}>
+                        <span className={styles.coffeeTypewriter} aria-hidden="true">
+                          {userTypingDisplayText.slice(0, coffeeTypewriterLength)}
+                          {coffeeTypewriterLength < userTypingDisplayText.length ? (
+                            <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
+                              │
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className={styles.srOnly}>You are speaking.</span>
+                      </span>
+                    ) : centerMessage
+                      ? renderPlainTextWithBotMentions(centerMessage.content, {
+                          keyPrefix: centerMessage.id,
+                          botsById: chatEnabledBotMentionMap,
+                          resolvedTheme,
+                          normalizeAccentForTheme,
+                        })
+                      : coffeeSessionPhase === "arriving"
+                        ? "Bots will arrive one at a time."
+                        : coffeeSessionPhase === "topic"
+                          ? "Choose a topic to begin."
+                          : coffeeSessionPhase === "preview"
+                            ? "The bots are seated, but you have not joined the conversation yet."
+                            : coffeeSelectedGroup
+                              ? "This group is ready."
+                              : "Select bots below, then create a Coffee Group."}
+                  </p>
+                </div>
+                {coffeeSessionPhase === "selecting" && !coffeeSelectedGroup && (
                   <button
                     type="button"
-                    className={styles.coffeeJoinSessionButton}
-                    disabled={coffeeBusy}
-                    onClick={() => void createCoffeeGroupFromCurrentSession()}
+                    className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
+                    disabled={coffeeBusy || !coffeeSelectionValid}
+                    onClick={() => void createCoffeeGroupFromSelection()}
                   >
-                    {coffeeBusy ? "Saving..." : "Save as Coffee Group"}
+                    {coffeeBusy ? "Creating group..." : "Create Coffee Group →"}
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  className={styles.coffeeJoinSessionButton}
-                  onClick={joinPreviewedCoffeeSession}
-                >
-                  Join Coffee Session →
-                </button>
+                )}
+                {coffeeGroupReadyToStart && (
+                  <button
+                    type="button"
+                    className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
+                    disabled={coffeeBusy}
+                    onClick={() => void startCoffeeSessionFromGroup()}
+                  >
+                    {coffeeBusy ? "Starting..." : `Start ${coffeeSelectedDurationMinutes}m session`}
+                  </button>
+                )}
+                {previewingSession && (
+                  <div className={styles.coffeePreviewActions}>
+                    {!coffeeConversation?.coffeeGroupId ? (
+                      <button
+                        type="button"
+                        className={styles.coffeeJoinSessionButton}
+                        disabled={coffeeBusy}
+                        onClick={() => void createCoffeeGroupFromCurrentSession()}
+                      >
+                        {coffeeBusy ? "Saving..." : "Save as Coffee Group"}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className={styles.coffeeJoinSessionButton}
+                      onClick={joinPreviewedCoffeeSession}
+                    >
+                      Join Coffee Session →
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
+              {coffeeSessionPhase === "topic" && coffeeConversation ? (
+                <div className={styles.coffeeTopicPickerWrap} aria-label="Pick a Coffee table topic">
+                  <p className={styles.coffeeTopicPickerHint}>
+                    Tap a suggestion, or type your own below.
+                  </p>
+                  <div className={styles.coffeeTopicChipRow}>
+                    {coffeeStarterTopics.map((topic) => (
+                      <button
+                        key={topic}
+                        type="button"
+                        className={styles.coffeeTopicChip}
+                        disabled={coffeeBusy}
+                        onClick={() =>
+                          void persistCoffeeTopicToServer(
+                            topic,
+                            coffeeConversation,
+                            coffeePendingArrivalScenario
+                          )
+                        }
+                      >
+                        {topic}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
           {visibleCoffeeSeats.map(({ seatIndex, bot }, layoutIndex) => {
             const interruptedSeatSnippet =
@@ -32642,6 +33145,29 @@ function HomeContent(): React.JSX.Element {
       </section>
     );
   };
+  const handleCoffeeGroupAutoTopicToggle = async (group: CoffeeGroupState) => {
+    if (coffeeAutoTopicToggleBusy || coffeeBusy) return;
+    const nextMode: CoffeeTopicSelectionMode = group.topicSelectionMode === "auto" ? "manual" : "auto";
+    setCoffeeAutoTopicToggleBusy(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{ ok: true; group: CoffeeGroupState }>(
+        `/api/coffee/groups/${encodeURIComponent(group.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ topicSelectionMode: nextMode }),
+        }
+      );
+      setCoffeeGroups((current) =>
+        current.map((item) => (item.id === response.group.id ? response.group : item))
+      );
+      void refreshCoffeeGroups();
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to update auto topic mode.");
+    } finally {
+      setCoffeeAutoTopicToggleBusy(false);
+    }
+  };
   const renderCoffeeGroupOverview = (): React.JSX.Element | null => {
     const group = coffeeSelectedGroup;
     if (!group || coffeeConversation) return null;
@@ -32654,7 +33180,28 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.coffeeGroupOverviewHeader}>
           <div>
             <p className={styles.coffeeEyebrow}>Coffee Group</p>
-            <h2>{group.name}</h2>
+            <input
+              type="text"
+              className={styles.coffeeGroupOverviewNameInput}
+              value={coffeeGroupNameDraft}
+              onChange={(event) => setCoffeeGroupNameDraft(event.target.value)}
+              onBlur={() => void commitCoffeeGroupOverviewRename()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  (event.currentTarget as HTMLInputElement).blur();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setCoffeeGroupNameDraft(group.name);
+                  (event.currentTarget as HTMLInputElement).blur();
+                }
+              }}
+              disabled={coffeeBusy || coffeeGroupOverviewRenameBusy}
+              aria-label="Coffee Group name"
+              autoComplete="off"
+              spellCheck={false}
+            />
             <p>
               {groupBots.length} seated bots · {groupSessions.length} saved sessions
             </p>
@@ -32687,14 +33234,20 @@ function HomeContent(): React.JSX.Element {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              className={styles.coffeeSend}
-              disabled={coffeeBusy}
-              onClick={() => void startCoffeeSessionFromGroup(group)}
-            >
-              {coffeeBusy ? "Starting..." : `Start ${coffeeSelectedDurationMinutes}m session`}
-            </button>
+            <label className={styles.coffeeAutoTopicToggle}>
+              <input
+                type="checkbox"
+                checked={group.topicSelectionMode === "auto"}
+                disabled={coffeeBusy || coffeeAutoTopicToggleBusy}
+                onChange={() => void handleCoffeeGroupAutoTopicToggle(group)}
+              />
+              <span>
+                Auto-pick table topic{" "}
+                <small className={styles.coffeeAutoTopicToggleHint}>
+                  (recommended for hands-free starts)
+                </small>
+              </span>
+            </label>
           </div>
         </div>
         <div className={styles.coffeeGroupOverviewGrid}>
@@ -32800,15 +33353,20 @@ function HomeContent(): React.JSX.Element {
       coffeeSessionPhase === "selecting" && coffeeSelectedGroup
         ? "Coffee Group overview. Start a new session, review the table, or configure it later."
         : coffeeSessionPhase === "selecting"
-        ? "Choose 2-5 bots to invite to the PRISM coffee table."
-        : coffeeSessionPhase === "preview"
-          ? "Previewing this table. Join when you are ready."
-          : coffeeSessionPhase === "arriving"
-            ? "PRISM is preparing the table."
-            : coffeeSessionPhase === "finished"
-              ? "The cups are empty. This Coffee Session has settled."
-              : "Listen in, join gently, or let the bots talk.";
-    const coffeeComposerEnabled = conversationActive || (!coffeeSelectedGroup && coffeeSelectionValid);
+          ? "Choose 2-5 bots to invite to the PRISM coffee table."
+          : coffeeSessionPhase === "preview"
+            ? "Previewing this table. Join when you are ready."
+            : coffeeSessionPhase === "topic"
+              ? "Pick a shared topic — the session timer starts after you choose."
+              : coffeeSessionPhase === "arriving"
+                ? "PRISM is preparing the table."
+                : coffeeSessionPhase === "finished"
+                  ? "The cups are empty. This Coffee Session has settled."
+                  : "Listen in, join gently, or let the bots talk.";
+    const coffeeComposerEnabled =
+      conversationActive ||
+      (!coffeeSelectedGroup && coffeeSelectionValid) ||
+      coffeeSessionPhase === "topic";
     const coffeeComposerVisible =
       (coffeeSessionPhase === "selecting" && !coffeeSelectedGroup) || coffeeComposerEnabled;
     const coffeeComposerPlaceholder =
@@ -32816,11 +33374,21 @@ function HomeContent(): React.JSX.Element {
         ? "This Coffee Session has ended."
         : coffeeSessionPhase === "preview"
           ? "Send a message to join this table..."
-          : conversationActive
-            ? "Join the table..."
-            : coffeeSelectionValid
-              ? "Send the first message to start..."
-              : `Select at least ${COFFEE_GROUP_MIN_SIZE_CLIENT} bots to start...`;
+          : coffeeSessionPhase === "topic"
+            ? "Pick a chip above, or type a topic and send…"
+            : conversationActive
+              ? "Join the table..."
+              : coffeeSelectionValid
+                ? "Send the first message to start..."
+                : `Select at least ${COFFEE_GROUP_MIN_SIZE_CLIENT} bots to start...`;
+    const coffeeHeaderTopic =
+      coffeeConversation?.coffeeTopic &&
+      coffeeSessionPhase !== "topic" &&
+      coffeeSessionPhase !== "selecting" &&
+      coffeeSessionPhase !== "preview"
+        ? coffeeConversation.coffeeTopic
+        : null;
+    const coffeeHeaderTitle = coffeeHeaderTopic ?? coffeeStageTitle;
     const interruptionCueBotId =
       coffeeLiveInterruptionCue?.interrupterBotId ?? coffeeLiveInterruptionCue?.interruptedBotId;
     const interruptionCueBotName =
@@ -32902,11 +33470,11 @@ function HomeContent(): React.JSX.Element {
                 className={styles.coffeeDeleteAllSessionsButton}
                 onClick={() => armDelete(DELETE_ALL_COFFEE_SESSIONS_KEY)}
                 disabled={coffeeSessions.length === 0}
-                aria-label="Delete all Coffee Sessions"
+                aria-label="Delete all Coffee Session transcripts"
                 title={
                   coffeeSessions.length === 0
                     ? "No Coffee Sessions to delete"
-                    : "Delete all Coffee Sessions"
+                    : "Delete every Coffee Session transcript (Coffee Groups stay)"
                 }
                 data-delete-affordance="true"
               >
@@ -32950,7 +33518,7 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.coffeeTitleBlock}>
               <div>
                 <p className={styles.coffeeEyebrow}>Coffee Mode</p>
-                <h1 className={styles.coffeeTitle}>{coffeeStageTitle}</h1>
+                <h1 className={styles.coffeeTitle}>{coffeeHeaderTitle}</h1>
                 <p>{coffeeStageSubtitle}</p>
               </div>
             </div>
@@ -32962,7 +33530,10 @@ function HomeContent(): React.JSX.Element {
               aria-disabled={coffeeToolbarDisabled}
             >
               {renderMemoryToasts()}
-              {renderCoffeeProviderModeToggle()}
+              <div className={styles.chatHeaderModelPicker}>
+                {renderCoffeeProviderModeToggle()}
+                {renderCoffeeHeaderModelPicker()}
+              </div>
               {coffeeSessionJoined ? (
                 <button
                   type="button"
