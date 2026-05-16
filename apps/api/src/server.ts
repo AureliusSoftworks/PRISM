@@ -140,8 +140,60 @@ const LOCAL_OWNER_EMAIL = "prism-owner@local.prism";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
 const memoryInferenceCheckedAtByScope = new Map<string, string>();
 const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
+const IMAGE_GENERATION_ALLOWED_SIZES = new Set(["1024x1536", "1024x1024", "1536x1024"]);
+const IMAGE_GENERATION_DEFAULT_SIZE = "1024x1024";
+const IMAGE_GENERATION_VARIANT_TAGS = {
+  portrait: [
+    "selfie",
+    "portrait",
+    "headshot",
+    "close-up",
+    "closeup",
+    "vertical",
+    "9:16",
+    "phone wallpaper",
+    "profile photo",
+  ],
+  letterbox: ["square", "1:1", "avatar", "icon", "logo", "sticker", "profile pic"],
+  landscape: [
+    "landscape",
+    "widescreen",
+    "wide-screen",
+    "panorama",
+    "panoramic",
+    "cinematic",
+    "16:9",
+    "21:9",
+    "banner",
+  ],
+} as const;
 const COMPOSER_CLEANUP_SYSTEM_PROMPT =
   "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
+
+function scorePromptTags(promptLower: string, tags: readonly string[]): number {
+  let score = 0;
+  for (const tag of tags) {
+    if (promptLower.includes(tag)) score += 1;
+  }
+  return score;
+}
+
+function inferImageGenerationSizeFromPrompt(prompt: string): string {
+  const promptLower = prompt.toLowerCase();
+  const portraitScore = scorePromptTags(promptLower, IMAGE_GENERATION_VARIANT_TAGS.portrait);
+  const letterboxScore = scorePromptTags(promptLower, IMAGE_GENERATION_VARIANT_TAGS.letterbox);
+  const landscapeScore = scorePromptTags(promptLower, IMAGE_GENERATION_VARIANT_TAGS.landscape);
+  if (portraitScore === 0 && letterboxScore === 0 && landscapeScore === 0) {
+    return IMAGE_GENERATION_DEFAULT_SIZE;
+  }
+  if (portraitScore >= landscapeScore && portraitScore >= letterboxScore) {
+    return "1024x1536";
+  }
+  if (landscapeScore >= portraitScore && landscapeScore >= letterboxScore) {
+    return "1536x1024";
+  }
+  return IMAGE_GENERATION_DEFAULT_SIZE;
+}
 
 interface UserDbRow {
   id: string;
@@ -1633,6 +1685,9 @@ function buildRoutes(): RouteDefinition[] {
         name: body.name,
         groupBotIds,
         coffeeSettings: body.coffeeSettings,
+        ...(body.modelChoiceByProvider !== undefined
+          ? { modelChoiceByProvider: body.modelChoiceByProvider }
+          : {}),
       });
       json(ctx.res, 201, {
         ok: true,
@@ -1651,6 +1706,9 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.coffeeSettings !== undefined ? { coffeeSettings: body.coffeeSettings } : {}),
         ...(body.presetMode !== undefined ? { presetMode: body.presetMode } : {}),
         ...(body.topicSelectionMode !== undefined ? { topicSelectionMode: body.topicSelectionMode } : {}),
+        ...(body.modelChoiceByProvider !== undefined
+          ? { modelChoiceByProvider: body.modelChoiceByProvider }
+          : {}),
       });
       json(ctx.res, 200, {
         ok: true,
@@ -1743,6 +1801,11 @@ function buildRoutes(): RouteDefinition[] {
           ? body.directedSpeakerBotId
           : undefined;
       const userIsComposing = body.userIsComposing === true;
+      const sessionRemainingMs =
+        typeof body.sessionRemainingMs === "number" &&
+        Number.isFinite(body.sessionRemainingMs)
+          ? Math.max(0, body.sessionRemainingMs)
+          : null;
       const sessionSpeakerModel = readOptionalString(body.modelOverride);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -1760,6 +1823,7 @@ function buildRoutes(): RouteDefinition[] {
           userDisplayName: user.display_name,
           userKey,
           prismDefaultLlmModel: user.prism_default_llm_model,
+          sessionRemainingMs,
           ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
         },
         userIsComposing,
@@ -1796,6 +1860,15 @@ function buildRoutes(): RouteDefinition[] {
                   : 1,
             }
           : undefined;
+      const directedSpeakerBotId =
+        typeof body.directedSpeakerBotId === "string"
+          ? body.directedSpeakerBotId
+          : undefined;
+      const sessionRemainingMs =
+        typeof body.sessionRemainingMs === "number" &&
+        Number.isFinite(body.sessionRemainingMs)
+          ? Math.max(0, body.sessionRemainingMs)
+          : null;
       // Per-request provider override matches Sandbox's /api/chat semantics:
       // the client toggle wins over the user's saved preferred_provider for
       // this single turn. Anything else (including absent or malformed)
@@ -1818,6 +1891,7 @@ function buildRoutes(): RouteDefinition[] {
           groupBotIds,
           message,
           playerInterruption,
+          directedSpeakerBotId,
         },
         {
           preferredProvider: effectiveProvider,
@@ -1826,6 +1900,7 @@ function buildRoutes(): RouteDefinition[] {
           userDisplayName: user.display_name,
           userKey,
           prismDefaultLlmModel: user.prism_default_llm_model,
+          sessionRemainingMs,
           ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
         }
       );
@@ -2497,7 +2572,11 @@ function buildRoutes(): RouteDefinition[] {
       try {
       const body = ctx.body as Record<string, unknown>;
       const prompt = readString(body.prompt, "prompt");
-      const size = (body.size as string) ?? "1024x1024";
+      const requestedSize =
+        typeof body.size === "string" ? body.size.trim() : IMAGE_GENERATION_DEFAULT_SIZE;
+      const size = IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
+        ? requestedSize
+        : inferImageGenerationSizeFromPrompt(prompt);
       const quality = (body.quality as string) ?? "standard";
       const bodyModel =
         typeof body.model === "string" && body.model.trim().length > 0

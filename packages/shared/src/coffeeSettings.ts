@@ -38,10 +38,10 @@ export const DEFAULT_COFFEE_SESSION_SETTINGS: CoffeeSessionSettings = {
 };
 
 /** Absolute ceiling for tabletop reply length (layout + latency guardrail). */
-export const COFFEE_TABLE_REPLY_MAX_CHARS_HARD = 120;
+export const COFFEE_TABLE_REPLY_MAX_CHARS_HARD = 240;
 
 /** Absolute ceiling for speaker decode tokens. */
-export const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD = 80;
+export const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD = 160;
 
 /** Max messages loaded from DB / forwarded window (plan: cap at 32). */
 export const COFFEE_HISTORY_WINDOW_HARD_CAP = 32;
@@ -138,21 +138,21 @@ export function coffeeReplyLengthCaps(settings: CoffeeSessionSettings): {
   let speakerMaxOutputTokens: number;
   switch (preset) {
     case "brief":
-      tableReplyMaxChars = 28;
-      speakerMaxOutputTokens = 16;
+      tableReplyMaxChars = 60;
+      speakerMaxOutputTokens = 32;
       break;
     case "detailed":
-      tableReplyMaxChars = 72;
-      speakerMaxOutputTokens = 40;
+      tableReplyMaxChars = 160;
+      speakerMaxOutputTokens = 96;
       break;
     case "roomy":
-      tableReplyMaxChars = 96;
-      speakerMaxOutputTokens = 60;
+      tableReplyMaxChars = 220;
+      speakerMaxOutputTokens = 140;
       break;
     case "balanced":
     default:
-      tableReplyMaxChars = 48;
-      speakerMaxOutputTokens = 24;
+      tableReplyMaxChars = 110;
+      speakerMaxOutputTokens = 64;
       break;
   }
   return {

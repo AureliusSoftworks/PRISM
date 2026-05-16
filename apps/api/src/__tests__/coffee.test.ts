@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   COFFEE_GROUP_MAX_SIZE,
   COFFEE_GROUP_MIN_SIZE,
+  autoTagPeerMentionsInCoffeeReply,
   buildCoffeeTableTuningAppendix,
   buildRouterPrompt,
   buildSpeakerPrompt,
@@ -11,6 +12,7 @@ import {
   clampCoffeeTableReplyText,
   coffeeReplyLooksLikePromptLeak,
   coffeeReplyRepeatsRecentAssistant,
+  coffeeReplyRepeatsRecentMotifs,
   computePlayerInterruptionConsequences,
   computeNextCoffeeSocialState,
   createCoffeeGroup,
@@ -32,6 +34,7 @@ import {
   parseRouterResponse,
   pickDirectedSpeaker,
   pickFallbackSpeaker,
+  repairBotMentionBrackets,
   sanitizeCoffeeTableReply,
   stripCoffeeSpeakerPrefix,
   updateCoffeeGroup,
@@ -227,6 +230,7 @@ function createCoffeeTestDb(): DatabaseSync {
       coffee_settings TEXT NOT NULL,
       preset_mode TEXT NOT NULL DEFAULT 'manual',
       coffee_topic_mode TEXT NOT NULL DEFAULT 'manual',
+      model_choice TEXT NOT NULL DEFAULT '{}',
       mood_summary TEXT NOT NULL DEFAULT '{}',
       archived_at TEXT,
       created_at TEXT NOT NULL,
@@ -402,6 +406,66 @@ describe("Coffee group foundation", () => {
     assert.deepEqual(events.map((row) => row.event_type), ["created"]);
   });
 
+  it("persists per-group model picker memory across reads and updates", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      modelChoiceByProvider: { local: "llama3.2", openai: "gpt-5.1" },
+    });
+    assert.deepEqual(group.modelChoiceByProvider, {
+      local: "llama3.2",
+      openai: "gpt-5.1",
+    });
+
+    // Clearing one provider with empty string drops just that key.
+    const cleared = updateCoffeeGroup(db, userId, group.id, {
+      modelChoiceByProvider: { openai: "" },
+    });
+    assert.deepEqual(cleared.modelChoiceByProvider, { local: "llama3.2" });
+
+    // "auto" is also treated as cleared.
+    const all = updateCoffeeGroup(db, userId, group.id, {
+      modelChoiceByProvider: { local: "auto" },
+    });
+    assert.deepEqual(all.modelChoiceByProvider, {});
+
+    // Set a fresh online value without touching local.
+    const next = updateCoffeeGroup(db, userId, group.id, {
+      modelChoiceByProvider: { openai: "gpt-5.4-medium" },
+    });
+    assert.deepEqual(next.modelChoiceByProvider, { openai: "gpt-5.4-medium" });
+  });
+
+  it("isolates model picker memory between two groups for the same user", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const group1 = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      modelChoiceByProvider: { local: "llama3.2" },
+    });
+    const group2 = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      modelChoiceByProvider: { local: "qwen3" },
+    });
+
+    assert.deepEqual(group1.modelChoiceByProvider, { local: "llama3.2" });
+    assert.deepEqual(group2.modelChoiceByProvider, { local: "qwen3" });
+
+    updateCoffeeGroup(db, userId, group2.id, {
+      modelChoiceByProvider: { local: "phi4-mini" },
+    });
+
+    const reread1 = updateCoffeeGroup(db, userId, group1.id, { name: group1.name });
+    assert.deepEqual(reread1.modelChoiceByProvider, { local: "llama3.2" });
+  });
+
   it("persists auto topic selection on the conversation when the group requests it", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -476,7 +540,7 @@ describe("Coffee group foundation", () => {
     );
   });
 
-  it("deletes a Coffee group and unlinks sessions without removing conversations", async () => {
+  it("deletes a Coffee group and permanently removes its sessions", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
@@ -492,10 +556,8 @@ describe("Coffee group foundation", () => {
 
     deleteCoffeeGroup(db, userId, group.id);
 
-    const convRow = db
-      .prepare("SELECT coffee_group_id FROM conversations WHERE id = ?")
-      .get(convId) as { coffee_group_id: string | null };
-    assert.equal(convRow.coffee_group_id, null);
+    const convRow = db.prepare("SELECT id FROM conversations WHERE id = ?").get(convId);
+    assert.equal(convRow, undefined);
 
     const groupStill = db.prepare("SELECT id FROM coffee_groups WHERE id = ?").get(group.id);
     assert.equal(groupStill, undefined);
@@ -727,10 +789,34 @@ describe("buildRouterPrompt", () => {
     assert.match(messages[0]!.content, /Bot-to-bot banter is welcome/i);
     assert.match(messages[0]!.content, /riffing is welcome/i);
   });
+
+  it("adds natural wrap-up speaker-selection guidance near the session end", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "The table has been lively.",
+      lastSpeakerBotId: BORIS.id,
+      sessionRemainingMs: 19_500,
+    });
+    assert.match(messages[0]!.content, /Session wrap-up window/);
+    assert.match(messages[0]!.content, /closing thought/);
+    assert.match(messages[0]!.content, /starting a fresh tangent/);
+  });
+
+  it("omits wrap-up speaker-selection guidance outside the final window", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "The table has been lively.",
+      lastSpeakerBotId: BORIS.id,
+      sessionRemainingMs: 21_000,
+    });
+    assert.doesNotMatch(messages[0]!.content, /Session wrap-up window/);
+  });
 });
 
 describe("buildSpeakerPrompt", () => {
-  it("includes one-clause and 48-char tabletop guidance", () => {
+  it("includes one-clause and balanced-cap tabletop guidance", () => {
     const messages = buildSpeakerPrompt({
       speaker: ALICE,
       group: [ALICE, BORIS, CARA],
@@ -746,7 +832,7 @@ describe("buildSpeakerPrompt", () => {
       (message) =>
         message.role === "system" &&
         message.content.includes("Coffee Mode") &&
-        message.content.includes("48 characters")
+        message.content.includes("110 characters")
     );
     assert.ok(systemInstruction);
     assert.match(systemInstruction!.content, /no line breaks/);
@@ -755,15 +841,20 @@ describe("buildSpeakerPrompt", () => {
     assert.match(systemInstruction!.content, /Do not end with a question by default/);
     assert.match(systemInstruction!.content, /cutting off another bot mid-sentence/);
     assert.match(systemInstruction!.content, /still warming up/);
-    assert.match(systemInstruction!.content, /Hard tabletop cap/);
+    // Cap is now a soft target — the server no longer truncates, so the
+    // prompt language reflects "aim for X chars" instead of "Hard cap".
+    assert.match(systemInstruction!.content, /soft target around 110 characters/);
+    assert.match(systemInstruction!.content, /server no longer truncates/);
     assert.match(systemInstruction!.content, /Never repeat a recent table line exactly/);
-    assert.match(systemInstruction!.content, /excitedly/);
+    // Stage-direction format moved from a blanket prohibition to a canonical
+    // single-asterisk rule so the renderer can lift `*…*` blocks above the speaker's seat.
+    assert.match(systemInstruction!.content, /single asterisks/);
     assert.doesNotMatch(systemInstruction!.content, /Yeah, I get that/);
     assert.doesNotMatch(systemInstruction!.content, /Wild shift/);
 
     const userTurnInstruction = messages.at(-1);
     assert.equal(userTurnInstruction?.role, "user");
-    assert.doesNotMatch(userTurnInstruction!.content, /48 characters/);
+    assert.doesNotMatch(userTurnInstruction!.content, /110 characters/);
     assert.doesNotMatch(userTurnInstruction!.content, /Do not end with a question unless/);
     assert.match(userTurnInstruction!.content, /Alice, answer with your next short table line now/);
   });
@@ -800,13 +891,97 @@ describe("buildSpeakerPrompt", () => {
       sessionSettings: normalizeCoffeeSessionSettings({ responseLength: "roomy" }),
     });
     const combined = messages.map((m) => m.content).join("\n");
-    assert.match(combined, /96 characters/);
+    assert.match(combined, /220 characters/);
     assert.doesNotMatch(combined, /48 characters/);
+  });
+
+  it("asks the speaker to organically wind down during the final 20 seconds", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "The table has been lively.",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+      sessionRemainingMs: 20_000,
+    });
+    const combined = messages.map((m) => m.content).join("\n");
+    assert.match(combined, /final moments/);
+    assert.match(combined, /wind down organically/);
+    assert.match(combined, /soft farewell/);
+    assert.match(combined, /Do not start a new topic/);
+  });
+
+  it("does not ask the speaker to wind down before the final 20 seconds", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "The table has been lively.",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+      sessionRemainingMs: 20_001,
+    });
+    const combined = messages.map((m) => m.content).join("\n");
+    assert.doesNotMatch(combined, /final moments/);
+    assert.doesNotMatch(combined, /wind down organically/);
+  });
+
+  it("teaches the speaker to chip-format direct address with peer-only roster markdown", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "What do you think?",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+    });
+    const combined = messages.map((m) => m.content).join("\n");
+    assert.match(combined, /Direct-address chip format \(use sparingly\)/);
+    assert.match(combined, /\[Boris\]\(prism-bot:\/\/bot-boris\)/);
+    assert.match(combined, /\[Cara\]\(prism-bot:\/\/bot-cara\)/);
+    assert.doesNotMatch(combined, /\[Alice\]\(prism-bot:\/\/bot-alice\)/);
+    assert.match(combined, /Most of your lines should NOT call anyone out by name/);
+    assert.match(combined, /Third-person references/);
+    assert.match(combined, /Never invent a botId/);
+    assert.match(combined, /orphan brackets show up as a visible glitch/);
+  });
+
+  it("teaches the speaker to use single-asterisk format for stage directions", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "What do you think?",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+    });
+    const combined = messages.map((m) => m.content).join("\n");
+    assert.match(combined, /Stage-direction format/);
+    assert.match(combined, /single asterisks/);
+    assert.match(combined, /\*pours coffee\*/);
+    assert.match(combined, /Coffee Mode is not Markdown-formatted chat/);
+    assert.match(combined, /not `the \*thought\* that counts`/);
+    assert.match(combined, /Do not put ordinary sentence words inside asterisks/);
+    // The old anti-asterisk line must be gone now that we're enabling stage directions.
+    assert.doesNotMatch(combined, /No asterisk stage directions/);
   });
 });
 
 describe("clampCoffeeTableReplyText", () => {
-  it("returns short text untouched", () => {
+  it("returns short text untouched after whitespace trim", () => {
     assert.equal(clampCoffeeTableReplyText("  Hello there. "), "Hello there.");
   });
 
@@ -814,26 +989,83 @@ describe("clampCoffeeTableReplyText", () => {
     assert.equal(clampCoffeeTableReplyText("A\n\nB\tC"), "A B C");
   });
 
-  it("truncates oversized replies", () => {
-    const filler = `${"word ".repeat(120)}`;
+  it("does NOT truncate replies that exceed the soft target — server scrolls instead", () => {
+    // Hard truncation was removed (player feedback: scroll > clipped sentence
+    // ending in `…`). The cap is now a prompt-side soft target only.
+    const filler = `${"word ".repeat(120)}`.trim();
     const out = clampCoffeeTableReplyText(filler, 48);
-    assert.ok(out.endsWith("…") || out.length <= 48);
-    assert.ok(out.length < filler.length);
+    assert.equal(out, filler);
+    assert.ok(!out.endsWith("…"));
   });
 
-  it("respects a custom max character budget", () => {
-    const long = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
-    const out = clampCoffeeTableReplyText(long, 28);
-    assert.ok(out.length <= 28);
+  it("preserves a full chip-mention reply verbatim regardless of length", () => {
+    const reply =
+      "[SpongeBob](prism-bot://spongebob-id) thinks he's so clever with his Karen paranoia, but what a buffoon.";
+    const out = clampCoffeeTableReplyText(reply);
+    assert.equal(out, reply);
+    assert.ok(!out.endsWith("…"), out);
   });
 
-  it("prefers cutting at sentence punctuation when possible", () => {
-    const base = `${"short ".repeat(2)}`; // keep \"First fitting end.\" inside the 48-char window
-    const tail = `${"reallylongtoken".repeat(12)}`;
-    const long = `${base}First fitting end. ${tail}`;
-    const out = clampCoffeeTableReplyText(long);
-    assert.ok(out.includes("First fitting end."), out);
-    assert.ok(out.length <= 48);
+  it("never drops a chip mention regardless of how short the legacy maxChars is", () => {
+    // Even with a tiny `maxChars` arg, the function ignores it now.
+    const reply = "abcdefghij [Plankton](prism-bot://plankton-id) more.";
+    const out = clampCoffeeTableReplyText(reply, 16);
+    assert.equal(out, reply);
+    assert.ok(out.includes("[Plankton]"), out);
+  });
+});
+
+describe("repairBotMentionBrackets", () => {
+  const peers = [
+    { id: "bot-spongebob", name: "SpongeBob" },
+    { id: "bot-mr-krabs", name: "Mr. Krabs" },
+    { id: "bot-patrick-star", name: "Patrick Star" },
+  ];
+
+  it("repairs an orphan [Name] bracket into a plain canonical peer name", () => {
+    const out = repairBotMentionBrackets("[Mr. Krabs] sounds like he's got a nutty idea brewing!", peers);
+    assert.equal(out, "Mr. Krabs sounds like he's got a nutty idea brewing!");
+  });
+
+  it("matches case-insensitively against the peer roster", () => {
+    const out = repairBotMentionBrackets("[spongebob] thinks otherwise.", peers);
+    assert.equal(out, "SpongeBob thinks otherwise.");
+  });
+
+  it("folds possessive suffixes into the repaired plain name", () => {
+    const out = repairBotMentionBrackets("[SpongeBob]'s remark only confirms it.", peers);
+    assert.equal(out, "SpongeBob's remark only confirms it.");
+  });
+
+  it("leaves a properly-formatted markdown link untouched", () => {
+    const reply = "Hi [Mr. Krabs](prism-bot://bot-mr-krabs), how are you?";
+    assert.equal(repairBotMentionBrackets(reply, peers), reply);
+  });
+
+  it("leaves markdown links with whitespace before the href untouched", () => {
+    const reply = "Hi [Mr. Krabs] (prism-bot://bot-mr-krabs), how are you?";
+    assert.equal(repairBotMentionBrackets(reply, peers), reply);
+  });
+
+  it("leaves brackets that don't match any peer name alone (could be persona prose)", () => {
+    const reply = "I have [a feeling] about this.";
+    assert.equal(repairBotMentionBrackets(reply, peers), reply);
+  });
+
+  it("does nothing when the peer roster is empty", () => {
+    const reply = "[Mr. Krabs] is here.";
+    assert.equal(repairBotMentionBrackets(reply, []), reply);
+  });
+
+  it("repairs multiple orphan brackets in the same reply", () => {
+    const out = repairBotMentionBrackets(
+      "[SpongeBob] giggled and [Patrick Star] yawned.",
+      peers
+    );
+    assert.equal(
+      out,
+      "SpongeBob giggled and Patrick Star yawned."
+    );
   });
 });
 
@@ -862,6 +1094,71 @@ describe("coffee repeated reply cleanup", () => {
           createdAt: new Date().toISOString(),
         },
       ]),
+      false
+    );
+  });
+
+  it("detects repeated conversation motifs even when the exact line changes", () => {
+    const history = [
+      {
+        id: "m1",
+        role: "assistant",
+        content: "What if the bottom of the sea is just a place for bubbles to float up?",
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "m2",
+        role: "assistant",
+        content: "Bubbles don't drown, SpongeBob—they rise, and that's precisely what the sea hates.",
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "m3",
+        role: "assistant",
+        content: "Aye, and that's why I keep my coins in airtight jars—no room for bubbles or nonsense!",
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "m4",
+        role: "assistant",
+        content: "Airtight jars? I keep my snacks in a rock—no room for bubbles or snacking!",
+        createdAt: new Date().toISOString(),
+      },
+    ] as const;
+
+    assert.equal(
+      coffeeReplyRepeatsRecentMotifs(
+        "Aye, and that's why I keep my coins in airtight jars—no room for bubbles or nonsense!",
+        history
+      ),
+      true
+    );
+  });
+
+  it("allows a concrete pivot away from the repeated motif cluster", () => {
+    const history = [
+      {
+        id: "m1",
+        role: "assistant",
+        content: "What if the bottom of the sea is just a place for bubbles to float up?",
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "m2",
+        role: "assistant",
+        content: "Bubbles don't drown, SpongeBob—they rise, and that's precisely what the sea hates.",
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "m3",
+        role: "assistant",
+        content: "Aye, and that's why I keep my coins in airtight jars—no room for bubbles or nonsense!",
+        createdAt: new Date().toISOString(),
+      },
+    ] as const;
+
+    assert.equal(
+      coffeeReplyRepeatsRecentMotifs("The register bell just blinked twice.", history),
       false
     );
   });
@@ -1277,9 +1574,9 @@ describe("normalizeCoffeeSessionSettings", () => {
 describe("coffeeReplyLengthCaps", () => {
   it("maps presets to bounded caps", () => {
     const brief = coffeeReplyLengthCaps(normalizeCoffeeSessionSettings({ responseLength: "brief" }));
-    assert.deepEqual(brief, { tableReplyMaxChars: 28, speakerMaxOutputTokens: 16 });
+    assert.deepEqual(brief, { tableReplyMaxChars: 60, speakerMaxOutputTokens: 32 });
     const roomy = coffeeReplyLengthCaps(normalizeCoffeeSessionSettings({ responseLength: "roomy" }));
-    assert.deepEqual(roomy, { tableReplyMaxChars: 96, speakerMaxOutputTokens: 60 });
+    assert.deepEqual(roomy, { tableReplyMaxChars: 220, speakerMaxOutputTokens: 140 });
   });
 });
 
@@ -1306,5 +1603,61 @@ describe("buildCoffeeTableTuningAppendix", () => {
     );
     assert.match(chatty, /riffing is welcome/i);
     assert.match(chatty, /Discourage hard topic jumps/i);
+  });
+});
+
+describe("autoTagPeerMentionsInCoffeeReply", () => {
+  it("leaves a bare peer name as prose for client-side soft coloring", () => {
+    const out = autoTagPeerMentionsInCoffeeReply(
+      "I think Boris is overreacting.",
+      ALICE,
+      [ALICE, BORIS, CARA]
+    );
+    assert.equal(out, "I think Boris is overreacting.");
+  });
+
+  it("upgrades an @-prefixed peer name", () => {
+    const out = autoTagPeerMentionsInCoffeeReply(
+      "@Cara, what do you think?",
+      ALICE,
+      [ALICE, BORIS, CARA]
+    );
+    assert.equal(out, "[Cara](prism-bot://bot-cara), what do you think?");
+  });
+
+  it("never tags the speaker themselves", () => {
+    const out = autoTagPeerMentionsInCoffeeReply(
+      "Alice here. @Boris, your move.",
+      ALICE,
+      [ALICE, BORIS, CARA]
+    );
+    assert.match(out, /^Alice here\./);
+    assert.match(out, /\[Boris\]\(prism-bot:\/\/bot-boris\)/);
+  });
+
+  it("leaves text inside an existing prism-bot link untouched", () => {
+    const original = "[Boris](prism-bot://bot-boris) said it best — Boris is right.";
+    const out = autoTagPeerMentionsInCoffeeReply(original, ALICE, [ALICE, BORIS, CARA]);
+    // The existing link stays a link; the second bare "Boris" stays prose for
+    // client-side soft coloring.
+    assert.equal(out, original);
+  });
+
+  it("does not split a peer name that is part of a longer word", () => {
+    const out = autoTagPeerMentionsInCoffeeReply(
+      "Borisland is not a place.",
+      ALICE,
+      [ALICE, BORIS, CARA]
+    );
+    assert.equal(out, "Borisland is not a place.");
+  });
+
+  it("returns the input unchanged when no peers match", () => {
+    const out = autoTagPeerMentionsInCoffeeReply(
+      "Just talking to myself here.",
+      ALICE,
+      [ALICE, BORIS, CARA]
+    );
+    assert.equal(out, "Just talking to myself here.");
   });
 });

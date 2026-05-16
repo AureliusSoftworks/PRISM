@@ -307,6 +307,7 @@ export function createDatabase(): DatabaseSync {
       coffee_settings TEXT NOT NULL,
       preset_mode TEXT NOT NULL DEFAULT 'manual',
       coffee_topic_mode TEXT NOT NULL DEFAULT 'manual',
+      model_choice TEXT NOT NULL DEFAULT '{}',
       mood_summary TEXT NOT NULL DEFAULT '{}',
       archived_at TEXT,
       created_at TEXT NOT NULL,
@@ -545,6 +546,14 @@ export function createDatabase(): DatabaseSync {
   if (!hasCoffeeGroupTopicModeColumn) {
     db.exec(
       "ALTER TABLE coffee_groups ADD COLUMN coffee_topic_mode TEXT NOT NULL DEFAULT 'manual';"
+    );
+  }
+  const hasCoffeeGroupModelChoiceColumn = coffeeGroupColumns.some(
+    (column) => column.name === "model_choice"
+  );
+  if (!hasCoffeeGroupModelChoiceColumn) {
+    db.exec(
+      "ALTER TABLE coffee_groups ADD COLUMN model_choice TEXT NOT NULL DEFAULT '{}';"
     );
   }
   const sweepBatchColumns = db

@@ -8247,6 +8247,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   cursor: default;
 }
 
+/* Soft inline coloring for plain-prose name occurrences ("Squidward seems
+ * quiet today") — recognizable as a callout via the bot's identity color
+ * without the chip's bold-and-underline emphasis, so prose-heavy lines stay
+ * readable.
+ */
+.botMentionInlineColor {
+  color: var(--bot-color, inherit);
+}
+
 .composeBotOption[data-mention-row="true"] {
   cursor: default;
 }
@@ -17605,6 +17614,121 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   line-height: 1.38;
 }
 
+.imageVariantRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.form button.imageVariantButton,
+.imageVariantButton {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated) 84%, transparent);
+  color: var(--fg-muted);
+  padding: 8px 10px;
+  min-height: 52px;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  text-align: left;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease,
+    color 0.14s ease,
+    transform 0.06s ease;
+}
+
+.imageVariantButton::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(
+    --image-variant-active-border,
+    color-mix(in srgb, var(--accent-ink) 56%, var(--line))
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease;
+}
+
+.imageVariantButton > span:first-child {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.imageVariantButton > span:last-child {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--fg-subtle);
+}
+
+.imageVariantButton[data-selected="true"] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--bg));
+  color: var(--fg);
+}
+
+.imageVariantButton[data-selected="true"]::before {
+  opacity: 1;
+}
+
+.imageVariantButton[data-selected="true"] > span:last-child {
+  color: color-mix(in srgb, var(--accent-ink) 74%, var(--fg));
+}
+
+.imageVariantButton:hover:not(:disabled),
+.imageVariantButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-ink) 42%, var(--line));
+  color: var(--fg);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, var(--accent-soft) 8%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-ink) 22%, transparent);
+  outline: none;
+}
+
+.imageVariantButton:hover:not(:disabled) > span:last-child,
+.imageVariantButton:focus-visible > span:last-child {
+  color: color-mix(in srgb, var(--fg) 76%, var(--fg-muted));
+}
+
+.panelImages[data-image-scope="bot"] .imageVariantButton {
+  --image-variant-active-border: var(--editor-bot-ink);
+}
+
+.panelImages[data-image-scope="all"] .imageVariantButton,
+.panelImages[data-image-scope="general"] .imageVariantButton {
+  --image-variant-active-border: conic-gradient(
+    from 210deg,
+    #ff4d6d,
+    #ff9f1c,
+    #b7e63a,
+    #2fd3e3,
+    #7b5cff,
+    #ff4d6d
+  );
+}
+
+.imageVariantButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.imageVariantButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .form button.botRandomizeButton,
 .botRandomizeButton {
   -webkit-appearance: none;
@@ -21340,6 +21464,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-left: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/*
+ * Wraps the title button + a delete button that swaps in for the duration on
+ * hover/focus, mirroring the Chat sidebar pattern.
+ */
+.coffeeGroupSessionRow {
+  position: relative;
+}
+
 .coffeeGroupSessionButton {
   width: 100%;
   display: flex;
@@ -21359,6 +21491,69 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeGroupSessionButton[data-current="true"] {
   color: #fff;
   background: rgba(255, 255, 255, 0.06);
+}
+
+.coffeeGroupSessionTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.coffeeGroupSessionDuration {
+  flex: 0 0 auto;
+  transition: opacity 120ms ease;
+}
+
+.coffeeGroupSessionDeleteButton {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.42);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) scale(0.92);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    color 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.coffeeGroupSessionRow:hover .coffeeGroupSessionDeleteButton,
+.coffeeGroupSessionRow:focus-within .coffeeGroupSessionDeleteButton,
+.coffeeGroupSessionDeleteButton:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) scale(1);
+}
+
+.coffeeGroupSessionRow:hover .coffeeGroupSessionDuration,
+.coffeeGroupSessionRow:focus-within .coffeeGroupSessionDuration {
+  opacity: 0;
+}
+
+.coffeeGroupSessionDeleteButton:hover,
+.coffeeGroupSessionDeleteButton:focus-visible {
+  outline: none;
+  color: #ffffff;
+  border-color: rgba(255, 116, 116, 0.55);
+  background: rgba(187, 35, 35, 0.45);
+  transform: translateY(-50%) scale(1.06);
 }
 
 .coffeeSessionMeta,
@@ -21523,9 +21718,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeAutoplayDock {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 8px 14px;
   width: 100%;
   min-width: 0;
 }
@@ -21536,7 +21733,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-size: clamp(0.78rem, 2.1vw, 0.88rem);
   line-height: 1.35;
   color: var(--coffee-muted);
-  max-width: 36rem;
+  max-width: min(36rem, 100%);
 }
 
 .coffeeAutoplayDockTimer {
@@ -21547,7 +21744,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   color: var(--coffee-muted);
-  max-width: 36rem;
+  max-width: min(36rem, 100%);
 }
 
 .coffeeAutoplayDockTimerValue {
@@ -21645,9 +21842,28 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: none;
 }
 
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"])
+  .coffeeTableScene {
+  height: 100%;
+  min-height: 100%;
+  justify-content: center;
+  transform: translateY(clamp(10px, 1.4vh, 18px));
+}
+
 .coffeeStage[data-compact="true"] .coffeeTableDisk {
   width: min(42vw, 340px);
   max-width: calc(100% - 56px);
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"])
+  .coffeeTableGlow {
+  width: min(76%, 620px);
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"])
+  .coffeeTableDisk {
+  width: clamp(332px, 44vw, 360px);
+  max-width: calc(100% - 48px);
 }
 
 .coffeeStage[data-phase="selecting"][data-group-ready="true"] {
@@ -21686,6 +21902,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="4"][data-layout-seat="4"] {
   left: 67%;
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"])
+  .coffeeSeat[data-seat="0"] {
+  top: 8.5%;
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"])
+  .coffeeSeat[data-seat="1"] {
+  left: 28%;
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"])
+  .coffeeSeat[data-seat="2"] {
+  left: 72%;
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"])
+  .coffeeSeat[data-seat="3"] {
+  left: 32%;
+  top: 77%;
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"])
+  .coffeeSeat[data-seat="4"] {
+  left: 68%;
+  top: 77%;
 }
 
 .coffeeStage[data-phase="selecting"][data-group-ready="true"]:not([data-compact="true"])
@@ -21789,6 +22032,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   left: var(--coffee-cup-x, calc(50% + 20px));
 }
 
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"]) .coffeeCup,
 .coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"] .coffeeCup {
   display: none;
 }
@@ -21895,6 +22139,185 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: 100%;
   /* Extra air between the center card and topic row so chips sit lower toward the seats. */
   gap: clamp(28px, 6.5vh, 80px);
+}
+
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"] {
+  --coffee-live-table-y: clamp(28px, 5vh, 42px);
+}
+
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"] .coffeeTableGlow,
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"] .coffeeTableDisk {
+  transform: translate(-50%, calc(-50% + var(--coffee-live-table-y)));
+}
+
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"] .coffeeTableFocalColumn {
+  transform: translateY(var(--coffee-live-table-y));
+}
+
+.coffeeStage[data-phase="finished"][data-autoplay-dock="true"] {
+  --coffee-finished-table-y: clamp(46px, 7.5vh, 62px);
+}
+
+.coffeeStage[data-phase="finished"][data-autoplay-dock="true"] .coffeeTableGlow,
+.coffeeStage[data-phase="finished"][data-autoplay-dock="true"] .coffeeTableDisk {
+  transform: translate(-50%, calc(-50% + var(--coffee-finished-table-y)));
+}
+
+.coffeeStage[data-phase="finished"][data-autoplay-dock="true"] .coffeeTableFocalColumn {
+  transform: translateY(var(--coffee-finished-table-y));
+}
+
+.coffeeStage[data-phase="finished"] .coffeeCup {
+  display: none;
+}
+
+/*
+ * Finished session — bots leave the table one at a time, slowly drifting
+ * left or right depending on which side they sit on, fading out completely
+ * before reaching the stage edge.
+ *
+ * Sequencing: each bot animates over 2.6s with a 1.5s gap between
+ * neighbours, so a full table of 5 takes roughly 9s to clear. Each bot
+ * fully fades to opacity 0 by 75% of its own animation, so they vanish
+ * well inside the stage before they would otherwise hit the edge.
+ *
+ * Sides:
+ *   - Top seat (0): drifts gently up and fades.
+ *   - Left seats (1, 3): drift LEFT.
+ *   - Right seats (2, 4): drift RIGHT.
+ */
+.coffeeStage[data-phase="finished"] .coffeeSeat {
+  --coffee-walk-away-x: 0px;
+  --coffee-walk-away-y: 0px;
+  /* Cup glyphs share the seat's positioning context — keep them out. */
+  pointer-events: none;
+  animation: coffeeSeatWalkAway 2600ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.coffeeStage[data-phase="finished"] .coffeeSeat[data-seat="0"] {
+  --coffee-walk-away-x: 0px;
+  --coffee-walk-away-y: -32%;
+  animation-delay: 200ms;
+}
+
+.coffeeStage[data-phase="finished"] .coffeeSeat[data-seat="1"] {
+  --coffee-walk-away-x: -36vw;
+  --coffee-walk-away-y: -4%;
+  animation-delay: 1700ms;
+}
+
+.coffeeStage[data-phase="finished"] .coffeeSeat[data-seat="2"] {
+  --coffee-walk-away-x: 36vw;
+  --coffee-walk-away-y: -4%;
+  animation-delay: 3200ms;
+}
+
+.coffeeStage[data-phase="finished"] .coffeeSeat[data-seat="3"] {
+  --coffee-walk-away-x: -36vw;
+  --coffee-walk-away-y: 12%;
+  animation-delay: 4700ms;
+}
+
+.coffeeStage[data-phase="finished"] .coffeeSeat[data-seat="4"] {
+  --coffee-walk-away-x: 36vw;
+  --coffee-walk-away-y: 12%;
+  animation-delay: 6200ms;
+}
+
+@keyframes coffeeSeatWalkAway {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+
+  60% {
+    opacity: 0.55;
+    transform: translate(
+      calc(-50% + var(--coffee-walk-away-x) * 0.62),
+      calc(-50% + var(--coffee-walk-away-y) * 0.62)
+    );
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(
+      calc(-50% + var(--coffee-walk-away-x)),
+      calc(-50% + var(--coffee-walk-away-y))
+    );
+  }
+}
+
+/* In-card recap (replaces the bottom dock when the session is finished). */
+.coffeeFinishedRecap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  width: 100%;
+}
+
+.coffeeFinishedRecapCaption {
+  margin: 0;
+  font-size: clamp(0.78rem, 1.4vw, 0.92rem);
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.78);
+  text-align: center;
+  max-width: 32ch;
+}
+
+.coffeeFinishedRecapControls {
+  width: 100%;
+  justify-content: center;
+}
+
+.coffeeStage[data-phase="live"] .coffeeSeatPlate {
+  --coffee-plate-emoji-nudge-y: clamp(0px, 1.4%, 5px);
+}
+
+.coffeeStage[data-phase="live"] .coffeeCenterMessage,
+.coffeeStage[data-phase="finished"] .coffeeCenterMessage {
+  width: min(300px, 46vmin);
+  height: auto;
+  min-height: min(168px, 26vmin);
+  max-width: min(300px, 60%);
+  max-height: none;
+}
+
+.coffeeStage[data-phase="live"] .coffeeCenterMessageScroll,
+.coffeeStage[data-phase="finished"] .coffeeCenterMessageScroll {
+  flex: 0 1 auto;
+  overflow-y: visible;
+}
+
+.coffeeStage[data-phase="live"] .coffeeCenterMessageScroll p,
+.coffeeStage[data-phase="finished"] .coffeeCenterMessageScroll p {
+  font-size: clamp(1rem, 1.75vw, 1.3rem);
+  line-height: 1.34;
+}
+
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="1"][data-layout-seat="1"] {
+  left: 30%;
+  top: 42%;
+}
+
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="2"][data-layout-seat="2"] {
+  left: 70%;
+  top: 42%;
+}
+
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="3"][data-layout-seat="3"] {
+  left: 31%;
+  top: 79%;
+}
+
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="4"][data-layout-seat="4"] {
+  left: 69%;
+  top: 79%;
 }
 
 /*
@@ -22589,6 +23012,47 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeSeatThinkingIndicator .typingDots span {
   width: 4px;
   height: 4px;
+}
+
+/*
+ * "You've been called on" indicator: small `!` chip that pops on a seat the
+ * moment the latest line tags that bot. Lives in the same overlay slot as the
+ * thinking indicator so they never overlap.
+ */
+.coffeeSeatNotifiedIndicator {
+  position: absolute;
+  top: -10px;
+  right: -6px;
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 64%, rgba(255, 255, 255, 0.32));
+  background: color-mix(in srgb, var(--coffee-bot-color) 78%, #050505);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.78rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 3px rgba(0, 0, 0, 0.36),
+    0 0 16px color-mix(in srgb, var(--coffee-bot-color) 52%, transparent);
+  animation: coffeeSeatNotifiedPop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes coffeeSeatNotifiedPop {
+  from {
+    opacity: 0;
+    transform: scale(0.55) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 /* Picker — empty state before a thread exists. */
@@ -23731,17 +24195,57 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border: 1px solid rgba(255, 255, 255, 0.09);
 }
 
-.coffeeComposer textarea {
+.coffeeComposerInputWrap {
+  position: relative;
   flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.36);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.coffeeComposer textarea {
+  position: relative;
+  z-index: 2;
+  width: 100%;
   resize: none;
   min-height: 44px;
   max-height: 200px;
   padding: 10px 12px;
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.36);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  border: 0;
   color: #fff;
   font: inherit;
+}
+
+/* Flatten the rich composer when nested inside the Coffee surface — the
+ * Coffee wrapper already provides the visible border + background, so the
+ * inner editor should feel like a plain typing area. */
+.coffeeComposerInputWrap .markdownComposerSurface {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  border-radius: 12px;
+}
+
+.coffeeComposerInputWrap .markdownComposerSurface[data-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.coffeeComposerInputWrap .markdownComposerSurface[data-disabled="true"] :global(.tiptap) {
+  cursor: not-allowed;
+}
+
+.coffeeComposerInputWrap .markdownRichEditorHost {
+  min-height: 44px;
+  max-height: 200px;
+}
+
+.coffeeComposerInputWrap .markdownRichEditorHost :global(.tiptap) {
+  padding: 10px 12px;
+  color: #fff;
 }
 
 .coffeeSend {

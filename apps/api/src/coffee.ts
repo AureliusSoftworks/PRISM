@@ -48,6 +48,7 @@ import type {
   CoffeeBotSocialSnapshot,
   CoffeeArrivalScenario,
   CoffeeGroup,
+  CoffeeGroupModelChoice,
   CoffeeInterruptionEvent,
   CoffeeInterruptionSocialDelta,
   CoffeePlayerInterruptionInput,
@@ -72,7 +73,10 @@ export const COFFEE_GROUP_MIN_SIZE = 2;
 export const COFFEE_GROUP_MAX_SIZE = 5;
 
 /** Default tabletop cap when callers omit an explicit limit (tests + legacy). */
-export const COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS = 48;
+export const COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS = 110;
+
+/** When the timer is this close to done, bots should naturally wind down. */
+export const COFFEE_WRAP_UP_REMAINING_MS = 20_000;
 
 /** Default for new group-owned Coffee Sessions until the player chooses otherwise. */
 const DEFAULT_COFFEE_SESSION_DURATION_MINUTES = 5;
@@ -150,6 +154,85 @@ function coffeeReplyRepeatKey(raw: string): string {
     .trim();
 }
 
+const COFFEE_LOOP_MOTIF_HISTORY_LIMIT = 8;
+const COFFEE_LOOP_MOTIF_STRONG_REPEAT_COUNT = 3;
+const COFFEE_LOOP_MOTIF_CLUSTER_REPEAT_COUNT = 2;
+const COFFEE_LOOP_MOTIF_CLUSTER_SIZE = 2;
+
+const COFFEE_LOOP_MOTIF_STOPWORDS = new Set([
+  "about",
+  "again",
+  "because",
+  "being",
+  "coffee",
+  "could",
+  "every",
+  "going",
+  "maybe",
+  "never",
+  "other",
+  "really",
+  "right",
+  "should",
+  "table",
+  "their",
+  "there",
+  "thing",
+  "those",
+  "through",
+  "would",
+]);
+
+function coffeeLoopMotifToken(raw: string): string | null {
+  const lower = raw.toLowerCase();
+  const normalized = lower
+    .replace(/'s$/u, "")
+    .replace(/(?:ing|ed)$/u, "")
+    .replace(/s$/u, "");
+  if (normalized.length < 5) return null;
+  if (COFFEE_LOOP_MOTIF_STOPWORDS.has(normalized)) return null;
+  return normalized;
+}
+
+function coffeeLoopMotifTokens(raw: string): string[] {
+  const tokens = new Set<string>();
+  for (const match of raw.matchAll(/[\p{L}\p{N}']+/gu)) {
+    const token = coffeeLoopMotifToken(match[0]);
+    if (token) tokens.add(token);
+  }
+  return [...tokens];
+}
+
+function repeatedCoffeeMotifsInReply(
+  replyText: string,
+  history: readonly ChatMessage[]
+): string[] {
+  const recentAssistantMessages = history
+    .filter((message) => message.role === "assistant")
+    .slice(-COFFEE_LOOP_MOTIF_HISTORY_LIMIT);
+  if (recentAssistantMessages.length < 3) return [];
+
+  const motifCounts = new Map<string, number>();
+  for (const message of recentAssistantMessages) {
+    for (const token of coffeeLoopMotifTokens(message.content)) {
+      motifCounts.set(token, (motifCounts.get(token) ?? 0) + 1);
+    }
+  }
+
+  const replyTokens = coffeeLoopMotifTokens(replyText);
+  const repeatedTokens = replyTokens.filter((token) => {
+    return (motifCounts.get(token) ?? 0) >= COFFEE_LOOP_MOTIF_CLUSTER_REPEAT_COUNT;
+  });
+
+  return repeatedTokens.filter((token) => {
+    const count = motifCounts.get(token) ?? 0;
+    return (
+      count >= COFFEE_LOOP_MOTIF_STRONG_REPEAT_COUNT ||
+      repeatedTokens.length >= COFFEE_LOOP_MOTIF_CLUSTER_SIZE
+    );
+  });
+}
+
 function recentCoffeeAssistantRepeatKeys(history: readonly ChatMessage[], limit = 6): Set<string> {
   const keys = new Set<string>();
   for (let index = history.length - 1; index >= 0 && keys.size < limit; index -= 1) {
@@ -167,6 +250,13 @@ export function coffeeReplyRepeatsRecentAssistant(
 ): boolean {
   const key = coffeeReplyRepeatKey(replyText);
   return key.length > 0 && recentCoffeeAssistantRepeatKeys(history).has(key);
+}
+
+export function coffeeReplyRepeatsRecentMotifs(
+  replyText: string,
+  history: readonly ChatMessage[]
+): boolean {
+  return repeatedCoffeeMotifsInReply(replyText, history).length > 0;
 }
 
 /**
@@ -478,6 +568,7 @@ function buildCoffeeRepeatRepairMessages(args: {
   repeatedReply: string;
   recentLines: readonly string[];
   tableFocus: string;
+  repeatedMotifs: readonly string[];
   maxChars: number;
 }): ProviderMessage[] {
   const speakerSystemPrompt = composeBotSystemPrompt(args.speaker.name, args.speaker.systemPrompt);
@@ -497,6 +588,10 @@ function buildCoffeeRepeatRepairMessages(args: {
       `Latest table moment: ${args.tableFocus}`,
       `Repeated draft: ${args.repeatedReply}`,
       `Do not reuse: ${args.recentLines.join(" / ")}`,
+      ...(args.repeatedMotifs.length > 0
+        ? [`Avoid the circular table motifs: ${args.repeatedMotifs.join(", ")}.`]
+        : []),
+      "Change the social motion: add a new concrete object, feeling, decision, or pause.",
       `Return one visible ${args.speaker.name} line, max ${args.maxChars} characters.`,
     ].join("\n"),
   });
@@ -516,12 +611,14 @@ async function repairCoffeeRepeatedReply(args: {
     .filter((message) => message.role === "assistant")
     .slice(-6)
     .map((message) => message.content);
+  const repeatedMotifs = repeatedCoffeeMotifsInReply(args.repeatedReply, args.history);
   const repaired = await args.speakerProvider.generateResponse(
     buildCoffeeRepeatRepairMessages({
       speaker: args.speaker,
       repeatedReply: args.repeatedReply,
       recentLines,
       tableFocus: args.tableFocus,
+      repeatedMotifs,
       maxChars: args.maxChars,
     }),
     {
@@ -535,7 +632,11 @@ async function repairCoffeeRepeatedReply(args: {
   const visible = typeof repaired === "string"
     ? sanitizeCoffeeTableReply(repaired, args.speaker.name, args.maxChars)
     : "";
-  return visible && !coffeeReplyRepeatsRecentAssistant(visible, args.history) ? visible : "";
+  return visible &&
+    !coffeeReplyRepeatsRecentAssistant(visible, args.history) &&
+    !coffeeReplyRepeatsRecentMotifs(visible, args.history)
+    ? visible
+    : "";
 }
 
 function buildCoffeeEmergencyFallbackReply(args: {
@@ -549,7 +650,7 @@ function buildCoffeeEmergencyFallbackReply(args: {
 }): string {
   const options = /\?\s*$/.test(args.tableFocus.trim())
     ? ["Yeah.", "I hear you.", "That tracks.", "Maybe so."]
-    : ["Mm.", "Right.", "Okay.", "Tiny pause.", "I get that.", "New angle."];
+    : ["Mm.", "Right.", "Okay.", "Tiny pause.", "I get that.", "Let's move on."];
   const seed = `${args.conversationId}:${args.speaker.id}:${args.historyLength}:${args.seedExtra ?? ""}:${args.tableFocus}`;
   const startIndex = Math.floor(stableUnitValue(seed) * options.length) % options.length;
   const avoidKeys = new Set((args.avoidTexts ?? []).map(coffeeReplyRepeatKey).filter(Boolean));
@@ -589,32 +690,28 @@ function sanitizeLoadedCoffeeAssistantContent(
  * Collapse whitespace and trim Coffee replies so the live table stays a tiny
  * card; prefer ending on sentence punctuation when clipping is required.
  */
+/**
+ * Normalizes a Coffee table reply for storage/display.
+ *
+ * Originally this also enforced a hard visible-character cap by truncating
+ * with an ellipsis when the bot wrote past it. That hard truncation made
+ * occasional longer thoughts look mid-sentence "cut off" on the table —
+ * worse UX than letting the message scroll. The cap is now a *soft target*
+ * only: it stays in the speaker prompt so bots aim for one short line, but
+ * the server no longer chops their reply. The table center scrolls
+ * vertically if a reply runs long.
+ *
+ * The function still collapses internal whitespace into single spaces and
+ * trims, so multi-line LLM output renders as a single tabletop line.
+ *
+ * `maxChars` is retained in the signature for backwards compatibility with
+ * call sites that still pass a target value, but is intentionally unused.
+ */
 export function clampCoffeeTableReplyText(
   raw: string,
-  maxChars: number = COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS
+  _maxChars: number = COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS
 ): string {
-  const normalized = raw.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxChars) {
-    return normalized;
-  }
-  const slice = normalized.slice(0, maxChars);
-  const minSentenceCut = Math.floor(maxChars * 0.42);
-  for (let index = slice.length - 1; index >= minSentenceCut; index -= 1) {
-    const char = slice[index];
-    if (char === "." || char === "!" || char === "?") {
-      const next = slice[index + 1];
-      if (!next || /\s/u.test(next)) {
-        return slice.slice(0, index + 1).trim();
-      }
-    }
-  }
-
-  const wordTrimmed = normalized.slice(0, maxChars - 1);
-  const space = wordTrimmed.lastIndexOf(" ");
-  if (space >= minSentenceCut) {
-    return `${wordTrimmed.slice(0, space).trim()}…`;
-  }
-  return `${wordTrimmed.trim()}…`;
+  return raw.replace(/\s+/g, " ").trim();
 }
 
 function formatCoffeeTranscriptLine(message: ChatMessage): string {
@@ -638,6 +735,11 @@ export interface CoffeeTurnSettings {
   /** Matches account Settings — drives auxiliary LLM for the Coffee router. */
   prismDefaultLlmModel?: string | null;
   /**
+   * Client-provided timer snapshot for the active Coffee session. When it is
+   * near zero, prompts shift from "continue the table" to "land the plane".
+   */
+  sessionRemainingMs?: number | null;
+  /**
    * When set, every Coffee speaker uses this model id for the effective provider,
    * ignoring per-bot local/online checkpoint fields (same idea as Sandbox
    * `modelOverride`).
@@ -650,6 +752,7 @@ export interface CoffeeTurnInput {
   groupBotIds?: Array<string | null>;
   message: string;
   playerInterruption?: CoffeePlayerInterruptionInput;
+  directedSpeakerBotId?: string;
 }
 
 export interface CoffeeSessionCreateInput {
@@ -664,6 +767,7 @@ export interface CoffeeGroupCreateInput {
   name?: unknown;
   groupBotIds?: Array<string | null>;
   coffeeSettings?: unknown;
+  modelChoiceByProvider?: unknown;
 }
 
 export interface CoffeeGroupUpdateInput {
@@ -672,6 +776,7 @@ export interface CoffeeGroupUpdateInput {
   coffeeSettings?: unknown;
   presetMode?: unknown;
   topicSelectionMode?: unknown;
+  modelChoiceByProvider?: unknown;
 }
 
 export interface CoffeeGroupSessionCreateInput {
@@ -732,6 +837,34 @@ function normalizeCoffeePresetMode(raw: unknown): CoffeePresetMode {
 
 function normalizeCoffeeTopicSelectionMode(raw: unknown): CoffeeTopicSelectionMode {
   return raw === "auto" ? "auto" : "manual";
+}
+
+/**
+ * Normalize a free-form `model_choice` value into a sanitized
+ * `{ local?, openai? }` map. Drops empty/`auto` strings so picker hydration on
+ * the client treats those as "Auto".
+ */
+export function normalizeCoffeeGroupModelChoice(raw: unknown): CoffeeGroupModelChoice {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const source = raw as Record<string, unknown>;
+  const out: CoffeeGroupModelChoice = {};
+  for (const provider of ["local", "openai"] as const) {
+    const value = source[provider];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || trimmed.toLowerCase() === "auto") continue;
+    out[provider] = trimmed;
+  }
+  return out;
+}
+
+function parseStoredCoffeeGroupModelChoice(raw: string | null | undefined): CoffeeGroupModelChoice {
+  if (!raw || raw.trim().length === 0) return {};
+  try {
+    return normalizeCoffeeGroupModelChoice(JSON.parse(raw));
+  } catch {
+    return {};
+  }
 }
 
 function applyInterruptionSocialConsequences(args: {
@@ -1127,6 +1260,7 @@ function mapCoffeeGroupRow(
     coffeeSettings: parseStoredCoffeeSessionSettings(row.coffee_settings),
     presetMode: normalizeCoffeePresetMode(row.preset_mode),
     topicSelectionMode: normalizeCoffeeTopicSelectionMode(row.coffee_topic_mode ?? "manual"),
+    modelChoiceByProvider: parseStoredCoffeeGroupModelChoice(row.model_choice),
     moodSummary: moodSummary ?? computeCoffeeGroupMoodSummary(db, row.user_id, row.id),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -1174,7 +1308,7 @@ function loadCoffeeGroupRow(
 ): CoffeeGroupRow | undefined {
   return db
     .prepare(
-      `SELECT id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, mood_summary, archived_at, created_at, updated_at
+      `SELECT id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, model_choice, mood_summary, archived_at, created_at, updated_at
          FROM coffee_groups
         WHERE id = ? AND user_id = ? AND archived_at IS NULL`
     )
@@ -1184,7 +1318,7 @@ function loadCoffeeGroupRow(
 export function listCoffeeGroups(db: DatabaseSync, userId: string): CoffeeGroup[] {
   const rows = db
     .prepare(
-      `SELECT id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, mood_summary, archived_at, created_at, updated_at
+      `SELECT id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, model_choice, mood_summary, archived_at, created_at, updated_at
          FROM coffee_groups
         WHERE user_id = ? AND archived_at IS NULL
         ORDER BY updated_at DESC, created_at DESC`
@@ -1321,11 +1455,12 @@ export function createCoffeeGroup(
   const groupId = randomId(12);
   const settings = normalizeCoffeeSessionSettings(input.coffeeSettings);
   const name = normalizeCoffeeGroupName(input.name, generateCoffeeTitle("", group));
+  const modelChoice = normalizeCoffeeGroupModelChoice(input.modelChoiceByProvider);
   db.prepare(
     `INSERT INTO coffee_groups
-       (id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, mood_summary, archived_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'manual', 'manual', '{}', NULL, ?, ?)`
-  ).run(groupId, userId, name, JSON.stringify(settings), now, now);
+       (id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, model_choice, mood_summary, archived_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'manual', 'manual', ?, '{}', NULL, ?, ?)`
+  ).run(groupId, userId, name, JSON.stringify(settings), JSON.stringify(modelChoice), now, now);
   upsertCoffeeGroupSeats(db, userId, groupId, seatBotIds, now);
   insertCoffeeGroupEvent(
     db,
@@ -1379,6 +1514,25 @@ export function updateCoffeeGroup(
     updates.push("coffee_topic_mode = ?");
     values.push(normalizeCoffeeTopicSelectionMode(input.topicSelectionMode));
   }
+  if (input.modelChoiceByProvider !== undefined) {
+    const merged = {
+      ...parseStoredCoffeeGroupModelChoice(row.model_choice),
+      ...normalizeCoffeeGroupModelChoice(input.modelChoiceByProvider),
+    } as Record<string, string>;
+    // Drop blanks from caller-supplied overrides (lets the client clear back to Auto).
+    const provided = (input.modelChoiceByProvider ?? {}) as Record<string, unknown>;
+    for (const provider of ["local", "openai"] as const) {
+      if (Object.prototype.hasOwnProperty.call(provided, provider)) {
+        const raw = provided[provider];
+        if (typeof raw !== "string" || raw.trim().length === 0 || raw.trim().toLowerCase() === "auto") {
+          delete merged[provider];
+        }
+      }
+    }
+    updates.push("model_choice = ?");
+    values.push(JSON.stringify(merged));
+    insertCoffeeGroupEvent(db, userId, groupId, "model_choice_updated", { modelChoiceByProvider: merged }, now);
+  }
   if (input.groupBotIds !== undefined) {
     const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
     const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
@@ -1412,20 +1566,15 @@ export function updateCoffeeGroup(
 /**
  * Permanently removes a Coffee Group for this account.
  *
- * Unlinks any Coffee conversations that referenced it (`coffee_group_id` → NULL).
- * Drops seat rows and group events (FK CASCADE). Does **not** delete messages
- * or conversation rows.
+ * Also deletes any Coffee conversations tied to that group.
+ * Dependent rows (messages, seats, events) are removed via FK cascade.
  */
 export function deleteCoffeeGroup(db: DatabaseSync, userId: string, groupId: string): void {
-  const now = new Date().toISOString();
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     db.prepare(
-      `UPDATE conversations
-          SET coffee_group_id = NULL,
-              updated_at = ?
-        WHERE user_id = ? AND coffee_group_id = ?`
-    ).run(now, userId, groupId);
+      "DELETE FROM conversations WHERE user_id = ? AND coffee_group_id = ?"
+    ).run(userId, groupId);
     const result = db.prepare("DELETE FROM coffee_groups WHERE id = ? AND user_id = ?").run(groupId, userId);
     if (Number(result.changes ?? 0) === 0) {
       db.exec("ROLLBACK");
@@ -1495,10 +1644,10 @@ export function buildCoffeeSpeakerStyleAppendix(
         : "Sometimes reply to the last bot; sometimes widen to the whole table.";
 
   return [
-    "Coffee style cues (the tabletop cap below overrides everything):",
+    "Coffee style cues (the soft tabletop target below shapes everything):",
     energyLine,
     crossLine,
-    `Hard tabletop cap for this session: ${tableReplyMaxChars} characters including spaces.`,
+    `Soft tabletop target for this session: ${tableReplyMaxChars} characters including spaces. The server no longer truncates, so a slightly longer line is fine — but please don't ramble; brevity reads best on the table.`,
   ].join("\n");
 }
 
@@ -1631,9 +1780,195 @@ function coffeeTranscriptContainsPrismBotMention(
   return history.some((m) => m.content.includes("prism-bot://"));
 }
 
+function coffeeSessionIsInWrapUpWindow(remainingMs: number | null | undefined): boolean {
+  return (
+    typeof remainingMs === "number" &&
+    Number.isFinite(remainingMs) &&
+    remainingMs >= 0 &&
+    remainingMs <= COFFEE_WRAP_UP_REMAINING_MS
+  );
+}
+
+function coffeeWrapUpSeconds(remainingMs: number | null | undefined): number {
+  if (!coffeeSessionIsInWrapUpWindow(remainingMs)) return 0;
+  return Math.max(1, Math.ceil((remainingMs ?? 0) / 1000));
+}
+
+function buildCoffeeWrapUpRouterAppendix(remainingMs: number | null | undefined): string[] {
+  if (!coffeeSessionIsInWrapUpWindow(remainingMs)) return [];
+  const seconds = coffeeWrapUpSeconds(remainingMs);
+  return [
+    "",
+    `Session wrap-up window: about ${seconds}s remain.`,
+    "Pick the bot whose personality can help the table land naturally. Prefer a closing thought, soft exit, final joke, small goodbye, or quiet gesture over starting a fresh tangent.",
+  ];
+}
+
+function buildCoffeeWrapUpSpeakerAppendix(remainingMs: number | null | undefined): string[] {
+  if (!coffeeSessionIsInWrapUpWindow(remainingMs)) return [];
+  const seconds = coffeeWrapUpSeconds(remainingMs);
+  return [
+    "",
+    `The Coffee Session is in its final moments (about ${seconds}s remain).`,
+    "Let the conversation wind down organically, as if people at the table can feel it is time to leave or let the silence settle. Prefer a final thought, soft farewell, closing joke, small gesture, or satisfied pause. Do not start a new topic, ask a big new question, or explicitly mention a timer/countdown unless it would sound natural in character.",
+  ];
+}
+
+/**
+ * Mirror of the web client's `PRISM_BOT_MARKDOWN_LINK_RE` so the API can detect
+ * existing prism-bot mention links when post-processing bot replies.
+ */
+const PRISM_BOT_MARKDOWN_LINK_RE =
+  /\[((?:[^\]]|\\.)*)\]\s*\(\s*prism-bot:\/\/([^)\s]+)\s*\)/gi;
+
 /** Router/speaker appendix only when table text includes prism-bot markdown links. */
 const PRISM_BOT_MENTION_COFFEE_APPENDIX =
   "The user may @-mention bots with markdown like [Label](prism-bot://botId) (botId may be URL-encoded). Prefer the mentioned bot as the next speaker when that fits the table.";
+
+/**
+ * Post-process a bot's reply to upgrade explicit `@Name` mentions into the
+ * canonical `[Name](prism-bot://botId)` markdown link. Skips text that already
+ * sits inside a prism-bot link, and only matches names that exactly correspond
+ * to seated bots (case-insensitive). Plain bare-name references intentionally
+ * stay as prose; the web renderer soft-colors them without creating a full
+ * chip/tag.
+ */
+export function autoTagPeerMentionsInCoffeeReply(
+  reply: string,
+  speaker: { id: string; name: string },
+  group: readonly { id: string; name: string }[]
+): string {
+  if (!reply || reply.length === 0) return reply;
+  const peers = group.filter((bot) => bot.id !== speaker.id && bot.name.trim().length > 0);
+  if (peers.length === 0) return reply;
+  // Sort longest names first so e.g. "Patrick Star" wins over "Patrick".
+  const sorted = [...peers].sort((a, b) => b.name.length - a.name.length);
+
+  // Locate every existing prism-bot link span so we can avoid touching them.
+  const lockedRanges: Array<[number, number]> = [];
+  const lockRe = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi");
+  for (const match of reply.matchAll(lockRe)) {
+    const start = match.index ?? 0;
+    lockedRanges.push([start, start + match[0].length]);
+  }
+  const inLockedRange = (index: number): boolean =>
+    lockedRanges.some(([from, to]) => index >= from && index < to);
+
+  let out = reply;
+  for (const peer of sorted) {
+    const escaped = peer.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Explicit @, then exact name as a whole word.
+    const pattern = new RegExp(`(?<![\\w\\-])@${escaped}(?![\\w\\-])`, "g");
+    let cursor = 0;
+    let assembled = "";
+    let m: RegExpExecArray | null;
+    while ((m = pattern.exec(out)) !== null) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (inLockedRange(start) || inLockedRange(end - 1)) {
+        continue;
+      }
+      const replacement = formatBotMentionMarkdownInline(peer);
+      assembled += out.slice(cursor, start) + replacement;
+      cursor = end;
+      // Re-tag this region as locked so subsequent peers don't re-process it.
+      const newStart = assembled.length - replacement.length;
+      lockedRanges.push([newStart, newStart + replacement.length]);
+    }
+    if (cursor > 0) {
+      assembled += out.slice(cursor);
+      out = assembled;
+    }
+  }
+  return out;
+}
+
+function formatBotMentionMarkdownInline(bot: { id: string; name: string }): string {
+  const safeName = bot.name.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+  return `[${safeName}](prism-bot://${encodeURIComponent(bot.id)})`;
+}
+
+/** Mirrors `formatBotMentionMarkdown` in apps/web — kept in sync by hand. */
+function coffeeFormatBotMentionMarkdown(bot: { id: string; name: string }): string {
+  const label = bot.name.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+  return `[${label}](prism-bot://${encodeURIComponent(bot.id)})`;
+}
+
+/**
+ * Repairs the common LLM glitch of emitting a `[Name]` bracket without the
+ * matching `(prism-bot://botId)` href. If the bracketed label exactly matches
+ * a peer name at the table (case-insensitive), the function removes the
+ * bracket wrapper and leaves the plain canonical name. The client will still
+ * soft-color that name, but this avoids accidentally turning third-person
+ * references into full tags/chips.
+ * Brackets that don't match a known peer are left intact (they may be
+ * meaningful prose to the bot's persona).
+ */
+export function repairBotMentionBrackets(
+  raw: string,
+  peers: readonly { id: string; name: string }[]
+): string {
+  if (!raw) return raw;
+  const peerByLowerName = new Map<string, { id: string; name: string }>();
+  for (const peer of peers) {
+    if (!peer.id || !peer.name) continue;
+    peerByLowerName.set(peer.name.toLowerCase(), peer);
+  }
+  if (peerByLowerName.size === 0) return raw;
+  // Match `[label]` NOT followed by optional whitespace + `(` — i.e. orphan
+  // brackets without an href. Fold a possessive suffix into the repaired name
+  // so `[SpongeBob]'s` becomes `SpongeBob's`.
+  return raw.replace(/\[((?:[^\]\n]|\\\])+)\](['’]s)?(?!\s*\()/g, (match, label, suffix = "") => {
+    const cleanLabel = String(label).replace(/\\([\\\]])/g, "$1").trim();
+    const peer = peerByLowerName.get(cleanLabel.toLowerCase());
+    return peer ? `${peer.name}${suffix}` : match;
+  });
+}
+
+/**
+ * Peer-roster appendix that teaches the speaker how to chip-format a direct,
+ * second-person address to another bot at the table.
+ *
+ * Goals (tuned after observing tag ping-pong on the live table):
+ * - The chip format is a *rare* dramatic device, not a default opener.
+ * - Third-person references stay as plain prose — the renderer auto-colors
+ *   bot names in their identity color regardless, so plain references still
+ *   read as recognizable callouts visually.
+ * - The bot must use the verbatim markdown from the roster — never the
+ *   `[Name]`-only bracket label (which produces a visible `[Name]` artifact
+ *   on the table) and never an invented botId.
+ */
+function buildCoffeeSpeakerMentionRosterAppendix(
+  peers: readonly { id: string; name: string }[]
+): string | null {
+  const usable = peers.filter((p) => p.id.trim().length > 0 && p.name.trim().length > 0);
+  if (usable.length === 0) return null;
+  const rosterLines = usable.map((p) => `- ${p.name} → ${coffeeFormatBotMentionMarkdown(p)}`);
+  return [
+    "Direct-address chip format (use sparingly):",
+    "Most of your lines should NOT call anyone out by name — react to the room, agree, disagree, pivot. Constant `[Name]`-style call-outs make the table feel like ping-pong and break the conversation flow.",
+    "ONLY when you are speaking directly TO one specific bot at this table — second-person address, like \"Squidward, that's a stretch\" or \"Plankton, why?\" — wrap that name with the exact markdown below (it renders as a styled chip):",
+    ...rosterLines,
+    "Third-person references — describing another bot, agreeing with what they said, narrating about them — must stay as plain prose with no markdown around the name. The table will still render the name in their identity color automatically.",
+    "Never write a `[Name]` bracket without the matching `(prism-bot://…)` href; orphan brackets show up as a visible glitch on the table. Never invent a botId; only copy from the roster above. Never chip-format your own name.",
+  ].join("\n");
+}
+
+/**
+ * Canonical stage-direction rule for Coffee replies. Bots come from many
+ * model families with different roleplay habits (`*…*`, `[…]`, `(…)`,
+ * `_…_`); this pins one shared format so the renderer can detect actions
+ * uniformly and (in a future pass) lift them out of the table line into a
+ * status indicator above the speaker's avatar.
+ */
+const COFFEE_STAGE_DIRECTION_APPENDIX = [
+  "Stage-direction format:",
+  "Coffee Mode is not Markdown-formatted chat. Do NOT use asterisks for emphasis in ordinary dialogue — write plain words instead (`the thought that counts`, not `the *thought* that counts`).",
+  "Only use single asterisks for a complete non-verbal action, gesture, or aside (anything that isn't spoken dialogue), like `*pours coffee*` or `*glances at the door*`. Do not put ordinary sentence words inside asterisks.",
+  "Asterisk-wrapped actions are presented separately from your spoken line, so keep them short, in third person, and self-contained. The bulk of your reply should still be one short spoken line in plain prose with no Markdown styling.",
+  "Keep stage directions name-free and ambient (`*nods slowly*`, `*stirs cream*`, `*winces*`). Do NOT name another bot inside a `*…*` block — directed asides like `*glares at Squidward*` aren't allowed; if you genuinely want to address someone, do it in spoken text instead.",
+  "It is okay to reply with ONLY a stage direction and no spoken line — silent gestures are a valid turn. When you do, the table won't expect a response, so don't tack on a question or invitation; just the gesture is enough.",
+].join("\n");
 
 /**
  * Build the router LLM prompt that picks the next speaker.
@@ -1652,6 +1987,8 @@ export function buildRouterPrompt(args: {
   sessionSettings?: CoffeeSessionSettings;
   /** When set, router should prefer speakers who can advance this shared subject. */
   coffeeTopic?: string | null;
+  /** Client-side timer snapshot for natural session wrap-up prompting. */
+  sessionRemainingMs?: number | null;
 }): ProviderMessage[] {
   const {
     group,
@@ -1662,6 +1999,7 @@ export function buildRouterPrompt(args: {
     turnKind = "user",
     sessionSettings,
     coffeeTopic,
+    sessionRemainingMs,
   } = args;
   const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
   const topicTrim = typeof coffeeTopic === "string" ? coffeeTopic.trim() : "";
@@ -1717,6 +2055,7 @@ export function buildRouterPrompt(args: {
     recencyHint,
     earlyThreadHint,
     ...topicAnchorLines,
+    ...buildCoffeeWrapUpRouterAppendix(sessionRemainingMs),
     "",
     buildCoffeeTableTuningAppendix(settings),
     "",
@@ -1881,6 +2220,8 @@ export function buildSpeakerPrompt(args: {
   firstContactIntro?: boolean;
   sessionSettings?: CoffeeSessionSettings;
   coffeeTopic?: string | null;
+  /** Client-side timer snapshot for natural session wrap-up prompting. */
+  sessionRemainingMs?: number | null;
 }): ProviderMessage[] {
   const {
     speaker,
@@ -1893,6 +2234,7 @@ export function buildSpeakerPrompt(args: {
     firstContactIntro = false,
     sessionSettings,
     coffeeTopic,
+    sessionRemainingMs,
   } = args;
   const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
   const { tableReplyMaxChars } = coffeeReplyLengthCaps(settings);
@@ -1900,12 +2242,12 @@ export function buildSpeakerPrompt(args: {
     speaker.name,
     speaker.systemPrompt
   );
-  const peerLines = group
-    .filter((bot) => bot.id !== speaker.id)
-    .map((bot) => `- ${bot.name}`);
+  const peers = group.filter((bot) => bot.id !== speaker.id);
+  const peerLines = peers.map((bot) => `- ${bot.name}`);
   const speakerSocial = socialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL;
 
   const prismBotMentionHint = coffeeTranscriptContainsPrismBotMention(userMessage, history);
+  const speakerMentionRosterAppendix = buildCoffeeSpeakerMentionRosterAppendix(peers);
   const topicTrim = typeof coffeeTopic === "string" ? coffeeTopic.trim() : "";
   const topicLines: string[] =
     topicTrim.length > 0
@@ -1922,6 +2264,7 @@ export function buildSpeakerPrompt(args: {
       ? "This table is still warming up. You can see the other participants' names, but do not act as if you already know them unless the transcript proves it."
       : "Use the current table transcript as your shared history with the user and the other bots.",
     ...topicLines,
+    ...buildCoffeeWrapUpSpeakerAppendix(sessionRemainingMs),
     "You are participating in a live group conversation with the user and the following other bots:",
     ...peerLines,
     "",
@@ -1929,10 +2272,9 @@ export function buildSpeakerPrompt(args: {
     "You may react directly to what another bot just said, agree, disagree, add one concrete thought, pause into a softer observation, or gently shift the topic when that fits your personality.",
     "The user is present, but Coffee should feel like a group conversation. Do not turn every reply back toward the user.",
     "Reply as one line of plain prose (no line breaks). ONE clause only — a single short utterance, like a reaction bark or one breath. No second sentence, no semicolon piles, no em dash add-ons.",
-    `Hard tabletop cap: ${tableReplyMaxChars} characters including spaces. Anything longer is clipped and looks broken.`,
+    `Aim for a soft target around ${tableReplyMaxChars} characters including spaces; brevity reads best on the table. The server no longer truncates, so a slightly longer line is fine, but please don't ramble — keep the table feeling like a single quick exchange.`,
     "Make the line concrete: pull one small image, opinion, object, motive, or emotional beat from your persona or the latest table moment.",
-    "Never repeat a recent table line exactly; if the obvious reply is generic, choose a new concrete angle instead.",
-    "No asterisk stage directions (like *excitedly*), no parenthetical acting notes.",
+    "Never repeat a recent table line exactly; if the table keeps circling the same nouns or joke shape, change the concrete detail or social motion instead.",
     "Do not end with a question by default. Ask a question only when it is genuinely the most natural next move; otherwise end with a statement, observation, or small offer.",
     "Do not write as if you are cutting off another bot mid-sentence. Coffee only presents cutoffs when the app has explicit interruption metadata.",
     "Avoid long monologues; the table should feel like a shared room, not a speech.",
@@ -1943,6 +2285,9 @@ export function buildSpeakerPrompt(args: {
     "- If your valuesFriction and restraint are both high, set calm boundaries, be brief, or politely step back. Avoid insults or hostile escalation.",
     "- If leavePressure is high, prefer short grounded replies and occasional gentle withdrawal language.",
     ...(prismBotMentionHint ? ["", PRISM_BOT_MENTION_COFFEE_APPENDIX] : []),
+    ...(speakerMentionRosterAppendix ? ["", speakerMentionRosterAppendix] : []),
+    "",
+    COFFEE_STAGE_DIRECTION_APPENDIX,
   ];
 
   const messages: ProviderMessage[] = [];
@@ -2044,6 +2389,7 @@ interface CoffeeGroupRow {
   coffee_settings: string;
   preset_mode: string;
   coffee_topic_mode: string | null;
+  model_choice: string | null;
   mood_summary: string | null;
   archived_at: string | null;
   created_at: string;
@@ -2616,6 +2962,7 @@ async function generateCoffeeBotReply(args: {
       turnKind,
       sessionSettings,
       coffeeTopic: row.coffee_topic,
+      sessionRemainingMs: settings.sessionRemainingMs,
     });
     try {
       const routerRaw = await routerProvider.generateResponse(routerMessages, {
@@ -2689,15 +3036,25 @@ async function generateCoffeeBotReply(args: {
     firstContactIntro: turnKind === "user" && shouldUseFirstContactIntro,
     sessionSettings,
     coffeeTopic: row.coffee_topic,
+    sessionRemainingMs: settings.sessionRemainingMs,
   });
   const speakerReply = await speakerProvider.generateResponse(
     speakerMessages,
     speakerOptions
   );
-  let replyText =
+  // Repair orphan `[Name]` brackets emitted without their `(prism-bot://…)`
+  // href before sanitizing — otherwise they leak as visible artifacts on the
+  // table (and the visible-length clamp still works correctly because the
+  // repaired markdown adds source bytes only).
+  const peersForRepair = group.filter((bot) => bot.id !== speaker.id);
+  const speakerReplyRepaired =
     typeof speakerReply === "string"
+      ? repairBotMentionBrackets(speakerReply, peersForRepair)
+      : speakerReply;
+  let replyText =
+    typeof speakerReplyRepaired === "string"
       ? sanitizeCoffeeTableReply(
-          speakerReply,
+          speakerReplyRepaired,
           speaker.name,
           replyCaps.tableReplyMaxChars
         )
@@ -2733,7 +3090,11 @@ async function generateCoffeeBotReply(args: {
       maxChars: replyCaps.tableReplyMaxChars,
     });
   }
-  if (replyText && coffeeReplyRepeatsRecentAssistant(replyText, history)) {
+  if (
+    replyText &&
+    (coffeeReplyRepeatsRecentAssistant(replyText, history) ||
+      coffeeReplyRepeatsRecentMotifs(replyText, history))
+  ) {
     try {
       replyText = await repairCoffeeRepeatedReply({
         speakerProvider,
@@ -2748,23 +3109,31 @@ async function generateCoffeeBotReply(args: {
       replyText = "";
     }
   }
-  if (!replyText || coffeeReplyRepeatsRecentAssistant(replyText, history)) {
+  if (
+    !replyText ||
+    coffeeReplyRepeatsRecentAssistant(replyText, history) ||
+    coffeeReplyRepeatsRecentMotifs(replyText, history)
+  ) {
     replyText = buildCoffeeEmergencyFallbackReply({
       tableFocus,
       speaker,
       conversationId: row.id,
       historyLength: history.length,
       seedExtra: "repeat",
-    avoidTexts: history
-      .filter((message) => message.role === "assistant")
-      .slice(-6)
-      .map((message) => message.content),
+      avoidTexts: history
+        .filter((message) => message.role === "assistant")
+        .slice(-6)
+        .map((message) => message.content),
       maxChars: replyCaps.tableReplyMaxChars,
     });
   }
   if (!replyText) {
     throw new Error("Speaker bot returned an empty reply.");
   }
+  // Promote any plain `@Name` / bare-name peer references into prism-bot mention
+  // markdown so the client renders the chip + lights the notified glyph on the
+  // addressed bot's seat. Safe even when the model already used the markdown.
+  replyText = autoTagPeerMentionsInCoffeeReply(replyText, speaker, group);
   const nextSocialByBotId = computeNextCoffeeSocialState({
     previousByBotId: preTurnSocialByBotId,
     group,
@@ -2953,6 +3322,7 @@ export async function processCoffeeTurn(
     settings,
     turnKind: "user",
     playerInterruption: input.playerInterruption,
+    directedSpeakerBotId: input.directedSpeakerBotId,
   });
 }
 

@@ -225,9 +225,25 @@ export interface CoffeePreset {
 export interface CoffeeGroupEvent {
   id: string;
   groupId: string;
-  type: "created" | "renamed" | "settings_updated" | "roster_updated" | "session_created";
+  type:
+    | "created"
+    | "renamed"
+    | "settings_updated"
+    | "roster_updated"
+    | "session_created"
+    | "model_choice_updated";
   payload: Record<string, unknown>;
   createdAt: string;
+}
+
+/**
+ * Per-Coffee-Group model picker memory. Keys are provider ids; values are
+ * Auto picker model ids (e.g. `"llama3.2"`, `"gpt-5.1"`). Missing or empty
+ * keys mean "Auto" / fall back to per-bot defaults.
+ */
+export interface CoffeeGroupModelChoice {
+  local?: string;
+  openai?: string;
 }
 
 export interface CoffeeGroup {
@@ -240,6 +256,8 @@ export interface CoffeeGroup {
   presetMode: CoffeePresetMode;
   /** When `auto`, new group sessions pick a random generated topic server-side. */
   topicSelectionMode?: CoffeeTopicSelectionMode;
+  /** Server-persisted Coffee model picker per provider. Empty = Auto. */
+  modelChoiceByProvider?: CoffeeGroupModelChoice;
   moodSummary?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
