@@ -10,12 +10,14 @@ import {
   clampCoffeeSocialValue,
   clampCoffeeTableReplyText,
   coffeeReplyLooksLikePromptLeak,
+  coffeeReplyRepeatsRecentAssistant,
   computePlayerInterruptionConsequences,
   computeNextCoffeeSocialState,
   createCoffeeGroup,
   createCoffeeConversation,
   createCoffeeConversationFromGroup,
   createCoffeePreset,
+  deleteCoffeeGroup,
   deleteCoffeePreset,
   updateCoffeeConversationSettings,
   listCoffeePresets,
@@ -184,6 +186,7 @@ function createCoffeeTestDb(): DatabaseSync {
       coffee_group_id TEXT,
       coffee_duration_minutes INTEGER,
       coffee_preset_id TEXT,
+      coffee_topic TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -223,6 +226,7 @@ function createCoffeeTestDb(): DatabaseSync {
       name TEXT NOT NULL,
       coffee_settings TEXT NOT NULL,
       preset_mode TEXT NOT NULL DEFAULT 'manual',
+      coffee_topic_mode TEXT NOT NULL DEFAULT 'manual',
       mood_summary TEXT NOT NULL DEFAULT '{}',
       archived_at TEXT,
       created_at TEXT NOT NULL,
@@ -283,13 +287,13 @@ function seedCoffeeBot(db: DatabaseSync, userId: string, bot: CoffeeBotProfile):
 }
 
 describe("createCoffeeConversation", () => {
-  it("creates an empty Coffee session with frozen bot group ids", () => {
+  it("creates an empty Coffee session with frozen bot group ids", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
     seedCoffeeBot(db, userId, BORIS);
 
-    const result = createCoffeeConversation(db, userId, {
+    const result = await createCoffeeConversation(db, userId, {
       groupBotIds: [ALICE.id, BORIS.id],
     });
 
@@ -333,15 +337,17 @@ describe("createCoffeeConversation", () => {
       [ALICE.id, BORIS.id].sort()
     );
     assert.ok(persistedRows.every((row) => row.leave_pressure >= 0 && row.leave_pressure <= 1));
+    assert.equal(result.coffeeStarterTopics?.length, 3);
+    assert.ok(!result.conversation.coffeeTopic);
   });
 
-  it("persists normalized coffee settings and returns them on the conversation", () => {
+  it("persists normalized coffee settings and returns them on the conversation", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
     seedCoffeeBot(db, userId, BORIS);
 
-    const result = createCoffeeConversation(db, userId, {
+    const result = await createCoffeeConversation(db, userId, {
       groupBotIds: [ALICE.id, BORIS.id],
       coffeeSettings: {
         responseLength: "brief",
@@ -388,6 +394,7 @@ describe("Coffee group foundation", () => {
     assert.equal(group.coffeeSettings.responseLength, "brief");
     assert.equal(group.coffeeSettings.crossTalk, "chatty");
     assert.equal(group.presetMode, "manual");
+    assert.equal(group.topicSelectionMode, "manual");
 
     const events = db
       .prepare("SELECT event_type FROM coffee_group_events WHERE group_id = ?")
@@ -395,7 +402,26 @@ describe("Coffee group foundation", () => {
     assert.deepEqual(events.map((row) => row.event_type), ["created"]);
   });
 
-  it("starts a session from a Coffee group and freezes its snapshot", () => {
+  it("persists auto topic selection on the conversation when the group requests it", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+    updateCoffeeGroup(db, userId, group.id, { topicSelectionMode: "auto" });
+    const result = await createCoffeeConversationFromGroup(db, userId, group.id, {});
+    const topic = result.conversation.coffeeTopic?.trim() ?? "";
+    assert.ok(topic.length > 0, "expected server-picked topic on the conversation");
+    assert.equal(result.coffeeStarterTopics, undefined);
+    const row = db
+      .prepare("SELECT coffee_topic FROM conversations WHERE id = ?")
+      .get(result.conversation.id) as { coffee_topic: string | null };
+    assert.equal(row.coffee_topic, topic);
+  });
+
+  it("starts a session from a Coffee group and freezes its snapshot", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
@@ -406,7 +432,7 @@ describe("Coffee group foundation", () => {
       groupBotIds: [null, ALICE.id, BORIS.id, null, null],
       coffeeSettings: { responseLength: "roomy" },
     });
-    const result = createCoffeeConversationFromGroup(db, userId, group.id, {
+    const result = await createCoffeeConversationFromGroup(db, userId, group.id, {
       durationMinutes: 10,
     });
 
@@ -433,7 +459,7 @@ describe("Coffee group foundation", () => {
     assert.deepEqual(JSON.parse(row.bot_group_ids), [null, ALICE.id, BORIS.id, null, null]);
   });
 
-  it("rejects unsupported group session durations", () => {
+  it("rejects unsupported group session durations", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
@@ -442,10 +468,39 @@ describe("Coffee group foundation", () => {
       groupBotIds: [ALICE.id, BORIS.id],
     });
 
-    assert.throws(
-      () => createCoffeeConversationFromGroup(db, userId, group.id, { durationMinutes: 15 }),
+    await assert.rejects(
+      async () => {
+        await createCoffeeConversationFromGroup(db, userId, group.id, { durationMinutes: 15 });
+      },
       /1, 5, or 10 minutes/
     );
+  });
+
+  it("deletes a Coffee group and unlinks sessions without removing conversations", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const group = createCoffeeGroup(db, userId, {
+      name: "Temp Table",
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+    const session = await createCoffeeConversationFromGroup(db, userId, group.id, {
+      durationMinutes: 5,
+    });
+    const convId = session.conversation.id;
+
+    deleteCoffeeGroup(db, userId, group.id);
+
+    const convRow = db
+      .prepare("SELECT coffee_group_id FROM conversations WHERE id = ?")
+      .get(convId) as { coffee_group_id: string | null };
+    assert.equal(convRow.coffee_group_id, null);
+
+    const groupStill = db.prepare("SELECT id FROM coffee_groups WHERE id = ?").get(group.id);
+    assert.equal(groupStill, undefined);
+
+    assert.throws(() => deleteCoffeeGroup(db, userId, group.id), /not found/);
   });
 });
 
@@ -491,7 +546,7 @@ describe("Coffee presets", () => {
     assert.equal(listCoffeePresets(db, userId).some((preset) => preset.id === created.id), false);
   });
 
-  it("applies explicit and auto presets when starting group sessions", () => {
+  it("applies explicit and auto presets when starting group sessions", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
@@ -505,14 +560,14 @@ describe("Coffee presets", () => {
       coffeeSettings: { responseLength: "roomy" },
     });
 
-    const explicit = createCoffeeConversationFromGroup(db, userId, group.id, {
+    const explicit = await createCoffeeConversationFromGroup(db, userId, group.id, {
       durationMinutes: 1,
       presetId: preset.id,
     });
     assert.equal(explicit.conversation.coffeeSettings?.responseLength, "roomy");
 
     updateCoffeeGroup(db, userId, group.id, { presetMode: "auto" });
-    const auto = createCoffeeConversationFromGroup(db, userId, group.id, {
+    const auto = await createCoffeeConversationFromGroup(db, userId, group.id, {
       durationMinutes: 5,
     });
     assert.ok(auto.conversation.coffeeSettings);
@@ -571,6 +626,18 @@ describe("buildRouterPrompt", () => {
     assert.match(system!.content, /id="bot-cara"/);
     assert.match(system!.content, /name="Alice"/);
     assert.match(system!.content, /Curious philosopher/);
+  });
+
+  it("threads the session topic into the router system prompt when provided", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Hello",
+      lastSpeakerBotId: null,
+      coffeeTopic: "Soft light through the café window",
+    });
+    assert.match(messages[0]!.content, /Soft light through the café window/);
+    assert.match(messages[0]!.content, /Shared session topic/);
   });
 
   it("notes the previous speaker and asks for variety when one exists", () => {
@@ -689,12 +756,34 @@ describe("buildSpeakerPrompt", () => {
     assert.match(systemInstruction!.content, /cutting off another bot mid-sentence/);
     assert.match(systemInstruction!.content, /still warming up/);
     assert.match(systemInstruction!.content, /Hard tabletop cap/);
+    assert.match(systemInstruction!.content, /Never repeat a recent table line exactly/);
     assert.match(systemInstruction!.content, /excitedly/);
+    assert.doesNotMatch(systemInstruction!.content, /Yeah, I get that/);
+    assert.doesNotMatch(systemInstruction!.content, /Wild shift/);
 
     const userTurnInstruction = messages.at(-1);
     assert.equal(userTurnInstruction?.role, "user");
-    assert.match(userTurnInstruction!.content, /48 characters/);
-    assert.match(userTurnInstruction!.content, /Do not end with a question unless/);
+    assert.doesNotMatch(userTurnInstruction!.content, /48 characters/);
+    assert.doesNotMatch(userTurnInstruction!.content, /Do not end with a question unless/);
+    assert.match(userTurnInstruction!.content, /Alice, answer with your next short table line now/);
+  });
+
+  it("threads the session topic into the speaker group context when provided", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "What do you think?",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+      coffeeTopic: "Tiny rituals that keep the week gentle",
+    });
+    const joined = messages.map((m) => m.content).join("\n");
+    assert.match(joined, /Tiny rituals that keep the week gentle/);
+    assert.match(joined, /Table topic anchor/);
   });
 
   it("uses roomy caps when session responseLength is roomy", () => {
@@ -745,6 +834,36 @@ describe("clampCoffeeTableReplyText", () => {
     const out = clampCoffeeTableReplyText(long);
     assert.ok(out.includes("First fitting end."), out);
     assert.ok(out.length <= 48);
+  });
+});
+
+describe("coffee repeated reply cleanup", () => {
+  it("detects exact recent assistant repeats after punctuation normalization", () => {
+    assert.equal(
+      coffeeReplyRepeatsRecentAssistant("Yeah I get that", [
+        {
+          id: "m1",
+          role: "assistant",
+          content: "Yeah, I get that.",
+          createdAt: new Date().toISOString(),
+        },
+      ]),
+      true
+    );
+  });
+
+  it("allows fresh lines that differ from recent assistant replies", () => {
+    assert.equal(
+      coffeeReplyRepeatsRecentAssistant("I'm ready, captain.", [
+        {
+          id: "m1",
+          role: "assistant",
+          content: "Yeah, I get that.",
+          createdAt: new Date().toISOString(),
+        },
+      ]),
+      false
+    );
   });
 });
 
@@ -825,6 +944,40 @@ describe("coffee prompt leak cleanup", () => {
       coffeeReplyLooksLikePromptLeak("We need to respond as SpongeBob, one line, no speaker label."),
       true
     );
+    assert.equal(
+      coffeeReplyLooksLikePromptLeak(
+        "We must respond as Patrick Star, short, one clause, 72 characters max."
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplyLooksLikePromptLeak(
+        '**We must respond as Patrick Star**, short, one clause, 72 characters max.'
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplyLooksLikePromptLeak(
+        "We need to respond as SpongeBob, one clause only, under 72 characters."
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplyLooksLikePromptLeak("We need to respond as Patrick Star."),
+      true
+    );
+    assert.equal(
+      coffeeReplyLooksLikePromptLeak(
+        "We need to produce a single clause, no line breaks, max 72 characters, no speaker label."
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplyLooksLikePromptLeak(
+        "The user wants a single clause of up to 72 characters, no speaker label."
+      ),
+      true
+    );
   });
 
   it("does not flag normal visible banter", () => {
@@ -836,6 +989,27 @@ describe("coffee prompt leak cleanup", () => {
       sanitizeCoffeeTableReply(
         "We need to respond as SpongeBob, one line, no speaker label.",
         "SpongeBob"
+      ),
+      ""
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "SpongeBob We need to respond as SpongeBob, one clause only, under 72 characters.",
+        "SpongeBob"
+      ),
+      ""
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "We need to produce a single clause, no line breaks, max 72 characters, no speaker label.",
+        "SpongeBob"
+      ),
+      ""
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "The user wants a single clause of up to 72 characters, no speaker label.",
+        "Plankton"
       ),
       ""
     );

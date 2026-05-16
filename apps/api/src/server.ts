@@ -23,12 +23,14 @@ import {
   createCoffeeGroup,
   createCoffeeConversation,
   createCoffeeConversationFromGroup,
+  deleteCoffeeGroup,
   deleteCoffeePreset,
   listCoffeeGroups,
   listCoffeePresets,
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
+  setCoffeeConversationTopic,
   updateCoffeePreset,
   updateCoffeeGroup,
   updateCoffeeConversationSettings,
@@ -837,6 +839,7 @@ function buildRoutes(): RouteDefinition[] {
         .prepare(
           `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
                   c.coffee_settings, c.coffee_group_id, c.coffee_duration_minutes,
+                  c.coffee_topic,
                   c.incognito, c.created_at, c.updated_at,
                   (SELECT m.bot_id FROM messages m
                      WHERE m.conversation_id = c.id
@@ -863,6 +866,7 @@ function buildRoutes(): RouteDefinition[] {
             coffee_settings: string | null;
             coffee_group_id: string | null;
             coffee_duration_minutes: number | null;
+            coffee_topic: string | null;
             incognito: number;
             created_at: string;
             updated_at: string;
@@ -1012,6 +1016,11 @@ function buildRoutes(): RouteDefinition[] {
             conversation.coffee_duration_minutes === 5 ||
             conversation.coffee_duration_minutes === 10)
             ? { coffeeSessionDurationMinutes: conversation.coffee_duration_minutes }
+            : {}),
+          ...(conversationModeOut === "coffee" &&
+          typeof conversation.coffee_topic === "string" &&
+          conversation.coffee_topic.trim().length > 0
+            ? { coffeeTopic: conversation.coffee_topic.trim() }
             : {}),
           incognito: conversation.incognito === 1,
           lastBotId: conversation.last_bot_id ?? null,
@@ -1641,20 +1650,33 @@ function buildRoutes(): RouteDefinition[] {
         ...(groupBotIds !== undefined ? { groupBotIds } : {}),
         ...(body.coffeeSettings !== undefined ? { coffeeSettings: body.coffeeSettings } : {}),
         ...(body.presetMode !== undefined ? { presetMode: body.presetMode } : {}),
+        ...(body.topicSelectionMode !== undefined ? { topicSelectionMode: body.topicSelectionMode } : {}),
       });
       json(ctx.res, 200, {
         ok: true,
         group,
       });
     }),
+    route("DELETE", "/api/coffee/groups/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      deleteCoffeeGroup(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true });
+    }),
     route("POST", "/api/coffee/groups/:id/sessions", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
-      const result = createCoffeeConversationFromGroup(db, userId, ctx.params.id, {
-        coffeeSettings: body.coffeeSettings,
-        durationMinutes: body.durationMinutes,
-        presetId: body.presetId,
-      });
+      const result = await createCoffeeConversationFromGroup(
+        db,
+        userId,
+        ctx.params.id,
+        {
+          coffeeSettings: body.coffeeSettings,
+          durationMinutes: body.durationMinutes,
+          presetId: body.presetId,
+        },
+        { prismDefaultLlmModel: user.prism_default_llm_model }
+      );
       json(ctx.res, 201, {
         ok: true,
         ...result,
@@ -1662,17 +1684,37 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/coffee/sessions", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      const result = createCoffeeConversation(db, userId, {
-        groupBotIds,
-        coffeeSettings: body.coffeeSettings,
-      });
+      const result = await createCoffeeConversation(
+        db,
+        userId,
+        {
+          groupBotIds,
+          coffeeSettings: body.coffeeSettings,
+        },
+        { prismDefaultLlmModel: user.prism_default_llm_model }
+      );
       json(ctx.res, 200, {
         ok: true,
         ...result,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/topic", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const conversation = await setCoffeeConversationTopic(
+        db,
+        userId,
+        ctx.params.id,
+        body.topic
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
       });
     }),
     route("PATCH", "/api/coffee/sessions/:id/settings", async (ctx) => {
@@ -1701,6 +1743,7 @@ function buildRoutes(): RouteDefinition[] {
           ? body.directedSpeakerBotId
           : undefined;
       const userIsComposing = body.userIsComposing === true;
+      const sessionSpeakerModel = readOptionalString(body.modelOverride);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
@@ -1717,6 +1760,7 @@ function buildRoutes(): RouteDefinition[] {
           userDisplayName: user.display_name,
           userKey,
           prismDefaultLlmModel: user.prism_default_llm_model,
+          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
         },
         userIsComposing,
         directedSpeakerBotId
@@ -1765,6 +1809,7 @@ function buildRoutes(): RouteDefinition[] {
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const sessionSpeakerModel = readOptionalString(body.modelOverride);
       const result = await processCoffeeTurn(
         db,
         userId,
@@ -1781,6 +1826,7 @@ function buildRoutes(): RouteDefinition[] {
           userDisplayName: user.display_name,
           userKey,
           prismDefaultLlmModel: user.prism_default_llm_model,
+          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
         }
       );
       json(ctx.res, 200, {

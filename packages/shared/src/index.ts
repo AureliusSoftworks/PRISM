@@ -210,6 +210,9 @@ export const DEFAULT_COFFEE_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinut
 
 export type CoffeePresetMode = "manual" | "auto";
 
+/** How new Coffee Sessions pick a table topic for a saved Coffee Group. */
+export type CoffeeTopicSelectionMode = "manual" | "auto";
+
 export interface CoffeePreset {
   id: string;
   name: string;
@@ -235,6 +238,8 @@ export interface CoffeeGroup {
   coffeeSeatBotIds: Array<string | null>;
   coffeeSettings: CoffeeSessionSettings;
   presetMode: CoffeePresetMode;
+  /** When `auto`, new group sessions pick a random generated topic server-side. */
+  topicSelectionMode?: CoffeeTopicSelectionMode;
   moodSummary?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -303,6 +308,8 @@ export interface Conversation {
   coffeeSettings?: CoffeeSessionSettings;
   /** Coffee-only — selected timed session duration, once group sessions own starts. */
   coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
+  /** Coffee-only — shared anchor topic for this session (null until chosen). */
+  coffeeTopic?: string | null;
   /**
    * Private chat marker — once `true`, accent styling is suppressed to
    * grayscale, the thread stays client-held, and nothing is written to
@@ -586,6 +593,11 @@ export interface CoffeeSessionCreateResponse {
   conversation: Conversation;
   /** Opening setup used by the client arrival animation. */
   arrivalScenario: CoffeeArrivalScenario;
+  /**
+   * Suggested topic chips for manual selection (omitted when the server
+   * already persisted {@link Conversation.coffeeTopic}, e.g. auto-topic groups).
+   */
+  coffeeStarterTopics?: string[];
 }
 
 /** Request body for `POST /api/coffee/sessions/:id/continue`. */

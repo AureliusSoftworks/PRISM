@@ -56,6 +56,7 @@ import type {
   CoffeeSessionDurationMinutes,
   CoffeeSessionCreateResponse,
   CoffeeSessionSettings,
+  CoffeeTopicSelectionMode,
   CoffeeTurnResponse,
 } from "@localai/shared";
 import {
@@ -139,6 +140,33 @@ function sanitizeCoffeeSocialSnapshot(input: Partial<CoffeeBotSocialSnapshot> | 
     engagement: clampCoffeeSocialValue(input?.engagement ?? DEFAULT_COFFEE_SOCIAL.engagement),
     leavePressure: clampCoffeeSocialValue(input?.leavePressure ?? DEFAULT_COFFEE_SOCIAL.leavePressure),
   };
+}
+
+function coffeeReplyRepeatKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function recentCoffeeAssistantRepeatKeys(history: readonly ChatMessage[], limit = 6): Set<string> {
+  const keys = new Set<string>();
+  for (let index = history.length - 1; index >= 0 && keys.size < limit; index -= 1) {
+    const message = history[index];
+    if (!message || message.role !== "assistant") continue;
+    const key = coffeeReplyRepeatKey(message.content);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+export function coffeeReplyRepeatsRecentAssistant(
+  replyText: string,
+  history: readonly ChatMessage[]
+): boolean {
+  const key = coffeeReplyRepeatKey(replyText);
+  return key.length > 0 && recentCoffeeAssistantRepeatKeys(history).has(key);
 }
 
 /**
@@ -270,6 +298,13 @@ export function stripCoffeeSpeakerPrefix(raw: string, speakerName: string | null
           new RegExp(`^\\s*\\*{0,2}${escaped}\\s*(?:\\((?:assistant|bot)\\))?\\*{0,2}\\s*[:：-]\\s*`, "i"),
           ""
         )
+        .replace(
+          new RegExp(
+            `^\\s*\\*{0,2}${escaped}\\*{0,2}\\s+(?=(?:we|i|you|respond|reply|write|return|length|do\\s+not)\\b)`,
+            "i"
+          ),
+          ""
+        )
         .trim();
     }
     if (text === before) break;
@@ -279,12 +314,18 @@ export function stripCoffeeSpeakerPrefix(raw: string, speakerName: string | null
 }
 
 const COFFEE_PROMPT_LEAK_PREFIX_PATTERNS = [
-  /^we need to respond as\b/i,
-  /^i need to respond as\b/i,
+  /** Matches meta lines models emit ("need/must/should/have to respond as …"). */
+  /^(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?respond\s+as\b/i,
+  /^(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?(?:produce|write|return|provide|create)\b/i,
+  /^write only\b/i,
+  /^return only\b/i,
+  /^length\s*:/i,
   /^respond as\b/i,
   /^reply as\b/i,
   /^you are sitting at coffee mode\b/i,
   /^the user says\b/i,
+  /^the user wants\b/i,
+  /^the user needs\b/i,
   /^current autonomous table moment\b/i,
   /^latest table moment\b/i,
   /^reply naturally as part of the table conversation\b/i,
@@ -296,7 +337,11 @@ const COFFEE_PROMPT_LEAK_PREFIX_PATTERNS = [
 ] as const;
 
 const COFFEE_PROMPT_LEAK_FRAGMENT_PATTERNS = [
+  /\brespond as\b/i,
   /\bone line\b/i,
+  /\bone clause\b/i,
+  /\bsingle clause\b/i,
+  /\bsingle line\b/i,
   /\bno line breaks\b/i,
   /\bhard tabletop cap\b/i,
   /\bdo not include a speaker label\b/i,
@@ -305,17 +350,47 @@ const COFFEE_PROMPT_LEAK_FRAGMENT_PATTERNS = [
   /\bcurrent autonomous table moment\b/i,
   /\byou are sitting at coffee mode\b/i,
   /\breply naturally as part of the table conversation\b/i,
+  /\bcharacters\s+max\b/i,
+  /\bmax\s+\d+\s+characters\b/i,
+  /\bunder\s+\d+\s+characters\b/i,
+  /\bup to\s+\d+\s+characters\b/i,
+  /\bvisible table line\b/i,
+  /\bno speaker\b/i,
+  /\bno speaker label\b/i,
+] as const;
+
+const COFFEE_PROMPT_LEAK_ANYWHERE_PATTERNS = [
+  /\b(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?respond\s+as\b/i,
+  /\b(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?(?:produce|write|return|provide|create)\s+(?:a\s+)?(?:single\s+)?(?:line|clause|reply|response|utterance)\b/i,
+  /\bthe user (?:wants|needs|asked for|requested)\s+(?:a\s+)?(?:single\s+)?(?:line|clause|reply|response|utterance)\b/i,
 ] as const;
 
 const COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS = 48;
+
+/**
+ * Strip wrapping noise so leaked instructions still match after models echo
+ * prompts inside quotes or markdown emphasis.
+ */
+function normalizedCoffeeReplyForLeakScan(raw: string): string {
+  let text = raw.replace(/\s+/g, " ").trim();
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = text.replace(/^[*"_`'#\s]+/, "").trim();
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
 
 /**
  * Detect when the model replies with Coffee instruction text instead of an
  * in-character table line.
  */
 export function coffeeReplyLooksLikePromptLeak(raw: string): boolean {
-  const normalized = raw.replace(/\s+/g, " ").trim();
+  const normalized = normalizedCoffeeReplyForLeakScan(raw);
   if (!normalized) return false;
+  if (COFFEE_PROMPT_LEAK_ANYWHERE_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return true;
+  }
   if (COFFEE_PROMPT_LEAK_PREFIX_PATTERNS.some((pattern) => pattern.test(normalized))) {
     return true;
   }
@@ -398,9 +473,116 @@ async function repairCoffeePromptLeak(args: {
     : "";
 }
 
-function buildCoffeeEmergencyFallbackReply(tableFocus: string, maxChars: number): string {
-  const fallback = /\?\s*$/.test(tableFocus.trim()) ? "Yeah, I hear that." : "Mm, fair enough.";
-  return clampCoffeeTableReplyText(fallback, maxChars);
+function buildCoffeeRepeatRepairMessages(args: {
+  speaker: CoffeeBotProfile;
+  repeatedReply: string;
+  recentLines: readonly string[];
+  tableFocus: string;
+  maxChars: number;
+}): ProviderMessage[] {
+  const speakerSystemPrompt = composeBotSystemPrompt(args.speaker.name, args.speaker.systemPrompt);
+  const messages: ProviderMessage[] = [];
+  if (speakerSystemPrompt) {
+    messages.push({ role: "system", content: speakerSystemPrompt });
+  }
+  messages.push({
+    role: "system",
+    content:
+      `You are ${args.speaker.name} at the PRISM coffee table. ` +
+      "Your previous draft repeated the table. Replace it with a fresh, concrete in-character beat.",
+  });
+  messages.push({
+    role: "user",
+    content: [
+      `Latest table moment: ${args.tableFocus}`,
+      `Repeated draft: ${args.repeatedReply}`,
+      `Do not reuse: ${args.recentLines.join(" / ")}`,
+      `Return one visible ${args.speaker.name} line, max ${args.maxChars} characters.`,
+    ].join("\n"),
+  });
+  return messages;
+}
+
+async function repairCoffeeRepeatedReply(args: {
+  speakerProvider: LlmProvider;
+  speaker: CoffeeBotProfile;
+  speakerOptions: GenerateOptions;
+  repeatedReply: string;
+  history: readonly ChatMessage[];
+  tableFocus: string;
+  maxChars: number;
+}): Promise<string> {
+  const recentLines = args.history
+    .filter((message) => message.role === "assistant")
+    .slice(-6)
+    .map((message) => message.content);
+  const repaired = await args.speakerProvider.generateResponse(
+    buildCoffeeRepeatRepairMessages({
+      speaker: args.speaker,
+      repeatedReply: args.repeatedReply,
+      recentLines,
+      tableFocus: args.tableFocus,
+      maxChars: args.maxChars,
+    }),
+    {
+      ...args.speakerOptions,
+      maxTokens: Math.min(
+        args.speakerOptions.maxTokens ?? COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS,
+        COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS
+      ),
+    }
+  );
+  const visible = typeof repaired === "string"
+    ? sanitizeCoffeeTableReply(repaired, args.speaker.name, args.maxChars)
+    : "";
+  return visible && !coffeeReplyRepeatsRecentAssistant(visible, args.history) ? visible : "";
+}
+
+function buildCoffeeEmergencyFallbackReply(args: {
+  tableFocus: string;
+  speaker: Pick<CoffeeBotProfile, "id" | "name">;
+  conversationId: string;
+  historyLength: number;
+  seedExtra?: string;
+  avoidTexts?: readonly string[];
+  maxChars: number;
+}): string {
+  const options = /\?\s*$/.test(args.tableFocus.trim())
+    ? ["Yeah.", "I hear you.", "That tracks.", "Maybe so."]
+    : ["Mm.", "Right.", "Okay.", "Tiny pause.", "I get that.", "New angle."];
+  const seed = `${args.conversationId}:${args.speaker.id}:${args.historyLength}:${args.seedExtra ?? ""}:${args.tableFocus}`;
+  const startIndex = Math.floor(stableUnitValue(seed) * options.length) % options.length;
+  const avoidKeys = new Set((args.avoidTexts ?? []).map(coffeeReplyRepeatKey).filter(Boolean));
+  let fallback = options[startIndex] ?? options[0]!;
+  for (let offset = 0; offset < options.length; offset += 1) {
+    const candidate = options[(startIndex + offset) % options.length] ?? fallback;
+    if (!avoidKeys.has(coffeeReplyRepeatKey(candidate))) {
+      fallback = candidate;
+      break;
+    }
+  }
+  return clampCoffeeTableReplyText(fallback, args.maxChars);
+}
+
+function sanitizeLoadedCoffeeAssistantContent(
+  row: Pick<MessageRow, "id" | "content" | "bot_id" | "bot_name">,
+  conversationId: string,
+  historyLength: number
+): string {
+  const speakerName = row.bot_name ?? "Bot";
+  const visible = sanitizeCoffeeTableReply(row.content, speakerName);
+  if (visible) return visible;
+  return buildCoffeeEmergencyFallbackReply({
+    tableFocus: row.content,
+    speaker: {
+      id: row.bot_id ?? speakerName,
+      name: speakerName,
+    },
+    conversationId,
+    historyLength,
+    seedExtra: row.id,
+    maxChars: COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS,
+  });
 }
 
 /**
@@ -455,6 +637,12 @@ export interface CoffeeTurnSettings {
   userKey?: Buffer;
   /** Matches account Settings — drives auxiliary LLM for the Coffee router. */
   prismDefaultLlmModel?: string | null;
+  /**
+   * When set, every Coffee speaker uses this model id for the effective provider,
+   * ignoring per-bot local/online checkpoint fields (same idea as Sandbox
+   * `modelOverride`).
+   */
+  sessionSpeakerModel?: string | null;
 }
 
 export interface CoffeeTurnInput {
@@ -483,6 +671,7 @@ export interface CoffeeGroupUpdateInput {
   groupBotIds?: Array<string | null>;
   coffeeSettings?: unknown;
   presetMode?: unknown;
+  topicSelectionMode?: unknown;
 }
 
 export interface CoffeeGroupSessionCreateInput {
@@ -538,6 +727,10 @@ function normalizeCoffeeSessionDurationMinutes(raw: unknown): CoffeeSessionDurat
 }
 
 function normalizeCoffeePresetMode(raw: unknown): CoffeePresetMode {
+  return raw === "auto" ? "auto" : "manual";
+}
+
+function normalizeCoffeeTopicSelectionMode(raw: unknown): CoffeeTopicSelectionMode {
   return raw === "auto" ? "auto" : "manual";
 }
 
@@ -933,6 +1126,7 @@ function mapCoffeeGroupRow(
     coffeeSeatBotIds,
     coffeeSettings: parseStoredCoffeeSessionSettings(row.coffee_settings),
     presetMode: normalizeCoffeePresetMode(row.preset_mode),
+    topicSelectionMode: normalizeCoffeeTopicSelectionMode(row.coffee_topic_mode ?? "manual"),
     moodSummary: moodSummary ?? computeCoffeeGroupMoodSummary(db, row.user_id, row.id),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -980,7 +1174,7 @@ function loadCoffeeGroupRow(
 ): CoffeeGroupRow | undefined {
   return db
     .prepare(
-      `SELECT id, user_id, name, coffee_settings, preset_mode, mood_summary, archived_at, created_at, updated_at
+      `SELECT id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, mood_summary, archived_at, created_at, updated_at
          FROM coffee_groups
         WHERE id = ? AND user_id = ? AND archived_at IS NULL`
     )
@@ -990,7 +1184,7 @@ function loadCoffeeGroupRow(
 export function listCoffeeGroups(db: DatabaseSync, userId: string): CoffeeGroup[] {
   const rows = db
     .prepare(
-      `SELECT id, user_id, name, coffee_settings, preset_mode, mood_summary, archived_at, created_at, updated_at
+      `SELECT id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, mood_summary, archived_at, created_at, updated_at
          FROM coffee_groups
         WHERE user_id = ? AND archived_at IS NULL
         ORDER BY updated_at DESC, created_at DESC`
@@ -1129,8 +1323,8 @@ export function createCoffeeGroup(
   const name = normalizeCoffeeGroupName(input.name, generateCoffeeTitle("", group));
   db.prepare(
     `INSERT INTO coffee_groups
-       (id, user_id, name, coffee_settings, preset_mode, mood_summary, archived_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'manual', '{}', NULL, ?, ?)`
+       (id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, mood_summary, archived_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'manual', 'manual', '{}', NULL, ?, ?)`
   ).run(groupId, userId, name, JSON.stringify(settings), now, now);
   upsertCoffeeGroupSeats(db, userId, groupId, seatBotIds, now);
   insertCoffeeGroupEvent(
@@ -1181,6 +1375,10 @@ export function updateCoffeeGroup(
     updates.push("preset_mode = ?");
     values.push(normalizeCoffeePresetMode(input.presetMode));
   }
+  if (input.topicSelectionMode !== undefined) {
+    updates.push("coffee_topic_mode = ?");
+    values.push(normalizeCoffeeTopicSelectionMode(input.topicSelectionMode));
+  }
   if (input.groupBotIds !== undefined) {
     const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
     const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
@@ -1209,6 +1407,39 @@ export function updateCoffeeGroup(
   const updated = loadCoffeeGroupRow(db, userId, groupId);
   if (!updated) throw new Error("Coffee group not found.");
   return mapCoffeeGroupRow(db, updated);
+}
+
+/**
+ * Permanently removes a Coffee Group for this account.
+ *
+ * Unlinks any Coffee conversations that referenced it (`coffee_group_id` → NULL).
+ * Drops seat rows and group events (FK CASCADE). Does **not** delete messages
+ * or conversation rows.
+ */
+export function deleteCoffeeGroup(db: DatabaseSync, userId: string, groupId: string): void {
+  const now = new Date().toISOString();
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    db.prepare(
+      `UPDATE conversations
+          SET coffee_group_id = NULL,
+              updated_at = ?
+        WHERE user_id = ? AND coffee_group_id = ?`
+    ).run(now, userId, groupId);
+    const result = db.prepare("DELETE FROM coffee_groups WHERE id = ? AND user_id = ?").run(groupId, userId);
+    if (Number(result.changes ?? 0) === 0) {
+      db.exec("ROLLBACK");
+      throw new Error("Coffee group not found.");
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* ignore failed rollback after closed txn */
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1283,6 +1514,115 @@ export function parseStoredCoffeeSessionSettings(raw: string | null | undefined)
   }
 }
 
+const COFFEE_STARTER_TOPIC_INFER_MAX_TOKENS = 220;
+const COFFEE_STARTER_TOPIC_INFER_TEMPERATURE = 0.55;
+
+function parseCoffeeStarterTopicsPayload(raw: string): string[] {
+  if (typeof raw !== "string") return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const candidates: string[] = [trimmed];
+  const fenceMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (fenceMatch && fenceMatch[0] !== trimmed) {
+    candidates.push(fenceMatch[0]);
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (!parsed || typeof parsed !== "object") continue;
+      const topics = (parsed as { topics?: unknown }).topics;
+      if (!Array.isArray(topics)) continue;
+      const strings = topics
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+      if (strings.length >= 3) return strings.slice(0, 3);
+    } catch {
+      // try next candidate
+    }
+  }
+  return [];
+}
+
+function buildDeterministicCoffeeStarterTopics(
+  group: CoffeeBotProfile[],
+  sessionSettings: CoffeeSessionSettings
+): string[] {
+  const names = group.map((bot) => bot.name).filter((name) => name.trim().length > 0);
+  const roster = names.length > 0 ? names.slice(0, 3).join(", ") : "the seated bots";
+  const energy =
+    sessionSettings.tableEnergy === "theatre"
+      ? "theatrical"
+      : sessionSettings.tableEnergy === "still"
+        ? "quiet"
+        : "easygoing";
+  return [
+    `A ${energy} check-in everyone at this table can riff on`,
+    `One small curiosity ${roster} might disagree on kindly`,
+    `Something concrete from today worth unpacking together`,
+  ];
+}
+
+/**
+ * Produce three short topic labels for the Coffee topic picker. Falls back to
+ * deterministic copy when the auxiliary model is unavailable or mis-parses.
+ */
+export async function inferCoffeeStarterTopics(args: {
+  provider: LlmProvider;
+  group: CoffeeBotProfile[];
+  sessionSettings: CoffeeSessionSettings;
+  presetLabel?: string | null;
+}): Promise<string[]> {
+  const { provider, group, sessionSettings, presetLabel } = args;
+  const botLines = group.map((bot) => {
+    const persona = summarizePersonaForRouter(bot.systemPrompt);
+    return `- ${bot.name}${persona ? ` — ${persona}` : ""}`;
+  });
+  const presetLine =
+    typeof presetLabel === "string" && presetLabel.trim().length > 0
+      ? `Session preset / tone label: "${presetLabel.trim()}".`
+      : "No named preset — infer tone only from Coffee session settings below.";
+  const settingsLine = JSON.stringify({
+    responseLength: sessionSettings.responseLength,
+    tableEnergy: sessionSettings.tableEnergy,
+    crossTalk: sessionSettings.crossTalk,
+    stayOnThread: sessionSettings.stayOnThread,
+  });
+  const messages: ProviderMessage[] = [
+    {
+      role: "system",
+      content:
+        "You name short tabletop conversation topics for a multi-bot Coffee session UI. Reply with JSON only — no prose, no markdown outside JSON.",
+    },
+    {
+      role: "user",
+      content: [
+        presetLine,
+        `Coffee session tuning (JSON): ${settingsLine}`,
+        "Seated bots:",
+        ...botLines,
+        "",
+        'Respond with compact JSON exactly in this shape: {"topics":["...","...","..."]}',
+        "Include exactly three strings.",
+        "Each string is a TOPIC THE GROUP EXPLORES together (not a user quick-reply, not a question directed only at the player).",
+        "Each topic must be 2–8 words, concrete, safe, single-line UTF-8; no numbering or prefixes inside strings.",
+        "Topics should differ in emotional angle (e.g. reflective vs playful vs practical) while fitting the same table energy.",
+      ].join("\n"),
+    },
+  ];
+  try {
+    const raw = await provider.generateResponse(messages, {
+      temperature: COFFEE_STARTER_TOPIC_INFER_TEMPERATURE,
+      maxTokens: COFFEE_STARTER_TOPIC_INFER_MAX_TOKENS,
+    });
+    const parsed = parseCoffeeStarterTopicsPayload(raw);
+    if (parsed.length === 3) return parsed;
+  } catch {
+    // Non-fatal — deterministic fallback below.
+  }
+  return buildDeterministicCoffeeStarterTopics(group, sessionSettings);
+}
+
 function coffeeTranscriptContainsPrismBotMention(
   userMessage: string,
   history: readonly { content: string }[]
@@ -1310,6 +1650,8 @@ export function buildRouterPrompt(args: {
   socialByBotId?: Record<string, CoffeeBotSocialSnapshot>;
   turnKind?: CoffeeTurnKind;
   sessionSettings?: CoffeeSessionSettings;
+  /** When set, router should prefer speakers who can advance this shared subject. */
+  coffeeTopic?: string | null;
 }): ProviderMessage[] {
   const {
     group,
@@ -1319,8 +1661,18 @@ export function buildRouterPrompt(args: {
     socialByBotId = {},
     turnKind = "user",
     sessionSettings,
+    coffeeTopic,
   } = args;
   const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
+  const topicTrim = typeof coffeeTopic === "string" ? coffeeTopic.trim() : "";
+  const topicAnchorLines: string[] =
+    topicTrim.length > 0
+      ? [
+          "",
+          `Shared session topic (stay near this unless the table naturally pivots): "${topicTrim}".`,
+          "Prefer the next speaker who can add a fresh angle on this topic without repeating the same beat.",
+        ]
+      : [];
 
   const personaLines = group.map((bot) => {
     const personaSnippet = summarizePersonaForRouter(bot.systemPrompt);
@@ -1364,6 +1716,7 @@ export function buildRouterPrompt(args: {
     "",
     recencyHint,
     earlyThreadHint,
+    ...topicAnchorLines,
     "",
     buildCoffeeTableTuningAppendix(settings),
     "",
@@ -1527,6 +1880,7 @@ export function buildSpeakerPrompt(args: {
   turnKind?: CoffeeTurnKind;
   firstContactIntro?: boolean;
   sessionSettings?: CoffeeSessionSettings;
+  coffeeTopic?: string | null;
 }): ProviderMessage[] {
   const {
     speaker,
@@ -1538,6 +1892,7 @@ export function buildSpeakerPrompt(args: {
     turnKind = "user",
     firstContactIntro = false,
     sessionSettings,
+    coffeeTopic,
   } = args;
   const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
   const { tableReplyMaxChars } = coffeeReplyLengthCaps(settings);
@@ -1551,12 +1906,22 @@ export function buildSpeakerPrompt(args: {
   const speakerSocial = socialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL;
 
   const prismBotMentionHint = coffeeTranscriptContainsPrismBotMention(userMessage, history);
+  const topicTrim = typeof coffeeTopic === "string" ? coffeeTopic.trim() : "";
+  const topicLines: string[] =
+    topicTrim.length > 0
+      ? [
+          "",
+          `Table topic anchor: "${topicTrim}".`,
+          "Let your line relate to this topic in a natural, character-true way unless the transcript has clearly moved on.",
+        ]
+      : [];
 
   const groupContextLines = [
     "You are sitting at Coffee Mode: an ambiguous coffee shop table inside PRISM.",
     history.length < 3
       ? "This table is still warming up. You can see the other participants' names, but do not act as if you already know them unless the transcript proves it."
       : "Use the current table transcript as your shared history with the user and the other bots.",
+    ...topicLines,
     "You are participating in a live group conversation with the user and the following other bots:",
     ...peerLines,
     "",
@@ -1565,7 +1930,8 @@ export function buildSpeakerPrompt(args: {
     "The user is present, but Coffee should feel like a group conversation. Do not turn every reply back toward the user.",
     "Reply as one line of plain prose (no line breaks). ONE clause only — a single short utterance, like a reaction bark or one breath. No second sentence, no semicolon piles, no em dash add-ons.",
     `Hard tabletop cap: ${tableReplyMaxChars} characters including spaces. Anything longer is clipped and looks broken.`,
-    `Examples: "Hey Patrick!" "Wild shift, huh?" "Yeah, I get that." If you're tempted to type more, stop sooner (cap is ${tableReplyMaxChars} chars).`,
+    "Make the line concrete: pull one small image, opinion, object, motive, or emotional beat from your persona or the latest table moment.",
+    "Never repeat a recent table line exactly; if the obvious reply is generic, choose a new concrete angle instead.",
     "No asterisk stage directions (like *excitedly*), no parenthetical acting notes.",
     "Do not end with a question by default. Ask a question only when it is genuinely the most natural next move; otherwise end with a statement, observation, or small offer.",
     "Do not write as if you are cutting off another bot mid-sentence. Coffee only presents cutoffs when the app has explicit interruption metadata.",
@@ -1627,22 +1993,15 @@ export function buildSpeakerPrompt(args: {
       ? {
           role: "user",
           content: [
-            "Continue the table conversation in your own voice.",
             `Latest table moment: ${userMessage}`,
-            `Respond as ${speaker.name} to the latest bot, the shared topic, or a natural topic shift. Only address the user if that is truly the natural next move.`,
-            `Length: one clause only — hard cap ${tableReplyMaxChars} characters including spaces.`,
-            "Do not end with a question unless the moment truly needs one.",
-            "Do not include a speaker label.",
+            `${speaker.name}, say your next short table line now.`,
           ].join("\n"),
         }
       : {
           role: "user",
           content: [
             `The user says: ${userMessage}`,
-            "Reply naturally as part of the table conversation. You may answer the user directly or open the topic to another bot.",
-            `Length: one clause only — hard cap ${tableReplyMaxChars} characters including spaces.`,
-            "Do not end with a question unless the moment truly needs one.",
-            "Do not include a speaker label.",
+            `${speaker.name}, answer with your next short table line now.`,
           ].join("\n"),
         }
   );
@@ -1672,6 +2031,7 @@ interface ConversationRow {
   coffee_group_id: string | null;
   coffee_duration_minutes: number | null;
   coffee_preset_id: string | null;
+  coffee_topic: string | null;
   incognito: number;
   created_at: string;
   updated_at: string;
@@ -1683,6 +2043,7 @@ interface CoffeeGroupRow {
   name: string;
   coffee_settings: string;
   preset_mode: string;
+  coffee_topic_mode: string | null;
   mood_summary: string | null;
   archived_at: string | null;
   created_at: string;
@@ -1737,10 +2098,10 @@ const BUILT_IN_COFFEE_PRESETS: readonly CoffeePreset[] = [
     builtIn: true,
     settings: normalizeCoffeeSessionSettings({
       responseLength: "detailed",
-      responseDelayBias: 82,
+      responseDelayBias: 100,
       tableEnergy: "theatre",
       crossTalk: "chatty",
-      breathingRoom: 18,
+      breathingRoom: 0,
       stayOnThread: false,
       givePlayerLastWord: false,
       memoryCallbacks: "this-session",
@@ -1770,7 +2131,7 @@ function loadConversationRow(
     .prepare(
       `SELECT id, user_id, title, conversation_mode, bot_id, bot_group_ids,
               coffee_settings, coffee_group_id, coffee_duration_minutes, coffee_preset_id,
-              incognito, created_at, updated_at
+              coffee_topic, incognito, created_at, updated_at
          FROM conversations
         WHERE id = ? AND user_id = ?`
     )
@@ -1794,13 +2155,17 @@ function loadMessages(
         LIMIT ?`
     )
     .all(conversationId, userId, limit) as unknown as MessageRow[];
-  return rowsDesc
+  const rows = rowsDesc
     .slice()
-    .reverse()
-    .map((row): ChatMessage => ({
+    .reverse();
+  return rows
+    .map((row, index): ChatMessage => ({
       id: row.id,
       role: row.role,
-      content: row.content,
+      content:
+        row.role === "assistant"
+          ? sanitizeLoadedCoffeeAssistantContent(row, conversationId, index)
+          : row.content,
       createdAt: row.created_at,
       provider: row.provider === "local" || row.provider === "openai" ? row.provider : undefined,
       model: row.model ?? undefined,
@@ -1880,6 +2245,9 @@ function buildConversationResponse(args: {
     row.coffee_duration_minutes === 5 ||
     row.coffee_duration_minutes === 10
       ? { coffeeSessionDurationMinutes: row.coffee_duration_minutes }
+      : {}),
+    ...(typeof row.coffee_topic === "string" && row.coffee_topic.trim().length > 0
+      ? { coffeeTopic: row.coffee_topic.trim() }
       : {}),
     incognito: row.incognito === 1,
     lastBotId: lastSpeakerBotId,
@@ -1991,8 +2359,14 @@ function pickSpeakerProvider(
 
 function pickSpeakerModel(
   speaker: CoffeeBotProfile,
-  effectiveProvider: "local" | "openai"
+  effectiveProvider: "local" | "openai",
+  sessionOverride?: string | null
 ): string | undefined {
+  const trimmed =
+    typeof sessionOverride === "string" ? sessionOverride.trim() : "";
+  if (trimmed.length > 0) {
+    return trimmed;
+  }
   if (effectiveProvider === "local") {
     return speaker.localModel ?? speaker.defaultModel ?? undefined;
   }
@@ -2027,11 +2401,12 @@ async function ensureCoffeeAboutYouMemory(args: {
   });
 }
 
-export function createCoffeeConversation(
+export async function createCoffeeConversation(
   db: DatabaseSync,
   userId: string,
-  input: CoffeeSessionCreateInput
-): CoffeeSessionCreateResponse {
+  input: CoffeeSessionCreateInput,
+  llm?: { prismDefaultLlmModel?: string | null; autoPickStarterTopic?: boolean } | null
+): Promise<CoffeeSessionCreateResponse> {
   const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
   const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
   const group = loadCoffeeGroupProfiles(db, userId, groupIds);
@@ -2044,11 +2419,19 @@ export function createCoffeeConversation(
     input.durationMinutes === undefined || input.durationMinutes === null
       ? null
       : normalizeCoffeeSessionDurationMinutes(input.durationMinutes);
+  let presetLabel: string | null = null;
+  if (typeof input.presetId === "string" && input.presetId.trim().length > 0) {
+    try {
+      presetLabel = resolveCoffeePreset(db, userId, input.presetId.trim()).name;
+    } catch {
+      presetLabel = null;
+    }
+  }
   db.prepare(
     `INSERT INTO conversations
        (id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito,
-        coffee_settings, coffee_group_id, coffee_duration_minutes, coffee_preset_id, created_at, updated_at)
-     VALUES (?, ?, ?, 'coffee', NULL, ?, 0, ?, ?, ?, ?, ?, ?)`
+        coffee_settings, coffee_group_id, coffee_duration_minutes, coffee_preset_id, coffee_topic, created_at, updated_at)
+     VALUES (?, ?, ?, 'coffee', NULL, ?, 0, ?, ?, ?, ?, NULL, ?, ?)`
   ).run(
     conversationId,
     userId,
@@ -2062,11 +2445,28 @@ export function createCoffeeConversation(
     now
   );
   upsertCoffeeBotSocialState(db, userId, conversationId, initialSocialByBotId, now);
+  const provider = getAuxiliaryProvider(llm?.prismDefaultLlmModel ?? undefined);
+  let coffeeStarterTopics = await inferCoffeeStarterTopics({
+    provider,
+    group,
+    sessionSettings,
+    presetLabel,
+  });
+  let persistedTopic: string | null = null;
+  if (llm?.autoPickStarterTopic === true && coffeeStarterTopics.length > 0) {
+    persistedTopic =
+      coffeeStarterTopics[Math.floor(Math.random() * coffeeStarterTopics.length)] ?? null;
+    if (persistedTopic && persistedTopic.trim().length > 0) {
+      db.prepare(
+        `UPDATE conversations SET coffee_topic = ?, updated_at = ? WHERE id = ? AND user_id = ?`
+      ).run(persistedTopic.trim(), now, conversationId, userId);
+    }
+  }
   const row = loadConversationRow(db, userId, conversationId);
   if (!row) {
     throw new Error("Failed to create Coffee conversation.");
   }
-  return {
+  const response: CoffeeSessionCreateResponse = {
     conversation: buildConversationResponse({
       row,
       messages: [],
@@ -2075,14 +2475,19 @@ export function createCoffeeConversation(
     }),
     arrivalScenario: pickArrivalScenario(conversationId),
   };
+  if (!persistedTopic?.trim()) {
+    response.coffeeStarterTopics = coffeeStarterTopics;
+  }
+  return response;
 }
 
-export function createCoffeeConversationFromGroup(
+export async function createCoffeeConversationFromGroup(
   db: DatabaseSync,
   userId: string,
   groupId: string,
-  input: CoffeeGroupSessionCreateInput = {}
-): CoffeeSessionCreateResponse {
+  input: CoffeeGroupSessionCreateInput = {},
+  llm?: { prismDefaultLlmModel?: string | null } | null
+): Promise<CoffeeSessionCreateResponse> {
   const row = loadCoffeeGroupRow(db, userId, groupId);
   if (!row) throw new Error("Coffee group not found.");
   const group = mapCoffeeGroupRow(db, row);
@@ -2108,13 +2513,19 @@ export function createCoffeeConversationFromGroup(
         });
   const presetId = pickedPreset?.id ?? null;
   const durationMinutes = normalizeCoffeeSessionDurationMinutes(input.durationMinutes);
-  const result = createCoffeeConversation(db, userId, {
-    groupBotIds: group.coffeeSeatBotIds,
-    coffeeSettings: settings,
-    coffeeGroupId: group.id,
-    durationMinutes,
-    presetId,
-  });
+  const autoPickStarterTopic = group.topicSelectionMode === "auto";
+  const result = await createCoffeeConversation(
+    db,
+    userId,
+    {
+      groupBotIds: group.coffeeSeatBotIds,
+      coffeeSettings: settings,
+      coffeeGroupId: group.id,
+      durationMinutes,
+      presetId,
+    },
+    { ...llm, autoPickStarterTopic }
+  );
   const now = new Date().toISOString();
   insertCoffeeGroupEvent(
     db,
@@ -2125,6 +2536,7 @@ export function createCoffeeConversationFromGroup(
       conversationId: result.conversation.id,
       durationMinutes,
       presetId,
+      coffeeTopic: result.conversation.coffeeTopic ?? null,
     },
     now
   );
@@ -2203,6 +2615,7 @@ async function generateCoffeeBotReply(args: {
       socialByBotId: preTurnSocialByBotId,
       turnKind,
       sessionSettings,
+      coffeeTopic: row.coffee_topic,
     });
     try {
       const routerRaw = await routerProvider.generateResponse(routerMessages, {
@@ -2252,7 +2665,11 @@ async function generateCoffeeBotReply(args: {
     settings.secondaryOllamaHost
   );
   const speakerOptions: GenerateOptions = {};
-  const speakerModel = pickSpeakerModel(speaker, effectiveProvider);
+  const speakerModel = pickSpeakerModel(
+    speaker,
+    effectiveProvider,
+    settings.sessionSpeakerModel
+  );
   if (speakerModel) speakerOptions.model = speakerModel;
   if (typeof speaker.temperature === "number") {
     speakerOptions.temperature = speaker.temperature;
@@ -2271,6 +2688,7 @@ async function generateCoffeeBotReply(args: {
     turnKind,
     firstContactIntro: turnKind === "user" && shouldUseFirstContactIntro,
     sessionSettings,
+    coffeeTopic: row.coffee_topic,
   });
   const speakerReply = await speakerProvider.generateResponse(
     speakerMessages,
@@ -2298,7 +2716,51 @@ async function generateCoffeeBotReply(args: {
     }
   }
   if (!replyText) {
-    replyText = buildCoffeeEmergencyFallbackReply(tableFocus, replyCaps.tableReplyMaxChars);
+    replyText = buildCoffeeEmergencyFallbackReply({
+      tableFocus,
+      speaker,
+      conversationId: row.id,
+      historyLength: history.length,
+      maxChars: replyCaps.tableReplyMaxChars,
+    });
+  }
+  if (coffeeReplyLooksLikePromptLeak(replyText)) {
+    replyText = buildCoffeeEmergencyFallbackReply({
+      tableFocus,
+      speaker,
+      conversationId: row.id,
+      historyLength: history.length,
+      maxChars: replyCaps.tableReplyMaxChars,
+    });
+  }
+  if (replyText && coffeeReplyRepeatsRecentAssistant(replyText, history)) {
+    try {
+      replyText = await repairCoffeeRepeatedReply({
+        speakerProvider,
+        speaker,
+        speakerOptions,
+        repeatedReply: replyText,
+        history,
+        tableFocus,
+        maxChars: replyCaps.tableReplyMaxChars,
+      });
+    } catch {
+      replyText = "";
+    }
+  }
+  if (!replyText || coffeeReplyRepeatsRecentAssistant(replyText, history)) {
+    replyText = buildCoffeeEmergencyFallbackReply({
+      tableFocus,
+      speaker,
+      conversationId: row.id,
+      historyLength: history.length,
+      seedExtra: "repeat",
+    avoidTexts: history
+      .filter((message) => message.role === "assistant")
+      .slice(-6)
+      .map((message) => message.content),
+      maxChars: replyCaps.tableReplyMaxChars,
+    });
   }
   if (!replyText) {
     throw new Error("Speaker bot returned an empty reply.");
@@ -2361,6 +2823,58 @@ async function generateCoffeeBotReply(args: {
 }
 
 /**
+ * Persists the chosen Coffee anchor topic before the session timer / autoplay begins.
+ */
+export async function setCoffeeConversationTopic(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  rawTopic: unknown
+): Promise<Conversation> {
+  const topic = typeof rawTopic === "string" ? rawTopic.trim() : "";
+  if (topic.length === 0) {
+    throw new Error("Coffee topic cannot be empty.");
+  }
+  if (topic.length > 500) {
+    throw new Error("Coffee topic is too long.");
+  }
+  const row = loadConversationRow(db, userId, conversationId);
+  if (!row || row.conversation_mode !== "coffee") {
+    throw new Error("Coffee session not found.");
+  }
+  const existing = row.coffee_topic?.trim() ?? "";
+  if (existing.length > 0) {
+    throw new Error("This Coffee session already has a topic.");
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE conversations SET coffee_topic = ?, updated_at = ? WHERE id = ? AND user_id = ?`
+  ).run(topic, now, conversationId, userId);
+  const refreshed = loadConversationRow(db, userId, conversationId);
+  if (!refreshed) {
+    throw new Error("Coffee session not found.");
+  }
+  const { group, groupIds } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const sessionSettings = parseStoredCoffeeSessionSettings(refreshed.coffee_settings);
+  const historyLimit = coffeeEffectiveHistoryLimit(sessionSettings);
+  const messages = loadMessages(db, userId, conversationId, historyLimit);
+  const lastSpeakerBotId = loadLastSpeakerBotId(db, userId, conversationId);
+  const persistedSocialByBotId = loadCoffeeBotSocialState(
+    db,
+    userId,
+    conversationId,
+    groupIds
+  );
+  const socialByBotId = initializeCoffeeSocialState(group, persistedSocialByBotId);
+  return buildConversationResponse({
+    row: refreshed,
+    messages,
+    lastSpeakerBotId,
+    socialByBotId,
+  });
+}
+
+/**
  * Main Coffee turn entrypoint.
  *
  * Returns the updated conversation (including the new user + assistant
@@ -2393,8 +2907,8 @@ export async function processCoffeeTurn(
     const newConversationId = randomId(12);
     db.prepare(
       `INSERT INTO conversations
-         (id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito, coffee_settings, created_at, updated_at)
-       VALUES (?, ?, ?, 'coffee', NULL, ?, 0, NULL, ?, ?)`
+         (id, user_id, title, conversation_mode, bot_id, bot_group_ids, incognito, coffee_settings, coffee_topic, created_at, updated_at)
+       VALUES (?, ?, ?, 'coffee', NULL, ?, 0, NULL, NULL, ?, ?)`
     ).run(
       newConversationId,
       userId,
@@ -2407,6 +2921,20 @@ export async function processCoffeeTurn(
     if (!conversationRow) {
       throw new Error("Failed to create Coffee conversation.");
     }
+  }
+
+  const historyPreview = loadMessages(db, userId, conversationRow.id, 1);
+  const priorTopic = conversationRow.coffee_topic?.trim() ?? "";
+  if (
+    conversationRow.conversation_mode === "coffee" &&
+    priorTopic.length === 0 &&
+    historyPreview.length === 0
+  ) {
+    const anchor = message.trim();
+    db.prepare(
+      `UPDATE conversations SET coffee_topic = ?, updated_at = ? WHERE id = ? AND user_id = ?`
+    ).run(anchor, now, conversationRow.id, userId);
+    conversationRow = loadConversationRow(db, userId, conversationRow.id) ?? conversationRow;
   }
 
   // 1. Persist the user message.
@@ -2463,6 +2991,10 @@ export async function processCoffeeAutonomousTurn(
   directedSpeakerBotId?: string
 ): Promise<CoffeeTurnResponse> {
   const { row, group } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const topicTrim = row.coffee_topic?.trim() ?? "";
+  if (!topicTrim) {
+    throw new Error("Pick a Coffee topic for this session before bots can autoplay.");
+  }
   const sessionSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
   const historyLimit = coffeeEffectiveHistoryLimit(sessionSettings);
   const history = loadMessages(db, userId, row.id, historyLimit);

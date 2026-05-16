@@ -152,6 +152,7 @@ export function createDatabase(): DatabaseSync {
       coffee_group_id TEXT,
       coffee_duration_minutes INTEGER,
       coffee_preset_id TEXT,
+      coffee_topic TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -305,6 +306,7 @@ export function createDatabase(): DatabaseSync {
       name TEXT NOT NULL,
       coffee_settings TEXT NOT NULL,
       preset_mode TEXT NOT NULL DEFAULT 'manual',
+      coffee_topic_mode TEXT NOT NULL DEFAULT 'manual',
       mood_summary TEXT NOT NULL DEFAULT '{}',
       archived_at TEXT,
       created_at TEXT NOT NULL,
@@ -527,6 +529,23 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasConversationCoffeePresetColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_preset_id TEXT;");
+  }
+  const hasConversationCoffeeTopicColumn = conversationColumns.some(
+    (column) => column.name === "coffee_topic"
+  );
+  if (!hasConversationCoffeeTopicColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_topic TEXT;");
+  }
+  const coffeeGroupColumns = db
+    .prepare("PRAGMA table_info(coffee_groups)")
+    .all() as Array<{ name: string }>;
+  const hasCoffeeGroupTopicModeColumn = coffeeGroupColumns.some(
+    (column) => column.name === "coffee_topic_mode"
+  );
+  if (!hasCoffeeGroupTopicModeColumn) {
+    db.exec(
+      "ALTER TABLE coffee_groups ADD COLUMN coffee_topic_mode TEXT NOT NULL DEFAULT 'manual';"
+    );
   }
   const sweepBatchColumns = db
     .prepare("PRAGMA table_info(conversation_sweep_batches)")
