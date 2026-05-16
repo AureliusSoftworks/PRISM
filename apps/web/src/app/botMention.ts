@@ -196,6 +196,86 @@ export function splitTextByBotNames(
   return segments;
 }
 
+export interface StageDirectionCue {
+  action: string;
+  /** Display-length threshold where this action should become visible. */
+  revealAtDisplayLength: number;
+}
+
+function looksLikeStageDirectionAction(inner: string): boolean {
+  const normalized = inner.trim().toLowerCase();
+  if (!normalized) return false;
+  // Keep this conservative: only treat common physical/social action verbs
+  // as stage directions when the token is embedded in prose.
+  return /^(?:glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snorts?|snorting|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|mutters?|muttering|scoffs?|scoffing)\b/u.test(
+    normalized
+  );
+}
+
+function looksLikeInlineActionAtSentenceBoundary(before: string, after: string): boolean {
+  const beforeTrimmed = before.trimEnd();
+  const afterTrimmed = after.trimStart();
+  const beforeEndsSentence = /(?:[.!?…]|\.{3}|—|–|:|;)$/.test(beforeTrimmed);
+  const afterStartsSentenceish = afterTrimmed.length === 0 || /^[\p{Lu}\p{N}"“'‘(\[]/u.test(afterTrimmed);
+  return beforeEndsSentence && afterStartsSentenceish;
+}
+
+function normalizeStageDirectionMainText(raw: string): string {
+  let mainText = raw.replace(/\*+/g, "");
+  mainText = mainText.replace(/\s+/g, " ").trim();
+  return mainText;
+}
+
+function parseStageDirectionsDetailed(text: string): {
+  mainText: string;
+  actions: string[];
+  cues: StageDirectionCue[];
+} {
+  if (!text) return { mainText: "", actions: [], cues: [] };
+  // 1+ leading asterisks, non-asterisk content (lazy), 1+ trailing asterisks.
+  const re = /\*+([^*\n]+?)\*+/g;
+  const cues: StageDirectionCue[] = [];
+  let spokenRaw = "";
+  let cursor = 0;
+  for (const match of text.matchAll(re)) {
+    const start = match.index ?? 0;
+    const token = match[0] ?? "";
+    const trimmed = String(match[1] ?? "").trim();
+    if (start > cursor) {
+      spokenRaw += text.slice(cursor, start);
+    }
+    const before = text.slice(0, start);
+    const after = text.slice(start + token.length);
+    const hasSpokenBefore = /\p{L}|\p{N}/u.test(before);
+    const hasSpokenAfter = /\p{L}|\p{N}/u.test(after);
+
+    if (
+      hasSpokenBefore &&
+      hasSpokenAfter &&
+      !looksLikeStageDirectionAction(trimmed) &&
+      !looksLikeInlineActionAtSentenceBoundary(before, after)
+    ) {
+      // Inline emphasis in ordinary prose.
+      spokenRaw += trimmed;
+    } else if (trimmed.length > 0) {
+      const revealAtDisplayLength = getBotMentionDisplayLength(
+        normalizeStageDirectionMainText(spokenRaw)
+      );
+      cues.push({ action: trimmed, revealAtDisplayLength });
+    }
+    cursor = start + token.length;
+  }
+  if (cursor < text.length) {
+    spokenRaw += text.slice(cursor);
+  }
+  const mainText = normalizeStageDirectionMainText(spokenRaw);
+  return {
+    mainText,
+    actions: cues.map((cue) => cue.action),
+    cues,
+  };
+}
+
 /**
  * Splits a string at asterisk-delimited stage directions and returns the
  * spoken `mainText` plus the actions in order of appearance. The renderer
@@ -218,33 +298,12 @@ export function extractStageDirections(text: string): {
   mainText: string;
   actions: string[];
 } {
-  if (!text) return { mainText: "", actions: [] };
-  // 1+ leading asterisks, non-asterisk content (lazy), 1+ trailing asterisks.
-  const re = /\*+([^*\n]+?)\*+/g;
-  const actions: string[] = [];
-  let mainText = text.replace(re, (match, inner, offset, fullText) => {
-    const trimmed = String(inner).trim();
-    const before = fullText.slice(0, offset);
-    const after = fullText.slice(offset + String(match).length);
-    const hasSpokenBefore = /\p{L}|\p{N}/u.test(before);
-    const hasSpokenAfter = /\p{L}|\p{N}/u.test(after);
+  const parsed = parseStageDirectionsDetailed(text);
+  return { mainText: parsed.mainText, actions: parsed.actions };
+}
 
-    // A block embedded between words is most likely accidental Markdown
-    // emphasis, not a stage direction. Keep its content so prose like
-    // "the *thought* that counts" never becomes "the that counts".
-    if (hasSpokenBefore && hasSpokenAfter) {
-      return trimmed;
-    }
-
-    if (trimmed.length > 0) actions.push(trimmed);
-    return "";
-  });
-  // Final scrub: any leftover asterisks are malformed (e.g. the bot opened
-  // an action and never closed it). Drop them so they never leak as a
-  // visible `*` artifact at the start/end of the spoken line.
-  mainText = mainText.replace(/\*+/g, "");
-  mainText = mainText.replace(/\s+/g, " ").trim();
-  return { mainText, actions };
+export function extractStageDirectionCues(text: string): StageDirectionCue[] {
+  return parseStageDirectionsDetailed(text).cues;
 }
 
 /**

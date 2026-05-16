@@ -1774,7 +1774,7 @@
 
 .profile {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   padding: 6px 8px;
@@ -7613,9 +7613,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .chatEphemeralTypedLetter {
   display: inline;
   opacity: 0;
-  --char-step-ms: 14ms;
-  animation: chatEphemeralLetterIn 0.2s ease-out both;
-  animation-delay: calc(var(--char-index, 0) * var(--char-step-ms, 14ms));
+  --char-step-ms: 42ms;
+  animation: chatEphemeralLetterIn 0.34s ease-out both;
+  animation-delay: calc(var(--char-index, 0) * var(--char-step-ms, 42ms));
 }
 
 .chatEphemeralTypedLetterNoFade {
@@ -10067,6 +10067,53 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   height: 0;
   pointer-events: none;
   font-style: italic;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismDevCommandToken) {
+  background-image: repeating-linear-gradient(
+    90deg,
+    #ff5f6d 0ch,
+    #ff5f6d 1ch,
+    #ffc371 1ch,
+    #ffc371 2ch,
+    #9be15d 2ch,
+    #9be15d 3ch,
+    #5d9fff 3ch,
+    #5d9fff 4ch,
+    #c77dff 4ch,
+    #c77dff 5ch
+  );
+  background-size: 5ch 100%;
+  background-repeat: repeat;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: devCommandRainbowShift 2.8s linear infinite;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismDevCommandQuotedToken) {
+  color: #ff4fd8;
+  -webkit-text-fill-color: #ff4fd8;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismDevCommandArgumentToken) {
+  color: #7dd3fc;
+  -webkit-text-fill-color: #7dd3fc;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismDevCommandActionToken) {
+  color: #fb923c;
+  -webkit-text-fill-color: #fb923c;
+}
+
+@keyframes devCommandRainbowShift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 10ch 0;
+  }
 }
 
 .compose[data-compose-ready="true"] .markdownComposerSurface {
@@ -21237,6 +21284,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding: 0;
   margin: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
   flex: 1 1 auto;
 }
@@ -21254,6 +21302,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   position: relative;
   display: grid;
   gap: 7px;
+  min-width: 0;
 }
 
 .coffeeGroupDeleteButton {
@@ -21341,11 +21390,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeSessionRow {
   position: relative;
   margin: 0;
+  min-width: 0;
 }
 
 .coffeeGroupButton,
 .coffeeSessionButton {
   width: 100%;
+  box-sizing: border-box;
   display: grid;
   gap: 6px;
   padding: 14px 12px 14px 30px;
@@ -21445,8 +21496,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .coffeeSessionTitle {
+  display: block;
   font-size: 0.9rem;
   font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .coffeeGroupTitle {
@@ -21474,9 +21530,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeGroupSessionButton {
   width: 100%;
-  display: flex;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 6px 8px;
   border: 0;
@@ -21485,6 +21542,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: transparent;
   font-size: 0.72rem;
   cursor: pointer;
+  overflow: hidden;
 }
 
 .coffeeGroupSessionButton:hover,
@@ -21494,8 +21552,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .coffeeGroupSessionTitle {
-  flex: 1 1 auto;
+  display: block;
   min-width: 0;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -21504,6 +21563,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeGroupSessionDuration {
   flex: 0 0 auto;
+  justify-self: end;
+  white-space: nowrap;
   transition: opacity 120ms ease;
 }
 
@@ -21558,8 +21619,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeSessionMeta,
 .coffeeSessionEmpty {
+  display: block;
   font-size: 0.76rem;
   color: var(--coffee-muted);
+}
+
+.coffeeSessionMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .coffeeSessionEmpty {
@@ -22028,8 +22097,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeStage[data-compact="true"] .coffeeCup {
   width: 15px;
   height: 15px;
-  top: var(--coffee-cup-y, calc(50% + 30px));
-  left: var(--coffee-cup-x, calc(50% + 20px));
 }
 
 .coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"]) .coffeeCup,
@@ -22277,10 +22344,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeStage[data-phase="live"] .coffeeCenterMessage,
 .coffeeStage[data-phase="finished"] .coffeeCenterMessage {
-  width: min(300px, 46vmin);
+  width: min(276px, 42vmin);
   height: auto;
-  min-height: min(168px, 26vmin);
-  max-width: min(300px, 60%);
+  min-height: min(192px, 30vmin);
+  max-width: min(276px, 56%);
   max-height: none;
 }
 
@@ -22817,17 +22884,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translateX(-50%) translateY(clamp(-30px, -3.8vw, -16px));
   z-index: 3;
   box-sizing: border-box;
-  width: min(190px, calc(100% + 56px));
+  width: min(220px, calc(100% + 72px));
   min-width: min(132px, 46vw);
-  max-width: min(200px, 74vw);
+  max-width: min(236px, 82vw);
   padding: 6px 11px;
   border-radius: 13px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 8px;
   pointer-events: none;
-  color: rgba(255, 255, 255, 0.92);
+  color: color-mix(in srgb, var(--coffee-bot-color) 88%, #ffffff 12%);
   border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 48%, rgba(255, 255, 255, 0.14));
   background: color-mix(in srgb, #060608 78%, var(--coffee-bot-color) 22%);
   box-shadow:
@@ -22853,7 +22920,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   gap: 3px;
   justify-items: start;
   min-width: 0;
-  max-width: min(9.5rem, 38vw);
+  max-width: none;
   overflow: hidden;
   box-sizing: border-box;
   text-align: left;
@@ -22868,16 +22935,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: normal;
+  white-space: nowrap;
   word-break: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
   text-align: left;
+  color: color-mix(in srgb, var(--coffee-bot-color) 88%, #ffffff 12%);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--coffee-bot-color) 36%, transparent);
 }
 
 .coffeeSeatPlateEmoji {
@@ -22925,13 +22991,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .coffeeCup {
-  position: absolute;
-  top: var(--coffee-cup-y, calc(50% + 42px));
-  left: var(--coffee-cup-x, calc(50% + 28px));
+  position: relative;
+  top: auto;
+  left: auto;
+  justify-self: end;
+  margin-left: 4px;
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  transform: rotate(calc(var(--coffee-cup-rotation, 0deg) + var(--coffee-cup-rotation-bias, 0deg)));
+  /* Keep random cup-tilt limits via `--coffee-cup-rotation-bias`. */
+  transform: rotate(var(--coffee-cup-rotation-bias, 0deg));
   transform-origin: center;
   background:
     radial-gradient(circle, #120904 0 40%, #e9e9e9 43% 52%, #111 56% 100%);
@@ -23004,6 +23073,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   pointer-events: none;
 }
 
+.coffeeSeatThinkingIndicator[data-badge-side="left"] {
+  left: -4px;
+  right: auto;
+}
+
+.coffeeSeatThinkingIndicator[data-badge-side="right"] {
+  right: -4px;
+  left: auto;
+}
+
 .coffeeSeatThinkingIndicator .typingDots {
   --typing-accent: rgba(255, 255, 255, 0.95);
   gap: 3px;
@@ -23012,6 +23091,88 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeSeatThinkingIndicator .typingDots span {
   width: 4px;
   height: 4px;
+}
+
+.coffeeSeatActionBadge {
+  position: absolute;
+  top: -14px;
+  right: -8px;
+  z-index: 7;
+  max-width: min(220px, 34vw);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 62%, rgba(255, 255, 255, 0.26));
+  background: color-mix(in srgb, #070707 76%, var(--coffee-bot-color) 24%);
+  color: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 0 0 3px rgba(0, 0, 0, 0.34),
+    0 0 16px color-mix(in srgb, var(--coffee-bot-color) 42%, transparent);
+  pointer-events: none;
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    filter 220ms ease;
+}
+
+.coffeeSeatActionBadge[data-badge-side="left"] {
+  left: -8px;
+  right: auto;
+  transform-origin: top left;
+}
+
+.coffeeSeatActionBadge[data-badge-side="right"] {
+  right: -8px;
+  left: auto;
+  transform-origin: top right;
+}
+
+.coffeeSeatActionBadgeText {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  line-height: 1;
+  font-style: italic;
+  letter-spacing: 0.01em;
+  animation: coffeeSeatActionBadgeTextSwapIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.coffeeSeatActionBadgeCurrent {
+  opacity: 1;
+  filter: none;
+}
+
+.coffeeSeatActionBadgeGhost {
+  opacity: 0.38;
+  filter: saturate(0.75);
+}
+
+.coffeeSeatActionBadgeGhost[data-badge-side="right"] {
+  transform: translate3d(36px, -8px, 0) scale(0.92);
+}
+
+.coffeeSeatActionBadgeGhost[data-badge-side="left"] {
+  transform: translate3d(-36px, -8px, 0) scale(0.92);
+}
+
+@keyframes coffeeSeatActionBadgeTextSwapIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 3px, 0) scale(0.985);
+    filter: blur(0.4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: none;
+  }
 }
 
 /*
@@ -24442,8 +24603,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .coffeeCup {
     width: 18px;
     height: 18px;
-    top: calc(50% + 30px);
-    left: calc(50% + 22px);
   }
 
   .coffeeComposer {

@@ -4,6 +4,7 @@ import {
   cleanBotMentionTextArtifacts,
   composeMentionTabPlainTextAction,
   escapeMarkdownLinkLabel,
+  extractStageDirectionCues,
   extractStageDirections,
   filterBotsForMentionQuery,
   findAtMentionTokenPlain,
@@ -402,9 +403,49 @@ describe("extractStageDirections", () => {
     assert.deepEqual(out.actions, []);
   });
 
+  it("keeps inline action blocks as stage directions even when surrounded by prose", () => {
+    const out = extractStageDirections(
+      "You're too kind, but I'd rather you admired my clarinet than my... *glances at Plankton* ...other talents."
+    );
+    assert.equal(
+      out.mainText,
+      "You're too kind, but I'd rather you admired my clarinet than my... ...other talents."
+    );
+    assert.deepEqual(out.actions, ["glances at Plankton"]);
+  });
+
   it("unwraps double-asterisk inline emphasis inside prose", () => {
     const out = extractStageDirections("The **idea** is still terrible.");
     assert.equal(out.mainText, "The idea is still terrible.");
     assert.deepEqual(out.actions, []);
+  });
+});
+
+describe("extractStageDirectionCues", () => {
+  it("emits progressive reveal thresholds for multiple actions in one line", () => {
+    const cues = extractStageDirectionCues(
+      "*looks at Patrick* What is your favorite food? *smiles* Mine is Potatoes! *laughs*"
+    );
+    assert.deepEqual(cues.map((cue) => cue.action), [
+      "looks at Patrick",
+      "smiles",
+      "laughs",
+    ]);
+    assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [0, 27, 45]);
+  });
+
+  it("does not treat inline emphasis as an action cue", () => {
+    const cues = extractStageDirectionCues(
+      "Ah, but a rock can't make a snack—it's the *thought* that counts."
+    );
+    assert.deepEqual(cues, []);
+  });
+
+  it("treats sentence-boundary inline markers as progressive action cues", () => {
+    const cues = extractStageDirectionCues(
+      "*one* I said one. *two* I said two. *three* I said three."
+    );
+    assert.deepEqual(cues.map((cue) => cue.action), ["one", "two", "three"]);
+    assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [0, 11, 23]);
   });
 });

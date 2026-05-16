@@ -77,8 +77,13 @@ import {
 } from "./prismDevChatCommands";
 import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
+  hasLeadingDevCommand,
+  PrismDevCommandHighlight,
+} from "./tiptapPrismDevCommandHighlight";
+import {
   PRISM_BOT_MARKDOWN_LINK_RE,
   composeMentionTabPlainTextAction,
+  extractStageDirectionCues,
   extractStageDirections,
   filterBotsForMentionQuery,
   findAtMentionTokenPlain,
@@ -110,6 +115,7 @@ import {
   revealPlainTextWithBotMentions,
 } from "./BotMentionRichText";
 import { syncPrismBotMentionMarksInEditorDom } from "./botMentionTipTapDom";
+import { parseCoffeeDevCommand } from "./coffeeDevCommand";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
 // Long enough for a deliberate confirmation click, short enough that the armed
@@ -2217,15 +2223,22 @@ const COFFEE_ARRIVAL_STEP_MS = 850;
 const COFFEE_ARRIVAL_SETTLE_MS = 900;
 const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
 const COFFEE_SEND_COOLDOWN_MS = 2200;
-const COFFEE_BOT_REVEAL_DELAY_MIN_MS = 1400;
-const COFFEE_BOT_REVEAL_DELAY_MAX_MS = 3400;
-const COFFEE_BOT_REVEAL_MS_PER_WORD = 90;
+const COFFEE_BOT_REVEAL_DELAY_MIN_MS = 280;
+const COFFEE_BOT_REVEAL_DELAY_MAX_MS = 12000;
+const COFFEE_MOOD_TYPEWRITER_CHARS_PER_SECOND: Record<BotMoodKey, number> = {
+  joyful: 26,
+  warm: 21,
+  neutral: 16,
+  guarded: 12,
+  strained: 9,
+};
 const COFFEE_INTERRUPTION_CUE_HIDE_MS = 3200;
 const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
 const COFFEE_SESSION_DURATION_OPTIONS: readonly CoffeeSessionDurationMinutes[] = [1, 5, 10];
 const COFFEE_DEFAULT_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
 const COFFEE_AUTO_PRESET_ID = "__auto__";
 const COFFEE_CUP_ROTATION_BIAS_DEGREES = 45;
+const COFFEE_TABLE_MAX_CHARS = 250;
 
 /** Browser default for Coffee table-tuning sliders before a live session loads from the API. */
 const PRISM_COFFEE_SESSION_SETTINGS_STORAGE_KEY = "prism_coffee_session_settings_v1";
@@ -2386,28 +2399,34 @@ function randomCoffeeAutonomousDelayMs(
   );
 }
 
-function randomCoffeeRevealDelayMs(
-  messageText: string,
-  settings: CoffeeSessionSettings
-): number {
-  const wordCount = Math.max(1, (messageText.match(/\S+/g) ?? []).length);
-  let minMs = COFFEE_BOT_REVEAL_DELAY_MIN_MS;
-  let maxMs = COFFEE_BOT_REVEAL_DELAY_MAX_MS;
-  const speed = Math.max(0, Math.min(1, settings.responseDelayBias / 100));
-  const crossScale =
-    settings.crossTalk === "chatty" ? 0.72 : settings.crossTalk === "rare" ? 1.08 : 1;
-  minMs = Math.round(minMs * (1 - speed * 0.35) * crossScale);
-  maxMs = Math.round(maxMs * (1 - speed * 0.42) * crossScale);
-  minMs = Math.max(
-    settings.crossTalk === "chatty" && settings.responseDelayBias >= 95 ? 360 : 700,
-    minMs
-  );
-  maxMs = Math.max(minMs + 300, maxMs);
-  const lengthBiasMs = Math.min(maxMs - minMs, wordCount * COFFEE_BOT_REVEAL_MS_PER_WORD);
-  const jitterMs = Math.floor(Math.random() * Math.max(1, maxMs - minMs));
-  return Math.min(
-    maxMs,
-    minMs + Math.floor(lengthBiasMs * 0.55) + Math.floor(jitterMs * 0.45)
+function normalizeCoffeeTypewriterMoodKey(moodKey: BotMoodKey | undefined): BotMoodKey {
+  if (
+    moodKey === "joyful" ||
+    moodKey === "warm" ||
+    moodKey === "neutral" ||
+    moodKey === "guarded" ||
+    moodKey === "strained"
+  ) {
+    return moodKey;
+  }
+  return "neutral";
+}
+
+/**
+ * Coffee typewriter duration is mood-driven (chars/second by mood), then lightly
+ * jittered so lines feel less robotic. Message length only affects total time
+ * proportionally; it does not increase typing *speed* for longer lines.
+ */
+function randomCoffeeRevealDelayMs(messageText: string, moodKey: BotMoodKey | undefined): number {
+  const displayText = extractStageDirections(messageText).mainText;
+  const charCount = Math.max(1, getBotMentionDisplayLength(displayText));
+  const mood = normalizeCoffeeTypewriterMoodKey(moodKey);
+  const charsPerSecond = COFFEE_MOOD_TYPEWRITER_CHARS_PER_SECOND[mood];
+  const baseMs = Math.round((charCount / Math.max(1, charsPerSecond)) * 1000);
+  const jitterMs = Math.round((Math.random() * 2 - 1) * 120);
+  return Math.max(
+    COFFEE_BOT_REVEAL_DELAY_MIN_MS,
+    Math.min(COFFEE_BOT_REVEAL_DELAY_MAX_MS, baseMs + jitterMs)
   );
 }
 
@@ -2441,6 +2460,18 @@ type CoffeeTurnRhythmState =
   | "userTableTyping"
   | "tableTyping"
   | "cooldown";
+
+type CoffeeSeatBadgeSide = "left" | "right";
+
+function coffeeSeatBadgeSide(seatCount: number, layoutIndex: number): CoffeeSeatBadgeSide {
+  // Keep overlay badges biased toward the table center so they stay visible
+  // near stage edges. Mapping mirrors seat geometry in `page.module.css`.
+  if (seatCount === 2) return layoutIndex === 1 ? "left" : "right";
+  if (seatCount === 3) return layoutIndex === 2 ? "left" : "right";
+  if (seatCount === 4) return layoutIndex === 1 ? "left" : "right";
+  if (seatCount >= 5) return layoutIndex === 2 || layoutIndex === 4 ? "left" : "right";
+  return "right";
+}
 
 interface CoffeeConversationMessage {
   id: string;
@@ -2542,6 +2573,22 @@ type CoffeePendingRevealQueueArgs = {
   onReveal?: () => void;
 };
 
+type ParsedGlobalClearCommand =
+  | { kind: "none" }
+  | { kind: "ok" }
+  | { kind: "error"; error: string };
+
+function parseGlobalClearCommand(text: string): ParsedGlobalClearCommand {
+  const trimmed = text.trim();
+  const match = /^\/clear(?:\s|$)/i.exec(trimmed);
+  if (!match) return { kind: "none" };
+  const rest = trimmed.slice(match[0].length).trim();
+  if (rest.length > 0) {
+    return { kind: "error", error: "Use `/clear` without extra arguments." };
+  }
+  return { kind: "ok" };
+}
+
 /**
  * User line from a post-`POST /api/coffee/turn` payload: prefer the user message before a
  * trailing assistant reply; otherwise the last user message in the array.
@@ -2555,7 +2602,7 @@ function extractCoffeeUserLineFromTurnMessages(
     for (let i = messages.length - 2; i >= 0; i -= 1) {
       const m = messages[i];
       if (m.role === "user") {
-        return m.content.trim().length > 0 ? m.content : null;
+        return m.content.trim().length > 0 ? clampCoffeeTableText(m.content) : null;
       }
     }
     return null;
@@ -2563,10 +2610,14 @@ function extractCoffeeUserLineFromTurnMessages(
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i];
     if (m.role === "user") {
-      return m.content.trim().length > 0 ? m.content : null;
+      return m.content.trim().length > 0 ? clampCoffeeTableText(m.content) : null;
     }
   }
   return null;
+}
+
+function clampCoffeeTableText(text: string): string {
+  return text.length > COFFEE_TABLE_MAX_CHARS ? text.slice(0, COFFEE_TABLE_MAX_CHARS) : text;
 }
 
 /**
@@ -2586,6 +2637,17 @@ function latestAssistantMessageIsActionOnly(
   if (last.role !== "assistant") return false;
   const { mainText, actions } = extractStageDirections(last.content);
   return actions.length > 0 && mainText.trim().length === 0;
+}
+
+function coffeeMessageHasTableText(
+  message: CoffeeConversationMessage | null | undefined
+): boolean {
+  if (!message) return false;
+  if (message.role !== "assistant") {
+    return message.content.trim().length > 0;
+  }
+  const { mainText } = extractStageDirections(clampCoffeeTableText(message.content));
+  return mainText.trim().length > 0;
 }
 
 interface SessionUser { id: string; email: string; displayName: string; theme: Theme; preferredProvider: Provider; }
@@ -2802,7 +2864,8 @@ const CHAT_MODE_USER_ANCHOR_FADE_CONTINUE_MS = 5200;
 const CHAT_MODE_USER_ANCHOR_FADE_FINAL_OPACITY = 0.05;
 const CHAT_MODE_INTERRUPTION_FOLLOWUP_DELAY_MS = 700;
 const CHAT_MODE_EPHEMERAL_TICK_MS = 120;
-const CHAT_MODE_WORD_REVEAL_MS = 120;
+// Significantly slower reveal cadence to keep the typing effect readable.
+const CHAT_MODE_WORD_REVEAL_MS = 600;
 const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 1000;
 const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_DOT_STEP_MS * 3;
 const CHAT_MODE_ELLIPSIS_TOKEN_PATTERN = /^(?:\.\.\.|…)\s*$/;
@@ -2835,6 +2898,13 @@ const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_P
 // the auto-scroll target.
 const CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT = 0.6;
 const CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE = 34;
+const CHAT_MODE_MOOD_WORD_REVEAL_MS: Record<MessageMoodKey, number> = {
+  joyful: 420,
+  warm: 520,
+  neutral: CHAT_MODE_WORD_REVEAL_MS,
+  guarded: 720,
+  strained: 860,
+};
 const DEFAULT_CHAT_STARTUP_SUMMARY = "Type a message below to start the conversation.";
 const CHAT_MODE_LINE_DISSOLVE_STAGGER_MS = 140;
 
@@ -10883,6 +10953,8 @@ interface MessageBodyProps {
   chatPhase?: ChatMessageTemporalPhase;
   /** Optional externally-driven token count for deterministic word reveal. */
   forcedVisibleTokenCount?: number;
+  /** Assistant typing cadence key for mood-based reveal speed. */
+  revealMoodKey?: NonNullable<Message["moodKey"]>;
   /** When set, `prism-bot://…` markdown links render as glyph + colored name. */
   mentionRenderBots?: readonly BotMentionPick[];
   resolvedTheme?: "light" | "dark";
@@ -11341,18 +11413,32 @@ function tokenizeMessageReveal(text: string): string[] {
   return text.match(/\S+\s*/g) ?? [];
 }
 
-function resolveRevealStepDelayMs(previousToken: string): number {
-  return isChatModeEllipsisToken(previousToken)
-    ? CHAT_MODE_ELLIPSIS_WORD_HOLD_MS
-    : CHAT_MODE_WORD_REVEAL_MS;
+function resolveRevealWordDelayMsByMood(
+  moodKey: NonNullable<Message["moodKey"]> | undefined
+): number {
+  const normalizedMood = normalizeAssistantMoodKey(moodKey);
+  return CHAT_MODE_MOOD_WORD_REVEAL_MS[normalizedMood] ?? CHAT_MODE_WORD_REVEAL_MS;
 }
 
-function resolveVisibleTokenCountAtElapsedMs(tokens: string[], elapsedMs: number): number {
+function resolveRevealStepDelayMs(
+  previousToken: string,
+  moodKey?: NonNullable<Message["moodKey"]>
+): number {
+  return isChatModeEllipsisToken(previousToken)
+    ? CHAT_MODE_ELLIPSIS_WORD_HOLD_MS
+    : resolveRevealWordDelayMsByMood(moodKey);
+}
+
+function resolveVisibleTokenCountAtElapsedMs(
+  tokens: string[],
+  elapsedMs: number,
+  moodKey?: NonNullable<Message["moodKey"]>
+): number {
   if (tokens.length <= 1) return 1;
   let visible = 1;
   let remaining = Math.max(0, elapsedMs);
   while (visible < tokens.length) {
-    const delayMs = resolveRevealStepDelayMs(tokens[visible - 1] ?? "");
+    const delayMs = resolveRevealStepDelayMs(tokens[visible - 1] ?? "", moodKey);
     if (remaining < delayMs) break;
     remaining -= delayMs;
     visible += 1;
@@ -11360,11 +11446,14 @@ function resolveVisibleTokenCountAtElapsedMs(tokens: string[], elapsedMs: number
   return visible;
 }
 
-function resolveRevealDurationMsForTokens(tokens: string[]): number {
+function resolveRevealDurationMsForTokens(
+  tokens: string[],
+  moodKey?: NonNullable<Message["moodKey"]>
+): number {
   if (tokens.length <= 1) return 0;
   let total = 0;
   for (let i = 1; i < tokens.length; i += 1) {
-    total += resolveRevealStepDelayMs(tokens[i - 1] ?? "");
+    total += resolveRevealStepDelayMs(tokens[i - 1] ?? "", moodKey);
   }
   return total;
 }
@@ -11578,6 +11667,7 @@ function MessageBody({
   renderAsEphemeralLines,
   chatPhase,
   forcedVisibleTokenCount,
+  revealMoodKey,
   mentionRenderBots,
   resolvedTheme,
 }: MessageBodyProps): React.JSX.Element {
@@ -11641,7 +11731,7 @@ function MessageBody({
     const scheduleNextReveal = () => {
       if (nextCount >= tokens.length) return;
       const priorToken = tokens[nextCount - 1] ?? "";
-      const delayMs = resolveRevealStepDelayMs(priorToken);
+      const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey);
       timer = window.setTimeout(() => {
         nextCount += 1;
         setVisibleTokenCount(Math.min(nextCount, tokens.length));
@@ -11655,6 +11745,7 @@ function MessageBody({
   }, [
     forcedVisibleTokenCount,
     preferLocalProgressiveReveal,
+    revealMoodKey,
     revealWordByWord,
     tokens,
   ]);
@@ -12084,6 +12175,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             autolink: true,
             defaultProtocol: "https",
           }),
+          PrismDevCommandHighlight,
           Placeholder.configure({ placeholder }),
           Markdown.configure({
             markedOptions: {
@@ -12117,7 +12209,20 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               event.preventDefault();
               return true;
             }
+            if (hasLeadingDevCommand(view.state.doc)) {
+              const plain = event.clipboardData?.getData("text/plain");
+              if (typeof plain === "string") {
+                event.preventDefault();
+                view.dispatch(view.state.tr.insertText(plain, sel.from, sel.to));
+                return true;
+              }
+            }
             return false;
+          },
+          handleTextInput: (view, from, to, text) => {
+            if (!hasLeadingDevCommand(view.state.doc)) return false;
+            view.dispatch(view.state.tr.insertText(text, from, to));
+            return true;
           },
           handleKeyDown: (view, event) => {
             const activeEditor = editorRef.current;
@@ -12409,7 +12514,6 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
 
     const composeFormForTheme = editor?.view.dom?.closest("form") ?? null;
     const markdownComposerSurfaceRef = useRef<HTMLDivElement | null>(null);
-
     return (
       <div
         ref={markdownComposerSurfaceRef}
@@ -16121,7 +16225,10 @@ function HomeContent(): React.JSX.Element {
         message.role === "assistant" && message.id === latestAssistantId;
       const estimatedRevealDoneAt = revealGatedAssistant
         ? firstSeenAt +
-          resolveRevealDurationMsForTokens(tokenizeMessageReveal(resolveMessageDisplayContent(message)))
+          resolveRevealDurationMsForTokens(
+            tokenizeMessageReveal(resolveMessageDisplayContent(message)),
+            resolveMessageMoodKey(message)
+          )
         : firstSeenAt;
       const revealReadyAt = revealGatedAssistant ? estimatedRevealDoneAt : firstSeenAt;
       const effectiveStartAt =
@@ -16331,8 +16438,9 @@ function HomeContent(): React.JSX.Element {
     const latestAssistantMessage =
       detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
     if (!latestAssistantMessage) return false;
+    const latestAssistantMood = resolveMessageMoodKey(latestAssistantMessage);
     const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistantMessage));
-    const revealDurationMs = resolveRevealDurationMsForTokens(revealTokens);
+    const revealDurationMs = resolveRevealDurationMsForTokens(revealTokens, latestAssistantMood);
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
     chatAssistantTypingMechanicsActive,
@@ -16359,11 +16467,15 @@ function HomeContent(): React.JSX.Element {
     if (!latestAssistant) return;
     const interruptedText = resolveMessageDisplayContent(latestAssistant);
     const revealTokens = tokenizeMessageReveal(interruptedText);
+    const interruptedMood = resolveMessageMoodKey(latestAssistant);
     const tokenTotal = Math.max(1, revealTokens.length);
     const firstSeenAt =
       chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
     const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
-    const visibleTokenCount = Math.min(tokenTotal, resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs));
+    const visibleTokenCount = Math.min(
+      tokenTotal,
+      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, interruptedMood)
+    );
     const interruptedSnippet = interruptedMidWordSnippet(
       interruptedText,
       visibleTokenCount
@@ -16379,7 +16491,6 @@ function HomeContent(): React.JSX.Element {
     const nextInterruptCount =
       (chatInterruptCountByConversationRef.current.get(detail.id) ?? 0) + 1;
     chatInterruptCountByConversationRef.current.set(detail.id, nextInterruptCount);
-    const interruptedMood = resolveMessageMoodKey(latestAssistant);
     const previousInterruptionLine =
       chatLastInterruptionLineByConversationRef.current.get(detail.id) ?? "";
     const followup = interruptionFollowupLine({
@@ -16732,6 +16843,7 @@ function HomeContent(): React.JSX.Element {
   const [coffeeDraft, setCoffeeDraft] = useState<string>("");
   const coffeeComposerRichRef = useRef<DesktopMarkdownComposerHandle | null>(null);
   const coffeeComposerFormRef = useRef<HTMLFormElement | null>(null);
+  const coffeeLastSubmittedDraftRef = useRef<string | null>(null);
   const coffeeMentionBotsRef = useRef<BotMentionPick[]>([]);
   const [coffeeBusy, setCoffeeBusy] = useState<boolean>(false);
   const [coffeeAutoBusy, setCoffeeAutoBusy] = useState<boolean>(false);
@@ -16995,6 +17107,11 @@ function HomeContent(): React.JSX.Element {
     ) {
       return;
     }
+    if (coffeeTurnRhythmState === "botThinking" && coffeePendingSpeakerBotId) {
+      // Keep the visible "..." badge alive during explicit local waits (e.g.
+      // `/echo "...\" --wait 5`) even when no network request is in-flight.
+      return;
+    }
     if (coffeeDraft.trim().length > 0) {
       setCoffeeTurnRhythmState("playerComposing");
       return;
@@ -17009,6 +17126,7 @@ function HomeContent(): React.JSX.Element {
   }, [
     coffeeSessionPhase,
     coffeeTurnRhythmState,
+    coffeePendingSpeakerBotId,
     coffeeDraft,
     coffeeBusy,
     coffeeAutoBusy,
@@ -17023,7 +17141,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (coffeeTurnRhythmState === "userTableTyping") {
-      const full = coffeeUserRevealText;
+      const full = clampCoffeeTableText(coffeeUserRevealText);
       if (!full) {
         setCoffeeTypewriterLength(0);
         return;
@@ -17037,7 +17155,7 @@ function HomeContent(): React.JSX.Element {
       const charCount = getBotMentionDisplayLength(extractStageDirections(full).mainText);
       const durationMs = Math.max(
         120,
-        coffeeRevealTypingDurationMsRef.current || randomCoffeeRevealDelayMs(full, coffeeSessionSettingsRef.current)
+        coffeeRevealTypingDurationMsRef.current || randomCoffeeRevealDelayMs(full, undefined)
       );
       setCoffeeTypewriterLength(0);
       const startMs = performance.now();
@@ -17074,7 +17192,7 @@ function HomeContent(): React.JSX.Element {
       );
       return;
     }
-    const full = last.content;
+    const full = clampCoffeeTableText(last.content);
     const charCount = getBotMentionDisplayLength(extractStageDirections(full).mainText);
     if (charCount === 0) {
       setCoffeeTypewriterLength(0);
@@ -17082,7 +17200,7 @@ function HomeContent(): React.JSX.Element {
     }
     const durationMs = Math.max(
       120,
-      coffeeRevealTypingDurationMsRef.current || randomCoffeeRevealDelayMs(full, coffeeSessionSettingsRef.current)
+      coffeeRevealTypingDurationMsRef.current || randomCoffeeRevealDelayMs(full, last.moodKey)
     );
     setCoffeeTypewriterLength(0);
     const startMs = performance.now();
@@ -18181,7 +18299,10 @@ function HomeContent(): React.JSX.Element {
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(temporalKey);
     if (firstSeenAt === undefined) return;
     const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistant));
-    const revealDurationMs = resolveRevealDurationMsForTokens(revealTokens);
+    const revealDurationMs = resolveRevealDurationMsForTokens(
+      revealTokens,
+      resolveMessageMoodKey(latestAssistant)
+    );
     if (chatEphemeralNowMs - firstSeenAt >= revealDurationMs) {
       chatCompletedRevealKeysRef.current.add(temporalKey);
     }
@@ -19981,6 +20102,63 @@ function HomeContent(): React.JSX.Element {
     startPendingImageJobPoll(envelope.pendingImageJob.jobId, convId);
   }
 
+  function clearAllDisplayedConversationState(): void {
+    setDetail((current) =>
+      current
+        ? {
+            ...current,
+            hasAssistantReply: false,
+            lastBotId: null,
+            lastBotColor: null,
+            messages: [],
+          }
+        : current
+    );
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setConversationStarterPrompts(null);
+    setAskQuestionComposerRevealed(false);
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    setDraft("");
+    setComposerPrimed(false);
+    clearCoffeeLoopTimer();
+    abortCoffeeRequests();
+    resetCoffeeRhythm();
+    setCoffeeDraft("");
+    setCoffeeError(null);
+    coffeeLastSubmittedDraftRef.current = null;
+    setCoffeeConversation((current) =>
+      current
+        ? {
+            ...current,
+            hasAssistantReply: false,
+            lastBotId: null,
+            lastBotColor: null,
+            messages: [],
+          }
+        : current
+    );
+  }
+
+  function consumeGlobalClearCommand(trimmedLine: string, source: "chat" | "coffee"): boolean {
+    const parsed = parseGlobalClearCommand(trimmedLine);
+    if (parsed.kind === "none") return false;
+    if (parsed.kind === "error") {
+      if (source === "coffee") {
+        setCoffeeError(parsed.error);
+      } else {
+        setError(parsed.error);
+      }
+      return true;
+    }
+    clearAllDisplayedConversationState();
+    setError(null);
+    return true;
+  }
+
   async function sendMessage(
     e: React.FormEvent | React.KeyboardEvent<HTMLTextAreaElement | HTMLFormElement>,
     options: {
@@ -19998,6 +20176,13 @@ function HomeContent(): React.JSX.Element {
     const forceNewConversation = !isStarterPrompt && forceNewConversationOnNextSend;
     // `/dev …` bypasses pendingReply — otherwise tooling looks "broken"
     // while the model is streaming or between turns.
+    if (
+      trimmed.length > 0 &&
+      !options.starterPrompt &&
+      consumeGlobalClearCommand(trimmed, "chat")
+    ) {
+      return;
+    }
     if (
       trimmed.length > 0 &&
       !options.starterPrompt &&
@@ -20668,10 +20853,11 @@ function HomeContent(): React.JSX.Element {
         const revealTokens = tokenizeMessageReveal(
           resolveMessageDisplayContent(pendingAskQuestionAssistantMessage)
         );
+        const pendingMood = resolveMessageMoodKey(pendingAskQuestionAssistantMessage);
         const tokenTotal = Math.max(1, revealTokens.length);
         const visibleTokenCount = Math.min(
           tokenTotal,
-          resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs)
+          resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, pendingMood)
         );
         return visibleTokenCount < tokenTotal;
       })()
@@ -31627,7 +31813,7 @@ function HomeContent(): React.JSX.Element {
     const rhythmSettings = coffeeSessionSettingsRef.current;
     const revealDelayMs = randomCoffeeRevealDelayMs(
       pendingMessage?.role === "assistant" ? pendingMessage.content : "",
-      rhythmSettings
+      pendingMessage?.role === "assistant" ? pendingMessage.moodKey : undefined
     );
     coffeeRevealTypingDurationMsRef.current = revealDelayMs;
     const applyReveal = () => {
@@ -32413,19 +32599,111 @@ function HomeContent(): React.JSX.Element {
       return nextPaused;
     });
   };
+  const ECHO_WAIT_SECOND_MS = 1000;
+  const waitForCoffeeEcho = async (waitSeconds: number) => {
+    if (waitSeconds <= 0) return;
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, waitSeconds * ECHO_WAIT_SECOND_MS);
+    });
+  };
+  const recallPreviousCoffeeDraft = (): string | null => {
+    const remembered = coffeeLastSubmittedDraftRef.current;
+    if (typeof remembered === "string" && remembered.trim().length > 0) {
+      return remembered;
+    }
+    const fromConversation = extractCoffeeUserLineFromTurnMessages(
+      coffeeConversation?.messages ?? []
+    );
+    return fromConversation && fromConversation.trim().length > 0 ? fromConversation : null;
+  };
+  const handleCoffeeComposerKeyDown = (event: React.KeyboardEvent<HTMLFormElement>) => {
+    if (event.defaultPrevented) return;
+    if (event.key !== "ArrowUp" || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) {
+      return;
+    }
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const fromMarkdownEditor = target.closest("[data-markdown-cm-host='true']") !== null;
+    const fromPlainTextarea = target instanceof HTMLTextAreaElement;
+    if (!fromMarkdownEditor && !fromPlainTextarea) return;
+    const plainTextareaAtStart =
+      fromPlainTextarea && target.selectionStart === 0 && target.selectionEnd === 0;
+    const markdownReadyForRecall = fromMarkdownEditor && coffeeDraft.trim().length === 0;
+    if (!plainTextareaAtStart && !markdownReadyForRecall) return;
+    const recalled = recallPreviousCoffeeDraft();
+    if (recalled === null) return;
+    event.preventDefault();
+    setCoffeeDraft(recalled);
+  };
   const triggerDirectedCoffeeTurn = async (botId: string) => {
     if (!coffeeConversation || !coffeeAutoplayPaused || coffeeSessionPhase !== "live") return;
+    const liveDraft = coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
+    const trimmedLiveDraft = liveDraft.trim();
+    if (trimmedLiveDraft.length > 0 && consumeGlobalClearCommand(trimmedLiveDraft, "coffee")) {
+      return;
+    }
+    const echoCommand = parseCoffeeDevCommand(liveDraft);
+    if (echoCommand.kind === "error") {
+      setCoffeeError(echoCommand.error);
+      return;
+    }
+    if (echoCommand.kind === "ok") {
+      const speaker = coffeeBotsById.get(botId);
+      if (!speaker) {
+        setCoffeeError("Could not find that bot in this Coffee session.");
+        return;
+      }
+      coffeeLastSubmittedDraftRef.current = liveDraft.trim();
+      setCoffeeDraft("");
+      setCoffeeTurnRhythmState("botThinking");
+      setCoffeePendingSpeakerBotId(speaker.id);
+      setCoffeeError(null);
+      await waitForCoffeeEcho(echoCommand.waitSeconds);
+      const nextConversation: CoffeeConversationState = {
+        ...coffeeConversation,
+        hasAssistantReply: true,
+        lastBotId: speaker.id,
+        lastBotColor: speaker.color ?? null,
+        messages: [
+          ...coffeeConversation.messages,
+          {
+            id: `coffee-echo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            role: "assistant",
+            content: echoCommand.message,
+            createdAt: new Date().toISOString(),
+            botName: speaker.name,
+            botColor: speaker.color ?? undefined,
+            botGlyph: speaker.glyph ?? undefined,
+          },
+        ],
+      };
+      const endsAt = coffeeSessionEndsAtMs ?? Date.now() + coffeeSessionDurationMs(nextConversation);
+      assignCoffeeSessionEndsAtMs(endsAt);
+      setCoffeeSessionPhase("live");
+      queueCoffeeReveal({
+        conversation: nextConversation,
+        speakerBotId: speaker.id,
+        includeCooldown: false,
+      });
+      return;
+    }
     await continueCoffeeSession(coffeeConversation.id, undefined, botId);
   };
   const sendCoffeeTurn = async () => {
     const liveDraft = coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
     const trimmed = liveDraft.trim();
     if (!trimmed) return;
+    if (consumeGlobalClearCommand(trimmed, "coffee")) return;
     if (liveDraft !== coffeeDraft) {
       setCoffeeDraft(liveDraft);
     }
     if (coffeeTurnRhythmState === "cooldown" || coffeeTurnRhythmState === "userTableTyping") return;
     if (coffeeBusy) return;
+    const coffeeCommand = parseCoffeeDevCommand(trimmed);
+    if (coffeeCommand.kind === "error") {
+      setCoffeeError(coffeeCommand.error);
+      return;
+    }
     clearCoffeeLoopTimer();
     const pendingRevealMessages = coffeePendingRevealConversation?.messages ?? [];
     const pendingRevealLatestMessage =
@@ -32478,6 +32756,10 @@ function HomeContent(): React.JSX.Element {
       setCoffeeSessionPhase("live");
       setCoffeeAutoplayPausedValue(false);
     } else if (coffeeSessionPhase === "topic" && activeConversation?.id) {
+      if (coffeeCommand.kind === "ok") {
+        setCoffeeError("Set the session topic first, then use `/echo` during live turns.");
+        return;
+      }
       setCoffeeBusy(true);
       setCoffeeError(null);
       try {
@@ -32487,6 +32769,7 @@ function HomeContent(): React.JSX.Element {
           coffeePendingArrivalScenario
         );
         if (ok) {
+          coffeeLastSubmittedDraftRef.current = trimmed;
           setCoffeeDraft("");
         }
       } finally {
@@ -32494,8 +32777,52 @@ function HomeContent(): React.JSX.Element {
       }
       return;
     }
+    if (coffeeCommand.kind === "ok") {
+      const seats = coffeeMentionBotsRef.current;
+      if (seats.length === 0) {
+        setCoffeeError("No seated bots are available for `/echo`.");
+        return;
+      }
+      const speaker = seats[Math.floor(Math.random() * seats.length)]!;
+      coffeeLastSubmittedDraftRef.current = trimmed;
+      setCoffeeDraft("");
+      setCoffeeTurnRhythmState("botThinking");
+      setCoffeePendingSpeakerBotId(speaker.id);
+      setCoffeeError(null);
+      await waitForCoffeeEcho(coffeeCommand.waitSeconds);
+      const nextConversation: CoffeeConversationState = {
+        ...activeConversation,
+        hasAssistantReply: true,
+        lastBotId: speaker.id,
+        lastBotColor: speaker.color ?? null,
+        messages: [
+          ...activeConversation.messages,
+          {
+            id: `coffee-echo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            role: "assistant",
+            content: coffeeCommand.message,
+            createdAt: new Date().toISOString(),
+            botName: speaker.name,
+            botColor: speaker.color ?? undefined,
+            botGlyph: speaker.glyph ?? undefined,
+          },
+        ],
+      };
+      const endsAt = activeEndsAt ?? Date.now() + coffeeSessionDurationMs(nextConversation);
+      assignCoffeeSessionEndsAtMs(endsAt);
+      setCoffeeSessionPhase("live");
+      queueCoffeeReveal({
+        conversation: nextConversation,
+        speakerBotId: speaker.id,
+        includeCooldown: false,
+      });
+      return;
+    }
     setCoffeeBusy(true);
-    setCoffeeTurnRhythmState("playerComposing");
+    // Clear composer immediately so the room can show "thinking" feedback
+    // while the backend is still generating the turn.
+    setCoffeeDraft("");
+    setCoffeeTurnRhythmState("botThinking");
     setCoffeeError(null);
     const directedSpeakerBotId = findCoffeeDirectedMentionBotId(trimmed);
     setCoffeePendingSpeakerBotId(directedSpeakerBotId ?? null);
@@ -32523,11 +32850,11 @@ function HomeContent(): React.JSX.Element {
         }),
         signal: abortController.signal,
       });
-      setCoffeeDraft("");
       void refreshConversations().catch((err) => {
         console.warn("[coffee] refreshConversations after turn failed", err);
       });
       showCoffeeInterruptionCue(response.interruption);
+      coffeeLastSubmittedDraftRef.current = trimmed;
       // NOTE: don't setCoffeeConversation here — the user reveal + queueCoffeeReveal
       // pipeline applies it at the right moment. Setting it now would briefly flash
       // the new bot reply in the center card before the typewriter starts.
@@ -32562,7 +32889,7 @@ function HomeContent(): React.JSX.Element {
         if (userLine) {
           coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
             userLine,
-            coffeeSessionSettingsRef.current
+            undefined
           );
           coffeePendingRevealAfterUserRef.current = revealArgs;
           clearCoffeeRhythmTimers();
@@ -32574,6 +32901,7 @@ function HomeContent(): React.JSX.Element {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
+      setCoffeeDraft(trimmed);
       setCoffeePendingSpeakerBotId(null);
       setCoffeeError(err instanceof Error ? err.message : "Failed to send.");
     } finally {
@@ -32749,7 +33077,7 @@ function HomeContent(): React.JSX.Element {
         </button>
         {groupSessions.length > 0 && !collapsed ? (
           <ul id={sessionListId} className={styles.coffeeGroupSessionList}>
-            {groupSessions.slice(0, 4).map((session) => {
+            {groupSessions.map((session) => {
               const sessionLabel =
                 session.title?.trim() ||
                 new Date(session.updatedAt).toLocaleTimeString([], {
@@ -33101,13 +33429,6 @@ function HomeContent(): React.JSX.Element {
   );
   const renderCoffeeTranscriptPanel = (): React.JSX.Element | null => {
     if (!coffeeConversation) return null;
-    const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
-    const pendingLatestMessage =
-      pendingMessages.length > 0 ? pendingMessages[pendingMessages.length - 1] : null;
-    const pendingSpeakerLabel =
-      pendingLatestMessage?.role === "assistant"
-        ? pendingLatestMessage.botName ?? "a bot"
-        : "a bot";
     return (
       <>
         <div
@@ -33180,30 +33501,6 @@ function HomeContent(): React.JSX.Element {
                 </li>
                 );
               })}
-              {(coffeeBusy ||
-                coffeeAutoBusy ||
-                coffeeTurnRhythmState === "cooldown" ||
-                coffeeTurnRhythmState === "tableTyping" ||
-                coffeeTurnRhythmState === "userTableTyping") && (
-                <li
-                  className={styles.coffeeMessage}
-                  data-role="assistant"
-                  data-pending="true"
-                >
-                  <div className={styles.coffeeMessageBotLabel}>...</div>
-                  <div className={styles.coffeeMessageContent}>
-                    {coffeeTurnRhythmState === "cooldown"
-                      ? "Giving the table a beat before the next voice."
-                      : coffeeTurnRhythmState === "tableTyping"
-                        ? `${pendingSpeakerLabel} is about to speak.`
-                        : coffeeTurnRhythmState === "userTableTyping"
-                          ? "Your line is landing on the table."
-                        : coffeeAutoBusy
-                          ? "Someone is taking a sip before replying."
-                          : "Picking the next speaker."}
-                  </div>
-                </li>
-              )}
             </ul>
           </section>
         </aside>
@@ -33427,6 +33724,13 @@ function HomeContent(): React.JSX.Element {
       coffeeReplayActive && messages.length > 0
         ? messages[Math.min(coffeeReplayMessageIndex, messages.length - 1)]
         : null;
+    const latestReadableMessage = (() => {
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const candidate = messages[index];
+        if (coffeeMessageHasTableText(candidate)) return candidate;
+      }
+      return null;
+    })();
     const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
     const pendingLatestMessage =
       pendingMessages.length > 0 ? pendingMessages[pendingMessages.length - 1] : null;
@@ -33437,12 +33741,12 @@ function HomeContent(): React.JSX.Element {
         : null;
     const userLineTyping = coffeeTurnRhythmState === "userTableTyping";
     const centerMessage = replayMessage
-      ? replayMessage
+      ? coffeeMessageHasTableText(replayMessage)
+        ? replayMessage
+        : null
       : previewingSession
       ? null
-      : messages.length > 0
-        ? messages[messages.length - 1]
-        : null;
+      : latestReadableMessage;
     const centerSpeaker = tableTypingBot
       ? tableTypingBot.name
       : userLineTyping
@@ -33458,10 +33762,14 @@ function HomeContent(): React.JSX.Element {
         ? centerMessage.botGlyph
         : null);
     const tableTypingAssistantFullText =
-      pendingLatestMessage?.role === "assistant" ? pendingLatestMessage.content : "";
-    const userTypingDisplayText = coffeeUserRevealText;
+      pendingLatestMessage?.role === "assistant"
+        ? clampCoffeeTableText(pendingLatestMessage.content)
+        : "";
+    const userTypingDisplayText = clampCoffeeTableText(coffeeUserRevealText);
+    const centerMessageDisplayText = centerMessage ? clampCoffeeTableText(centerMessage.content) : "";
     const showThinkingIndicator =
-      coffeeDraft.trim().length === 0 && !userLineTyping;
+      !userLineTyping &&
+      coffeeTurnRhythmState === "botThinking";
     const thinkingBotId = showThinkingIndicator ? coffeePendingSpeakerBotId : null;
     /**
      * Bots referenced by name in the most recently delivered message (or in the
@@ -33474,7 +33782,7 @@ function HomeContent(): React.JSX.Element {
       const sources: string[] = [];
       if (userLineTyping && coffeeUserRevealText) sources.push(coffeeUserRevealText);
       if (tableTypingBot && tableTypingAssistantFullText) sources.push(tableTypingAssistantFullText);
-      if (centerMessage?.content) sources.push(centerMessage.content);
+      if (centerMessageDisplayText) sources.push(centerMessageDisplayText);
       const re = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi");
       for (const source of sources) {
         for (const match of source.matchAll(re)) {
@@ -33495,6 +33803,65 @@ function HomeContent(): React.JSX.Element {
           (b) => b.name === centerMessage.botName
         );
         if (speaker) out.delete(speaker.id);
+      }
+      return out;
+    })();
+    const latestSeatActionsByBotId = (() => {
+      const out = new Map<string, string[]>();
+      if (!conversationActive || coffeeSessionPhase === "finished") return out;
+      const botIdByName = new Map<string, string>(
+        coffeeMentionBotPicks.map((bot) => [bot.name, bot.id])
+      );
+      for (const message of messages) {
+        if (message.role !== "assistant" || !message.botName) continue;
+        const botId = botIdByName.get(message.botName);
+        if (!botId) continue;
+        const { actions } = extractStageDirections(message.content);
+        const actionHistory = actions
+          .map((action) => action.trim())
+          .filter((action) => action.length > 0);
+        if (actionHistory.length > 0) {
+          const previous = out.get(botId) ?? [];
+          const next = [...previous];
+          for (const action of actionHistory) {
+            // Keep every meaningful transition, but avoid immediate duplicates.
+            if (next[next.length - 1] !== action) {
+              next.push(action);
+            }
+          }
+          // Keep the two most recent actions visible (current + ghost).
+          out.set(botId, next.slice(-2));
+        }
+      }
+      return out;
+    })();
+    const typingSeatActionByBotId = (() => {
+      const out = new Map<
+        string,
+        {
+          current: string;
+          previous: string | null;
+        }
+      >();
+      if (!tableTypingBot || !tableTypingAssistantFullText) return out;
+      const cues = extractStageDirectionCues(tableTypingAssistantFullText);
+      if (cues.length === 0) return out;
+      let activeCueIndex = -1;
+      for (let index = 0; index < cues.length; index += 1) {
+        if (coffeeTypewriterLength >= cues[index]!.revealAtDisplayLength) {
+          activeCueIndex = index;
+        }
+      }
+      if (activeCueIndex >= 0) {
+        const current = cues[activeCueIndex]!.action.trim();
+        if (current.length > 0) {
+          const previousRaw =
+            activeCueIndex > 0 ? cues[activeCueIndex - 1]!.action.trim() : "";
+          out.set(tableTypingBot.id, {
+            current,
+            previous: previousRaw.length > 0 ? previousRaw : null,
+          });
+        }
       }
       return out;
     })();
@@ -33556,7 +33923,11 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.coffeeTableFocalStack}>
               <div
                 className={styles.coffeeCenterMessage}
-                data-empty={!centerMessage && !tableTypingBot && !userLineTyping ? "true" : undefined}
+                data-empty={
+                  !centerMessage && !tableTypingBot && !userLineTyping
+                    ? "true"
+                    : undefined
+                }
                 data-start-ready={coffeeGroupReadyToStart ? "true" : undefined}
               >
                 <span className={styles.coffeeCenterIcon} aria-hidden="true">
@@ -33567,7 +33938,9 @@ function HomeContent(): React.JSX.Element {
                   )}
                 </span>
                 <strong>
-                  {tableTypingBot || userLineTyping || centerMessage ? centerSpeaker : "The table is waiting"}
+                  {tableTypingBot || userLineTyping || centerMessage
+                    ? centerSpeaker
+                    : "The table is waiting"}
                 </strong>
                 <div className={styles.coffeeCenterMessageScroll}>
                   <p>
@@ -33621,7 +33994,7 @@ function HomeContent(): React.JSX.Element {
                         <span className={styles.srOnly}>You are speaking.</span>
                       </span>
                     ) : centerMessage
-                      ? renderPlainTextWithBotMentions(centerMessage.content, {
+                      ? renderPlainTextWithBotMentions(centerMessageDisplayText, {
                           keyPrefix: centerMessage.id,
                           botsById: chatEnabledBotMentionMap,
                           resolvedTheme,
@@ -33633,6 +34006,8 @@ function HomeContent(): React.JSX.Element {
                         ? "Bots will arrive one at a time."
                         : coffeeSessionPhase === "topic"
                           ? "Choose a topic to begin."
+                        : coffeeSessionPhase === "live"
+                          ? "The table is listening."
                           : coffeeSessionPhase === "preview"
                             ? previewCanResumeSession
                               ? "This session is paused. Resume when you are ready."
@@ -33775,6 +34150,28 @@ function HomeContent(): React.JSX.Element {
             const isTableTypingThisSeat =
               coffeeTurnRhythmState === "tableTyping" &&
               coffeePendingSpeakerBotId === bot.id;
+            const seatTypingActionState = typingSeatActionByBotId.get(bot.id) ?? null;
+            const seatLiveActionBadgeText = seatTypingActionState?.current ?? null;
+            const seatLastActionHistory = latestSeatActionsByBotId.get(bot.id) ?? [];
+            const seatLastActionBadgeText =
+              seatLastActionHistory.length > 0
+                ? seatLastActionHistory[seatLastActionHistory.length - 1] ?? null
+                : null;
+            const seatIsThinkingThisSeat = thinkingBotId === bot.id;
+            const seatBadgeSide = coffeeSeatBadgeSide(visibleCoffeeSeats.length, layoutIndex);
+            const seatActionPrimaryText = seatLiveActionBadgeText ?? seatLastActionBadgeText;
+            const seatActionGhostText =
+              seatIsThinkingThisSeat && seatLastActionBadgeText
+                ? seatLastActionBadgeText
+                : seatTypingActionState?.previous
+                  ? seatTypingActionState.previous
+                : seatLiveActionBadgeText &&
+                    seatLastActionBadgeText &&
+                    seatLiveActionBadgeText !== seatLastActionBadgeText
+                  ? seatLastActionBadgeText
+                  : seatLastActionHistory.length > 1
+                    ? seatLastActionHistory[seatLastActionHistory.length - 2] ?? null
+                  : null;
             const pendingAssistantMood =
               pendingLatestMessage?.role === "assistant"
                 ? pendingLatestMessage.moodKey
@@ -33871,19 +34268,42 @@ function HomeContent(): React.JSX.Element {
                     <div className={styles.coffeeSeatGlowText}>
                       <span>{bot.name}</span>
                     </div>
+                    <div className={styles.coffeeCup} aria-hidden="true" />
                   </div>
                 </div>
-                <div className={styles.coffeeCup} aria-hidden="true" />
                 {interruptedSeatSnippet ? (
                   <div className={styles.coffeeSeatInterruptedBubble}>
                     {interruptedSeatSnippet.snippet}
                   </div>
                 ) : null}
-                {thinkingBotId === bot.id ? (
+                {seatActionGhostText ? (
+                  <div
+                    className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeGhost}`}
+                    data-badge-side={seatBadgeSide}
+                    aria-hidden="true"
+                  >
+                    <span
+                      key={`${bot.id}:ghost:${seatActionGhostText}`}
+                      className={styles.coffeeSeatActionBadgeText}
+                    >
+                      {seatActionGhostText}
+                    </span>
+                  </div>
+                ) : null}
+                {seatIsThinkingThisSeat ? (
                   <div
                     className={styles.coffeeSeatThinkingIndicator}
-                    aria-label={`${bot.name} is preparing a reply`}
-                    title={`${bot.name} is preparing a reply`}
+                    data-badge-side={seatBadgeSide}
+                    aria-label={
+                      isTableTypingThisSeat
+                        ? `${bot.name} is talking`
+                        : `${bot.name} is preparing a reply`
+                    }
+                    title={
+                      isTableTypingThisSeat
+                        ? `${bot.name} is talking`
+                        : `${bot.name} is preparing a reply`
+                    }
                   >
                     <span className={styles.typingDots} aria-hidden="true">
                       <span />
@@ -33898,6 +34318,20 @@ function HomeContent(): React.JSX.Element {
                     title={`${bot.name} was just addressed`}
                   >
                     <span aria-hidden="true">!</span>
+                  </div>
+                ) : seatActionPrimaryText ? (
+                  <div
+                    className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeCurrent}`}
+                    data-badge-side={seatBadgeSide}
+                    aria-label={`${bot.name} action: ${seatActionPrimaryText}`}
+                    title={`${bot.name}: ${seatActionPrimaryText}`}
+                  >
+                    <span
+                      key={`${bot.id}:current:${seatActionPrimaryText}`}
+                      className={styles.coffeeSeatActionBadgeText}
+                    >
+                      {seatActionPrimaryText}
+                    </span>
                   </div>
                 ) : null}
               </button>
@@ -34570,6 +35004,7 @@ function HomeContent(): React.JSX.Element {
               ref={coffeeComposerFormRef}
               className={styles.coffeeComposer}
               data-prism-compose-field="true"
+              onKeyDown={handleCoffeeComposerKeyDown}
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!coffeeComposerEnabled) return;
@@ -35287,6 +35722,7 @@ function HomeContent(): React.JSX.Element {
                       chatMessageFirstSeenAtRef.current.get(`${detail.id}:${msg.id}`) ?? chatEphemeralNowMs;
                     const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
                     const revealTokens = tokenizeMessageReveal(displayContent);
+                    const assistantMood = resolveMessageMoodKey(msg);
                     const tokenTotal = Math.max(1, revealTokens.length);
                     if (messageRevealAlreadyCompleted) return tokenTotal;
                     if (messageRevealCancelled) {
@@ -35297,7 +35733,7 @@ function HomeContent(): React.JSX.Element {
                     }
                     return Math.min(
                       tokenTotal,
-                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs)
+                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, assistantMood)
                     );
                   })()
                 : undefined;
@@ -35461,6 +35897,7 @@ function HomeContent(): React.JSX.Element {
                   renderAsEphemeralLines={chatLikeSurface}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
+                  revealMoodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={composeMentionBotPicks}
                   resolvedTheme={resolvedTheme}
                 />
@@ -36533,6 +36970,7 @@ function HomeContent(): React.JSX.Element {
                       chatMessageFirstSeenAtRef.current.get(`${detail.id}:${msg.id}`) ?? chatEphemeralNowMs;
                     const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
                     const revealTokens = tokenizeMessageReveal(displayContent);
+                    const assistantMood = resolveMessageMoodKey(msg);
                     const tokenTotal = Math.max(1, revealTokens.length);
                     if (messageRevealAlreadyCompleted) return tokenTotal;
                     if (messageRevealCancelled) {
@@ -36543,7 +36981,7 @@ function HomeContent(): React.JSX.Element {
                     }
                     return Math.min(
                       tokenTotal,
-                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs)
+                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, assistantMood)
                     );
                   })()
                 : undefined;
@@ -36704,6 +37142,7 @@ function HomeContent(): React.JSX.Element {
                   renderAsEphemeralLines={chatLikeSurface}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
+                  revealMoodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={composeMentionBotPicks}
                   resolvedTheme={resolvedTheme}
                 />
