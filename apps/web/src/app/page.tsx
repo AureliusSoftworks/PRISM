@@ -243,6 +243,7 @@ const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
 const DEV_TOOLS_BUTTON_DEFAULT_X = 14;
 const DEV_TOOLS_BUTTON_DEFAULT_Y = 76;
 const DEV_TOOLS_BUTTON_SIZE = 44;
+const IMAGE_KEYWORD_EDITOR_SIDE_LAYOUT_MIN_VIEWPORT_PX = 1260;
 const DEV_TOOLS_BUTTON_DRAG_SUPPRESS_CLICK_PX = 4;
 const DEV_TOOLS_CONNECTION_PRESETS = [
   {
@@ -489,6 +490,11 @@ type ImageReadyNoticeState = {
   accentHex: string;
 };
 
+type ImageGenScopeUiContext = {
+  overlayBotId: string | null;
+  provider: Provider;
+};
+
 type ImageGenerateApiResponse = {
   image?: { id: string };
 };
@@ -570,6 +576,25 @@ function inferImageGenerationVariantFromPrompt(promptRaw: string): ImageGenerati
     return "landscape";
   }
   return "letterbox";
+}
+
+function composeImagePromptWithKeywordDirectives(args: {
+  basePrompt: string;
+  positiveKeywords: readonly string[];
+  negativeKeywords: readonly string[];
+}): string {
+  const base = args.basePrompt.trim();
+  const positive = args.positiveKeywords
+    .map((keyword) => keyword.trim())
+    .filter((keyword) => keyword.length > 0);
+  const negative = args.negativeKeywords
+    .map((keyword) => keyword.trim())
+    .filter((keyword) => keyword.length > 0);
+  if (positive.length === 0 && negative.length === 0) return base;
+  const directives: string[] = [];
+  if (positive.length > 0) directives.push(`Positive keywords: ${positive.join(", ")}`);
+  if (negative.length > 0) directives.push(`Negative keywords: ${negative.join(", ")}`);
+  return `${base}\n\n${directives.join("\n")}`;
 }
 
 /** Groups overlapping `/api/images/generate` calls so each directory/bot can load independently. */
@@ -5829,8 +5854,80 @@ function galleryImageThumbModelLabel(
 
 type ImagePanelScope = "all" | "bot" | "general";
 
-/** Browse-by-bot sentinel for images with no `bot_id` (PRISM general bucket). */
-const PRISM_IMAGE_GENERAL_ENTRY_ID = "__prism_general_images__";
+type ScopedImageKeywords = {
+  positive: string[];
+  negative: string[];
+};
+
+type ImageKeywordDragMode = "add" | "remove";
+
+const IMAGE_KEYWORD_CHIP_ROW_GAP_PX = 4;
+const IMAGE_KEYWORD_CHIP_BASE_WIDTH_PX = 26;
+const IMAGE_KEYWORD_CHIP_CHAR_WIDTH_PX = 7.1;
+const IMAGE_KEYWORD_CHIP_MIN_PACK_WIDTH_PX = 120;
+const IMAGE_KEYWORD_EDITOR_KINDS = ["negative", "positive"] as const;
+
+const EMPTY_SCOPED_IMAGE_KEYWORDS: ScopedImageKeywords = {
+  positive: [],
+  negative: [],
+};
+
+function estimateImageKeywordChipWidthPx(tag: string): number {
+  const normalizedLength = tag.trim().length;
+  return Math.max(
+    56,
+    Math.round(IMAGE_KEYWORD_CHIP_BASE_WIDTH_PX + normalizedLength * IMAGE_KEYWORD_CHIP_CHAR_WIDTH_PX)
+  );
+}
+
+function buildPackedImageKeywordDisplayOrder(
+  tags: string[],
+  containerWidthPx: number,
+  measuredChipWidths: Record<string, number>
+): string[] {
+  if (tags.length <= 2) return tags.slice();
+  const rowCapacity = Math.max(IMAGE_KEYWORD_CHIP_MIN_PACK_WIDTH_PX, Math.floor(containerWidthPx));
+  if (rowCapacity <= IMAGE_KEYWORD_CHIP_MIN_PACK_WIDTH_PX) return tags.slice();
+  const weighted = tags
+    .map((tag, index) => ({
+      tag,
+      index,
+      width: measuredChipWidths[tag] ?? estimateImageKeywordChipWidthPx(tag),
+    }))
+    .sort((left, right) => right.width - left.width || left.index - right.index);
+  const pool = weighted.slice();
+  const rows: Array<{ tags: string[] }> = [];
+  while (pool.length > 0) {
+    const anchor = pool.shift();
+    if (!anchor) break;
+    const rowTags = [anchor.tag];
+    let remainingWidth = Math.max(0, rowCapacity - anchor.width);
+    while (pool.length > 0) {
+      const neededForGap = rowTags.length > 0 ? IMAGE_KEYWORD_CHIP_ROW_GAP_PX : 0;
+      const allowedWidth = remainingWidth - neededForGap;
+      if (allowedWidth <= 0) break;
+      let candidateIndex = -1;
+      // Back-fill gaps with smaller chips first.
+      for (let index = pool.length - 1; index >= 0; index -= 1) {
+        const candidate = pool[index];
+        if (!candidate) continue;
+        if (candidate.width <= allowedWidth) {
+          candidateIndex = index;
+          break;
+        }
+      }
+      if (candidateIndex < 0) break;
+      const [picked] = pool.splice(candidateIndex, 1);
+      if (!picked) break;
+      rowTags.push(picked.tag);
+      remainingWidth = Math.max(0, remainingWidth - (picked.width + neededForGap));
+    }
+    rows.push({
+      tags: rowTags,
+    });
+  }
+  return rows.flatMap((row) => row.tags);
+}
 
 const DEFAULT_ASSISTANT_NAME = "Prism";
 const PRISM_MESSAGE_ROLE_LETTERS = ["P", "R", "I", "S", "M"] as const;
@@ -14015,10 +14112,50 @@ function HomeContent(): React.JSX.Element {
   >([]);
   const [imageLightbox, setImageLightbox] = useState<ImageRecord | null>(null);
   const [imagePrompt, setImagePrompt] = useState("");
+  const [imageGlobalPositiveKeywords, setImageGlobalPositiveKeywords] = useState<string[]>(
+    []
+  );
+  const [imageGlobalNegativeKeywords, setImageGlobalNegativeKeywords] = useState<string[]>(
+    []
+  );
+  const [imageBotKeywordsByBotId, setImageBotKeywordsByBotId] = useState<
+    Record<string, ScopedImageKeywords>
+  >({});
+  const [imagePositiveKeywordDraft, setImagePositiveKeywordDraft] = useState("");
+  const [imageNegativeKeywordDraft, setImageNegativeKeywordDraft] = useState("");
+  const [imageKeywordEditorOpen, setImageKeywordEditorOpen] = useState(false);
+  const imageKeywordTagListRefs = useRef<Record<"positive" | "negative", HTMLDivElement | null>>({
+    positive: null,
+    negative: null,
+  });
+  const [imageKeywordTagListWidthByKind, setImageKeywordTagListWidthByKind] = useState<
+    Record<"positive" | "negative", number>
+  >({
+    positive: 0,
+    negative: 0,
+  });
+  const [imageKeywordChipWidthByTagByKind, setImageKeywordChipWidthByTagByKind] = useState<
+    Record<"positive" | "negative", Record<string, number>>
+  >({
+    positive: {},
+    negative: {},
+  });
+  const [imageKeywordSelectedTagsByKind, setImageKeywordSelectedTagsByKind] =
+    useState<ScopedImageKeywords>({
+      positive: [],
+      negative: [],
+    });
+  const imageKeywordDragSelectRef = useRef<{
+    kind: "positive" | "negative";
+    mode: ImageKeywordDragMode;
+  } | null>(null);
   const [imageGenerationVariant, setImageGenerationVariant] =
     useState<ImageGenerationVariant>("letterbox");
   const [imageVariantManualOverride, setImageVariantManualOverride] = useState(false);
   const [imageRandomPromptBusy, setImageRandomPromptBusy] = useState(false);
+  const [imagePrivateMode, setImagePrivateMode] = useState(false);
+  const [imagePrivatePurgeBusy, setImagePrivatePurgeBusy] = useState(false);
+  const [imagePrivateGeneratedIds, setImagePrivateGeneratedIds] = useState<string[]>([]);
   const [imagePanelScope, setImagePanelScope] = useState<ImagePanelScope>("all");
   const imagePanelScopeRef = useRef<ImagePanelScope>("all");
   const [imagePanelBotId, setImagePanelBotId] = useState<string | null>(null);
@@ -14028,6 +14165,9 @@ function HomeContent(): React.JSX.Element {
   const [imageGenInflightByScope, setImageGenInflightByScope] = useState<
     Record<string, number>
   >({});
+  const [imageGenUiContextByScope, setImageGenUiContextByScope] = useState<
+    Record<string, ImageGenScopeUiContext>
+  >({});
   const imageGenAbortControllersByScopeRef = useRef<Map<string, AbortController[]>>(
     new Map()
   );
@@ -14035,10 +14175,121 @@ function HomeContent(): React.JSX.Element {
   const [imageReadyNotice, setImageReadyNotice] = useState<ImageReadyNoticeState | null>(
     null
   );
+  const [imagesDeleteAllConfirmOpen, setImagesDeleteAllConfirmOpen] = useState(false);
+  const [imagesDeleteAllBusy, setImagesDeleteAllBusy] = useState(false);
+  const [imageToolsDockHideCount, setImageToolsDockHideCount] = useState(0);
   const imagePanelBot =
     imagePanelBotId != null
       ? bots.find((candidate) => candidate.id === imagePanelBotId) ?? null
       : null;
+  const activeKeywordScopeBotId = imagePanelScope === "bot" ? imagePanelBotId : null;
+  const activeScopedImageKeywords =
+    activeKeywordScopeBotId != null
+      ? imageBotKeywordsByBotId[activeKeywordScopeBotId] ?? EMPTY_SCOPED_IMAGE_KEYWORDS
+      : {
+          positive: imageGlobalPositiveKeywords,
+          negative: imageGlobalNegativeKeywords,
+        };
+  const imagePositiveKeywords = activeScopedImageKeywords.positive;
+  const imageNegativeKeywords = activeScopedImageKeywords.negative;
+  useEffect(() => {
+    setImageKeywordSelectedTagsByKind((current) => {
+      const nextPositive = current.positive.filter((tag) => imagePositiveKeywords.includes(tag));
+      const nextNegative = current.negative.filter((tag) => imageNegativeKeywords.includes(tag));
+      if (
+        nextPositive.length === current.positive.length &&
+        nextNegative.length === current.negative.length
+      ) {
+        return current;
+      }
+      return {
+        positive: nextPositive,
+        negative: nextNegative,
+      };
+    });
+  }, [imageNegativeKeywords, imagePositiveKeywords]);
+  useEffect(() => {
+    if (imageKeywordEditorOpen) return;
+    setImageKeywordSelectedTagsByKind({
+      positive: [],
+      negative: [],
+    });
+  }, [imageKeywordEditorOpen]);
+  useEffect(() => {
+    const clearImageKeywordDragState = (): void => {
+      imageKeywordDragSelectRef.current = null;
+    };
+    window.addEventListener("pointerup", clearImageKeywordDragState);
+    return () => {
+      window.removeEventListener("pointerup", clearImageKeywordDragState);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (!imageKeywordEditorOpen) {
+      setImageKeywordTagListWidthByKind({
+        positive: 0,
+        negative: 0,
+      });
+      return;
+    }
+    const observers: ResizeObserver[] = [];
+    for (const kind of IMAGE_KEYWORD_EDITOR_KINDS) {
+      const node = imageKeywordTagListRefs.current[kind];
+      if (!node) continue;
+      const syncWidth = (): void => {
+        setImageKeywordTagListWidthByKind((current) => {
+          const width = Math.floor(node.clientWidth);
+          if (current[kind] === width) return current;
+          return {
+            ...current,
+            [kind]: width,
+          };
+        });
+      };
+      syncWidth();
+      const observer = new ResizeObserver(syncWidth);
+      observer.observe(node);
+      observers.push(observer);
+    }
+    return () => {
+      for (const observer of observers) observer.disconnect();
+    };
+  }, [imageKeywordEditorOpen]);
+  useLayoutEffect(() => {
+    if (!imageKeywordEditorOpen) return;
+    setImageKeywordChipWidthByTagByKind((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const kind of IMAGE_KEYWORD_EDITOR_KINDS) {
+        const node = imageKeywordTagListRefs.current[kind];
+        if (!node) continue;
+        const chipNodes = Array.from(node.querySelectorAll<HTMLElement>("[data-image-keyword-tag]"));
+        const nextKind: Record<string, number> = {};
+        for (const chipNode of chipNodes) {
+          const tag = chipNode.dataset.imageKeywordTag;
+          if (!tag) continue;
+          nextKind[tag] = Math.ceil(chipNode.getBoundingClientRect().width);
+        }
+        const currentKind = current[kind];
+        const sameCount = Object.keys(currentKind).length === Object.keys(nextKind).length;
+        const sameValues =
+          sameCount &&
+          Object.entries(nextKind).every(([tag, width]) => currentKind[tag] === width);
+        if (!sameValues) {
+          changed = true;
+          next[kind] = nextKind;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [
+    imageKeywordEditorOpen,
+    imageKeywordTagListWidthByKind,
+    imageGlobalPositiveKeywords,
+    imageGlobalNegativeKeywords,
+    imageBotKeywordsByBotId,
+  ]);
+  const imagePrivateModePrevRef = useRef(imagePrivateMode);
   // Single bot-form state used for BOTH create and edit modes. The top
   // form in the Bots panel is the only place a color + glyph picker ever
   // renders; when the user clicks a bot's pencil, we hydrate these same
@@ -15114,8 +15365,22 @@ function HomeContent(): React.JSX.Element {
         explicitDefault: false,
       };
     } else if (view === "chat") {
-      // Chat is locked to the default Prism persona.
-      return { botId: null, explicitDefault: true };
+      if (chatBotOverride !== undefined) {
+        return {
+          botId: chatBotOverride,
+          explicitDefault: chatBotOverride === null,
+        };
+      }
+      if (detail?.id !== undefined && detail.id !== "pending") {
+        return {
+          botId: detail.botId,
+          explicitDefault: detail.botId === null,
+        };
+      }
+      return {
+        botId: detail?.botId ?? selectedBotId ?? null,
+        explicitDefault: false,
+      };
     }
     return { botId: null, explicitDefault: false };
   }, [
@@ -15171,11 +15436,9 @@ function HomeContent(): React.JSX.Element {
   ]);
   const imageBotDirectoryEntries = useMemo(() => {
     const tallies = new Map<string, number>();
-    let generalCount = 0;
     for (const img of imageBotDirectorySnapshot) {
       const bid = img.botId ?? null;
       if (!bid) {
-        generalCount++;
         continue;
       }
       tallies.set(bid, (tallies.get(bid) ?? 0) + 1);
@@ -15187,18 +15450,10 @@ function HomeContent(): React.JSX.Element {
         name: bots.find((b) => b.id === botId)?.name ?? "Bot",
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    if (generalCount > 0) {
-      entries.unshift({
-        botId: PRISM_IMAGE_GENERAL_ENTRY_ID,
-        count: generalCount,
-        name: "PRISM (general)",
-      });
-    }
     if (view === "chat") {
-      return entries.filter((e) => {
-        if (e.botId === PRISM_IMAGE_GENERAL_ENTRY_ID) return true;
-        return Boolean(chatScopedGalleryBotId && e.botId === chatScopedGalleryBotId);
-      });
+      return entries.filter((e) =>
+        Boolean(chatScopedGalleryBotId && e.botId === chatScopedGalleryBotId)
+      );
     }
     return entries;
   }, [imageBotDirectorySnapshot, bots, view, chatScopedGalleryBotId]);
@@ -15224,11 +15479,16 @@ function HomeContent(): React.JSX.Element {
       ) ?? null
     );
   };
+  const activeImageGenScopeKey = resolveActiveImageGenInflightScopeKey();
+  const activeImageGenInflightCount =
+    activeImageGenScopeKey != null ? (imageGenInflightByScope[activeImageGenScopeKey] ?? 0) : 0;
+  const activeImageGenUiContext =
+    activeImageGenScopeKey != null ? (imageGenUiContextByScope[activeImageGenScopeKey] ?? null) : null;
   const imageGenElapsedAnchorRef = useRef<number | null>(null);
   const [, imageGenElapsedBump] = useState(0);
 
   useEffect(() => {
-    if (imageGenInflightHere <= 0) {
+    if (activeImageGenInflightCount <= 0) {
       imageGenElapsedAnchorRef.current = null;
       return;
     }
@@ -15240,17 +15500,18 @@ function HomeContent(): React.JSX.Element {
       imageGenElapsedBump((n) => n + 1);
     }, 500);
     return () => window.clearInterval(id);
-  }, [imageGenInflightHere]);
+  }, [activeImageGenInflightCount, activeImageGenScopeKey]);
 
   const imageGenElapsedSeconds =
-    imageGenInflightHere > 0 && imageGenElapsedAnchorRef.current !== null
+    activeImageGenInflightCount > 0 && imageGenElapsedAnchorRef.current !== null
       ? Math.floor((Date.now() - imageGenElapsedAnchorRef.current) / 1000)
       : 0;
   const imageGenLocalInflight =
-    imageGenInflightHere > 0 && effectivePreferredProvider !== "openai";
+    activeImageGenInflightCount > 0 &&
+    (activeImageGenUiContext?.provider ?? effectivePreferredProvider) !== "openai";
 
   useEffect(() => {
-    if (imageGenInflightHere <= 0) {
+    if (activeImageGenInflightCount <= 0) {
       setImageGenWarmupHintVisible(false);
       return;
     }
@@ -15259,7 +15520,22 @@ function HomeContent(): React.JSX.Element {
       setImageGenWarmupHintVisible(true);
     }, IMAGE_GEN_WARMUP_HINT_AFTER_MS);
     return () => window.clearTimeout(id);
-  }, [imageGenInflightHere]);
+  }, [activeImageGenInflightCount, activeImageGenScopeKey]);
+
+  useEffect(() => {
+    setImageGenUiContextByScope((prev) => {
+      let changed = false;
+      const next: Record<string, ImageGenScopeUiContext> = {};
+      for (const [key, ctx] of Object.entries(prev)) {
+        if ((imageGenInflightByScope[key] ?? 0) > 0) {
+          next[key] = ctx;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [imageGenInflightByScope]);
 
   const privateCustomBotActive = privateChatActive && activeBot !== null;
 
@@ -15284,7 +15560,11 @@ function HomeContent(): React.JSX.Element {
       if (detail?.id !== undefined && detail.id !== "pending") return detail.botId;
       return detail?.botId ?? selectedBotId ?? null;
     }
-    if (view === "chat") return null;
+    if (view === "chat") {
+      if (chatBotOverride !== undefined) return chatBotOverride;
+      if (detail?.id !== undefined && detail.id !== "pending") return detail.botId;
+      return detail?.botId ?? selectedBotId ?? null;
+    }
     return selectedBotId;
   }, [
     view,
@@ -19262,6 +19542,7 @@ function HomeContent(): React.JSX.Element {
     setPanelNotice(null);
     try {
       await api(`/api/images/${encodeURIComponent(img.id)}`, { method: "DELETE" });
+      setImagePrivateGeneratedIds((current) => current.filter((id) => id !== img.id));
       setImageLightbox((current) => (current?.id === img.id ? null : current));
       if (imagePanelScope === "general") {
         await refreshImages("general");
@@ -19275,6 +19556,93 @@ function HomeContent(): React.JSX.Element {
       await refreshImageBotDirectorySnapshot();
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Could not delete image.");
+    }
+  }
+
+  async function purgePrivateGeneratedImages(): Promise<void> {
+    if (imagePrivatePurgeBusy) return;
+    const ids = [...new Set(imagePrivateGeneratedIds)];
+    if (ids.length === 0) return;
+    setImagePrivatePurgeBusy(true);
+    setPanelError(null);
+    setPanelNotice("Leaving private image mode… clearing private images.");
+    setImagePrivateGeneratedIds([]);
+    let deleted = 0;
+    for (const imageId of ids) {
+      try {
+        await api(`/api/images/${encodeURIComponent(imageId)}`, { method: "DELETE" });
+        deleted += 1;
+      } catch {
+        // Best effort cleanup; we'll summarize remaining count below.
+      }
+    }
+    try {
+      if (imagePanelScope === "general") {
+        await refreshImages("general");
+      } else if (imagePanelScope === "bot" && imagePanelBotId) {
+        await refreshImages(imagePanelBotId);
+      } else if (view === "chat") {
+        await refreshImagesChatGallery();
+      } else {
+        await refreshImages(null);
+      }
+      await refreshImageBotDirectorySnapshot();
+    } finally {
+      setImagePrivatePurgeBusy(false);
+    }
+    const failed = ids.length - deleted;
+    if (failed > 0) {
+      setPanelError(
+        failed === 1
+          ? "1 private image could not be removed automatically."
+          : `${failed} private images could not be removed automatically.`
+      );
+    }
+    setPanelNotice(
+      deleted === 1
+        ? "Private mode exited. Deleted 1 private image."
+        : `Private mode exited. Deleted ${deleted} private images.`
+    );
+  }
+
+  async function deleteAllGalleryImages() {
+    if (imagesDeleteAllBusy) return;
+    setImagesDeleteAllBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      const isBotScopedDelete = imagePanelScope === "bot" && imagePanelBotId != null;
+      const endpoint = isBotScopedDelete
+        ? `/api/images?botId=${encodeURIComponent(imagePanelBotId)}`
+        : "/api/images";
+      const result = await api<{ ok: boolean; deleted?: number }>(endpoint, {
+        method: "DELETE",
+      });
+      setImagePrivateGeneratedIds([]);
+      setImageLightbox(null);
+      if (imagePanelScope === "general") {
+        await refreshImages("general");
+      } else if (imagePanelScope === "bot" && imagePanelBotId) {
+        await refreshImages(imagePanelBotId);
+      } else if (view === "chat") {
+        await refreshImagesChatGallery();
+      } else {
+        await refreshImages(null);
+      }
+      await refreshImageBotDirectorySnapshot();
+      const deleted = typeof result.deleted === "number" ? result.deleted : 0;
+      setPanelNotice(
+        deleted === 0
+          ? "No images to delete."
+          : deleted === 1
+            ? "Deleted 1 image."
+            : `Deleted ${deleted} images.`
+      );
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Could not delete images.");
+    } finally {
+      setImagesDeleteAllBusy(false);
+      setImagesDeleteAllConfirmOpen(false);
     }
   }
 
@@ -19293,6 +19661,25 @@ function HomeContent(): React.JSX.Element {
       setPanelError(err instanceof Error ? err.message : "Could not download image.");
     }
   }
+
+  useEffect(() => {
+    if (!imagesDeleteAllConfirmOpen) return;
+    const hasAnyImages =
+      imagePanelScope === "bot"
+        ? images.length > 0
+        : Math.max(images.length, imageBotDirectorySnapshot.length) > 0;
+    if (panel !== "images" || !hasAnyImages) {
+      setImagesDeleteAllConfirmOpen(false);
+    }
+  }, [imagesDeleteAllConfirmOpen, panel, imagePanelScope, images.length, imageBotDirectorySnapshot.length]);
+
+  useEffect(() => {
+    const wasPrivate = imagePrivateModePrevRef.current;
+    if (wasPrivate && !imagePrivateMode) {
+      void purgePrivateGeneratedImages();
+    }
+    imagePrivateModePrevRef.current = imagePrivateMode;
+  }, [imagePrivateMode, imagePrivateGeneratedIds.length]);
 
   useEffect(() => {
     if (!imageLightbox) return;
@@ -19559,6 +19946,12 @@ function HomeContent(): React.JSX.Element {
   ): Record<string, unknown> {
     const isChatMode = view === "chat";
     const privateForSend = detail?.incognito === true || pendingIncognito;
+    const chatBotIdForSend =
+      chatBotOverride !== undefined
+        ? chatBotOverride
+        : detail?.id !== undefined && detail.id !== "pending"
+          ? detail.botId
+          : (detail?.botId ?? selectedBotId ?? null);
     const privateBotIdForSend = privateForSend
       ? chatBotOverride !== undefined
         ? chatBotOverride
@@ -19607,7 +20000,9 @@ function HomeContent(): React.JSX.Element {
           ? (selectedBotId ?? undefined)
           : privateForSend
             ? privateBotIdForSend
-            : undefined,
+            : isChatMode
+              ? chatBotIdForSend
+              : undefined,
       ...(mode === "chat" ? { incognito: privateForSend } : {}),
       ...(privateForSend
         ? { ephemeralMessages: options.ephemeralMessages ?? detail?.messages ?? [] }
@@ -24361,13 +24756,26 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function performShowAllBotsView(): void {
+  function performShowAllBotsView(spotlightBotId: string | null = null): void {
+    const shouldAnimateSpotlightSwitch =
+      spotlightBotId !== null &&
+      view === "sandbox" &&
+      !pendingIncognito &&
+      !pendingReplyVisible &&
+      activeConversationIsEmpty;
+    if (shouldAnimateSpotlightSwitch) {
+      setCanvasBotSwitchOverlayPhase("enter");
+      canvasBotSwitchTransitionStartedAtRef.current = Date.now();
+      pendingCanvasBotUnfoldRef.current = true;
+      setCanvasBotSwitchTransitioning(true);
+    }
     setSelectedId(null);
     setDetail(null);
     setChatBotOverride(undefined);
     closeEmptyStateBotSearch();
     startBotPickerReturnToAll();
-    setSelectedBotId(null);
+    setSelectedBotId(spotlightBotId);
+    setSandboxGridSelectedBotId(spotlightBotId);
     setComposerPrimed(false);
     setConversationStarterPrompts(null);
     requestAnimationFrame(() => {
@@ -25757,6 +26165,172 @@ function HomeContent(): React.JSX.Element {
     return { localModelId, openAiModelId };
   }
 
+  function addImageKeywordTags(kind: "positive" | "negative", draftTags: string[]): void {
+    const normalizedDrafts = draftTags
+      .map((tag) => tag.replace(/\s+/g, " ").trim())
+      .filter((tag) => tag.length > 0);
+    if (normalizedDrafts.length === 0) return;
+    const scope = imagePanelScopeRef.current;
+    const scopeBotId = scope === "bot" ? imagePanelBotIdRef.current : null;
+    if (scopeBotId) {
+      setImageBotKeywordsByBotId((current) => {
+        const existing = current[scopeBotId] ?? EMPTY_SCOPED_IMAGE_KEYWORDS;
+        const nextList =
+          kind === "positive" ? existing.positive.slice() : existing.negative.slice();
+        let changed = false;
+        for (const draft of normalizedDrafts) {
+          if (!nextList.some((tag) => tag.toLowerCase() === draft.toLowerCase())) {
+            nextList.push(draft);
+            changed = true;
+          }
+        }
+        if (!changed) return current;
+        return {
+          ...current,
+          [scopeBotId]:
+            kind === "positive"
+              ? { positive: nextList, negative: existing.negative }
+              : { positive: existing.positive, negative: nextList },
+        };
+      });
+    } else if (kind === "positive") {
+      setImageGlobalPositiveKeywords((current) => {
+        const next = current.slice();
+        let changed = false;
+        for (const draft of normalizedDrafts) {
+          if (!next.some((tag) => tag.toLowerCase() === draft.toLowerCase())) {
+            next.push(draft);
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+    } else {
+      setImageGlobalNegativeKeywords((current) => {
+        const next = current.slice();
+        let changed = false;
+        for (const draft of normalizedDrafts) {
+          if (!next.some((tag) => tag.toLowerCase() === draft.toLowerCase())) {
+            next.push(draft);
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+    }
+  }
+
+  function commitImageKeywordDraft(kind: "positive" | "negative"): void {
+    const draftRaw =
+      kind === "positive" ? imagePositiveKeywordDraft : imageNegativeKeywordDraft;
+    const draft = draftRaw.replace(/\s+/g, " ").trim();
+    if (!draft) return;
+    addImageKeywordTags(kind, [draft]);
+    if (kind === "positive") {
+      setImagePositiveKeywordDraft("");
+    } else {
+      setImageNegativeKeywordDraft("");
+    }
+  }
+
+  function applyImageKeywordPaste(kind: "positive" | "negative", text: string): void {
+    if (!text.includes(",")) return;
+    const chunks = text.split(",");
+    const endsWithComma = /,\s*$/.test(text);
+    const finalized = (endsWithComma ? chunks : chunks.slice(0, -1))
+      .map((part) => part.replace(/\s+/g, " ").trim())
+      .filter((part) => part.length > 0);
+    if (finalized.length > 0) {
+      addImageKeywordTags(kind, finalized);
+    }
+    const trailingDraft = endsWithComma
+      ? ""
+      : (chunks[chunks.length - 1] ?? "").replace(/\s+/g, " ").trim();
+    if (kind === "positive") {
+      setImagePositiveKeywordDraft(trailingDraft);
+    } else {
+      setImageNegativeKeywordDraft(trailingDraft);
+    }
+  }
+
+  function removeImageKeywordTags(kind: "positive" | "negative", tagsToRemove: string[]): void {
+    if (tagsToRemove.length === 0) return;
+    const uniqueTagsToRemove = Array.from(new Set(tagsToRemove));
+    const tagsToRemoveSet = new Set(uniqueTagsToRemove);
+    setImageKeywordSelectedTagsByKind((current) => ({
+      ...current,
+      [kind]: current[kind].filter((tag) => !tagsToRemoveSet.has(tag)),
+    }));
+    const scope = imagePanelScopeRef.current;
+    const scopeBotId = scope === "bot" ? imagePanelBotIdRef.current : null;
+    if (scopeBotId) {
+      setImageBotKeywordsByBotId((current) => {
+        const existing = current[scopeBotId] ?? EMPTY_SCOPED_IMAGE_KEYWORDS;
+        const next =
+          kind === "positive"
+            ? {
+                positive: existing.positive.filter((item) => !tagsToRemoveSet.has(item)),
+                negative: existing.negative,
+              }
+            : {
+                positive: existing.positive,
+                negative: existing.negative.filter((item) => !tagsToRemoveSet.has(item)),
+              };
+        if (next.positive.length === 0 && next.negative.length === 0) {
+          const { [scopeBotId]: _removed, ...rest } = current;
+          return rest;
+        }
+        return {
+          ...current,
+          [scopeBotId]: next,
+        };
+      });
+      return;
+    }
+    if (kind === "positive") {
+      setImageGlobalPositiveKeywords((current) =>
+        current.filter((item) => !tagsToRemoveSet.has(item))
+      );
+      return;
+    }
+    setImageGlobalNegativeKeywords((current) =>
+      current.filter((item) => !tagsToRemoveSet.has(item))
+    );
+  }
+
+  function removeImageKeywordTag(kind: "positive" | "negative", tag: string): void {
+    removeImageKeywordTags(kind, [tag]);
+  }
+
+  function setImageKeywordTagSelected(
+    kind: "positive" | "negative",
+    tag: string,
+    selected: boolean
+  ): void {
+    setImageKeywordSelectedTagsByKind((current) => {
+      const existing = current[kind];
+      const hasTag = existing.includes(tag);
+      if (selected && hasTag) return current;
+      if (!selected && !hasTag) return current;
+      return {
+        ...current,
+        [kind]: selected ? [...existing, tag] : existing.filter((item) => item !== tag),
+      };
+    });
+  }
+
+  function applyImageKeywordDragSelectionFromTarget(
+    kind: "positive" | "negative",
+    mode: ImageKeywordDragMode,
+    target: EventTarget | null
+  ): void {
+    if (!(target instanceof Element)) return;
+    const chipElement = target.closest<HTMLElement>("[data-image-keyword-tag]");
+    const tag = chipElement?.dataset.imageKeywordTag;
+    if (!tag) return;
+    setImageKeywordTagSelected(kind, tag, mode === "add");
+  }
+
   async function runImageGeneration(promptTrimmed: string) {
     if (!promptTrimmed) return;
     const scopeBotId = imagesPanelAttributionBotId;
@@ -25764,10 +26338,25 @@ function HomeContent(): React.JSX.Element {
       sandboxImageGenConversationId,
       scopeBotId
     );
+    const originScope = imagePanelScopeRef.current;
+    const originScopeBotId = imagePanelBotIdRef.current;
+    // Keep loading-overlay identity scoped to the Images panel itself:
+    // - Bot scope: use that bot's chrome.
+    // - All/general scopes: force Prism default (no persona tint), even if
+    //   another chat bot is currently active elsewhere in the app.
+    const originOverlayBotId = originScope === "bot" ? originScopeBotId : null;
+    setImageGenUiContextByScope((prev) => ({
+      ...prev,
+      [scopeKey]: {
+        overlayBotId: originOverlayBotId,
+        provider: effectivePreferredProvider,
+      },
+    }));
     setImageGenInflightByScope((prev) => ({
       ...prev,
       [scopeKey]: (prev[scopeKey] ?? 0) + 1,
     }));
+    setImageToolsDockHideCount((count) => count + 1);
     setPanelError(null);
     let succeeded = false;
     const abortController = new AbortController();
@@ -25782,7 +26371,11 @@ function HomeContent(): React.JSX.Element {
         setImageGenerationVariant(effectiveVariant);
       }
       const body: Record<string, unknown> = {
-        prompt: promptTrimmed,
+        prompt: composeImagePromptWithKeywordDirectives({
+          basePrompt: promptTrimmed,
+          positiveKeywords: imagePositiveKeywords,
+          negativeKeywords: imageNegativeKeywords,
+        }),
         size: requestedSize,
       };
       if (sandboxImageGenConversationId) {
@@ -25811,6 +26404,11 @@ function HomeContent(): React.JSX.Element {
         signal: abortController.signal,
       });
       const imageId = data.image?.id ?? "";
+      if (imagePrivateMode && imageId) {
+        setImagePrivateGeneratedIds((current) =>
+          current.includes(imageId) ? current : [...current, imageId]
+        );
+      }
       await refreshImageBotDirectorySnapshot();
       const p = panelRef.current;
       const scope = imagePanelScopeRef.current;
@@ -25863,6 +26461,7 @@ function HomeContent(): React.JSX.Element {
       }
     } finally {
       unregisterImageGenAbort(scopeKey, abortController);
+      setImageToolsDockHideCount((count) => (count <= 0 ? 0 : count - 1));
       setImageGenInflightByScope((prev) => {
         const next = { ...prev };
         const cur = next[scopeKey] ?? 1;
@@ -26551,14 +27150,16 @@ function HomeContent(): React.JSX.Element {
                 return;
               }
               disarmDelete();
-              setExpandedConversationGroupKey((prev) =>
-                prev === group.key ? null : group.key
-              );
+              if (isExpanded) {
+                performShowAllBotsView(group.botId);
+                return;
+              }
+              setExpandedConversationGroupKey(group.key);
               setConversationListScrollTop(0);
             }}
             aria-label={
               isExpanded
-                ? `Collapse ${group.name} conversations`
+                ? `Show all bots from ${group.name} conversations`
                 : `Expand ${group.name} conversations`
             }
           >
@@ -26826,6 +27427,67 @@ function HomeContent(): React.JSX.Element {
               }}
             >
               Delete bot
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  /** Centered alertdialog for deleting every image in the global Images view. */
+  const renderImagesDeleteAllModal = () => {
+    if (!imagesDeleteAllConfirmOpen) return null;
+    const isBotScopedDelete = imagePanelScope === "bot" && imagePanelBotId != null;
+    const count = isBotScopedDelete ? images.length : Math.max(images.length, imageBotDirectorySnapshot.length);
+    const botName = imagePanelBot?.name ?? "this bot";
+    return (
+      <div
+        className={styles.deleteAllModalBackdrop}
+        data-delete-affordance="true"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setImagesDeleteAllConfirmOpen(false);
+        }}
+      >
+        <div
+          className={styles.deleteAllModalPanel}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="delete-images-all-title"
+          aria-describedby="delete-images-all-desc"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <h2 id="delete-images-all-title" className={styles.deleteAllModalTitle}>
+            {isBotScopedDelete ? `Delete ${botName} images?` : "Delete all images?"}
+          </h2>
+          <p id="delete-images-all-desc" className={styles.deleteAllModalBody}>
+            {isBotScopedDelete
+              ? (
+                count === 1
+                  ? `This will permanently remove the only saved image for ${botName}.`
+                  : `This will permanently remove all ${count} saved images for ${botName}.`
+              )
+              : (
+                count === 1
+                  ? "This will permanently remove your only saved image."
+                  : `This will permanently remove all ${count} saved images across all bots.`
+              )}
+          </p>
+          <div className={styles.deleteAllModalActions}>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              onClick={() => setImagesDeleteAllConfirmOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={styles.deleteAllModalConfirm}
+              onClick={() => void deleteAllGalleryImages()}
+              aria-label={isBotScopedDelete ? `Delete images for ${botName}` : "Delete all images"}
+              disabled={imagesDeleteAllBusy}
+            >
+              {isBotScopedDelete ? "Delete bot images" : "Delete all"}
             </button>
           </div>
         </div>
@@ -30129,6 +30791,7 @@ function HomeContent(): React.JSX.Element {
             data-closing={panelClosing ? "true" : undefined}
             data-color-picker-open={colorWheelOpen ? "true" : undefined}
             data-profile-builder-open={botProfileBuilderOpen ? "true" : undefined}
+            data-global-customizer={editorMode && !editingBotId ? "true" : undefined}
             data-library-expanded={
               botPanelLibraryEnabled && botLibraryExpanded ? "true" : undefined
             }
@@ -31314,6 +31977,30 @@ function HomeContent(): React.JSX.Element {
         const canGenerate =
           effectivePreferredProvider === "openai" ||
           (effectivePreferredProvider === "local" && hasLocalImageModels);
+        const imageKeywordEditorLayout =
+          viewportWidth >= IMAGE_KEYWORD_EDITOR_SIDE_LAYOUT_MIN_VIEWPORT_PX &&
+          viewportHeight >= 760
+            ? "side"
+            : "overlay";
+        const imageDockDirectoryEntries =
+          imageBotDirectoryEntries.length > 0
+            ? imageBotDirectoryEntries
+            : (() => {
+                const tallies = new Map<string, number>();
+                for (const img of images) {
+                  const bid = img.botId?.trim() ?? "";
+                  if (bid.length > 0) {
+                    tallies.set(bid, (tallies.get(bid) ?? 0) + 1);
+                  }
+                }
+                return [...tallies.entries()]
+                  .map(([botId, count]) => ({
+                    botId,
+                    count,
+                    name: bots.find((b) => b.id === botId)?.name ?? "Bot",
+                  }))
+                  .sort((a, b) => a.name.localeCompare(b.name));
+              })();
         // PRISM (general) uses CSS `--images-panel-*` + rainbow rail (see
         // `.panelImages[data-image-scope="general"]`). Per-bot drill-down keeps
         // editor-bot ink wash via inline vars below.
@@ -31343,9 +32030,11 @@ function HomeContent(): React.JSX.Element {
         const imagesPanelChromeStyle: React.CSSProperties | undefined =
           imagePanelScope === "general"
             ? ({
-                ["--images-panel-color"]: "#2fd3e3",
+                ["--images-panel-color"]:
+                  view === "chat" ? "#9399a5" : "#2fd3e3",
                 ["--images-panel-text"]: "#0b0b0d",
-                ["--images-panel-ink"]: "#2fd3e3",
+                ["--images-panel-ink"]:
+                  view === "chat" ? "#b4bac5" : "#2fd3e3",
               } as React.CSSProperties)
             : undefined;
         const imagesGenOverlayAccentHex = (() => {
@@ -31367,12 +32056,31 @@ function HomeContent(): React.JSX.Element {
           imagesGenOverlayAccentHex,
           resolvedTheme
         );
-        const overlayTintBot: Bot | null =
+        const imagePanelTitleGlyphName: BotGlyphName =
+          imagePanelScope === "bot" && imagePanelBot && isBotGlyphName(imagePanelBot.glyph)
+            ? imagePanelBot.glyph
+            : "triangle";
+        const imagePanelTitleGlyphColor = normalizeAccentForTheme(
+          imagePanelScope === "bot" && imagePanelBot
+            ? (imagePanelBot.color ?? PRISM_DEFAULT_ACCENT)
+            : PRISM_DEFAULT_ACCENT,
+          resolvedTheme
+        );
+        const canDeleteImagesInCurrentScope =
           imagePanelScope === "bot"
-            ? imagePanelBot
-            : imagePanelScope === "all"
-              ? activeBot
-              : null;
+            ? images.length > 0
+            : Math.max(images.length, imageBotDirectorySnapshot.length) > 0;
+        const imagePanelTitleFull =
+          imagePanelScope === "bot" && imagePanelBot
+            ? `${imagePanelBot.name} — images`
+            : imagePanelScope === "general"
+              ? "PRISM — images"
+              : "Image hub — images";
+        const overlayTintBotId = activeImageGenUiContext?.overlayBotId ?? null;
+        const overlayTintBot: Bot | null =
+          overlayTintBotId != null
+            ? (bots.find((candidate) => candidate.id === overlayTintBotId) ?? null)
+            : null;
         /** No bot identity in this overlay — use Prism triangle + rainbow chrome (general, or All without active bot). */
         const imagesGenOverlayPrismDefault = !overlayTintBot;
         const prismGenOverlayPaletteStyle = imagesGenOverlayPrismDefault
@@ -31414,10 +32122,12 @@ function HomeContent(): React.JSX.Element {
           return viaAuto ? `Using ${label} · Auto` : `Using ${label}`;
         })();
         return (
+          <>
           <div
             className={`${styles.panel} ${styles.panelImages}`}
             data-closing={panelClosing ? "true" : undefined}
             data-image-scope={imagePanelScope}
+            data-private-mode={imagePrivateMode ? "true" : undefined}
             aria-busy={imageGenInflightHere > 0}
             style={{
               ...(imagePanelBotThemeStyle ?? {}),
@@ -31425,7 +32135,9 @@ function HomeContent(): React.JSX.Element {
             }}
           >
             <div className={styles.panelHeader}>
-              <div className={styles.panelHeaderTitle}>
+              <div
+                className={styles.panelHeaderTitle}
+              >
                 {imagePanelScope === "bot" ||
                 (imagePanelScope === "general" && view !== "chat") ? (
                   <button
@@ -31448,26 +32160,65 @@ function HomeContent(): React.JSX.Element {
                     ←
                   </button>
                 ) : null}
-                <h3>
-                  {imagePanelScope === "bot" && imagePanelBot
-                    ? `${imagePanelBot.name} — images`
-                    : imagePanelScope === "general"
-                      ? "PRISM — images"
-                      : "Images"}
+                <h3 className={styles.panelImagesTitle} title={imagePanelTitleFull}>
+                  <span
+                    className={styles.panelImagesTitlePrimary}
+                    style={{ color: imagePanelTitleGlyphColor }}
+                    aria-label={imagePanelTitleFull}
+                  >
+                    <BotGlyph name={imagePanelTitleGlyphName} size={20} strokeWidth={1.95} />
+                  </span>
+                  <span className={styles.panelImagesTitleSuffix}> — images</span>
                 </h3>
               </div>
-              <div className={styles.panelImagesHeaderModelColumn}>
+              <div className={styles.panelHeaderActions}>
                 {renderImagesPanelModelPicker()}
+                <button
+                  type="button"
+                  className={`${styles.panelHeaderIconButton} ${styles.panelHeaderPrivateButton} ${styles.panelHeaderDangerTrashButton}`}
+                  aria-pressed={undefined}
+                  aria-label={
+                    imagesDeleteAllBusy ||
+                    !canDeleteImagesInCurrentScope
+                      ? "No images to delete"
+                      : imagePanelScope === "bot" && imagePanelBot
+                        ? `Delete images for ${imagePanelBot.name}`
+                        : "Delete all images"
+                  }
+                  data-glyph-tooltip={
+                    imagesDeleteAllBusy ||
+                    !canDeleteImagesInCurrentScope
+                      ? "No images to delete"
+                      : imagePanelScope === "bot" && imagePanelBot
+                        ? `Delete images for ${imagePanelBot.name}`
+                        : "Delete all images"
+                  }
+                  disabled={
+                    imagesDeleteAllBusy ||
+                    !canDeleteImagesInCurrentScope
+                  }
+                  onClick={() => {
+                    if (
+                      imagesDeleteAllBusy ||
+                      !canDeleteImagesInCurrentScope
+                    ) return;
+                    setImagesDeleteAllConfirmOpen(true);
+                  }}
+                >
+                  <span className={styles.panelHeaderPrivateGlyph} aria-hidden="true">
+                    <IconTrash />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.panelClose}
+                  onClick={closePanel}
+                  aria-label="Close panel"
+                  data-glyph-tooltip="Close panel"
+                >
+                  ×
+                </button>
               </div>
-              <button
-                type="button"
-                className={styles.panelClose}
-                onClick={closePanel}
-                aria-label="Close panel"
-                data-glyph-tooltip="Close panel"
-              >
-                ×
-              </button>
             </div>
             {canGenerate ? (
               <form className={styles.form} onSubmit={generateImg}>
@@ -31487,18 +32238,46 @@ function HomeContent(): React.JSX.Element {
                       }
                     }}
                   />
-                  <button
-                    type="button"
-                    className={styles.botRandomizeButton}
-                    disabled={busy || imageRandomPromptBusy || imageGenInflightHere > 0}
-                    aria-busy={imageRandomPromptBusy}
-                    onClick={() => void randomizeImagePrompt()}
-                    aria-label="Random prompt"
-                    title="Random prompt"
-                    data-glyph-tooltip="Random prompt"
-                  >
-                    <BotGlyph name="dice" size={20} strokeWidth={1.8} />
-                  </button>
+                  <div className={styles.imagePromptActionStack}>
+                    <button
+                      type="button"
+                      className={styles.botRandomizeButton}
+                      disabled={busy || imageRandomPromptBusy || imageGenInflightHere > 0}
+                      aria-busy={imageRandomPromptBusy}
+                      onClick={() => void randomizeImagePrompt()}
+                      aria-label="Random prompt"
+                      title="Random prompt"
+                      data-glyph-tooltip="Random prompt"
+                    >
+                      <BotGlyph name="dice" size={20} strokeWidth={1.8} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.botRandomizeButton} ${styles.imagePromptDangerButton}`}
+                      data-active={imagePrivateMode ? "true" : undefined}
+                      aria-pressed={imagePrivateMode}
+                      aria-label={
+                        imagePrivateMode
+                          ? "Private image mode is on. Click to turn off and delete private images."
+                          : "Turn on private image mode for temporary images."
+                      }
+                      title={
+                        imagePrivateMode
+                          ? "Private images on (turn off to auto-delete)"
+                          : "Private images off"
+                      }
+                      data-glyph-tooltip={
+                        imagePrivateMode
+                          ? "Private images on (turn off to auto-delete)"
+                          : "Private images off"
+                      }
+                      onClick={() => {
+                        setImagePrivateMode((current) => !current);
+                      }}
+                    >
+                      <IconKey />
+                    </button>
+                  </div>
                 </div>
                 <div className={styles.imageVariantRow} aria-label="Image format">
                   {IMAGE_GENERATION_VARIANT_OPTIONS.map((option) => {
@@ -31522,6 +32301,18 @@ function HomeContent(): React.JSX.Element {
                     );
                   })}
                 </div>
+                <>
+                  <div className={styles.imageKeywordLauncherRow}>
+                    <button
+                      type="button"
+                      className={styles.imageKeywordLauncherButton}
+                      data-active={imageKeywordEditorOpen ? "true" : undefined}
+                      onClick={() => setImageKeywordEditorOpen((current) => !current)}
+                    >
+                      Keywords
+                    </button>
+                  </div>
+                </>
                 <button
                   type="submit"
                   disabled={busy || imageRandomPromptBusy}
@@ -31534,35 +32325,192 @@ function HomeContent(): React.JSX.Element {
                 </button>
               </form>
             ) : null}
-            {canGenerate && view !== "chat" ? (
-              <p className={styles.muted} role="note">
-                With a bot active in Zen or Chat, new images save under that bot.
-                Otherwise they are stored as{" "}
-                <strong>PRISM (general)</strong> — open{" "}
-                <strong>Browse by bot</strong> to filter them.
-              </p>
-            ) : null}
-            {imageBotDirectoryEntries.length > 0 && view !== "chat" ? (
+            {imageKeywordEditorOpen && (
+              <div
+                className={styles.imageKeywordModalBackdrop}
+                data-layout={imageKeywordEditorLayout}
+                onClick={() => {
+                  if (imageKeywordEditorLayout === "overlay") {
+                    setImageKeywordEditorOpen(false);
+                  }
+                }}
+              >
+                {IMAGE_KEYWORD_EDITOR_KINDS.map((kind) => {
+                  const keywordList = kind === "positive" ? imagePositiveKeywords : imageNegativeKeywords;
+                  const keywordDraft =
+                    kind === "positive" ? imagePositiveKeywordDraft : imageNegativeKeywordDraft;
+                  const selectedTags =
+                    kind === "positive"
+                      ? imageKeywordSelectedTagsByKind.positive
+                      : imageKeywordSelectedTagsByKind.negative;
+                  const selectedSet = new Set(selectedTags);
+                  const displayTags = buildPackedImageKeywordDisplayOrder(
+                    keywordList,
+                    imageKeywordTagListWidthByKind[kind],
+                    imageKeywordChipWidthByTagByKind[kind]
+                  );
+                  return (
+                    <aside
+                      key={`keyword-modal-${kind}`}
+                      className={`${styles.imageKeywordModal} ${
+                        kind === "positive"
+                          ? styles.imageKeywordModalPositive
+                          : styles.imageKeywordModalNegative
+                      }`}
+                      data-layout={imageKeywordEditorLayout}
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDownCapture={(event) => {
+                        const selectAllPressed =
+                          (event.metaKey || event.ctrlKey) &&
+                          event.key.toLowerCase() === "a" &&
+                          !event.shiftKey &&
+                          !event.altKey;
+                        if (selectAllPressed) {
+                          event.preventDefault();
+                          setImageKeywordSelectedTagsByKind((current) => ({
+                            ...current,
+                            [kind]: keywordList.slice(),
+                          }));
+                          return;
+                        }
+                        const deletePressed = event.key === "Backspace" || event.key === "Delete";
+                        if (!deletePressed) return;
+                        if (keywordDraft.trim().length > 0) return;
+                        if (selectedTags.length === 0) return;
+                        event.preventDefault();
+                        removeImageKeywordTags(kind, selectedTags);
+                      }}
+                    >
+                      <header className={styles.imageKeywordModalHeader}>
+                        <h4>{kind === "positive" ? "Positive keywords" : "Negative keywords"}</h4>
+                      </header>
+                      <div
+                        ref={(node) => {
+                          imageKeywordTagListRefs.current[kind] = node;
+                        }}
+                        className={styles.imageKeywordTagList}
+                        onPointerDown={(event) => {
+                          if (event.button !== 0) return;
+                          if ((event.target as HTMLElement).closest("button")) return;
+                          const inInput =
+                            event.target instanceof HTMLElement &&
+                            event.target.closest("input") != null;
+                          if (inInput) return;
+                          if (event.target === event.currentTarget) {
+                            setImageKeywordSelectedTagsByKind((current) => ({
+                              ...current,
+                              [kind]: [],
+                            }));
+                            imageKeywordDragSelectRef.current = {
+                              kind,
+                              mode: "add",
+                            };
+                            return;
+                          }
+                          applyImageKeywordDragSelectionFromTarget(kind, "add", event.target);
+                          imageKeywordDragSelectRef.current = {
+                            kind,
+                            mode: "add",
+                          };
+                        }}
+                        onPointerMove={(event) => {
+                          const dragState = imageKeywordDragSelectRef.current;
+                          if (!dragState || dragState.kind !== kind) return;
+                          if ((event.buttons & 1) !== 1) return;
+                          applyImageKeywordDragSelectionFromTarget(kind, dragState.mode, event.target);
+                        }}
+                        onPointerUp={() => {
+                          imageKeywordDragSelectRef.current = null;
+                        }}
+                      >
+                        {displayTags.map((tag) => (
+                          <span
+                            key={`${kind}-${tag}`}
+                            className={styles.imageKeywordTagChip}
+                            data-selected={selectedSet.has(tag) ? "true" : undefined}
+                            data-image-keyword-tag={tag}
+                            onPointerDown={(event) => {
+                              if (event.button !== 0) return;
+                              if ((event.target as HTMLElement).closest("button")) return;
+                              event.preventDefault();
+                              const shouldSelect = !selectedSet.has(tag);
+                              const mode: ImageKeywordDragMode = shouldSelect ? "add" : "remove";
+                              setImageKeywordTagSelected(kind, tag, shouldSelect);
+                              imageKeywordDragSelectRef.current = {
+                                kind,
+                                mode,
+                              };
+                            }}
+                            onPointerEnter={(event) => {
+                              const dragState = imageKeywordDragSelectRef.current;
+                              if (!dragState || dragState.kind !== kind) return;
+                              if ((event.buttons & 1) !== 1) return;
+                              setImageKeywordTagSelected(kind, tag, dragState.mode === "add");
+                            }}
+                          >
+                            {tag}
+                            <button
+                              type="button"
+                              className={styles.imageKeywordTagRemove}
+                              aria-label={`Remove ${kind} keyword ${tag}`}
+                              onClick={() => removeImageKeywordTag(kind, tag)}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          type="text"
+                          placeholder="Type keyword and press Enter"
+                          value={keywordDraft}
+                          onChange={(event) => {
+                            if (kind === "positive") {
+                              setImagePositiveKeywordDraft(event.target.value);
+                            } else {
+                              setImageNegativeKeywordDraft(event.target.value);
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              event.key === "Backspace" &&
+                              keywordDraft.trim().length === 0 &&
+                              keywordList.length > 0
+                            ) {
+                              event.preventDefault();
+                              const lastTag = keywordList[keywordList.length - 1];
+                              if (lastTag) {
+                                removeImageKeywordTag(kind, lastTag);
+                              }
+                              return;
+                            }
+                            if (event.key === "Enter" || event.key === ",") {
+                              event.preventDefault();
+                              commitImageKeywordDraft(kind);
+                            }
+                          }}
+                          onPaste={(event) => {
+                            const pasted = event.clipboardData.getData("text");
+                            if (!pasted.includes(",")) return;
+                            event.preventDefault();
+                            applyImageKeywordPaste(kind, pasted);
+                          }}
+                          onBlur={() => commitImageKeywordDraft(kind)}
+                        />
+                      </div>
+                    </aside>
+                  );
+                })}
+              </div>
+            )}
+            {imageDockDirectoryEntries.length > 0 && view !== "chat" ? (
               <>
                 <h4 className={styles.sectionLabel}>By bot</h4>
                 <ImageBotDirectoryDropdown
-                  entries={imageBotDirectoryEntries}
+                  entries={imageDockDirectoryEntries}
                   bots={bots}
                   resolvedTheme={resolvedTheme}
-                  selectedBotId={
-                    imagePanelScope === "bot"
-                      ? imagePanelBotId
-                      : imagePanelScope === "general"
-                        ? PRISM_IMAGE_GENERAL_ENTRY_ID
-                        : null
-                  }
+                  selectedBotId={imagePanelScope === "bot" ? imagePanelBotId : null}
                   onPick={(botId) => {
-                    if (botId === PRISM_IMAGE_GENERAL_ENTRY_ID) {
-                      setImagePanelScope("general");
-                      setImagePanelBotId(null);
-                      void refreshImages("general");
-                      return;
-                    }
                     setImagePanelScope("bot");
                     setImagePanelBotId(botId);
                     void refreshImages(botId);
@@ -31644,7 +32592,7 @@ function HomeContent(): React.JSX.Element {
                 })}
               </div>
             </div>
-            {imageGenInflightHere > 0 ? (
+            {activeImageGenScopeKey !== null ? (
               <div
                 className={`${styles.panelImagesGenOverlay} ${
                   imagesGenOverlayPrismDefault ? styles.panelImagesGenOverlayRainbow : ""
@@ -31682,7 +32630,10 @@ function HomeContent(): React.JSX.Element {
                   <button
                     type="button"
                     className={styles.panelImagesGenOverlayCancel}
-                    onClick={() => abortImageGenForScope(imageFormScopeKey)}
+                    onClick={() => {
+                      if (!activeImageGenScopeKey) return;
+                      abortImageGenForScope(activeImageGenScopeKey);
+                    }}
                   >
                     Cancel
                   </button>
@@ -31723,6 +32674,7 @@ function HomeContent(): React.JSX.Element {
                 doesn't double up inside the Images drawer. */}
             {panelError && <p className={styles.error} role="alert">{panelError}</p>}
           </div>
+          </>
         );
       })()}
     </>
@@ -35065,6 +36017,7 @@ function HomeContent(): React.JSX.Element {
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}
         {renderDeleteAllModal()}
+      {renderImagesDeleteAllModal()}
         {renderDevToolsPanel()}
         {renderCoffeeShellContextMenu()}
         {renderCoffeeBotContextMenu()}
@@ -35086,7 +36039,7 @@ function HomeContent(): React.JSX.Element {
       onContextMenu={handleAppContextMenu}
     >
       <div className={styles.hubCard}>
-        <div className={styles.brandLockup}>
+        <div className={`${styles.brandLockup} ${styles.hubBrandLockup}`}>
           {/* See note on the auth-screen lockup: dark theme uses the boxed
               JPG with animated halos, light theme uses the bare triangle. */}
           <div className={`${styles.brandIconShell} ${styles.userHeroAvatar}`}>
@@ -35106,6 +36059,65 @@ function HomeContent(): React.JSX.Element {
             />
           </div>
           <PrismWordmarkWithVersion className={styles.brandWordmark} />
+          <div className={styles.hubFooter}>
+            <button
+              type="button"
+              className={styles.themeToggleButton}
+              onClick={() => void cycleThemeMode()}
+              aria-label={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+              }
+              data-title={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+              }
+              data-glyph-tooltip={
+                effectiveThemeMode === "system"
+                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+              }
+            >
+              <ThemeGlyph mode={effectiveThemeMode} />
+            </button>
+            {renderDevToolsButton()}
+            <div className={styles.hubUtilityActions}>
+              <button
+                type="button"
+                className={styles.hubNavButton}
+                onClick={() => openRightPanel("settings")}
+              >
+                <WrenchGlyph />
+                <span>Settings</span>
+              </button>
+              <button
+                type="button"
+                className={styles.hubNavButton}
+                onClick={() => openRightPanel("bots")}
+              >
+                <BotsGlyph />
+                <span>Bots</span>
+              </button>
+              <button
+                type="button"
+                className={styles.hubNavButton}
+                onClick={() => void openAllImagesPanel()}
+              >
+                <ImagesGlyph />
+                <span>Images</span>
+              </button>
+              <button
+                type="button"
+                className={styles.hubNavButton}
+                onClick={() => void openAllMemoriesPanel()}
+              >
+                <BookmarkGlyph />
+                <span>Memories</span>
+              </button>
+            </div>
+          </div>
         </div>
         <p className={styles.hubGreeting}>
           Welcome back, <span className={styles.hubGreetingName}>{user.displayName}</span>.
@@ -35285,36 +36297,6 @@ function HomeContent(): React.JSX.Element {
               Simple surfing, plus optional bot screen viewing.
             </div>
           </button>
-        </div>
-        <div className={styles.hubFooter}>
-          <button
-            type="button"
-            className={styles.themeToggleButton}
-            onClick={() => void cycleThemeMode()}
-            aria-label={
-              effectiveThemeMode === "system"
-                ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-            }
-            data-title={
-              effectiveThemeMode === "system"
-                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-            }
-            data-glyph-tooltip={
-              effectiveThemeMode === "system"
-                ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-            }
-          >
-            <ThemeGlyph mode={effectiveThemeMode} />
-          </button>
-          {renderDevToolsButton()}
-          <div className={styles.hubUtilityActions}>
-            <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
-            <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
-            <button type="button" onClick={() => void openAllMemoriesPanel()}>Memories</button>
-          </div>
         </div>
       </div>
       {renderDevToolsButton()}
@@ -36092,6 +37074,7 @@ function HomeContent(): React.JSX.Element {
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
+      {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
       {renderDevToolsPanel()}
@@ -36250,7 +37233,7 @@ function HomeContent(): React.JSX.Element {
               <button
                 type="button"
                 className={styles.hubHomeButton}
-                onClick={performShowAllBotsView}
+                onClick={() => performShowAllBotsView()}
                 data-home-affordance="identity"
                 aria-label="Return to all bots"
                 title="Return to all bots"
@@ -37428,6 +38411,7 @@ function HomeContent(): React.JSX.Element {
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
+      {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
       {renderDevToolsPanel()}

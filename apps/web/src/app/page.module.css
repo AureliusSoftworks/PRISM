@@ -567,6 +567,10 @@
   margin: 0 0 6px;
 }
 
+.hubBrandLockup {
+  width: 100%;
+}
+
 .authBrandLockup {
   align-items: flex-start;
   width: 100%;
@@ -1378,39 +1382,50 @@
 .hubFooter {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
+  margin-left: auto;
+  flex-wrap: wrap;
 }
 
 .hubUtilityActions {
-  display: grid;
-  grid-template-columns: repeat(4, max-content);
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
-  margin-left: auto;
 }
 
-.hubFooter button:not(.themeToggleButton) {
+.hubNavButton {
   appearance: none;
   -webkit-appearance: none;
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--fg-muted);
-  border-radius: 8px;
-  padding: 7px 12px;
+  border-radius: 999px;
+  height: 30px;
+  padding: 0 10px;
   cursor: pointer;
   font: inherit;
   font-size: 12px;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.hubUtilityActions button {
-  min-width: 78px;
+.hubNavButton .headerIconGlyph,
+.hubNavButton .chatGearGlyph {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
-.hubFooter button:not(.themeToggleButton):hover {
+.hubNavButton span {
+  white-space: nowrap;
+}
+
+.hubNavButton:hover {
   background: var(--bg-hover);
   color: var(--fg);
   border-color: var(--line-strong);
@@ -4173,6 +4188,7 @@
 .chatHeaderModelPicker .composeModelTrigger {
   justify-content: center;
   width: auto;
+  min-width: 104px;
   padding-inline: 10px;
 }
 
@@ -11750,6 +11766,39 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: panelOut 0.18s ease-in forwards;
 }
 
+/* Global utility drawers (Settings + non-specific Bots customizer) get the
+   same persistent rainbow rail language as the shared PRISM tooling surfaces. */
+.panelSettings,
+.panelBots[data-global-customizer="true"],
+.panelBots:not([data-editor-only="true"]) {
+  border-left: 0;
+}
+
+.panelSettings::before,
+.panelBots[data-global-customizer="true"]::before,
+.panelBots:not([data-editor-only="true"])::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  pointer-events: none;
+  z-index: 6;
+  background: linear-gradient(
+    180deg,
+    #ff4d6d,
+    #ff9f1c 24%,
+    #b7e63a 46%,
+    #2fd3e3 68%,
+    #7b5cff 86%,
+    #ff4d6d
+  );
+  box-shadow:
+    0 0 12px color-mix(in srgb, #ff4d6d 28%, transparent),
+    0 0 20px color-mix(in srgb, #2fd3e3 18%, transparent);
+}
+
 @keyframes panelIn {
   from {
     transform: translateX(calc(100% + 32px));
@@ -11836,6 +11885,68 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 /* Images panel — anchor for full-panel generation overlay (covers padded area via inset). */
 .panel.panelImages {
   position: relative;
+}
+
+.imagePanelToolsDock {
+  --image-tools-gap: 14px;
+  --panel-width: min(479px, calc(100vw - 32px));
+  position: fixed;
+  top: 20px;
+  right: calc(var(--panel-width) + var(--image-tools-gap));
+  bottom: 20px;
+  width: min(340px, calc(100vw - var(--panel-width) - 52px));
+  min-width: 280px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 76%, var(--accent-ink) 24%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  padding: 12px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  overflow-y: auto;
+  animation: panelIn 0.2s ease-out;
+  transition:
+    transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 180ms ease;
+}
+
+.imagePanelToolsDock[data-generating="false"] {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 100;
+}
+
+.imagePanelToolsDock[data-closing="true"] {
+  pointer-events: none;
+  animation: panelOut 0.18s ease-in forwards;
+}
+
+.imagePanelToolsDock[data-generating="true"] {
+  transform: translateX(calc(100% + 24px));
+  opacity: 0;
+  pointer-events: none;
+  z-index: 95;
+}
+
+.imagePanelToolsDockHeader h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.imagePanelToolsDockSection {
+  display: grid;
+  gap: 8px;
+}
+
+.imagePanelToolsDockSection h5 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
 }
 
 .panelImagesGenOverlay {
@@ -12128,31 +12239,64 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 /* Images panel — header model picker */
 .panelImages .panelHeader {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 10px 12px;
+  gap: 12px;
 }
 
 .panelImages .panelHeaderTitle {
-  flex: 1 1 140px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.panelImages .panelImagesHeaderModelColumn {
-  flex: 2 1 220px;
+.panelImagesTitle {
+  margin: 0;
+  width: 100%;
   min-width: 0;
   display: flex;
-  justify-content: center;
+  align-items: center;
+  gap: 6px;
+}
+
+.panelImagesTitlePrimary {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.panelImagesTitleSuffix {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+
+.panelImages .panelHeaderActions {
+  margin-left: auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .panelImages .panelImagesHeaderModelPicker {
-  width: 100%;
-  justify-content: center;
+  width: clamp(196px, 24vw, 248px);
+  min-width: 196px;
+  justify-content: flex-end;
 }
 
 .panelImages .panelClose {
   flex: 0 0 auto;
-  margin-left: auto;
+  margin-left: 0;
+}
+
+.panelImages .panelHeaderActions .panelHeaderIconButton,
+.panelImages .panelHeaderActions .panelClose {
+  flex: 0 0 auto;
 }
 
 /* Images panel — per-bot drill-down: same editor-bot ink wash + accent triad as
@@ -12380,8 +12524,31 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     )
       0 100% / 100% 2px no-repeat,
     linear-gradient(to bottom, var(--bg-surface) 0%, var(--bg-deep) 100%);
-  border-left-color: var(--line);
+  border-left: 0;
   box-shadow: var(--shadow-lg);
+}
+
+.panelImages[data-image-scope="all"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  pointer-events: none;
+  z-index: 6;
+  background: linear-gradient(
+    180deg,
+    #ff4d6d,
+    #ff9f1c 24%,
+    #b7e63a 46%,
+    #2fd3e3 68%,
+    #7b5cff 86%,
+    #ff4d6d
+  );
+  box-shadow:
+    0 0 12px color-mix(in srgb, #ff4d6d 28%, transparent),
+    0 0 20px color-mix(in srgb, #2fd3e3 18%, transparent);
 }
 
 /* Mirrors `.newChatButton` — keeps Images “Generate” visually lockstep with sidebar. */
@@ -12622,9 +12789,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: #ffffff;
 }
 
-/* Images drawer lives under `.appLayout`; keep it viewport-fixed even if a scoped
-   `.panelImages[data-image-scope="…"]` rule accidentally sets `position` again. */
-.appLayout .panel.panelImages {
+/* Images drawer should behave consistently in all shells (Hub/auth, Chat/Zen,
+   Sandbox, Coffee): keep it viewport-fixed and lock header/composer while the
+   gallery scrolls, even if a scoped rule accidentally sets `position` again. */
+.panel.panelImages {
   position: fixed;
   top: 0;
   right: 0;
@@ -12638,7 +12806,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 /* Default `.panel` is `display: grid`; flex keeps header + composer fixed while the gallery scrolls. */
-.appLayout .panel.panelImages > :not(.panelImagesGalleryScroll) {
+.panel.panelImages > :not(.panelImagesGalleryScroll) {
   flex-shrink: 0;
 }
 
@@ -14350,10 +14518,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 /* Panel header traffic lights mirror the conversation-panel action buttons. */
 .panelHeaderIconButton.panelHeaderSaveButton,
 .panelHeaderIconButton.panelHeaderImportButton,
-.panelHeaderIconButton.panelHeaderDangerTrashButton {
+.panelHeaderIconButton.panelHeaderDangerTrashButton,
+.panelHeaderIconButton.panelHeaderPrivateButton {
   width: 28px;
   height: 28px;
   margin: 1px;
+}
+
+.panelHeaderIconButton.panelHeaderPrivateButton {
+  border: 1px solid color-mix(in srgb, var(--fg) 44%, var(--line));
+  background: transparent;
+  color: color-mix(in srgb, var(--fg) 82%, var(--fg-subtle) 18%);
+  box-shadow: none;
+}
+
+.panelHeaderIconButton.panelHeaderPrivateButton[data-active="true"] {
+  border-color: color-mix(in srgb, var(--fg) 62%, var(--line));
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent),
+    0 4px 12px color-mix(in srgb, #000 22%, transparent);
+}
+
+.panelHeaderIconButton.panelHeaderPrivateButton:hover:not(:disabled),
+.panelHeaderIconButton.panelHeaderPrivateButton:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--fg) 62%, var(--line));
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+  outline: none;
 }
 
 .panelHeaderIconButton.panelHeaderSaveButton {
@@ -14474,6 +14667,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow: none;
 }
 
+/* Images private-mode header button: keep trash-chrome border/color, but no fill. */
+.panelHeaderIconButton.panelHeaderPrivateButton.panelHeaderDangerTrashButton,
+.panelHeaderIconButton.panelHeaderPrivateButton.panelHeaderDangerTrashButton[data-active="true"],
+.panelHeaderIconButton.panelHeaderPrivateButton.panelHeaderDangerTrashButton:hover:not(:disabled),
+.panelHeaderIconButton.panelHeaderPrivateButton.panelHeaderDangerTrashButton:focus-visible:not(:disabled) {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
 .panelHeaderImportGlyph {
   display: inline-grid;
   place-items: center;
@@ -14496,6 +14698,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: 14px;
   height: 14px;
   stroke-width: 2.1;
+}
+
+.panelHeaderPrivateGlyph {
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+}
+
+.panelHeaderPrivateGlyph :where(svg) {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.15;
 }
 
 .panelHeader h3 {
@@ -17739,15 +17953,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .imageVariantButton:hover:not(:disabled),
 .imageVariantButton:focus-visible {
   border-color: color-mix(in srgb, var(--accent-ink) 42%, var(--line));
-  color: var(--fg);
-  background: color-mix(in srgb, var(--bg-elevated) 92%, var(--accent-soft) 8%);
+  color: #0b0b0d;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 90%, var(--accent-soft) 10%),
+      color-mix(in srgb, #d4dae6 82%, var(--accent-soft) 18%)
+    );
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-ink) 22%, transparent);
   outline: none;
 }
 
 .imageVariantButton:hover:not(:disabled) > span:last-child,
 .imageVariantButton:focus-visible > span:last-child {
-  color: color-mix(in srgb, var(--fg) 76%, var(--fg-muted));
+  color: color-mix(in srgb, #0b0b0d 82%, #4a5261 18%);
 }
 
 .panelImages[data-image-scope="bot"] .imageVariantButton {
@@ -17774,6 +17993,291 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .imageVariantButton:disabled {
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+.imagePromptActionStack {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.form button.imagePromptDangerButton,
+.imagePromptDangerButton {
+  border-color: color-mix(in srgb, #ffffff 52%, transparent);
+  background:
+    linear-gradient(
+      138deg,
+      color-mix(in srgb, #ffffff 82%, transparent) 0%,
+      color-mix(in srgb, #ffffff 64%, transparent) 42%,
+      color-mix(in srgb, #ffffff 48%, transparent) 100%
+    ),
+    radial-gradient(
+      ellipse at 22% 18%,
+      color-mix(in srgb, #ffffff 34%, transparent),
+      transparent 48%
+    ),
+    color-mix(in srgb, #ffffff 72%, var(--bg) 28%);
+  color: #0c0c0c;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 58%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000000 14%, transparent);
+}
+
+.form button.imagePromptDangerButton:hover:not(:disabled),
+.imagePromptDangerButton:hover:not(:disabled),
+.form button.imagePromptDangerButton:focus-visible:not(:disabled),
+.imagePromptDangerButton:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, #ffffff 64%, transparent);
+  background:
+    linear-gradient(
+      138deg,
+      color-mix(in srgb, #ffffff 88%, transparent) 0%,
+      color-mix(in srgb, #ffffff 72%, transparent) 42%,
+      color-mix(in srgb, #ffffff 56%, transparent) 100%
+    ),
+    radial-gradient(
+      ellipse at 22% 18%,
+      color-mix(in srgb, #ffffff 40%, transparent),
+      transparent 48%
+    ),
+    color-mix(in srgb, #ffffff 78%, var(--bg) 22%);
+  color: #050505;
+}
+
+.imagePromptDangerButton :where(svg) {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.05;
+}
+
+.imageKeywordLauncherRow {
+  display: flex;
+}
+
+.form button.imageKeywordLauncherButton,
+.imageKeywordLauncherButton {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, var(--accent-ink) 26%);
+  background: color-mix(in srgb, var(--bg-elevated) 86%, var(--accent-soft) 14%);
+  color: var(--fg);
+  border-radius: 10px;
+  min-height: 36px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  width: 100%;
+}
+
+.imageKeywordLauncherButton[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent-ink) 56%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 66%, var(--bg-elevated));
+}
+
+.imageKeywordLauncherButton:hover:not(:disabled),
+.imageKeywordLauncherButton:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, #ffffff 62%, var(--line));
+  background: color-mix(in srgb, #ffffff 78%, var(--bg) 22%);
+  color: #0b0b0d;
+  outline: none;
+}
+
+.imageKeywordSummaryStrip {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px dashed color-mix(in srgb, var(--line) 72%, var(--accent-ink) 28%);
+  border-radius: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.imageKeywordTagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  align-content: flex-start;
+  min-height: 42px;
+  max-height: 100%;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, var(--accent-ink) 28%);
+  border-radius: 10px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.imageKeywordTagList > input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  min-width: 120px;
+  flex: 1 1 120px;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.imageKeywordTagChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: color-mix(in srgb, var(--accent-soft) 66%, var(--bg-elevated));
+  color: var(--fg);
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 36%, var(--line));
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 11px;
+  line-height: 1.2;
+  user-select: none;
+  cursor: default;
+}
+
+.imageKeywordTagChip[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--accent-ink) 70%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 88%, var(--bg-elevated) 12%);
+}
+
+.imageKeywordTagRemove {
+  -webkit-appearance: none;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.imageKeywordTagRemove:hover,
+.imageKeywordTagRemove:focus-visible {
+  color: var(--fg);
+  outline: none;
+}
+
+.imageKeywordModalBackdrop {
+  --image-keyword-stack-gap: 10px;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--image-keyword-stack-gap);
+  pointer-events: none;
+  z-index: 25;
+}
+
+.imageKeywordModalBackdrop[data-layout="overlay"] {
+  position: fixed;
+  inset: 24px;
+  z-index: 140;
+  pointer-events: auto;
+  background: color-mix(in srgb, var(--bg) 42%, transparent);
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.imageKeywordModalBackdrop[data-layout="side"] {
+  position: fixed;
+  inset: auto;
+  top: 28px;
+  bottom: 28px;
+  right: clamp(
+    12px,
+    calc(var(--panel-width, min(479px, calc(100vw - 32px))) + 14px),
+    calc(100vw - 472px)
+  );
+  z-index: 130;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.imageKeywordModalBackdrop[data-layout="side"] .imageKeywordModal,
+.imageKeywordModalBackdrop[data-layout="overlay"] .imageKeywordModal {
+  flex: 0 0 auto;
+  height: calc((100% - var(--image-keyword-stack-gap)) / 2);
+  min-height: 0;
+  max-height: calc((100% - var(--image-keyword-stack-gap)) / 2);
+}
+
+.imageKeywordModal {
+  width: min(460px, calc(100vw - 24px));
+  min-width: min(430px, calc(100vw - 24px));
+  max-height: calc(100dvh - 170px);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 78%, var(--accent-ink) 22%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  box-shadow: var(--shadow-lg);
+  padding: 10px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  overflow-y: hidden;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+
+.imageKeywordModalPositive {
+  border-color: color-mix(in srgb, #7ae6a2 62%, var(--line));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, #a4f7c3 34%, transparent) 0%,
+      color-mix(in srgb, #54d886 22%, transparent) 52%,
+      color-mix(in srgb, #1fad63 26%, transparent) 100%
+    ),
+    color-mix(in srgb, var(--bg-elevated) 90%, #0e1a13 10%);
+  box-shadow:
+    0 16px 34px -20px color-mix(in srgb, #46cf79 52%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 24%, transparent);
+}
+
+.imageKeywordModalNegative {
+  border-color: color-mix(in srgb, #ff7f9b 62%, var(--line));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, #ffabc0 34%, transparent) 0%,
+      color-mix(in srgb, #ff6486 22%, transparent) 52%,
+      color-mix(in srgb, #d73d65 26%, transparent) 100%
+    ),
+    color-mix(in srgb, var(--bg-elevated) 90%, #1c0f14 10%);
+  box-shadow:
+    0 16px 34px -20px color-mix(in srgb, #ff5c82 52%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 24%, transparent);
+}
+
+.imageKeywordModalPositive .imageKeywordTagList {
+  border-color: color-mix(in srgb, #7ae6a2 52%, var(--line));
+  background: color-mix(in srgb, var(--bg-elevated) 88%, #12311f 12%);
+}
+
+.imageKeywordModalNegative .imageKeywordTagList {
+  border-color: color-mix(in srgb, #ff7f9b 52%, var(--line));
+  background: color-mix(in srgb, var(--bg-elevated) 88%, #351420 12%);
+}
+
+.imageKeywordModal[data-layout="overlay"] {
+  margin: 12px;
+}
+
+.imageKeywordModalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.imageKeywordModalHeader h4 {
+  margin: 0;
+  font-size: 13px;
 }
 
 .form button.botRandomizeButton,
@@ -17851,6 +18355,50 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .botRandomizeButton:active {
   transform: translateY(1px) rotate(8deg);
+}
+
+/* Images prompt "Delete all" action: invert the pearlescent dice button so the
+   destructive affordance reads as the opposite polarity (dark body, light glyph). */
+.imagePromptActionStack .botRandomizeButton.imagePromptDangerButton {
+  border-color: #d8dbe2 !important;
+  background-image: none !important;
+  background: #08090b !important;
+  color: #f3f4f6 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  transition: none !important;
+  opacity: 1 !important;
+}
+
+.imagePromptActionStack .botRandomizeButton.imagePromptDangerButton:hover:not(:disabled),
+.imagePromptActionStack .botRandomizeButton.imagePromptDangerButton:focus-visible:not(:disabled) {
+  border-color: #f3f4f6 !important;
+  background-image: none !important;
+  background: #101215 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  filter: none !important;
+  transition: none !important;
+  outline: none;
+}
+
+.imagePromptActionStack .botRandomizeButton.imagePromptDangerButton:active:not(:disabled) {
+  transform: none !important;
+}
+
+.imagePromptActionStack .botRandomizeButton.imagePromptDangerButton[data-active="true"] {
+  border-color: var(--fg) !important;
+  background: color-mix(in srgb, var(--fg) 14%, var(--bg-deep) 86%) !important;
+  color: var(--fg) !important;
+}
+
+.panelImages[data-private-mode="true"] .imageVariantButton[data-selected="true"] {
+  border-color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, var(--bg));
+}
+
+.panelImages[data-private-mode="true"] .imageVariantButton[data-selected="true"]::before {
+  opacity: 0;
 }
 
 .botPurposeEditorBlock {
@@ -18924,6 +19472,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .imageThumbMain {
   display: block;
   width: 100%;
+  aspect-ratio: 1 / 1;
   padding: 0;
   margin: 0;
   border: none;
@@ -18936,8 +19485,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .imageThumbMain img {
   width: 100%;
+  height: 100%;
   display: block;
   vertical-align: middle;
+  object-fit: cover;
+  object-position: center;
 }
 
 .imageThumbActions {
@@ -19765,7 +20317,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
      the card is only 640px so flex-end felt tidy; on mobile the
      same alignment left the left half of the screen empty. */
   .hubFooter {
-    justify-content: space-between;
+    justify-content: flex-start;
   }
 
   .appLayout {
