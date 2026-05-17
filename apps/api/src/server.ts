@@ -49,6 +49,7 @@ import {
   createDevSeedConversations,
   deleteAllConversations,
   deleteConversation,
+  deleteConversationMessage,
   deleteConversationsByBot,
   getConversationSweepState,
   listConversationSummaries,
@@ -2291,6 +2292,16 @@ function buildRoutes(): RouteDefinition[] {
 
       json(ctx.res, 200, {
         ok: true,
+      });
+    }),
+    route("DELETE", "/api/messages/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const messageId = ctx.params.id;
+      const result = deleteConversationMessage(db, userId, messageId);
+      json(ctx.res, 200, {
+        ok: true,
+        deleted: true,
+        conversationId: result.conversationId,
       });
     }),
     route("GET", "/api/settings", async (ctx) => {

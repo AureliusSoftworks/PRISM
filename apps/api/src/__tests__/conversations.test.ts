@@ -5,6 +5,7 @@ import {
   createDevSeedConversations,
   deleteAllConversations,
   deleteConversation,
+  deleteConversationMessage,
   deleteConversationsByBot,
   getConversationSweepState,
   listConversationSummaries,
@@ -988,6 +989,79 @@ describe("rewindConversation", () => {
     assert.ok(
       after.updated_at > before.updated_at,
       `expected updated_at to advance (${before.updated_at} → ${after.updated_at})`
+    );
+  });
+});
+
+describe("deleteConversationMessage", () => {
+  it("deletes only the requested message row", () => {
+    const db = createTestDb();
+    seedConversationAt(db, "user-1", "chat-1", [
+      { id: "m1", role: "user", content: "first", seconds: 1 },
+      { id: "m2", role: "assistant", content: "reply", seconds: 2 },
+      { id: "m3", role: "user", content: "third", seconds: 3 },
+    ]);
+
+    deleteConversationMessage(db, "user-1", "m2");
+
+    const remaining = db
+      .prepare("SELECT id FROM messages WHERE conversation_id = ? ORDER BY created_at ASC")
+      .all("chat-1") as Array<{ id: string }>;
+    assert.deepEqual(
+      remaining.map((row) => row.id),
+      ["m1", "m3"]
+    );
+  });
+
+  it("clears conversation-scoped summaries so future context rebuilds from remaining messages", () => {
+    const db = createTestDb();
+    seedConversationAt(db, "user-1", "chat-1", [
+      { id: "m1", role: "user", content: "first", seconds: 1 },
+      { id: "m2", role: "assistant", content: "reply", seconds: 2 },
+    ]);
+    insertSummary(db, "user-1", "chat-1", "sum-1", "summary 1", 4);
+    insertSummary(db, "user-1", "chat-1", "sum-2", "summary 2", 5);
+    insertSummary(db, "user-1", "chat-2", "sum-other", "other conversation", 6);
+
+    const result = deleteConversationMessage(db, "user-1", "m2");
+
+    assert.equal(result.deletedSummaries, 2);
+    const remainingForChat1 = db
+      .prepare("SELECT id FROM memory_summaries WHERE conversation_id = ? ORDER BY id")
+      .all("chat-1") as Array<{ id: string }>;
+    assert.deepEqual(remainingForChat1, []);
+    const otherSummary = db
+      .prepare("SELECT id FROM memory_summaries WHERE id = ?")
+      .get("sum-other") as { id: string } | undefined;
+    assert.equal(otherSummary?.id, "sum-other");
+  });
+
+  it("preserves memories even if they reference deleted message ids", () => {
+    const db = createTestDb();
+    seedConversationAt(db, "user-1", "chat-1", [
+      { id: "m1", role: "user", content: "first", seconds: 1 },
+      { id: "m2", role: "assistant", content: "reply", seconds: 2 },
+    ]);
+    insertLinkedMemory(db, "user-1", "chat-1", "memory-1", ["m1", "m2"]);
+
+    deleteConversationMessage(db, "user-1", "m2");
+
+    const memory = db
+      .prepare("SELECT id, conversation_id FROM memories WHERE id = ?")
+      .get("memory-1") as { id: string; conversation_id: string | null } | undefined;
+    assert.equal(memory?.id, "memory-1");
+    assert.equal(memory?.conversation_id, "chat-1");
+  });
+
+  it("rejects deletion when the message belongs to another user", () => {
+    const db = createTestDb();
+    seedConversationAt(db, "user-1", "chat-1", [
+      { id: "m1", role: "user", content: "mine", seconds: 1 },
+    ]);
+
+    assert.throws(
+      () => deleteConversationMessage(db, "user-2", "m1"),
+      /Message not found/
     );
   });
 });

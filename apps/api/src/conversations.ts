@@ -738,6 +738,59 @@ export function rewindConversation(
 }
 
 /**
+ * Remove a single message from a conversation while preserving long-term memory rows.
+ *
+ * Behavior:
+ *   - Throws if the message is missing or not owned by `userId`.
+ *   - Deletes only the targeted message row.
+ *   - Invalidates conversation-scoped summaries so future context is rebuilt
+ *     from surviving messages.
+ *   - Leaves `memories` untouched, even when they reference the deleted message.
+ */
+export function deleteConversationMessage(
+  db: DatabaseSync,
+  userId: string,
+  messageId: string
+): { conversationId: string; deletedSummaries: number } {
+  const target = db
+    .prepare(
+      "SELECT id, conversation_id FROM messages WHERE id = ? AND user_id = ?"
+    )
+    .get(messageId, userId) as { id: string; conversation_id: string } | undefined;
+  if (!target) {
+    throw new Error("Message not found.");
+  }
+
+  const conversation = db
+    .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+    .get(target.conversation_id, userId) as { id?: string } | undefined;
+  if (!conversation?.id) {
+    throw new Error("Conversation not found.");
+  }
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    db.prepare("DELETE FROM messages WHERE id = ? AND user_id = ?").run(messageId, userId);
+    const summaryDelete = db
+      .prepare(
+        "DELETE FROM memory_summaries WHERE user_id = ? AND conversation_id = ?"
+      )
+      .run(userId, target.conversation_id);
+    db.prepare(
+      "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+    ).run(new Date().toISOString(), target.conversation_id, userId);
+    db.exec("COMMIT");
+    return {
+      conversationId: target.conversation_id,
+      deletedSummaries: Number(summaryDelete.changes ?? 0),
+    };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
  * Permanently remove every chat owned by `userId`.
  *
  * Behaviour:
