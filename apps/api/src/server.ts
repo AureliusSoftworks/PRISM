@@ -2657,7 +2657,6 @@ function buildRoutes(): RouteDefinition[] {
         (bodyModel && bodyModel.trim()) ||
         (botPersona?.openai_image_model?.trim() ?? "") ||
         (user.preferred_openai_image_model?.trim() ?? "");
-
       if (effectiveProvider === "local" && !resolvedLocalImageModel) {
         throw new Error(
           "Pick a local image model in the Images panel header, then try again."
@@ -3006,6 +3005,47 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.setHeader("content-type", "image/png");
       ctx.res.setHeader("cache-control", "private, max-age=3600");
       ctx.res.end(bytes);
+    }),
+    route("DELETE", "/api/images", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const filterBotId = readOptionalString(ctx.query.get("botId"));
+      const rows = (
+        filterBotId
+          ? db
+              .prepare(
+                "SELECT id, local_rel_path FROM images WHERE user_id = ? AND bot_id = ?"
+              )
+              .all(userId, filterBotId)
+          : db
+              .prepare("SELECT id, local_rel_path FROM images WHERE user_id = ?")
+              .all(userId)
+      ) as Array<{ id: string; local_rel_path: string | null }>;
+      if (rows.length === 0) {
+        json(ctx.res, 200, { ok: true, deleted: 0 });
+        return;
+      }
+      if (filterBotId) {
+        db.prepare("DELETE FROM images WHERE user_id = ? AND bot_id = ?").run(
+          userId,
+          filterBotId
+        );
+      } else {
+        db.prepare("DELETE FROM images WHERE user_id = ?").run(userId);
+      }
+      for (const row of rows) {
+        const rel = row.local_rel_path?.trim();
+        if (!rel) continue;
+        try {
+          tryUnlinkGeneratedImageFile(rel);
+        } catch (error) {
+          console.error(
+            `[images] orphan file after bulk delete imageId=${row.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
+      json(ctx.res, 200, { ok: true, deleted: rows.length });
     }),
     route("DELETE", "/api/images/:id", async (ctx) => {
       const userId = requireAuth(ctx);

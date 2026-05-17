@@ -20,6 +20,8 @@ const config = getAppConfig();
 const ASSISTANT_SENT_IMAGE_DEFAULT_SIZE = "1024x1024";
 const ASSISTANT_SENT_IMAGE_ALLOWED_SIZES = new Set(["1024x1536", "1024x1024", "1536x1024"]);
 const ASSISTANT_SENT_IMAGE_QUALITY = "standard";
+const IMAGE_CONTEXT_ROW_LIMIT = 4;
+const IMAGE_CONTEXT_ROW_MAX_CHARS = 220;
 const ASSISTANT_IMAGE_SIZE_TAGS = {
   portrait: [
     "selfie",
@@ -65,6 +67,135 @@ function inferAssistantSentImageSize(textRaw: string): string {
   if (portrait >= landscape && portrait >= letterbox) return "1024x1536";
   if (landscape >= portrait && landscape >= letterbox) return "1536x1024";
   return ASSISTANT_SENT_IMAGE_DEFAULT_SIZE;
+}
+
+type ImageContextRow = {
+  role: string;
+  content: string;
+  bot_name: string | null;
+};
+
+function userExplicitlyRequestsPersonaPortrait(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    /\b(selfie|self-portrait|self portrait|portrait of you|photo of you|picture of you)\b/.test(t) ||
+    /\b(?:show|send|paint|draw|sketch|illustrate)\b[\s\S]{0,40}\b(?:you|yourself)\b/.test(t) ||
+    /\b(?:you|yourself)\b[\s\S]{0,40}\b(?:in the photo|in the picture|in the image)\b/.test(t)
+  );
+}
+
+function extractRecentUserLines(contextLines: readonly string[]): string[] {
+  return contextLines
+    .filter((line) => /^user:/i.test(line.trim()))
+    .map((line) => line.replace(/^user:\s*/i, "").trim())
+    .filter((line) => line.length > 0)
+    .slice(-2);
+}
+
+function requestLooksSceneOnly(text: string): boolean {
+  const t = text.toLowerCase();
+  const hasSceneCue =
+    /\b(city|town|village|landscape|skyline|street|river|mountain|forest|ocean|sea|architecture|building|scene|view|vista|florence)\b/.test(
+      t
+    ) ||
+    /\b(?:picture|image|photo|painting|paint|draw|sketch|illustration)\b[\s\S]{0,30}\bof\b/.test(t);
+  const hasPersonCue =
+    /\b(person|people|portrait|selfie|face|character|figure|man|woman|child|you|yourself)\b/.test(
+      t
+    );
+  return hasSceneCue && !hasPersonCue;
+}
+
+function resolveImageSubjectPolicy(text: string): {
+  allowPersonaPortrait: boolean;
+  sceneOnlyComposition: boolean;
+} {
+  const allowPersonaPortrait = userExplicitlyRequestsPersonaPortrait(text);
+  const sceneOnlyComposition = !allowPersonaPortrait && requestLooksSceneOnly(text);
+  return { allowPersonaPortrait, sceneOnlyComposition };
+}
+
+function clipImageContextLine(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  if (oneLine.length <= IMAGE_CONTEXT_ROW_MAX_CHARS) return oneLine;
+  return `${oneLine.slice(0, IMAGE_CONTEXT_ROW_MAX_CHARS - 3).trimEnd()}...`;
+}
+
+function loadRecentImageContextLines(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string
+): string[] {
+  const rows = db
+    .prepare(
+      `SELECT m.role, m.content, b.name AS bot_name
+         FROM messages m
+         LEFT JOIN bots b ON b.id = m.bot_id
+        WHERE m.user_id = ? AND m.conversation_id = ?
+          AND TRIM(m.content) <> ''
+        ORDER BY m.created_at DESC
+        LIMIT ?`
+    )
+    .all(userId, conversationId, IMAGE_CONTEXT_ROW_LIMIT) as ImageContextRow[];
+  return rows
+    .slice()
+    .reverse()
+    .map((row) => {
+      const content = clipImageContextLine(row.content ?? "");
+      if (!content) return "";
+      if (row.role === "assistant") {
+        const speaker = row.bot_name?.trim() || "Assistant";
+        return `${speaker}: ${content}`;
+      }
+      if (row.role === "user") return `User: ${content}`;
+      return `System: ${content}`;
+    })
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * Builds a context-aware scene request so pronouns like "it/that scene" can
+ * resolve against the recent thread instead of defaulting to a self portrait.
+ */
+export function buildContextAwareImageUserPrompt(args: {
+  captionPrompt: string;
+  userMessage: string;
+  contextLines: readonly string[];
+}): string {
+  const caption = args.captionPrompt.trim();
+  const userMessage = args.userMessage.trim();
+  const contextLines = args.contextLines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const recentUserLines = extractRecentUserLines(contextLines);
+  const latestUserPriorityLines = [userMessage, ...recentUserLines]
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(0, 3);
+  const policySignalText = [caption, ...latestUserPriorityLines].join("\n");
+  const { allowPersonaPortrait, sceneOnlyComposition } =
+    resolveImageSubjectPolicy(policySignalText);
+  if (contextLines.length === 0) return caption;
+  return [
+    `Primary scene request: ${caption}`,
+    `User's latest message: ${userMessage}`,
+    "Instruction priority (highest to lowest):",
+    "1) User's latest message and the most recent user lines below.",
+    "2) Primary scene request line.",
+    "3) Assistant/context lines only for pronoun/reference resolution.",
+    ...latestUserPriorityLines.map((line, index) => `Recent user signal ${index + 1}: ${line}`),
+    "Recent conversation context (use this to resolve references like it/that/this scene):",
+    ...contextLines.map((line) => `- ${line}`),
+    allowPersonaPortrait
+      ? "The user explicitly asked for the persona/you to appear. Keep the requested scene details accurate, and include the persona only as requested."
+      : "Do NOT include the speaking persona in-frame by default. When the user asks to see a place/object/scene, depict that referenced subject (for example, the landscape itself) and avoid unsolicited portraits.",
+    ...(sceneOnlyComposition
+      ? [
+          "Composition constraint: this is a scene/place request. Do not include human figures, faces, or character portraits unless explicitly asked.",
+        ]
+      : []),
+    "If assistant wording conflicts with the latest user request, follow the latest user request.",
+  ].join("\n");
 }
 
 function isMissingComfyWorkflowError(error: unknown): boolean {
@@ -133,7 +264,28 @@ export async function runAssistantSentImageGeneration(args: {
   }
 
   const prompt = args.captionPrompt.trim();
-  let promptForModel = prompt;
+  const contextLines =
+    persistence.conversationIdForInsert && args.mode !== "sandbox"
+      ? loadRecentImageContextLines(
+          args.db,
+          args.userId,
+          persistence.conversationIdForInsert
+        )
+      : [];
+  const contextAwareUserPrompt = buildContextAwareImageUserPrompt({
+    captionPrompt: prompt,
+    userMessage: args.userMessage,
+    contextLines,
+  });
+  const subjectPolicySignal = [args.userMessage, prompt, ...contextLines].join("\n");
+  const subjectPolicy = resolveImageSubjectPolicy(subjectPolicySignal);
+  const sceneOnlyHardConstraint = subjectPolicy.sceneOnlyComposition
+    ? "Hard composition rule: scene/city/environment only. Exclude people, portraits, faces, and character figures."
+    : "";
+  const sceneOnlyNegativePrompt = subjectPolicy.sceneOnlyComposition
+    ? "person, people, portrait, face, selfie, character, figure, human"
+    : undefined;
+  let promptForModel = contextAwareUserPrompt;
   const explicitRequestedSize = args.requestedSize?.trim() ?? "";
   const requestedSize = ASSISTANT_SENT_IMAGE_ALLOWED_SIZES.has(explicitRequestedSize)
     ? explicitRequestedSize
@@ -148,11 +300,22 @@ export async function runAssistantSentImageGeneration(args: {
       )
       .get(personaBotId, args.userId) as BotPersonaImageRow | undefined;
     if (botPersona) {
-      promptForModel = composeAugmentedImagePrompt({
-        botName: botPersona.name,
-        systemPrompt: botPersona.system_prompt,
-        userPrompt: prompt,
-      });
+      if (subjectPolicy.allowPersonaPortrait) {
+        promptForModel = composeAugmentedImagePrompt({
+          botName: botPersona.name,
+          systemPrompt: botPersona.system_prompt,
+          userPrompt: contextAwareUserPrompt,
+        });
+        if (sceneOnlyHardConstraint) {
+          promptForModel = `${sceneOnlyHardConstraint}\n${promptForModel}`;
+        }
+      } else {
+        // For scene-first requests, avoid injecting bot identity text because it
+        // can pull diffusion models toward unsolicited character portraits.
+        promptForModel = sceneOnlyHardConstraint
+          ? `${sceneOnlyHardConstraint}\n${contextAwareUserPrompt}`
+          : contextAwareUserPrompt;
+      }
     }
   }
 
@@ -224,6 +387,7 @@ export async function runAssistantSentImageGeneration(args: {
         generateLocalImageBytesByModelId({
           modelId,
           promptForModel,
+          negativePrompt: sceneOnlyNegativePrompt,
           size: requestedSize,
           signal,
           comfyUiHost: args.prefs.comfyuiHost,
@@ -328,6 +492,7 @@ export async function runAssistantSentImageGeneration(args: {
       const localOut = await generateLocalImageBytesByModelId({
         modelId: lenientFb,
         promptForModel,
+        negativePrompt: sceneOnlyNegativePrompt,
         size: requestedSize,
         signal,
         comfyUiHost: args.prefs.comfyuiHost,

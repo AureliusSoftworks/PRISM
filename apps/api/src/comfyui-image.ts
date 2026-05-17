@@ -761,6 +761,35 @@ export function cloneComfyUiApiWorkflow(workflow: Record<string, unknown>): Reco
   return JSON.parse(JSON.stringify(workflow)) as Record<string, unknown>;
 }
 
+function generateComfyUiSeed(): number {
+  return Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+}
+
+/**
+ * Many user workflows keep a static seed baked into sampler/noise nodes, which
+ * yields the same image every run. Randomize those seed-like numeric inputs at
+ * runtime so repeated requests vary naturally.
+ */
+export function randomizeComfyUiWorkflowSeedInputs(workflow: Record<string, unknown>): void {
+  const seedLikeKey = /(^|_)(seed|noise_seed)$/i;
+  for (const node of Object.values(workflow)) {
+    if (!node || typeof node !== "object") continue;
+    const inputs = (node as { inputs?: unknown }).inputs;
+    if (!inputs || typeof inputs !== "object") continue;
+    const inputRecord = inputs as Record<string, unknown>;
+    for (const [inputKey, value] of Object.entries(inputRecord)) {
+      if (!seedLikeKey.test(inputKey)) continue;
+      if (typeof value === "number" && Number.isFinite(value)) {
+        inputRecord[inputKey] = generateComfyUiSeed();
+        continue;
+      }
+      if (typeof value === "string" && /^\d+$/u.test(value.trim())) {
+        inputRecord[inputKey] = String(generateComfyUiSeed());
+      }
+    }
+  }
+}
+
 /**
  * Writes prompt / optional negative / dimensions into a cloned API workflow using
  * the user's patch map (node id + input key per field).
@@ -946,6 +975,7 @@ export async function generateImageWithComfyUiRegisteredWorkflow(options: {
     width,
     height,
   });
+  randomizeComfyUiWorkflowSeedInputs(workflow);
   const pref = runtimePatch.outputNodeId?.trim();
   const modelUsedTag =
     options.modelUsedTag?.trim() ?? encodeComfyUiWorkflowModelId(options.registration.id);

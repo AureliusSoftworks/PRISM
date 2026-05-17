@@ -645,10 +645,11 @@ function shouldSuppressAssistantReply(raw: string): boolean {
 
 export function shouldBypassSuppressionForImageIntent(
   isStarterPrompt: boolean,
-  userMessage: string
+  userMessage: string,
+  recentMessages: readonly Pick<ChatMessage, "role" | "content">[] = []
 ): boolean {
   if (isStarterPrompt) return false;
-  return userMessageSuggestsInChatImageRequest(userMessage);
+  return userMessageSuggestsInChatImageRequest(userMessage, recentMessages);
 }
 
 function normalizeModelValue(value: string | null | undefined): string | null {
@@ -661,7 +662,37 @@ function normalizeModelValue(value: string | null | undefined): string | null {
  * True when the user's raw message likely asks for an in-thread generated image
  * (Prism `sendGeneratedImage` path), for optional per-turn chat model override.
  */
-export function userMessageSuggestsInChatImageRequest(message: string): boolean {
+function latestAssistantContentForImageIntent(
+  recentMessages: readonly Pick<ChatMessage, "role" | "content">[]
+): string {
+  for (let index = recentMessages.length - 1; index >= 0; index -= 1) {
+    const msg = recentMessages[index];
+    if (!msg || msg.role !== "assistant") continue;
+    return msg.content.trim().toLowerCase();
+  }
+  return "";
+}
+
+function userMessageLooksLikeVisualPeekRequest(text: string): boolean {
+  return (
+    /\b(?:can|could|may)\s+i\s+see\s+what\s+(?:it|that|this)\s+looks\s+like\b/.test(text) ||
+    /\bshow\s+me\s+what\s+(?:it|that|this)\s+looks\s+like\b/.test(text) ||
+    /\bwhat\s+does\s+(?:it|that|this)\s+look\s+like\b/.test(text) ||
+    /\b(?:outside|out)\s+(?:your|the)\s+window\b/.test(text) ||
+    /\bview\s+from\s+(?:your|the)\s+window\b/.test(text)
+  );
+}
+
+function textContainsSceneReferenceCue(text: string): boolean {
+  return /\b(window|outside|view|scene|landscape|street|city|lake|mountain|shore|sky|room|studio)\b/.test(
+    text
+  );
+}
+
+export function userMessageSuggestsInChatImageRequest(
+  message: string,
+  recentMessages: readonly Pick<ChatMessage, "role" | "content">[] = []
+): boolean {
   const t = message.trim().toLowerCase();
   if (t.length === 0) return false;
 
@@ -670,16 +701,57 @@ export function userMessageSuggestsInChatImageRequest(message: string): boolean 
     /\bno\s+(image|picture|drawing|artwork)\b/.test(t) ||
     /\b(text|words)\s+only\b/.test(t) ||
     /\bwithout\s+(an\s+)?(image|picture|drawing)\b/.test(t) ||
-    /\bnot\s+(an\s+)?(image|drawing|picture)\b/.test(t);
+    /\bnot\s+(an\s+)?(image|drawing|picture)\b/.test(t) ||
+    /\bi\s+see\s+what\s+you\s+mean\b/.test(t) ||
+    /\blet'?s\s+see\s+what\s+happens\b/.test(t);
   if (negative) return false;
 
-  return (
+  const directTrigger =
     /\b(draw|paint|sketch|illustrat(e|ion))\b/.test(t) ||
     /\b(image|picture|photo)\s+of\b/.test(t) ||
+    /\bselfie\b/.test(t) ||
+    /\bportrait\b/.test(t) ||
     /\b(generate|create|make)\s+(an?\s+)?(image|picture|illustration)\b/.test(t) ||
-    /\b(show|give)\s+me\s+(an?\s+)?(image|picture|drawing)\b/.test(t) ||
-    t.includes("sendgeneratedimage")
+    /\b(show|give|send)\s+me\s+(an?\s+)?(image|picture|drawing|photo|selfie|portrait)\b/.test(t) ||
+    t.includes("sendgeneratedimage");
+  if (directTrigger) return true;
+
+  // Contextual follow-up intent (e.g. assistant offered drawings, user says "I'd love to see them").
+  const hasVisualNoun = /\b(image|picture|photo|drawing|drawings|sketch|sketches|painting|paintings|illustration|illustrations|artwork|selfie|portrait)\b/.test(
+    t
   );
+  const hasVisualRequestPhrase =
+    /\b(?:show|share|send)\s+me\b/.test(t) ||
+    /\b(?:can|could|may)\s+i\s+see\b/.test(t) ||
+    /\bi(?:'d| would)?\s+love\s+to\s+see\b/.test(t) ||
+    /\bi\s+want\s+to\s+see\b/.test(t) ||
+    /\bsee\s+(?:it|that|them|this)\b/.test(t) ||
+    /\bsee\s+some\b/.test(t);
+  if (hasVisualNoun && hasVisualRequestPhrase) return true;
+
+  const latestAssistant = latestAssistantContentForImageIntent(recentMessages);
+  const visualPeekRequest = userMessageLooksLikeVisualPeekRequest(t);
+  if (visualPeekRequest) {
+    const userSceneCue = textContainsSceneReferenceCue(t);
+    const assistantSceneCue = latestAssistant
+      ? textContainsSceneReferenceCue(latestAssistant)
+      : false;
+    if (userSceneCue || assistantSceneCue) return true;
+  }
+
+  if (!latestAssistant) return false;
+  const assistantOfferedVisual =
+    /\b(?:would\s+you\s+(?:like|care)\s+to\s+see|want\s+to\s+see|can\s+i\s+show\s+you|i\s+can\s+show\s+you|i\s+can\s+share|shall\s+i\s+show\s+you)\b/.test(
+      latestAssistant
+    ) &&
+    /\b(image|picture|photo|drawing|drawings|sketch|sketches|painting|paintings|illustration|illustrations|artwork)\b/.test(
+      latestAssistant
+    );
+  const userAffirmed =
+    /^(?:yes|yeah|yep|sure|absolutely|please|of course)\b/.test(t) ||
+    /\bi(?:'d| would)\s+love\s+to\b/.test(t) ||
+    /\bthat sounds (?:great|good|lovely|nice)\b/.test(t);
+  return assistantOfferedVisual && userAffirmed;
 }
 
 const AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS = 1200;
@@ -693,15 +765,42 @@ export function autoBackfillSendGeneratedImagePrompt(args: {
   isStarterPrompt: boolean;
   userMessage: string;
   parsedToolPrompt?: string | null;
+  recentMessages?: readonly Pick<ChatMessage, "role" | "content">[];
 }): string | undefined {
   const explicit = args.parsedToolPrompt?.trim();
   if (explicit && explicit.length > 0) return explicit;
   if (args.isStarterPrompt) return undefined;
-  if (!userMessageSuggestsInChatImageRequest(args.userMessage)) return undefined;
+  if (!userMessageSuggestsInChatImageRequest(args.userMessage, args.recentMessages ?? [])) {
+    return undefined;
+  }
   const normalized = args.userMessage.replace(/\s+/g, " ").trim();
   if (!normalized) return undefined;
   if (normalized.length <= AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS) return normalized;
   return `${normalized.slice(0, AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS - 3).trimEnd()}...`;
+}
+
+const PRE_IMAGE_LEAD_FALLBACK = "One moment - I'll share that image shortly.";
+const PRE_IMAGE_LEAD_MAX_CHARS = 110;
+
+/**
+ * Keep the "message before the generated image" concise and readable.
+ * We keep only the first sentence-like thought and trim it to a short cap.
+ */
+export function compactPreImageLeadMessage(raw: string): string {
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  if (!normalized) return PRE_IMAGE_LEAD_FALLBACK;
+  const firstSentence =
+    normalized
+      .split(/(?<=[.!?])\s+/)
+      .map((part) => part.trim())
+      .find((part) => part.length > 0) ?? normalized;
+  const deferLeadPattern =
+    /\b(?:one moment|just a moment|hang on|hold on|coming right up|i(?:'ll| will)\s+(?:share|send|show|paint|draw)|i(?:'d| would)\s+be\s+happy\s+to\s+(?:share|send|show|paint|draw)|working on it|on its way|almost ready)\b/i;
+  if (!deferLeadPattern.test(firstSentence)) {
+    return PRE_IMAGE_LEAD_FALLBACK;
+  }
+  if (firstSentence.length <= PRE_IMAGE_LEAD_MAX_CHARS) return firstSentence;
+  return `${firstSentence.slice(0, PRE_IMAGE_LEAD_MAX_CHARS - 3).trimEnd()}...`;
 }
 
 export function resolvePrimaryChatProviderForPossibleImageToolTurn(args: {
@@ -711,6 +810,7 @@ export function resolvePrimaryChatProviderForPossibleImageToolTurn(args: {
   botOverrides: GenerateOptions | undefined;
   secondaryOllamaHost?: string | null;
   prismImageToolLlmModel?: string | null;
+  recentMessages?: readonly Pick<ChatMessage, "role" | "content">[];
 }): { provider: LlmProvider; botOverrides: GenerateOptions | undefined } {
   const imageModel =
     typeof args.prismImageToolLlmModel === "string"
@@ -719,7 +819,7 @@ export function resolvePrimaryChatProviderForPossibleImageToolTurn(args: {
   if (
     !args.isStarterPrompt &&
     imageModel.length > 0 &&
-    userMessageSuggestsInChatImageRequest(args.rawUserMessage)
+    userMessageSuggestsInChatImageRequest(args.rawUserMessage, args.recentMessages ?? [])
   ) {
     return {
       provider: new LocalOllamaProvider({
@@ -1605,6 +1705,7 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- Labels are what the USER sends verbatim when they tap; keep each short (single clause).",
   "",
   "Optional — send a generated image for the user (saved to their library alongside manual images):",
+  "- If you include sendGeneratedImage, keep the visible prose before it very short (one concise sentence).",
   "- Add a `sendGeneratedImage` object with a single `prompt` field: a concrete image-model description (scene, style, subject).",
   "- You may combine AskQuestion and sendGeneratedImage in one JSON object: {\"v\":1,\"askQuestion\":{...},\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
   "- Or image-only: {\"v\":1,\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
@@ -3193,6 +3294,7 @@ export async function processChatMessage(
         botOverrides: settings.botOverrides,
         secondaryOllamaHost: settings.secondaryOllamaHost,
         prismImageToolLlmModel: settings.prismImageToolLlmModel,
+        recentMessages: history,
       });
 
     const {
@@ -3209,7 +3311,7 @@ export async function processChatMessage(
     });
     if (
       shouldSuppressAssistantReply(assistantReplyRaw) &&
-      !shouldBypassSuppressionForImageIntent(isStarterPrompt, message)
+      !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
     ) {
       throw createDeniedReplySuppressedError({
         fallbackConfigured: normalizeModelValue(settings.lenientLocalFallbackModel) !== null,
@@ -3253,6 +3355,7 @@ export async function processChatMessage(
       isStarterPrompt,
       userMessage: message,
       parsedToolPrompt: sendImgPromptIncRaw,
+      recentMessages: history,
     });
     const sendImgPromptIncRequested = sendImgPromptInc;
     let pendingImageJobIncognito: ProcessChatMessageResult["pendingImageJob"] | undefined;
@@ -3277,6 +3380,7 @@ export async function processChatMessage(
             : ASSISTANT_IMAGE_SLOT_BUSY_NOTE;
         incognitoImageSlot = "busy";
       } else {
+        assistantDisplay = compactPreImageLeadMessage(assistantDisplay);
         startChatImageBackgroundJob({
           db,
           job: acq.job,
@@ -3583,6 +3687,7 @@ export async function processChatMessage(
       botOverrides: settings.botOverrides,
       secondaryOllamaHost: settings.secondaryOllamaHost,
       prismImageToolLlmModel: settings.prismImageToolLlmModel,
+      recentMessages: history,
     });
 
   const {
@@ -3599,7 +3704,7 @@ export async function processChatMessage(
   });
   if (
     shouldSuppressAssistantReply(assistantReplyRaw) &&
-    !shouldBypassSuppressionForImageIntent(isStarterPrompt, message)
+    !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
   ) {
     throw createDeniedReplySuppressedError({
       fallbackConfigured: normalizeModelValue(settings.lenientLocalFallbackModel) !== null,
@@ -3649,6 +3754,7 @@ export async function processChatMessage(
     isStarterPrompt,
     userMessage: message,
     parsedToolPrompt: sendImgPromptPersistedRaw,
+    recentMessages: history,
   });
   const sendImgPromptPersistedRequested = sendImgPromptPersisted;
   let pendingImageJob: ProcessChatMessageResult["pendingImageJob"] | undefined;
@@ -3680,6 +3786,7 @@ export async function processChatMessage(
       sentGeneratedImagePersisted = undefined;
       persistedImageSlot = "busy";
     } else {
+      assistantDisplay = compactPreImageLeadMessage(assistantDisplay);
       startChatImageBackgroundJob({
         db,
         job: acq.job,

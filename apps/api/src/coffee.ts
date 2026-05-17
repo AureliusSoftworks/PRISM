@@ -74,6 +74,7 @@ import {
 } from "./image-job-slot.ts";
 import {
   autoBackfillSendGeneratedImagePrompt,
+  compactPreImageLeadMessage,
   userMessageSuggestsInChatImageRequest,
 } from "./chat.ts";
 
@@ -942,6 +943,34 @@ async function maybeQueueCoffeeImageJob(args: {
     jobId: acq.job.id,
     conversationId: args.conversationId,
   };
+}
+
+function applyConcisePreImageLeadToCoffeeTurn(args: {
+  db: DatabaseSync;
+  userId: string;
+  turn: CoffeeTurnResponse;
+}): CoffeeTurnResponse {
+  const messages = args.turn.conversation.messages;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.role !== "assistant") continue;
+    const concise = compactPreImageLeadMessage(message.content);
+    if (concise === message.content) return args.turn;
+    args.db
+      .prepare("UPDATE messages SET content = ? WHERE id = ? AND user_id = ?")
+      .run(concise, message.id, args.userId);
+    const nextMessages = messages.map((row) =>
+      row.id === message.id ? { ...row, content: concise } : row
+    );
+    return {
+      ...args.turn,
+      conversation: {
+        ...args.turn.conversation,
+        messages: nextMessages,
+      },
+    };
+  }
+  return args.turn;
 }
 
 function interruptedSnippetFromTokenCount(fullText: string, visibleTokenCount: number): string {
@@ -3495,7 +3524,16 @@ export async function processCoffeeTurn(
     playerInterruption: input.playerInterruption,
     directedSpeakerBotId: input.directedSpeakerBotId,
   });
-  return pendingImageJob ? { ...turn, pendingImageJob } : turn;
+  if (!pendingImageJob) return turn;
+  const conciseTurn = applyConcisePreImageLeadToCoffeeTurn({
+    db,
+    userId,
+    turn,
+  });
+  return {
+    ...conciseTurn,
+    pendingImageJob,
+  };
 }
 
 /**

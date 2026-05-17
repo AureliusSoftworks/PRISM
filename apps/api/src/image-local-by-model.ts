@@ -24,6 +24,7 @@ import { normalizeOllamaHostForStatusCheck } from "./settings.ts";
 export async function generateLocalImageBytesByModelId(args: {
   modelId: string;
   promptForModel: string;
+  negativePrompt?: string;
   size: string;
   signal: AbortSignal;
   comfyUiHost: string | null | undefined;
@@ -50,6 +51,7 @@ export async function generateLocalImageBytesByModelId(args: {
       remotePath: remotePickPath,
       bindings: list,
       prompt: args.promptForModel,
+      negativePrompt: args.negativePrompt,
       size: args.size,
       signal: args.signal,
     });
@@ -78,6 +80,7 @@ export async function generateLocalImageBytesByModelId(args: {
         remotePath: registration.remotePath.trim(),
         bindings: list,
         prompt: args.promptForModel,
+        negativePrompt: args.negativePrompt,
         size: args.size,
         signal: args.signal,
       });
@@ -96,6 +99,7 @@ export async function generateLocalImageBytesByModelId(args: {
       comfyUiHost: comfyHost,
       registration,
       prompt: args.promptForModel,
+      negativePrompt: args.negativePrompt,
       size: args.size,
       signal: args.signal,
     });
@@ -122,6 +126,7 @@ export async function generateLocalImageBytesByModelId(args: {
       comfyUiHost: comfyHost,
       checkpointName: comfyCheckpoint,
       prompt: args.promptForModel,
+      negativePrompt: args.negativePrompt,
       size: args.size,
       signal: args.signal,
     });

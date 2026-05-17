@@ -9,6 +9,7 @@ import {
   inferComfyUiWorkflowPatchMap,
   parseComfyUiDimensions,
   parseComfyUiUserdataWorkflowFileToApiGraph,
+  randomizeComfyUiWorkflowSeedInputs,
 } from "../comfyui-image.ts";
 
 describe("comfyWorkflowKindFromCheckpoint", () => {
@@ -328,5 +329,42 @@ describe("applyComfyUiWorkflowRuntimePatches", () => {
     assert.equal(neg.inputs?.text, "new-neg");
     assert.equal(latent.inputs?.width, 888);
     assert.equal(latent.inputs?.height, 777);
+  });
+});
+
+describe("randomizeComfyUiWorkflowSeedInputs", () => {
+  it("replaces fixed numeric seed-like inputs with new values", () => {
+    const workflow: Record<string, unknown> = {
+      "1": {
+        class_type: "KSampler",
+        inputs: {
+          seed: 12345,
+          steps: 20,
+        },
+      },
+      "2": {
+        class_type: "RandomNoise",
+        inputs: {
+          noise_seed: "999",
+        },
+      },
+      "3": {
+        class_type: "OtherNode",
+        inputs: {
+          scheduler: "normal",
+          note: "keep-me",
+        },
+      },
+    };
+    randomizeComfyUiWorkflowSeedInputs(workflow);
+    const sampler = workflow["1"] as { inputs: { seed: number; steps: number } };
+    const noise = workflow["2"] as { inputs: { noise_seed: string } };
+    const other = workflow["3"] as { inputs: { scheduler: string; note: string } };
+    assert.equal(typeof sampler.inputs.seed, "number");
+    assert.notEqual(sampler.inputs.seed, 12345);
+    assert.match(noise.inputs.noise_seed, /^\d+$/);
+    assert.notEqual(noise.inputs.noise_seed, "999");
+    assert.equal(other.inputs.scheduler, "normal");
+    assert.equal(other.inputs.note, "keep-me");
   });
 });

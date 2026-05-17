@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   autoBackfillSendGeneratedImagePrompt,
   buildAssistantToolCallEvents,
+  compactPreImageLeadMessage,
   extractPrismBotMentionIdsFromMessage,
   parseTitleResponse,
   processChatMessage,
@@ -2664,6 +2665,8 @@ describe("userMessageSuggestsInChatImageRequest", () => {
     assert.equal(userMessageSuggestsInChatImageRequest("Please sketch a hillside."), true);
     assert.equal(userMessageSuggestsInChatImageRequest("generate an image of a sunset"), true);
     assert.equal(userMessageSuggestsInChatImageRequest("show me a picture of a cat"), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("would you mind sending me a selfie?"), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("please send me a portrait"), true);
   });
 
   it("returns false for non-image text", () => {
@@ -2675,6 +2678,49 @@ describe("userMessageSuggestsInChatImageRequest", () => {
     assert.equal(userMessageSuggestsInChatImageRequest("don't draw anything"), false);
     assert.equal(userMessageSuggestsInChatImageRequest("text only please"), false);
   });
+
+  it("uses recent assistant context to resolve affirmative visual follow-ups", () => {
+    const recent = [
+      {
+        role: "assistant" as const,
+        content: "Would you care to see some of my latest drawings?",
+      },
+    ];
+    assert.equal(userMessageSuggestsInChatImageRequest("I'd love to.", recent), true);
+  });
+
+  it("detects nuanced scene requests like 'see what it looks like outside your window'", () => {
+    const recent = [
+      {
+        role: "assistant" as const,
+        content:
+          "My study window gazes out upon serene Lake Zurich, with sunlight on the surrounding trees.",
+      },
+    ];
+    assert.equal(
+      userMessageSuggestsInChatImageRequest(
+        "May I see what it looks like outside your window, Dr. Jung?",
+        recent
+      ),
+      true
+    );
+  });
+
+  it("does not trigger on generic affirmation without a visual offer in context", () => {
+    const recent = [
+      {
+        role: "assistant" as const,
+        content: "Would you like to continue this thought?",
+      },
+    ];
+    assert.equal(userMessageSuggestsInChatImageRequest("I'd love to.", recent), false);
+  });
+
+  it("does not misclassify non-image idioms as image requests", () => {
+    assert.equal(userMessageSuggestsInChatImageRequest("I see what you mean."), false);
+    assert.equal(userMessageSuggestsInChatImageRequest("Let's see what happens."), false);
+  });
+
 });
 
 describe("autoBackfillSendGeneratedImagePrompt", () => {
@@ -2717,6 +2763,55 @@ describe("autoBackfillSendGeneratedImagePrompt", () => {
       undefined
     );
   });
+
+  it("backfills on contextual affirmations after an assistant visual offer", () => {
+    const out = autoBackfillSendGeneratedImagePrompt({
+      isStarterPrompt: false,
+      userMessage: "I'd love to.",
+      parsedToolPrompt: undefined,
+      recentMessages: [
+        {
+          role: "assistant",
+          content: "Would you care to see some of my latest drawings?",
+        },
+      ],
+    });
+    assert.equal(out, "I'd love to.");
+  });
+});
+
+describe("compactPreImageLeadMessage", () => {
+  it("keeps concise one-liners as-is", () => {
+    assert.equal(
+      compactPreImageLeadMessage("I'd be happy to share a photo of me, one moment..."),
+      "I'd be happy to share a photo of me, one moment..."
+    );
+  });
+
+  it("reduces verbose text to the first sentence", () => {
+    assert.equal(
+      compactPreImageLeadMessage(
+        "I'd be happy to share a photo of me in my lecture hall. Here is a widescreen image with more details."
+      ),
+      "I'd be happy to share a photo of me in my lecture hall."
+    );
+  });
+
+  it("falls back to neutral lead when first sentence is descriptive instead of defer-style", () => {
+    assert.equal(
+      compactPreImageLeadMessage(
+        "The view from my window is quite lovely today with mountains and rooftops. I'll share it now."
+      ),
+      "One moment - I'll share that image shortly."
+    );
+  });
+
+  it("falls back to a short default line when input is empty", () => {
+    assert.equal(
+      compactPreImageLeadMessage("   "),
+      "One moment - I'll share that image shortly."
+    );
+  });
 });
 
 describe("shouldBypassSuppressionForImageIntent", () => {
@@ -2725,6 +2820,13 @@ describe("shouldBypassSuppressionForImageIntent", () => {
       shouldBypassSuppressionForImageIntent(
         false,
         "Please send me a widescreen photo of yourself teaching a class."
+      ),
+      true
+    );
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(
+        false,
+        "Would you mind sending me a selfie? I'm curious what you look like."
       ),
       true
     );
@@ -2738,6 +2840,22 @@ describe("shouldBypassSuppressionForImageIntent", () => {
     assert.equal(
       shouldBypassSuppressionForImageIntent(false, "Let's talk philosophy."),
       false
+    );
+  });
+
+  it("bypasses suppression for contextual visual-peek phrasing with scene context", () => {
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(
+        false,
+        "May I see what it looks like outside your window, Dr. Jung?",
+        [
+          {
+            role: "assistant",
+            content: "I can describe the lake outside my window if you'd like.",
+          },
+        ]
+      ),
+      true
     );
   });
 });
