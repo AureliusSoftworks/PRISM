@@ -1994,6 +1994,115 @@ const PRISM_BOT_MARKDOWN_LINK_RE =
 const PRISM_BOT_MENTION_COFFEE_APPENDIX =
   "The user may @-mention bots with markdown like [Label](prism-bot://botId) (botId may be URL-encoded). Prefer the mentioned bot as the next speaker when that fits the table.";
 
+const COFFEE_ORGANIC_SEED_LINES = [
+  "I know, right?",
+  "Wait, what was that you just said? Sorry, it went over my head.",
+  "No offense, but this is boring.",
+  "Honestly, that tracks.",
+  "Okay, that's actually kind of wild.",
+  "Huh. Didn't see that coming.",
+] as const;
+
+function decodeCoffeeMentionBotId(rawId: string): string | null {
+  if (!rawId) return null;
+  try {
+    const decoded = decodeURIComponent(rawId).trim();
+    return decoded.length > 0 ? decoded : null;
+  } catch {
+    const trimmed = rawId.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+}
+
+function extractLastAddressedBotId(args: {
+  line: string;
+  speakerBotId: string | null;
+  seatedBotIds: ReadonlySet<string>;
+}): string | null {
+  const { line, speakerBotId, seatedBotIds } = args;
+  if (!line) return null;
+  const re = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi");
+  let lastMentionedBotId: string | null = null;
+  for (const match of line.matchAll(re)) {
+    const decoded = decodeCoffeeMentionBotId(match[2] ?? "");
+    if (!decoded) continue;
+    if (decoded === speakerBotId) continue;
+    if (!seatedBotIds.has(decoded)) continue;
+    lastMentionedBotId = decoded;
+  }
+  return lastMentionedBotId;
+}
+
+function pickRandomAutonomousSpeaker(args: {
+  group: CoffeeBotProfile[];
+}): CoffeeBotProfile {
+  const { group } = args;
+  if (group.length === 0) {
+    throw new Error("Coffee group is empty; cannot pick a random speaker.");
+  }
+  const index = Math.floor(Math.random() * group.length);
+  return group[index] ?? group[0]!;
+}
+
+function maybeApplyCoffeeOrganicSeed(args: {
+  replyText: string;
+  conversationId: string;
+  speaker: Pick<CoffeeBotProfile, "id" | "name">;
+  historyLength: number;
+  turnKind: CoffeeTurnKind;
+  avoidTexts: readonly string[];
+}): string {
+  const { replyText, conversationId, speaker, historyLength, turnKind, avoidTexts } = args;
+  if (!replyText) return replyText;
+  const seed = stableUnitValue(
+    `${conversationId}:${speaker.id}:${historyLength}:${turnKind}:organic-seed`
+  );
+  if (seed > 0.3) return replyText;
+  const startIndex =
+    Math.floor(
+      stableUnitValue(`${conversationId}:${speaker.id}:${historyLength}:organic-line`) *
+        COFFEE_ORGANIC_SEED_LINES.length
+    ) % COFFEE_ORGANIC_SEED_LINES.length;
+  const avoid = new Set(avoidTexts.map(coffeeReplyRepeatKey).filter(Boolean));
+  let picked = COFFEE_ORGANIC_SEED_LINES[startIndex] ?? COFFEE_ORGANIC_SEED_LINES[0]!;
+  for (let offset = 0; offset < COFFEE_ORGANIC_SEED_LINES.length; offset += 1) {
+    const candidate =
+      COFFEE_ORGANIC_SEED_LINES[(startIndex + offset) % COFFEE_ORGANIC_SEED_LINES.length] ?? picked;
+    if (!avoid.has(coffeeReplyRepeatKey(candidate))) {
+      picked = candidate;
+      break;
+    }
+  }
+  // Keep the "seeded" line infrequent and varied in shape.
+  if (seed <= 0.1) return picked;
+  if (seed <= 0.2) return `${picked} ${replyText}`.trim();
+  return `${replyText} ${picked}`.trim();
+}
+
+function maybeInjectAutonomousPeerAddress(args: {
+  replyText: string;
+  turnKind: CoffeeTurnKind;
+  speaker: CoffeeBotProfile;
+  latestAssistantBeforeTurn: ChatMessage | null;
+  group: readonly CoffeeBotProfile[];
+}): string {
+  const { replyText, turnKind, speaker, latestAssistantBeforeTurn, group } = args;
+  if (turnKind !== "autonomous") return replyText;
+  if (!latestAssistantBeforeTurn || latestAssistantBeforeTurn.role !== "assistant") return replyText;
+  const priorSpeakerId = latestAssistantBeforeTurn.botId ?? null;
+  if (!priorSpeakerId || priorSpeakerId === speaker.id) return replyText;
+  const priorSpeaker = group.find((bot) => bot.id === priorSpeakerId);
+  if (!priorSpeaker) return replyText;
+  const alreadyAddressesPeer =
+    replyText.includes("prism-bot://") ||
+    new RegExp(`\\b${escapeRegex(priorSpeaker.name)}\\b`, "i").test(replyText);
+  if (alreadyAddressesPeer) return replyText;
+  // Encourage direct bot-to-bot texture on most autonomous turns.
+  if (Math.random() > 0.65) return replyText;
+  const mention = formatBotMentionMarkdownInline(priorSpeaker);
+  return `${mention}, ${replyText}`.trim();
+}
+
 /**
  * Post-process a bot's reply to upgrade explicit `@Name` mentions into the
  * canonical `[Name](prism-bot://botId)` markdown link. Skips text that already
@@ -2455,7 +2564,11 @@ export function buildSpeakerPrompt(args: {
     "PRISM chat can generate and share images. Never say that photos/images are impossible to send in this chat.",
     "You may react directly to what another bot just said, agree, disagree, add one concrete thought, pause into a softer observation, or gently shift the topic when that fits your personality.",
     "The user is present, but Coffee should feel like a group conversation. Do not turn every reply back toward the user.",
+    "Avoid generic motivational platitudes and repetitive metaphor chains. It's okay to disagree, challenge, or redirect with warmth.",
+    "When another bot just spoke, often respond to that bot directly by name in second person before expanding your thought.",
     "Reply as one line of plain prose (no line breaks). Prefer one or two short sentences max, and vary your rhythm across turns so the table doesn't sound templated.",
+    "Do not keep the same line length every turn. Mix very short reactions, medium lines, and occasional longer lines so the table breathes like a real conversation.",
+    "Occasionally use casual conversational beats when natural for your persona (for example: \"I know, right?\", \"Wait, what was that you just said? Sorry, it went over my head.\", or \"No offense, but this is boring.\"). Use sparingly.",
     `Aim for a soft target around ${tableReplyMaxChars} characters including spaces; brevity reads best on the table. The server no longer truncates, so a slightly longer line is fine, but please don't ramble — keep the table feeling like a single quick exchange.`,
     "Make the line concrete: pull one small image, opinion, object, motive, or emotional beat from your persona or the latest table moment.",
     "Never repeat a recent table line exactly; if the table keeps circling the same nouns or joke shape, change the concrete detail or social motion instead.",
@@ -3111,7 +3224,6 @@ async function generateCoffeeBotReply(args: {
   const historyLimit = coffeeEffectiveHistoryLimit(sessionSettings);
   const replyCaps = coffeeReplyLengthCaps(sessionSettings);
   const history = loadMessages(db, userId, row.id, historyLimit);
-  const lastSpeakerBotId = loadLastSpeakerBotId(db, userId, row.id);
   const persistedSocialByBotId = loadCoffeeBotSocialState(
     db,
     userId,
@@ -3138,43 +3250,41 @@ async function generateCoffeeBotReply(args: {
       : socialByBotId;
   let interruptionEvent: CoffeeInterruptionEvent | undefined = playerInterruptionEvent;
   const directedSpeaker = pickDirectedSpeaker(group, directedSpeakerBotId);
+  const latestAssistantBeforeTurn = [...history]
+    .reverse()
+    .find((message): message is ChatMessage => message.role === "assistant") ?? null;
   let pickedBotId: string;
   let routerReason: string;
   if (directedSpeaker) {
     pickedBotId = directedSpeaker.id;
     routerReason = `Director mode picked ${directedSpeaker.name}.`;
   } else {
-    const routerProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel);
-    const routerMessages = buildRouterPrompt({
-      group,
-      history,
-      userMessage: tableFocus,
-      lastSpeakerBotId,
-      socialByBotId: preTurnSocialByBotId,
-      turnKind,
-      sessionKickoff,
-      sessionSettings,
-      coffeeTopic: row.coffee_topic,
-      sessionRemainingMs: settings.sessionRemainingMs,
-    });
-    try {
-      const routerRaw = await routerProvider.generateResponse(routerMessages, {
-        temperature: coffeeRouterTemperature(sessionSettings),
-        maxTokens: ROUTER_MAX_TOKENS,
-      });
-      const parsed = parseRouterResponse(routerRaw, group);
-      if (parsed) {
-        pickedBotId = parsed.botId;
-        routerReason = parsed.reason;
+    const seatedBotIds = new Set(group.map((bot) => bot.id));
+    const addressedBotId = latestAssistantBeforeTurn
+      ? extractLastAddressedBotId({
+          line: latestAssistantBeforeTurn.content,
+          speakerBotId: latestAssistantBeforeTurn.botId ?? null,
+          seatedBotIds,
+        })
+      : null;
+    if (addressedBotId) {
+      const addressedSpeaker = group.find((bot) => bot.id === addressedBotId);
+      if (addressedSpeaker) {
+        pickedBotId = addressedSpeaker.id;
+        routerReason = `Followed direct bot address to ${addressedSpeaker.name}.`;
       } else {
-        const fallback = pickFallbackSpeaker(group, lastSpeakerBotId);
-        pickedBotId = fallback.id;
-        routerReason = ROUTER_FALLBACK_REASON;
+        const randomSpeaker = pickRandomAutonomousSpeaker({
+          group,
+        });
+        pickedBotId = randomSpeaker.id;
+        routerReason = "Random speaker pick.";
       }
-    } catch {
-      const fallback = pickFallbackSpeaker(group, lastSpeakerBotId);
-      pickedBotId = fallback.id;
-      routerReason = "Router error (fell back to round-robin)";
+    } else {
+      const randomSpeaker = pickRandomAutonomousSpeaker({
+        group,
+      });
+      pickedBotId = randomSpeaker.id;
+      routerReason = "Random speaker pick.";
     }
   }
 
@@ -3323,6 +3433,21 @@ async function generateCoffeeBotReply(args: {
   if (!replyText) {
     throw new Error("Speaker bot returned an empty reply.");
   }
+  replyText = maybeInjectAutonomousPeerAddress({
+    replyText,
+    turnKind,
+    speaker,
+    latestAssistantBeforeTurn,
+    group,
+  });
+  replyText = maybeApplyCoffeeOrganicSeed({
+    replyText,
+    conversationId: row.id,
+    speaker,
+    historyLength: history.length,
+    turnKind,
+    avoidTexts: recentCoffeeAssistantTexts(history),
+  });
   // Promote any plain `@Name` / bare-name peer references into prism-bot mention
   // markdown so the client renders the chip + lights the notified glyph on the
   // addressed bot's seat. Safe even when the model already used the markdown.
