@@ -11660,7 +11660,9 @@ interface ComposerInputProps {
   placeholder: string;
   writingAssistEnabled: boolean;
   submitDisabled: boolean;
-  submitLabel: string;
+  submitLabel: React.ReactNode;
+  submitAriaLabel: string;
+  submitIconOnly?: boolean;
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onValueChange: (value: string) => void;
   onFocus: () => void;
@@ -12165,7 +12167,9 @@ interface DesktopMarkdownComposerProps {
   onValueChange: (value: string) => void;
   onFocus: () => void;
   submitDisabled: boolean;
-  submitLabel: string;
+  submitLabel: React.ReactNode;
+  submitAriaLabel: string;
+  submitIconOnly?: boolean;
   /** Omit Send pill on narrow viewports when empty — IME Send / Enter submits. */
   hideSubmitButton?: boolean;
   resolvedTheme: "light" | "dark";
@@ -12185,6 +12189,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       onFocus,
       submitDisabled,
       submitLabel,
+      submitAriaLabel,
+      submitIconOnly = false,
       hideSubmitButton,
       resolvedTheme,
       mentionBots,
@@ -12640,7 +12646,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               <EditorContent editor={editor} />
             </div>
             {!hideSubmitButton && (
-              <button type="submit" disabled={submitDisabled}>
+              <button
+                type="submit"
+                disabled={submitDisabled}
+                aria-label={submitAriaLabel}
+                title={submitAriaLabel}
+                data-submit-icon={submitIconOnly ? "true" : undefined}
+              >
                 {submitLabel}
               </button>
             )}
@@ -12689,6 +12701,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     writingAssistEnabled,
     submitDisabled,
     submitLabel,
+    submitAriaLabel,
+    submitIconOnly,
     onChange,
     onValueChange,
     onFocus,
@@ -12808,6 +12822,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           onFocus={onFocus}
           submitDisabled={submitDisabled}
           submitLabel={submitLabel}
+          submitAriaLabel={submitAriaLabel}
+          submitIconOnly={submitIconOnly}
           hideSubmitButton={hideSubmitButton}
           resolvedTheme={resolvedTheme}
           mentionBots={mentionBots}
@@ -12947,7 +12963,13 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
               lang="en"
             />
             {!hideSubmitButton && (
-              <button type="submit" disabled={submitDisabled}>
+              <button
+                type="submit"
+                disabled={submitDisabled}
+                aria-label={submitAriaLabel}
+                title={submitAriaLabel}
+                data-submit-icon={submitIconOnly ? "true" : undefined}
+              >
                 {submitLabel}
               </button>
             )}
@@ -13817,6 +13839,15 @@ function HomeContent(): React.JSX.Element {
   const memoryPhysicsFrameRef = useRef<number | null>(null);
   const [memoryPhysicsActive, setMemoryPhysicsActive] = useState(false);
   const [pendingReply, setPendingReply] = useState(false);
+  const [queuedChatPrompts, setQueuedChatPrompts] = useState<Array<{
+    id: string;
+    text: string;
+    targetConversationId: string | null;
+  }>>([]);
+  const [dispatchingQueuedPrompt, setDispatchingQueuedPrompt] = useState<{
+    id: string;
+    text: string;
+  } | null>(null);
   const [fallbackMessageIds, setFallbackMessageIds] = useState<Set<string>>(() => new Set());
   const [pendingReplyStartedAtMs, setPendingReplyStartedAtMs] = useState<number | null>(null);
   const [pendingReplyNowMs, setPendingReplyNowMs] = useState(() => Date.now());
@@ -20559,6 +20590,12 @@ function HomeContent(): React.JSX.Element {
       jobId: envelope.pendingImageJob.jobId,
       conversationId: convId,
     });
+    // If the user queued follow-up text while this turn was waiting, push the
+    // next queued message immediately once the image job is confirmed so chat
+    // can keep moving independently from image generation.
+    if (!dispatchingQueuedPrompt && queuedChatPrompts.length > 0) {
+      scheduleNextQueuedPrompt(convId);
+    }
     startPendingImageJobPoll(envelope.pendingImageJob.jobId, convId, {
       markPrivateGenerated: envelope.conversation.incognito === true,
     });
@@ -20627,6 +20664,7 @@ function HomeContent(): React.JSX.Element {
       starterPrompt?: boolean;
       starterPromptWarrantsIntro?: boolean;
       draftOverride?: string;
+      queuedConversationId?: string | null;
     } = {}
   ) {
     e.preventDefault();
@@ -20660,7 +20698,25 @@ function HomeContent(): React.JSX.Element {
       setDraft("");
       return;
     }
-    if ((!trimmed && !isStarterPrompt) || pendingReply) return;
+    if (!trimmed && !isStarterPrompt) return;
+    if (pendingReply && !canSendTextWhileReplyPending()) {
+      if (!isStarterPrompt && trimmed.length > 0) {
+        setQueuedChatPrompts((previous) => [
+          ...previous,
+          {
+            id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+            text: trimmed,
+            targetConversationId: pendingReplyConversationId,
+          },
+        ]);
+        if (!editingMessageId) {
+          appendComposerHistoryEntry(rawDraft);
+        }
+        setDraft("");
+        setError(null);
+      }
+      return;
+    }
     if (chatAutoRestoreSuppressed) {
       setChatAutoRestoreSuppressed(false);
     }
@@ -20684,10 +20740,11 @@ function HomeContent(): React.JSX.Element {
       setChatStartupSummary(null);
       chatSummaryRefreshMarkerRef.current = null;
     }
-    const requestConversationId =
+    const requestConversationId = options.queuedConversationId ?? (
       detail?.id && detail.id !== "pending"
         ? detail.id
-        : selectedId;
+        : selectedId
+    );
     const archiveConversationId =
       requestConversationId ??
       (detail?.id && detail.id !== "pending" ? detail.id : null);
@@ -20782,6 +20839,7 @@ function HomeContent(): React.JSX.Element {
       appendComposerHistoryEntry(rawDraft);
     }
     setDraft("");
+    let successfulConversationId: string | null = null;
 
     try {
       const d = await api<ChatPostEnvelope>("/api/chat", {
@@ -20800,6 +20858,7 @@ function HomeContent(): React.JSX.Element {
       captureFallbackMessageIdFromEnvelope(d);
       pushMemoryToasts(d.memoryLearned);
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
+      successfulConversationId = d.conversation.id;
       if (d.summaryCompaction?.mode === "sandbox" && d.summaryCompaction.triggered) {
         setSandboxSummaryBusy(true);
         window.setTimeout(() => {
@@ -20964,6 +21023,9 @@ function HomeContent(): React.JSX.Element {
       );
     } finally {
       clearPendingReplyVisuals();
+      if (successfulConversationId) {
+        scheduleNextQueuedPrompt(successfulConversationId);
+      }
     }
   }
 
@@ -21268,8 +21330,99 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
+  function removeQueuedPrompt(queueId: string): void {
+    setQueuedChatPrompts((previous) => previous.filter((item) => item.id !== queueId));
+  }
+
+  function scheduleNextQueuedPrompt(fallbackConversationId: string): void {
+    let nextQueuedPrompt:
+      | { id: string; text: string; targetConversationId: string | null }
+      | undefined;
+    setQueuedChatPrompts((previous) => {
+      nextQueuedPrompt = previous[0];
+      return previous.length > 0 ? previous.slice(1) : previous;
+    });
+    if (!nextQueuedPrompt || nextQueuedPrompt.text.trim().length === 0) return;
+    const queuedConversationId =
+      nextQueuedPrompt.targetConversationId ?? fallbackConversationId;
+    setDispatchingQueuedPrompt({
+      id: nextQueuedPrompt.id,
+      text: nextQueuedPrompt.text,
+    });
+    const syntheticSubmit = {
+      preventDefault: () => {
+        /* no-op — queue drain uses the regular send pipeline */
+      },
+    } as React.FormEvent<HTMLFormElement>;
+    window.setTimeout(() => {
+      void sendMessage(syntheticSubmit, {
+        draftOverride: nextQueuedPrompt?.text,
+        queuedConversationId,
+      });
+    }, 210);
+    window.setTimeout(() => {
+      setDispatchingQueuedPrompt((current) =>
+        current?.id === nextQueuedPrompt?.id ? null : current
+      );
+    }, 560);
+  }
+
+  useEffect(() => {
+    if (!composerImageJobOrb) return;
+    if (queuedChatPrompts.length === 0) return;
+    if (dispatchingQueuedPrompt) return;
+    const activeConversationId =
+      detail?.id && detail.id !== "pending"
+        ? detail.id
+        : selectedId;
+    if (!activeConversationId || activeConversationId !== composerImageJobOrb.conversationId) {
+      return;
+    }
+    scheduleNextQueuedPrompt(composerImageJobOrb.conversationId);
+  }, [
+    composerImageJobOrb,
+    queuedChatPrompts,
+    dispatchingQueuedPrompt,
+    detail?.id,
+    selectedId,
+  ]);
+
+  function renderQueuedPromptRail(): React.ReactNode {
+    if (queuedChatPrompts.length === 0 && !dispatchingQueuedPrompt) return null;
+    return (
+      <div className={styles.queuedPromptRailDock}>
+        <div className={styles.queuedPromptRail} role="list" aria-label="Queued messages">
+        {dispatchingQueuedPrompt ? (
+          <span
+            key={`dispatching-${dispatchingQueuedPrompt.id}`}
+            className={`${styles.queuedPromptChip} ${styles.queuedPromptChipDispatching}`}
+            role="listitem"
+            aria-live="polite"
+          >
+            <span className={styles.queuedPromptChipLabel}>{dispatchingQueuedPrompt.text}</span>
+            <span className={styles.queuedPromptChipMeta}>Sending…</span>
+          </span>
+        ) : null}
+        {queuedChatPrompts.map((item, index) => (
+          <button
+            key={item.id}
+            type="button"
+            className={styles.queuedPromptChip}
+            role="listitem"
+            title="Click to remove from queue"
+            onClick={() => removeQueuedPrompt(item.id)}
+          >
+            <span className={styles.queuedPromptChipLabel}>{item.text}</span>
+            <span className={styles.queuedPromptChipMeta}>Queued #{index + 1} · Click to remove</span>
+          </button>
+        ))}
+        </div>
+      </div>
+    );
+  }
+
   function sendRandomConversationNudge(): void {
-    if (pendingReply) return;
+    if (pendingReply && !canSendTextWhileReplyPending()) return;
     const rail =
       detail?.id && detail.id !== "pending"
         ? getComposerChipRail()
@@ -21519,14 +21672,53 @@ function HomeContent(): React.JSX.Element {
     return composerHistory[nextIndex] ?? null;
   }
 
-  function composerSubmitLabel(value: string): string {
+  /**
+   * Keep text sends unblocked while an in-thread image job is running.
+   * Image generation and chat replies are independent backends.
+   */
+  function canSendTextWhileReplyPending(): boolean {
+    if (!pendingReply) return false;
+    const activeConversationId =
+      detail?.id && detail.id !== "pending"
+        ? detail.id
+        : selectedId;
+    if (!activeConversationId) return false;
+    return composerImageJobOrb?.conversationId === activeConversationId;
+  }
+
+  function composerSubmitUsesRandomNudge(value: string): boolean {
+    return editingMessageId === null && value.trim().length === 0;
+  }
+
+  function composerSubmitLabel(value: string): React.ReactNode {
+    if (composerSubmitUsesRandomNudge(value)) {
+      return <BotGlyph name="dice" size={30} strokeWidth={1.45} />;
+    }
     if (editingMessageId) return "Save edit";
+    if (pendingReply && !canSendTextWhileReplyPending() && value.trim().length > 0) {
+      const queuedCountAfterClick = queuedChatPrompts.length + 1;
+      return queuedCountAfterClick > 1 ? `Queue (${queuedCountAfterClick})` : "Queue";
+    }
     return value.trim().length > 0 ? "Send" : "";
   }
 
+  function composerSubmitAriaLabel(value: string): string {
+    if (composerSubmitUsesRandomNudge(value)) return "Send random suggested prompt";
+    if (editingMessageId) return "Save edited message";
+    if (pendingReply && !canSendTextWhileReplyPending() && value.trim().length > 0) {
+      const queuedCountAfterClick = queuedChatPrompts.length + 1;
+      return queuedCountAfterClick > 1
+        ? `Queue message in position ${queuedCountAfterClick}`
+        : "Queue message";
+    }
+    return "Send message";
+  }
+
   function composerSubmitDisabled(value: string): boolean {
+    if (composerSubmitUsesRandomNudge(value)) {
+      return pendingReply && !canSendTextWhileReplyPending();
+    }
     return (
-      pendingReply ||
       value.trim().length === 0 ||
       (editingMessageId !== null && value.trim() === editingOriginalText.trim())
     );
@@ -21534,6 +21726,11 @@ function HomeContent(): React.JSX.Element {
 
   function handleComposerSubmit(e: React.FormEvent<HTMLFormElement>) {
     const liveDraft = draftComposerRef.current?.getValue() ?? draft;
+    if (composerSubmitUsesRandomNudge(liveDraft)) {
+      e.preventDefault();
+      sendRandomConversationNudge();
+      return;
+    }
     void sendMessage(e, {
       starterPrompt: isStarterPromptReady(liveDraft),
       draftOverride: liveDraft,
@@ -21729,8 +21926,8 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
-  /** Omit the Send pill while empty; submit affordance appears once text exists. */
-  const hideMobileEmptySend = draft.trim().length === 0;
+  /** Always render submit control; empty state swaps it to random prompt dice. */
+  const hideMobileEmptySend = false;
 
   function startFreshConversation(privateMode: boolean) {
     setImagePrivateMode(privateMode);
@@ -22189,10 +22386,6 @@ function HomeContent(): React.JSX.Element {
 
   async function deleteMessageFromHistory(msg: Message): Promise<void> {
     closeMessageContextOverlay();
-    const confirmed = window.confirm(
-      "Delete this message from chat history? It will be removed from future context and summary rebuilds. Saved memories stay unchanged."
-    );
-    if (!confirmed) return;
     if (!detail) return;
     const removeFromVisibleThread = () => {
       setDetail((current) => {
@@ -26164,16 +26357,6 @@ function HomeContent(): React.JSX.Element {
   function renderComposeUtilityActions(): React.JSX.Element {
     return (
       <div className={styles.composeUtilityActions}>
-        <button
-          type="button"
-          className={`${styles.headerIconButton} ${styles.composeUtilityButton}`}
-          onClick={sendRandomConversationNudge}
-          aria-label="Send random suggested prompt"
-          data-glyph-tooltip="Send random suggested prompt"
-          disabled={pendingReply}
-        >
-          <BotGlyph name="dice" size={16} strokeWidth={1.85} />
-        </button>
         {view !== "chat" ? renderDevToolsButton() : null}
       </div>
     );
@@ -36332,6 +36515,8 @@ function HomeContent(): React.JSX.Element {
                   onFocus={() => {}}
                   submitDisabled={false}
                   submitLabel="Send"
+                  submitAriaLabel="Send"
+                  submitIconOnly={false}
                   hideSubmitButton
                   resolvedTheme={resolvedTheme}
                   mentionBots={coffeeMentionBotPicks}
@@ -36743,6 +36928,108 @@ function HomeContent(): React.JSX.Element {
             />
           )}
           {renderChatOverflowGear()}
+          {!chatLikeSurface ? (
+            <div className={styles.chatHeaderComposeToolsRow}>
+              <div className={styles.composeTools}>
+                {(() => {
+                  const botHasCommenced = !!detail && detail.messages.length > 0;
+                  const botDisabled = !detail;
+                  return (
+                    <>
+                      {/* Pre-chat (!detail): dropdown is disabled so the tile
+                          picker above is the sole bot-arming path. The dropdown
+                          still mirrors selectedBotId visually — clicking a tile
+                          populates it automatically.
+                          Post-chat (detail set): dropdown becomes the mid-thread
+                          bot switcher. Consecutive sends reuse whatever bot is
+                          currently in selectedBotId; the user explicitly switches
+                          by changing this dropdown. */}
+                      {bots.length > 0 && (
+                        <ComposerBotPicker
+                          value={selectedBotId ?? ""}
+                          onChange={next => setSelectedBotId(next || null)}
+                          bots={botHasCommenced ? bots : filteredBots}
+                          resolvedTheme={resolvedTheme}
+                          disabled={botDisabled}
+                          title={
+                            !detail
+                                ? "Pick a bot from the grid above to start the chat. You can swap here between sends once it begins."
+                                : undefined
+                          }
+                          ariaLabel="Bot for the next message"
+                          // Same "hide name until a message exists" policy as Chat
+                          // mode. The grid picker above is the loud identity
+                          // affordance pre-send; the compose rail just reflects the
+                          // choice as a tinted glyph. Once a message is in the
+                          // thread, the pill becomes a full "[glyph] [name]" pick.
+                          showName={botHasCommenced}
+                          enableFilters={botHasCommenced}
+                          hueFilterCenter={hueFilterCenter}
+                          onHueChange={setHueFilterCenter}
+                          hueLensAvailable={hueLensAvailable}
+                          hueLensTrackGradient={hueLensTrackGradient}
+                          hueLensTrackSegments={hueLensTrackSegments}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
+                {/* Composer-tools toggle: route through the helper so the
+                    "active bot is offline-only" lock applies here too. The
+                    previous inline copy of this JSX was the reason flipping
+                    still appeared to work even though the API enforced the
+                    offline-only rule. */}
+                {renderProviderModeToggle()}
+                {(() => {
+                  // Use the effective provider so this picker also reflects
+                  // the offline-only lock when the active chat bot is
+                  // protected (matches what `renderProviderModeToggle` shows).
+                  const isLocal = effectivePreferredProvider !== "openai";
+                  const modelProvider: Provider = isLocal ? "local" : "openai";
+                  const rawModelChoice = chatModelChoiceByProvider[modelProvider];
+                  const visibleModelChoice = visibleModelChoiceForProvider(
+                    settings,
+                    rawModelChoice
+                  );
+                  const modelOptions = includeSelectedModelOption(
+                    availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+                    visibleModelChoice,
+                    modelProvider
+                  );
+                  return (
+                    <>
+                      <ComposerModelPicker
+                        value={visibleModelChoice}
+                        onChange={(nextChoice) => {
+                          setChatModelChoiceByProvider((previous) => {
+                            const next = { ...previous, [modelProvider]: nextChoice };
+                            persistChatModelChoicesForActiveScope(next);
+                            return next;
+                          });
+                        }}
+                        options={modelOptions}
+                        provider={modelProvider}
+                        disabled={!settings || pendingReply}
+                        title={`Model for ${isLocal ? "LOCAL" : "ONLINE"} replies`}
+                        ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
+                        autoOptionMetaOverride={composeAutoOptionMetaLine(
+                          modelCatalog,
+                          settings,
+                          modelProvider,
+                          composeBotForAutoModelMeta
+                        )}
+                        settingsDefaultModelId={chatSettingsSavedDefaultModelId(
+                          settings,
+                          modelProvider
+                        )}
+                      />
+                      {renderComposeUtilityActions()}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          ) : null}
         </header>
 
         <div
@@ -37352,6 +37639,7 @@ function HomeContent(): React.JSX.Element {
             </div>
           )}
           {renderComposerWritingAssistAction()}
+          {renderQueuedPromptRail()}
           {!composerHiddenByAskQuestion ? (
             view === "chat" ? (
               <div className={styles.chatComposerStack}>
@@ -37390,6 +37678,8 @@ function HomeContent(): React.JSX.Element {
                     writingAssistEnabled={settings?.composerWritingAssist !== false}
                     submitDisabled={composerSubmitDisabled(draft)}
                     submitLabel={composerSubmitLabel(draft)}
+                    submitAriaLabel={composerSubmitAriaLabel(draft)}
+                    submitIconOnly={composerSubmitUsesRandomNudge(draft)}
                     hideSubmitButton={hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
@@ -37408,6 +37698,8 @@ function HomeContent(): React.JSX.Element {
                 writingAssistEnabled={settings?.composerWritingAssist !== false}
                 submitDisabled={composerSubmitDisabled(draft)}
                 submitLabel={composerSubmitLabel(draft)}
+                submitAriaLabel={composerSubmitAriaLabel(draft)}
+                submitIconOnly={composerSubmitUsesRandomNudge(draft)}
                 hideSubmitButton={hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}
@@ -38581,106 +38873,6 @@ function HomeContent(): React.JSX.Element {
               onInteractionChange={setLensInteracting}
             />
           )}
-          {!chatLikeSurface ? (
-          <div className={styles.composeTools}>
-            {(() => {
-              const botHasCommenced = !!detail && detail.messages.length > 0;
-              const botDisabled = !detail;
-              return (
-                <>
-                  {/* Pre-chat (!detail): dropdown is disabled so the tile
-                      picker above is the sole bot-arming path. The dropdown
-                      still mirrors selectedBotId visually — clicking a tile
-                      populates it automatically.
-                      Post-chat (detail set): dropdown becomes the mid-thread
-                      bot switcher. Consecutive sends reuse whatever bot is
-                      currently in selectedBotId; the user explicitly switches
-                      by changing this dropdown. */}
-                  {bots.length > 0 && (
-                    <ComposerBotPicker
-                      value={selectedBotId ?? ""}
-                      onChange={next => setSelectedBotId(next || null)}
-                      bots={botHasCommenced ? bots : filteredBots}
-                      resolvedTheme={resolvedTheme}
-                      disabled={botDisabled}
-                      title={
-                        !detail
-                            ? "Pick a bot from the grid above to start the chat. You can swap here between sends once it begins."
-                            : undefined
-                      }
-                      ariaLabel="Bot for the next message"
-                      // Same "hide name until a message exists" policy as Chat
-                      // mode. The grid picker above is the loud identity
-                      // affordance pre-send; the compose rail just reflects the
-                      // choice as a tinted glyph. Once a message is in the
-                      // thread, the pill becomes a full "[glyph] [name]" pick.
-                      showName={botHasCommenced}
-                      enableFilters={botHasCommenced}
-                      hueFilterCenter={hueFilterCenter}
-                      onHueChange={setHueFilterCenter}
-                      hueLensAvailable={hueLensAvailable}
-                      hueLensTrackGradient={hueLensTrackGradient}
-                      hueLensTrackSegments={hueLensTrackSegments}
-                    />
-                  )}
-                </>
-              );
-            })()}
-            {/* Composer-tools toggle: route through the helper so the
-                "active bot is offline-only" lock applies here too. The
-                previous inline copy of this JSX was the reason flipping
-                still appeared to work even though the API enforced the
-                offline-only rule. */}
-            {renderProviderModeToggle()}
-            {(() => {
-              // Use the effective provider so this picker also reflects
-              // the offline-only lock when the active chat bot is
-              // protected (matches what `renderProviderModeToggle` shows).
-              const isLocal = effectivePreferredProvider !== "openai";
-              const modelProvider: Provider = isLocal ? "local" : "openai";
-              const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-              const visibleModelChoice = visibleModelChoiceForProvider(
-                settings,
-                rawModelChoice
-              );
-              const modelOptions = includeSelectedModelOption(
-                availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
-                visibleModelChoice,
-                modelProvider
-              );
-              return (
-                <>
-                  <ComposerModelPicker
-                    value={visibleModelChoice}
-                    onChange={(nextChoice) => {
-                      setChatModelChoiceByProvider((previous) => {
-                        const next = { ...previous, [modelProvider]: nextChoice };
-                        persistChatModelChoicesForActiveScope(next);
-                        return next;
-                      });
-                    }}
-                    options={modelOptions}
-                    provider={modelProvider}
-                    disabled={!settings || pendingReply}
-                    title={`Model for ${isLocal ? "LOCAL" : "ONLINE"} replies`}
-                    ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
-                    autoOptionMetaOverride={composeAutoOptionMetaLine(
-                      modelCatalog,
-                      settings,
-                      modelProvider,
-                      composeBotForAutoModelMeta
-                    )}
-                    settingsDefaultModelId={chatSettingsSavedDefaultModelId(
-                      settings,
-                      modelProvider
-                    )}
-                  />
-                  {renderComposeUtilityActions()}
-                </>
-              );
-            })()}
-          </div>
-          ) : null}
           {!composerHiddenByAskQuestion && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
               <span>Editing message. Save sends the revised text.</span>
@@ -38688,6 +38880,7 @@ function HomeContent(): React.JSX.Element {
             </div>
           )}
           {renderComposerWritingAssistAction()}
+          {renderQueuedPromptRail()}
           {!composerHiddenByAskQuestion ? (
             chatLikeSurface ? (
               <div className={styles.chatComposerStack}>
@@ -38726,6 +38919,8 @@ function HomeContent(): React.JSX.Element {
                     writingAssistEnabled={settings?.composerWritingAssist !== false}
                     submitDisabled={composerSubmitDisabled(draft)}
                     submitLabel={composerSubmitLabel(draft)}
+                    submitAriaLabel={composerSubmitAriaLabel(draft)}
+                    submitIconOnly={composerSubmitUsesRandomNudge(draft)}
                     hideSubmitButton={hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
@@ -38744,6 +38939,8 @@ function HomeContent(): React.JSX.Element {
                 writingAssistEnabled={settings?.composerWritingAssist !== false}
                 submitDisabled={composerSubmitDisabled(draft)}
                 submitLabel={composerSubmitLabel(draft)}
+                submitAriaLabel={composerSubmitAriaLabel(draft)}
+                submitIconOnly={composerSubmitUsesRandomNudge(draft)}
                 hideSubmitButton={hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}

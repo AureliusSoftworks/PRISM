@@ -4086,6 +4086,17 @@
   background: var(--bg-surface);
 }
 
+.chatHeaderComposeToolsRow {
+  flex: 1 1 100%;
+  min-width: 0;
+  margin-top: 4px;
+}
+
+.chatHeaderComposeToolsRow .composeTools {
+  margin: 0;
+  max-width: 100%;
+}
+
 .chatHeader h2 {
   font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
   font-size: 16px;
@@ -9285,6 +9296,116 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   gap: 8px;
 }
 
+.queuedPromptRailDock {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  pointer-events: auto;
+  max-width: min(1240px, 100%);
+  margin: 0 auto 8px;
+}
+
+.queuedPromptRail {
+  width: 100%;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.queuedPromptChip {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: 3px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--line));
+  background:
+    radial-gradient(
+      circle at 12% 18%,
+      color-mix(in srgb, var(--compose-bot-color, var(--accent)) 13%, transparent),
+      transparent 58%
+    ),
+    color-mix(in srgb, var(--bg-surface) 92%, var(--bg) 8%);
+  color: var(--fg);
+  font: inherit;
+  padding: 8px 12px;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  pointer-events: auto;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease;
+  animation: queuedPromptChipIn 0.2s ease-out both;
+}
+
+.queuedPromptChip:hover {
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 52%, var(--line));
+  background:
+    radial-gradient(
+      circle at 12% 18%,
+      color-mix(in srgb, var(--compose-bot-color, var(--accent)) 20%, transparent),
+      transparent 58%
+    ),
+    color-mix(in srgb, var(--bg-surface) 88%, var(--bg-hover) 12%);
+}
+
+.queuedPromptChip:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg-surface),
+    0 0 0 4px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 42%, transparent);
+}
+
+.queuedPromptChipLabel {
+  font-size: 0.9rem;
+  font-weight: 610;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queuedPromptChipMeta {
+  font-size: 0.74rem;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--fg-muted) 90%, var(--fg));
+}
+
+.queuedPromptChipDispatching {
+  cursor: default;
+  pointer-events: none;
+  animation: queuedPromptChipDispatch 0.65s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes queuedPromptChipIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes queuedPromptChipDispatch {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  70% {
+    opacity: 0.95;
+    transform: translateY(-14px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-42px);
+  }
+}
+
 .chatComposerRow > .composeEditorShell {
   flex: 1 1 auto;
   min-width: 0;
@@ -10503,6 +10624,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     opacity 0.18s ease,
     transform 0.18s ease;
   box-shadow: none;
+}
+
+.markdownComposerInputRow > button[data-submit-icon="true"] {
+  width: 52px;
+  min-width: 52px;
+  height: 52px;
+  padding: 0;
+  border-radius: 14px;
+  align-self: center;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
 }
 
 .compose[data-compose-ready="true"] .markdownComposerInputRow > button:not(:disabled) {
@@ -11769,6 +11902,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     opacity 0.18s ease,
     transform 0.18s ease;
   box-shadow: none;
+}
+
+.composeInner button[data-submit-icon="true"] {
+  width: 60px;
+  min-width: 60px;
+  height: 60px;
+  min-height: 60px;
+  padding: 0;
+  align-self: center;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
 }
 
 .compose[data-compose-ready="true"] .composeInner button:not(:disabled) {
