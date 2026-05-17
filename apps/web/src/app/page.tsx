@@ -2742,6 +2742,16 @@ interface Message {
   /** Assistant attached a generated image (also listed in the Images library). */
   sentGeneratedImage?: SentGeneratedImagePayload;
 }
+
+function collectGeneratedImageIds(messages: readonly Message[]): string[] {
+  const ids: string[] = [];
+  for (const message of messages) {
+    const imageId = message.sentGeneratedImage?.imageId?.trim();
+    if (!imageId) continue;
+    ids.push(imageId);
+  }
+  return ids;
+}
 type CoffeeSeatEmojiMood = "happy" | "warm" | "neutral" | "sad" | "angry";
 
 /** How many typewriter characters advance before swapping open/closed mouth. */
@@ -13603,6 +13613,7 @@ function HomeContent(): React.JSX.Element {
   const viewSwitchOverlayHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewSwitchOverlayUnmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewSwitchOverlayEnterFrameRef = useRef<number | null>(null);
+  const pendingPrivateExitOnHubRef = useRef(false);
   const clearViewSwitchOverlayTimers = useCallback(() => {
     if (viewSwitchOverlayHideTimerRef.current) {
       clearTimeout(viewSwitchOverlayHideTimerRef.current);
@@ -13675,6 +13686,17 @@ function HomeContent(): React.JSX.Element {
     }, VIEW_SWITCH_OVERLAY_FADE_OUT_MS);
     return clearViewSwitchOverlayTimers;
   }, [clearViewSwitchOverlayTimers, viewSwitchOverlayPhase]);
+  useEffect(() => {
+    if (!pendingPrivateExitOnHubRef.current) return;
+    const overlayIsReady =
+      viewSwitchTarget === "hub" &&
+      (viewSwitchOverlayPhase === "visible" || viewSwitchOverlayPhase === "fading");
+    const hubArrivedWithoutOverlay = view === "hub" && viewSwitchOverlayPhase === "hidden";
+    if (!overlayIsReady && !hubArrivedWithoutOverlay) return;
+    setImagePrivateMode(false);
+    setPendingIncognito(false);
+    pendingPrivateExitOnHubRef.current = false;
+  }, [view, viewSwitchOverlayPhase, viewSwitchTarget]);
   useEffect(() => clearViewSwitchOverlayTimers, [clearViewSwitchOverlayTimers]);
   const viewSwitchOverlayLabel = useMemo(() => {
     if (viewSwitchTarget === "chat") return "Opening Zen";
@@ -14154,8 +14176,10 @@ function HomeContent(): React.JSX.Element {
   const [imageVariantManualOverride, setImageVariantManualOverride] = useState(false);
   const [imageRandomPromptBusy, setImageRandomPromptBusy] = useState(false);
   const [imagePrivateMode, setImagePrivateMode] = useState(false);
-  const [imagePrivatePurgeBusy, setImagePrivatePurgeBusy] = useState(false);
   const [imagePrivateGeneratedIds, setImagePrivateGeneratedIds] = useState<string[]>([]);
+  const [imagePrivateRevealedIds, setImagePrivateRevealedIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [imagePanelScope, setImagePanelScope] = useState<ImagePanelScope>("all");
   const imagePanelScopeRef = useRef<ImagePanelScope>("all");
   const [imagePanelBotId, setImagePanelBotId] = useState<string | null>(null);
@@ -14289,7 +14313,6 @@ function HomeContent(): React.JSX.Element {
     imageGlobalNegativeKeywords,
     imageBotKeywordsByBotId,
   ]);
-  const imagePrivateModePrevRef = useRef(imagePrivateMode);
   // Single bot-form state used for BOTH create and edit modes. The top
   // form in the Bots panel is the only place a color + glyph picker ever
   // renders; when the user clicks a bot's pencil, we hydrate these same
@@ -14908,6 +14931,8 @@ function HomeContent(): React.JSX.Element {
     // the panel. The composer's `error` state is unaffected.
     setPanelError(null);
     setImageLightbox(null);
+    setImagePrivateMode(false);
+    setImagePrivateRevealedIds((current) => (current.size === 0 ? current : new Set()));
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     setBotLibraryExpanded(false);
     setBotPanelLibraryEnabled(true);
@@ -14938,6 +14963,10 @@ function HomeContent(): React.JSX.Element {
     setPanelClosing(false);
     setPanel(nextPanel);
     setSidebarOpen(false);
+    if (nextPanel !== "images") {
+      setImagePrivateMode(false);
+      setImagePrivateRevealedIds((current) => (current.size === 0 ? current : new Set()));
+    }
     if (nextPanel === "bots") {
       setBotPanelLibraryEnabled(true);
     }
@@ -15328,6 +15357,7 @@ function HomeContent(): React.JSX.Element {
   // is handled by the incognito request path, not by hiding the bot.
   //
   const privateChatActive = detail?.incognito === true || pendingIncognito;
+  const appWidePrivateMode = privateChatActive || imagePrivateMode;
 
   const visualBotSelection = useMemo<{
     botId: string | null;
@@ -16125,7 +16155,6 @@ function HomeContent(): React.JSX.Element {
   // payloads or pre-ephemeral rows that should never reach the sidebar UI.
   const visibleConversations = useMemo(
     () => {
-      if (privateChatActive) return [];
       const order = new Map(
         unreadConversationOrder.map((conversationId, index) => [conversationId, index])
       );
@@ -16147,7 +16176,7 @@ function HomeContent(): React.JSX.Element {
           return 0;
         });
     },
-    [conversations, privateChatActive, unreadConversationOrder, view]
+    [conversations, unreadConversationOrder, view]
   );
   const conversationGroups = useMemo(
     () => buildConversationGroups(visibleConversations, bots, unreadConversationIds),
@@ -17050,6 +17079,9 @@ function HomeContent(): React.JSX.Element {
     // the bottom of the list resolves to fully transparent fill and
     // the top peaks at a calm 45% color band.
     const baseIntensity = Math.max(0, Math.min(1, 1 - rowTopInViewport / glowFalloffPx));
+    const privateDepthCurve = Math.pow(baseIntensity, 2.45);
+    const privateGlareFactor = Math.max(0, (baseIntensity - 0.28) / 0.72);
+    const privateGlareCurve = Math.pow(privateGlareFactor, 2.2);
     // Light mode should keep the top rows calmer (less dark/tinted) so
     // the first visible groups don't overpower the sidebar. Dark mode
     // keeps the original stronger depth envelope.
@@ -17078,6 +17110,14 @@ function HomeContent(): React.JSX.Element {
       : Math.round(255 - baseIntensity * 244);
     const textChannelHex = textChannel.toString(16).padStart(2, "0");
     const rowText = `#${textChannelHex}${textChannelHex}${textChannelHex}`;
+    const privateRowGlare = privateGlareCurve * 48;
+    const privateRowTint = 2 + privateDepthCurve * 26;
+    const privateRowTintSoft = privateRowTint * 0.45;
+    const privateRowGlareHover = privateRowGlare > 0 ? Math.min(100, privateRowGlare + 10) : 0;
+    const privateRowTintHover = Math.min(100, privateRowTint + 6);
+    const privateRowTintSoftHover = privateRowTint * 0.62;
+    const privateRowSurfaceOpacity = 68 + (1 - baseIntensity) * 30;
+    const privateRowBgOpacity = 66 + (1 - baseIntensity) * 32;
     return {
       "--row-depth-base": `${baseFill.toFixed(1)}%`,
       "--row-depth-glow": `${innerGlow.toFixed(1)}%`,
@@ -17087,6 +17127,14 @@ function HomeContent(): React.JSX.Element {
       "--row-glow-y": `${sunYPct.toFixed(1)}%`,
       "--row-counter-y": `${counterYPct.toFixed(1)}%`,
       "--row-text-color": rowText,
+      "--private-row-glare": `${privateRowGlare.toFixed(1)}%`,
+      "--private-row-tint": `${privateRowTint.toFixed(1)}%`,
+      "--private-row-tint-soft": `${privateRowTintSoft.toFixed(1)}%`,
+      "--private-row-glare-hover": `${privateRowGlareHover.toFixed(1)}%`,
+      "--private-row-tint-hover": `${privateRowTintHover.toFixed(1)}%`,
+      "--private-row-tint-soft-hover": `${privateRowTintSoftHover.toFixed(1)}%`,
+      "--private-row-surface-opacity": `${privateRowSurfaceOpacity.toFixed(1)}%`,
+      "--private-row-bg-opacity": `${privateRowBgOpacity.toFixed(1)}%`,
     } as React.CSSProperties;
   }, [conversationListScrollTop, resolvedTheme]);
 
@@ -18083,7 +18131,6 @@ function HomeContent(): React.JSX.Element {
   );
   const showCanvasBotSwitchLoading =
     view === "sandbox" &&
-    !pendingIncognito &&
     !pendingReplyVisible &&
     activeConversationIsEmpty &&
     Boolean(selectedBotId) &&
@@ -18695,6 +18742,18 @@ function HomeContent(): React.JSX.Element {
     setChatAutoRestoreSuppressed(false);
   }, [view]);
 
+  const pulseConversationSurfaceLoading = useCallback((): void => {
+    const loadingToken = conversationSurfaceLoadingTokenRef.current + 1;
+    conversationSurfaceLoadingTokenRef.current = loadingToken;
+    conversationSurfaceLoadingStartedAtRef.current = Date.now();
+    setConversationSurfaceLoading(true);
+    window.setTimeout(() => {
+      if (conversationSurfaceLoadingTokenRef.current !== loadingToken) return;
+      conversationSurfaceLoadingStartedAtRef.current = null;
+      setConversationSurfaceLoading(false);
+    }, CONVERSATION_SURFACE_LOADING_MIN_MS);
+  }, []);
+
   useEffect(() => {
     if (view !== "chat") {
       setChatStartupSummary(null);
@@ -18811,15 +18870,30 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (pendingIncognito) {
+      let cancelled = false;
       setSandboxBotStatusBusy(false);
-      setCanvasBotSwitchTransitioning(false);
-      setCanvasBotSwitchOverlayPhase("hidden");
-      canvasBotSwitchTransitionStartedAtRef.current = null;
-      pendingCanvasBotUnfoldRef.current = false;
       setSandboxBotStatusSummary(null);
       setSandboxBotStatusSummaryBotId(null);
       sandboxBotStatusRefreshMarkerRef.current = null;
-      return;
+      if (!canvasBotSwitchTransitioning) {
+        setCanvasBotSwitchOverlayPhase("hidden");
+        canvasBotSwitchTransitionStartedAtRef.current = null;
+        pendingCanvasBotUnfoldRef.current = false;
+        return;
+      }
+      const transitionStartedAt =
+        canvasBotSwitchTransitionStartedAtRef.current ?? Date.now();
+      const elapsed = Date.now() - transitionStartedAt;
+      const remaining = Math.max(0, CANVAS_BOT_SWITCH_MIN_LOADING_MS - elapsed);
+      const settleTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        setCanvasBotSwitchTransitioning(false);
+        canvasBotSwitchTransitionStartedAtRef.current = null;
+      }, remaining);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(settleTimer);
+      };
     }
     if (!selectedBotId) {
       setSandboxBotStatusBusy(false);
@@ -19543,6 +19617,12 @@ function HomeContent(): React.JSX.Element {
     try {
       await api(`/api/images/${encodeURIComponent(img.id)}`, { method: "DELETE" });
       setImagePrivateGeneratedIds((current) => current.filter((id) => id !== img.id));
+      setImagePrivateRevealedIds((current) => {
+        if (!current.has(img.id)) return current;
+        const next = new Set(current);
+        next.delete(img.id);
+        return next;
+      });
       setImageLightbox((current) => (current?.id === img.id ? null : current));
       if (imagePanelScope === "general") {
         await refreshImages("general");
@@ -19559,52 +19639,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function purgePrivateGeneratedImages(): Promise<void> {
-    if (imagePrivatePurgeBusy) return;
-    const ids = [...new Set(imagePrivateGeneratedIds)];
-    if (ids.length === 0) return;
-    setImagePrivatePurgeBusy(true);
-    setPanelError(null);
-    setPanelNotice("Leaving private image mode… clearing private images.");
-    setImagePrivateGeneratedIds([]);
-    let deleted = 0;
-    for (const imageId of ids) {
-      try {
-        await api(`/api/images/${encodeURIComponent(imageId)}`, { method: "DELETE" });
-        deleted += 1;
-      } catch {
-        // Best effort cleanup; we'll summarize remaining count below.
-      }
-    }
-    try {
-      if (imagePanelScope === "general") {
-        await refreshImages("general");
-      } else if (imagePanelScope === "bot" && imagePanelBotId) {
-        await refreshImages(imagePanelBotId);
-      } else if (view === "chat") {
-        await refreshImagesChatGallery();
-      } else {
-        await refreshImages(null);
-      }
-      await refreshImageBotDirectorySnapshot();
-    } finally {
-      setImagePrivatePurgeBusy(false);
-    }
-    const failed = ids.length - deleted;
-    if (failed > 0) {
-      setPanelError(
-        failed === 1
-          ? "1 private image could not be removed automatically."
-          : `${failed} private images could not be removed automatically.`
-      );
-    }
-    setPanelNotice(
-      deleted === 1
-        ? "Private mode exited. Deleted 1 private image."
-        : `Private mode exited. Deleted ${deleted} private images.`
-    );
-  }
-
   async function deleteAllGalleryImages() {
     if (imagesDeleteAllBusy) return;
     setImagesDeleteAllBusy(true);
@@ -19619,6 +19653,7 @@ function HomeContent(): React.JSX.Element {
         method: "DELETE",
       });
       setImagePrivateGeneratedIds([]);
+      setImagePrivateRevealedIds(new Set());
       setImageLightbox(null);
       if (imagePanelScope === "general") {
         await refreshImages("general");
@@ -19674,12 +19709,16 @@ function HomeContent(): React.JSX.Element {
   }, [imagesDeleteAllConfirmOpen, panel, imagePanelScope, images.length, imageBotDirectorySnapshot.length]);
 
   useEffect(() => {
-    const wasPrivate = imagePrivateModePrevRef.current;
-    if (wasPrivate && !imagePrivateMode) {
-      void purgePrivateGeneratedImages();
-    }
-    imagePrivateModePrevRef.current = imagePrivateMode;
-  }, [imagePrivateMode, imagePrivateGeneratedIds.length]);
+    setImagePrivateRevealedIds((current) => {
+      if (current.size === 0) return current;
+      const privateIdSet = new Set(imagePrivateGeneratedIds);
+      const next = new Set<string>();
+      for (const id of current) {
+        if (privateIdSet.has(id)) next.add(id);
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [imagePrivateGeneratedIds]);
 
   useEffect(() => {
     if (!imageLightbox) return;
@@ -19693,6 +19732,9 @@ function HomeContent(): React.JSX.Element {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [imageLightbox]);
   async function openAllImagesPanel() {
+    if (view === "chat" && privateChatActive) {
+      setImagePrivateMode(true);
+    }
     if (view === "chat") {
       if (chatScopedGalleryBotId) {
         const bot = bots.find((b) => b.id === chatScopedGalleryBotId);
@@ -19715,6 +19757,9 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function openImagesPanelForBot(bot: Bot) {
+    if (view === "chat" && privateChatActive) {
+      setImagePrivateMode(true);
+    }
     setImagePanelScope("bot");
     setImagePanelBotId(bot.id);
     await refreshImages(bot.id);
@@ -19729,6 +19774,9 @@ function HomeContent(): React.JSX.Element {
    * always surfaces the blocking overlay instead of a fresh form scope.
    */
   async function openImagesPanelForScopeKey(scopeKey: string): Promise<void> {
+    if (view === "chat" && privateChatActive) {
+      setImagePrivateMode(true);
+    }
     const { conversationId, botId } = parseImageGenerationScopeKey(scopeKey);
     if (conversationId.length > 0) {
       try {
@@ -19767,6 +19815,9 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (panel !== "images" || view !== "chat") return;
+    if (privateChatActive) {
+      setImagePrivateMode(true);
+    }
     if (imagePanelScope !== "all") return;
     let cancelled = false;
     void (async () => {
@@ -19791,7 +19842,7 @@ function HomeContent(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [panel, view, imagePanelScope, chatScopedGalleryBotId, bots]);
+  }, [panel, view, imagePanelScope, chatScopedGalleryBotId, bots, privateChatActive]);
 
   async function runMemoryTransition(
     work: () => void | Promise<void>,
@@ -20421,7 +20472,11 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function startPendingImageJobPoll(jobId: string, conversationId: string) {
+  function startPendingImageJobPoll(
+    jobId: string,
+    conversationId: string,
+    options?: { markPrivateGenerated?: boolean }
+  ) {
     clearPendingImageJobPoll(jobId);
     const tick = async () => {
       try {
@@ -20456,6 +20511,16 @@ function HomeContent(): React.JSX.Element {
           },
         ]);
         if (incoming.length === 0) return;
+        if (options?.markPrivateGenerated) {
+          const generatedIds = collectGeneratedImageIds(incoming);
+          if (generatedIds.length > 0) {
+            setImagePrivateGeneratedIds((current) => {
+              const next = new Set(current);
+              for (const id of generatedIds) next.add(id);
+              return next.size === current.length ? current : [...next];
+            });
+          }
+        }
         setDetail((current) => {
           if (!current || current.id !== conversationId) return current;
           const seen = new Set(current.messages.map((m) => m.id));
@@ -20494,7 +20559,9 @@ function HomeContent(): React.JSX.Element {
       jobId: envelope.pendingImageJob.jobId,
       conversationId: convId,
     });
-    startPendingImageJobPoll(envelope.pendingImageJob.jobId, convId);
+    startPendingImageJobPoll(envelope.pendingImageJob.jobId, convId, {
+      markPrivateGenerated: envelope.conversation.incognito === true,
+    });
   }
 
   function clearAllDisplayedConversationState(): void {
@@ -20756,6 +20823,16 @@ function HomeContent(): React.JSX.Element {
         setSessionOpinion(d.opinion ?? null);
         setBotOpinion(d.botOpinion ?? null);
         setSelectedId(d.conversation.id);
+        if (d.conversation.incognito) {
+          const generatedIds = collectGeneratedImageIds(d.conversation.messages);
+          if (generatedIds.length > 0) {
+            setImagePrivateGeneratedIds((current) => {
+              const next = new Set(current);
+              for (const id of generatedIds) next.add(id);
+              return next.size === current.length ? current : [...next];
+            });
+          }
+        }
         setUnreadConversationIds(previous => {
           if (!previous.has(d.conversation.id)) return previous;
           const next = new Set(previous);
@@ -21656,7 +21733,12 @@ function HomeContent(): React.JSX.Element {
   const hideMobileEmptySend = draft.trim().length === 0;
 
   function startFreshConversation(privateMode: boolean) {
+    setImagePrivateMode(privateMode);
     if (view === "chat") {
+      const switchingPrivacyMode = pendingIncognito !== privateMode;
+      if (switchingPrivacyMode && !pendingReplyVisible) {
+        pulseConversationSurfaceLoading();
+      }
       setConversationStarterPrompts(null);
       setChatStartupSummary(null);
       chatSummaryRefreshMarkerRef.current = null;
@@ -21700,6 +21782,20 @@ function HomeContent(): React.JSX.Element {
     }
     setPendingIncognito(privateMode);
     setSidebarOpen(false);
+  }
+
+  function setAppWidePrivateMode(privateMode: boolean): void {
+    setImagePrivateMode(privateMode);
+    if (privateMode) {
+      setPendingIncognito(true);
+      return;
+    }
+    const restoreConversationId =
+      selectedId ?? (detail?.id && detail.id !== "pending" ? detail.id : null);
+    setPendingIncognito(false);
+    if (detail?.incognito && restoreConversationId) {
+      void refreshConversation(restoreConversationId).catch(() => {});
+    }
   }
 
   /** Click-to-start: dispatches a starter prompt request as if the user typed
@@ -22049,6 +22145,80 @@ function HomeContent(): React.JSX.Element {
       }, MESSAGE_COPY_FEEDBACK_MS);
     } catch {
       setError("Copy failed. Select the message and copy it manually.");
+    }
+  }
+
+  function removeMessageFromConversationDetail(
+    conversation: ConversationDetail,
+    messageId: string
+  ): ConversationDetail {
+    const nextMessages = conversation.messages.filter((message) => message.id !== messageId);
+    if (nextMessages.length === conversation.messages.length) return conversation;
+    const lastAssistant = [...nextMessages]
+      .reverse()
+      .find((message): message is Message => message.role === "assistant");
+    if (!lastAssistant) {
+      return {
+        ...conversation,
+        messages: nextMessages,
+        hasAssistantReply: false,
+        lastBotId: null,
+        lastBotColor: null,
+      };
+    }
+    const normalizedBotName = lastAssistant.botName?.trim() ?? "";
+    const matchingBots =
+      normalizedBotName.length > 0
+        ? bots.filter((candidate) => candidate.name.trim() === normalizedBotName)
+        : [];
+    const inferredLastBotId =
+      normalizedBotName.length === 0 ||
+      normalizedBotName.toLowerCase() === DEFAULT_ASSISTANT_NAME.toLowerCase()
+        ? null
+        : matchingBots.length === 1
+          ? matchingBots[0]?.id ?? null
+          : null;
+    return {
+      ...conversation,
+      messages: nextMessages,
+      hasAssistantReply: true,
+      lastBotId: inferredLastBotId,
+      lastBotColor: lastAssistant.botColor ?? null,
+    };
+  }
+
+  async function deleteMessageFromHistory(msg: Message): Promise<void> {
+    closeMessageContextOverlay();
+    const confirmed = window.confirm(
+      "Delete this message from chat history? It will be removed from future context and summary rebuilds. Saved memories stay unchanged."
+    );
+    if (!confirmed) return;
+    if (!detail) return;
+    const removeFromVisibleThread = () => {
+      setDetail((current) => {
+        if (!current) return current;
+        return removeMessageFromConversationDetail(current, msg.id);
+      });
+    };
+    const isLocalOnly = detail.incognito || String(msg.id).startsWith("pending-") || !selectedId;
+    if (isLocalOnly) {
+      removeFromVisibleThread();
+      return;
+    }
+    const previousDetail = detail;
+    const conversationId = selectedId;
+    removeFromVisibleThread();
+    try {
+      await api<{ ok: true; deleted: boolean; conversationId?: string }>(
+        `/api/messages/${encodeURIComponent(msg.id)}`,
+        { method: "DELETE" }
+      );
+      await refreshConversation(conversationId);
+      void refreshConversations();
+      await refreshOpenMemoryViews();
+    } catch (err) {
+      setDetail(previousDetail);
+      setError(err instanceof Error ? err.message : "Message delete failed.");
     }
   }
 
@@ -24735,6 +24905,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function handleHeaderHubClick() {
+    pendingPrivateExitOnHubRef.current = true;
     navigateToView("hub");
   }
 
@@ -24760,7 +24931,6 @@ function HomeContent(): React.JSX.Element {
     const shouldAnimateSpotlightSwitch =
       spotlightBotId !== null &&
       view === "sandbox" &&
-      !pendingIncognito &&
       !pendingReplyVisible &&
       activeConversationIsEmpty;
     if (shouldAnimateSpotlightSwitch) {
@@ -26404,7 +26574,8 @@ function HomeContent(): React.JSX.Element {
         signal: abortController.signal,
       });
       const imageId = data.image?.id ?? "";
-      if (imagePrivateMode && imageId) {
+      const privateImageForRun = imagePrivateMode || (view === "chat" && privateChatActive);
+      if (privateImageForRun && imageId) {
         setImagePrivateGeneratedIds((current) =>
           current.includes(imageId) ? current : [...current, imageId]
         );
@@ -26485,6 +26656,9 @@ function HomeContent(): React.JSX.Element {
 
   async function generateImg(e: React.FormEvent) {
     e.preventDefault();
+    if (view === "chat" && privateChatActive && !imagePrivateMode) {
+      setImagePrivateMode(true);
+    }
     await runImageGeneration(imagePrompt.trim());
   }
 
@@ -26664,6 +26838,15 @@ function HomeContent(): React.JSX.Element {
               Fork
             </button>
           )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              void deleteMessageFromHistory(msg);
+            }}
+          >
+            Delete
+          </button>
         </div>
       </>
     );
@@ -26988,19 +27171,33 @@ function HomeContent(): React.JSX.Element {
     c: ConversationSummary,
     index: number
   ): React.CSSProperties => {
-    const rawRowColor = privateChatActive ? null : resolveRowColor(c, bots);
+    const rawRowColor = resolveRowColor(c, bots);
     const rowAccent = rawRowColor
       ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
-      : !privateChatActive && !c.incognito
+      : !c.incognito
         ? neutralRowColor(resolvedTheme)
         : null;
+    const privateRowTint =
+      privateChatActive && rowAccent
+        ? mixHex(
+            rowAccent,
+            resolvedTheme === "dark" ? "#b9b0a5" : "#2c251e",
+            resolvedTheme === "dark" ? 0.72 : 0.6
+          )
+        : rowAccent;
     return {
       ...conversationRowGlowStyle(index),
-      ...(rowAccent
+      ...(privateRowTint
         ? {
-            "--row-color": rowAccent,
-            "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
-            "--row-selected-text-color": selectedRowTextColor(rowAccent, resolvedTheme),
+            "--row-color": privateRowTint,
+            "--row-glyph-color": rowAccent ?? privateRowTint,
+            "--row-border-mix": `${rowBorderMixPercent(privateRowTint, resolvedTheme)}%`,
+            "--row-selected-text-color": privateChatActive
+              ? (rowAccent ?? privateRowTint)
+              : selectedRowTextColor(privateRowTint, resolvedTheme),
+            ...(privateChatActive
+              ? { "--row-text-color": rowAccent ?? privateRowTint }
+              : {}),
           }
         : {}),
     } as React.CSSProperties;
@@ -27014,10 +27211,18 @@ function HomeContent(): React.JSX.Element {
     const rowAccent = rawRowColor
       ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
       : neutralRowColor(resolvedTheme);
+    const privateRowTint = privateChatActive
+      ? mixHex(
+          rowAccent,
+          resolvedTheme === "dark" ? "#b9b0a5" : "#2c251e",
+          resolvedTheme === "dark" ? 0.72 : 0.6
+        )
+      : rowAccent;
     return {
       ...conversationRowGlowStyle(index),
-      "--row-color": rowAccent,
-      "--row-border-mix": `${rowBorderMixPercent(rowAccent, resolvedTheme)}%`,
+      "--row-color": privateRowTint,
+      "--row-glyph-color": rowAccent,
+      "--row-border-mix": `${rowBorderMixPercent(privateRowTint, resolvedTheme)}%`,
     } as React.CSSProperties;
   };
 
@@ -27134,7 +27339,22 @@ function HomeContent(): React.JSX.Element {
             aria-expanded={isExpanded}
             aria-controls={nestedListId}
             onPointerDown={(event) =>
-              beginConversationGroupPointerDrag(event, group.key)
+              (() => {
+                const tileRect = event.currentTarget.getBoundingClientRect();
+                const pressedChevronZone = event.clientX <= tileRect.left + 22;
+                if (pressedChevronZone) {
+                  disarmDelete();
+                  setExpandedConversationGroupKey((previous) =>
+                    previous === group.key ? null : group.key
+                  );
+                  if (!isExpanded) {
+                    setConversationListScrollTop(0);
+                  }
+                  suppressConversationGroupClickRef.current = true;
+                  return;
+                }
+                beginConversationGroupPointerDrag(event, group.key);
+              })()
             }
             onPointerMove={updateConversationGroupPointerDrag}
             onPointerUp={endConversationGroupPointerDrag}
@@ -27144,7 +27364,7 @@ function HomeContent(): React.JSX.Element {
               event.stopPropagation();
               openConversationGroupContextMenu(group.key, event.clientX, event.clientY);
             }}
-            onClick={() => {
+            onClick={(event) => {
               if (suppressConversationGroupClickRef.current) {
                 suppressConversationGroupClickRef.current = false;
                 return;
@@ -27164,14 +27384,19 @@ function HomeContent(): React.JSX.Element {
             }
           >
             <span
-              className={[
-                styles.conversationGroupChevron,
-                isExpanded ? styles.conversationGroupChevronExpanded : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
+              className={styles.conversationGroupChevronHitbox}
+              data-conversation-group-chevron="true"
               aria-hidden="true"
-            />
+            >
+              <span
+                className={[
+                  styles.conversationGroupChevron,
+                  isExpanded ? styles.conversationGroupChevronExpanded : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              />
+            </span>
             <span className={styles.conversationGroupGlyph} aria-hidden="true">
               <BotGlyph name={group.glyph} size={22} strokeWidth={1.5} />
             </span>
@@ -27629,6 +27854,7 @@ function HomeContent(): React.JSX.Element {
     const showSettingsOnly =
       !detail &&
       !activeBot &&
+      !privateChatActive &&
       view !== "chat" &&
       !defaultConversationUsesPrismIdentity &&
       !sandboxDefaultBotView;
@@ -27645,6 +27871,44 @@ function HomeContent(): React.JSX.Element {
     /** Always allow header tools (Sandbox non-zen was the only case that disabled during first reply / pending). */
     const headerActionsDisabled = false;
     const isMobileGear = viewportWidth <= PHONE_MENU_BREAKPOINT;
+    const privateDefaultHeaderMode = privateChatActive && !privateCustomBotActive;
+    const privateFocusedBotHeaderMode = privateChatActive && privateCustomBotActive;
+    const privateFocusedBotBase =
+      (activeBot?.color ?? headerIdentity?.color ?? PRISM_DEFAULT_ACCENT).trim();
+    const privateFocusedBotNormalized = normalizeAccentForTheme(
+      privateFocusedBotBase,
+      resolvedTheme
+    );
+    const privateFocusedBotHeaderTint = mixHex(
+      privateFocusedBotNormalized,
+      "#ffffff",
+      resolvedTheme === "dark" ? 0.52 : 0.4
+    );
+    const privateDefaultMemoriesStyle = privateDefaultHeaderMode
+      ? ({ color: PRISM_WORDMARK_PALETTE[0] } as React.CSSProperties)
+      : privateFocusedBotHeaderMode
+        ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
+        : undefined;
+    const privateDefaultFocusStyle = privateDefaultHeaderMode
+      ? ({ color: PRISM_WORDMARK_PALETTE[1] } as React.CSSProperties)
+      : privateFocusedBotHeaderMode
+        ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
+        : undefined;
+    const privateDefaultImagesStyle = privateDefaultHeaderMode
+      ? ({ color: PRISM_WORDMARK_PALETTE[2] } as React.CSSProperties)
+      : privateFocusedBotHeaderMode
+        ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
+        : undefined;
+    const privateDefaultBotsStyle = privateDefaultHeaderMode
+      ? ({ color: PRISM_WORDMARK_PALETTE[3] } as React.CSSProperties)
+      : privateFocusedBotHeaderMode
+        ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
+        : undefined;
+    const privateDefaultThemeStyle = privateDefaultHeaderMode
+      ? ({ color: PRISM_WORDMARK_PALETTE[4] } as React.CSSProperties)
+      : privateFocusedBotHeaderMode
+        ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
+        : undefined;
     const imageReadySurface = THEME_SURFACE_BG[resolvedTheme];
     const chatToolbarImageReadyChip =
       showToolbarMemoriesButton &&
@@ -27808,6 +28072,7 @@ function HomeContent(): React.JSX.Element {
               aria-label="Memories"
               data-glyph-tooltip="Memories"
               disabled={headerActionsDisabled || !canMemoryActions}
+              style={privateDefaultMemoriesStyle}
             >
               <BookmarkGlyph />
             </button>
@@ -27826,6 +28091,7 @@ function HomeContent(): React.JSX.Element {
               data-glyph-tooltip={
                 zenPresentationActive ? "Exit focus layout" : "Focus layout"
               }
+              style={privateDefaultFocusStyle}
             >
               <ZenFocusGlyph />
             </button>
@@ -27840,6 +28106,7 @@ function HomeContent(): React.JSX.Element {
                   aria-label="Images"
                   data-glyph-tooltip="Images"
                   disabled={headerActionsDisabled}
+                  style={privateDefaultImagesStyle}
                 >
                   <ImagesGlyph />
                 </button>
@@ -27853,6 +28120,7 @@ function HomeContent(): React.JSX.Element {
                 aria-label="Images"
                 data-glyph-tooltip="Images"
                 disabled={headerActionsDisabled}
+                style={privateDefaultImagesStyle}
               >
                 <ImagesGlyph />
               </button>
@@ -27873,6 +28141,7 @@ function HomeContent(): React.JSX.Element {
               aria-label={activeBot ? `Edit ${activeBot.name}` : "Open bot customizer"}
               data-glyph-tooltip={activeBot ? "Edit bot" : "Bots"}
               disabled={headerActionsDisabled}
+              style={privateDefaultBotsStyle}
             >
               <BotsGlyph />
             </button>
@@ -27897,6 +28166,7 @@ function HomeContent(): React.JSX.Element {
                   ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
                   : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
               }
+              style={privateDefaultThemeStyle}
             >
               <ThemeGlyph mode={effectiveThemeMode} />
             </button>
@@ -28119,6 +28389,7 @@ function HomeContent(): React.JSX.Element {
     const showSettingsOnly =
       !detail &&
       !activeBot &&
+      !privateChatActive &&
       view !== "chat" &&
       !defaultConversationUsesPrismIdentity &&
       !sandboxDefaultBotView;
@@ -32009,6 +32280,27 @@ function HomeContent(): React.JSX.Element {
         const imagePanelBotThemeStyle =
           imagePanelThemeBot != null
             ? (() => {
+                if (imagePrivateMode) {
+                  const accentNormalized = normalizeAccentForTheme(
+                    imagePanelThemeBot.color ?? PRISM_DEFAULT_ACCENT,
+                    resolvedTheme
+                  );
+                  const monoText = resolvedTheme === "dark" ? "#0b0b0d" : "#f4f4f2";
+                  const monoInk = resolvedTheme === "dark" ? "#f1f1ef" : "#101010";
+                  return {
+                    ["--editor-bot-color" as string]: accentNormalized,
+                    ["--editor-bot-text" as string]: monoText,
+                    ["--editor-bot-ink" as string]: monoInk,
+                    ["--editor-bot-soft" as string]:
+                      resolvedTheme === "dark"
+                        ? "color-mix(in srgb, #ffffff 12%, transparent)"
+                        : "color-mix(in srgb, #000000 8%, transparent)",
+                    ["--editor-bot-glow" as string]:
+                      resolvedTheme === "dark"
+                        ? "color-mix(in srgb, #ffffff 16%, transparent)"
+                        : "color-mix(in srgb, #000000 12%, transparent)",
+                  } as React.CSSProperties;
+                }
                 const accentNormalized = normalizeAccentForTheme(
                   imagePanelThemeBot.color ?? PRISM_DEFAULT_ACCENT,
                   resolvedTheme
@@ -32060,12 +32352,19 @@ function HomeContent(): React.JSX.Element {
           imagePanelScope === "bot" && imagePanelBot && isBotGlyphName(imagePanelBot.glyph)
             ? imagePanelBot.glyph
             : "triangle";
-        const imagePanelTitleGlyphColor = normalizeAccentForTheme(
-          imagePanelScope === "bot" && imagePanelBot
-            ? (imagePanelBot.color ?? PRISM_DEFAULT_ACCENT)
-            : PRISM_DEFAULT_ACCENT,
-          resolvedTheme
-        );
+        const imagePanelTitleGlyphColor =
+          imagePrivateMode
+            ? resolvedTheme === "dark"
+              ? "#f4f4f3"
+              : "#121212"
+            : imagePanelScope === "bot" && imagePanelBot
+            ? normalizeAccentForTheme(
+                imagePanelBot.color ?? PRISM_DEFAULT_ACCENT,
+                resolvedTheme
+              )
+            : resolvedTheme === "dark"
+              ? "#f4f4f3"
+              : "#121212";
         const canDeleteImagesInCurrentScope =
           imagePanelScope === "bot"
             ? images.length > 0
@@ -32083,6 +32382,16 @@ function HomeContent(): React.JSX.Element {
             : null;
         /** No bot identity in this overlay — use Prism triangle + rainbow chrome (general, or All without active bot). */
         const imagesGenOverlayPrismDefault = !overlayTintBot;
+        const imagesGenOverlayPrivate = imagePrivateMode;
+        const privateOverlayGlyphStyle: React.CSSProperties | undefined =
+          imagesGenOverlayPrivate && overlayTintBot?.color?.trim()
+            ? ({
+                ["--private-overlay-glyph" as string]: normalizeAccentForTheme(
+                  overlayTintBot.color,
+                  resolvedTheme
+                ),
+              } as React.CSSProperties)
+            : undefined;
         const prismGenOverlayPaletteStyle = imagesGenOverlayPrismDefault
           ? ({
               ["--prism-gen-c1" as string]: PRISM_WORDMARK_PALETTE[0],
@@ -32127,7 +32436,7 @@ function HomeContent(): React.JSX.Element {
             className={`${styles.panel} ${styles.panelImages}`}
             data-closing={panelClosing ? "true" : undefined}
             data-image-scope={imagePanelScope}
-            data-private-mode={imagePrivateMode ? "true" : undefined}
+            data-private-mode={appWidePrivateMode ? "true" : undefined}
             aria-busy={imageGenInflightHere > 0}
             style={{
               ...(imagePanelBotThemeStyle ?? {}),
@@ -32162,7 +32471,9 @@ function HomeContent(): React.JSX.Element {
                 ) : null}
                 <h3 className={styles.panelImagesTitle} title={imagePanelTitleFull}>
                   <span
-                    className={styles.panelImagesTitlePrimary}
+                    className={`${styles.panelImagesTitlePrimary} ${
+                      imagePrivateMode ? styles.panelImagesTitlePrimaryPrivate : ""
+                    }`}
                     style={{ color: imagePanelTitleGlyphColor }}
                     aria-label={imagePanelTitleFull}
                   >
@@ -32254,25 +32565,25 @@ function HomeContent(): React.JSX.Element {
                     <button
                       type="button"
                       className={`${styles.botRandomizeButton} ${styles.imagePromptDangerButton}`}
-                      data-active={imagePrivateMode ? "true" : undefined}
-                      aria-pressed={imagePrivateMode}
+                      data-active={appWidePrivateMode ? "true" : undefined}
+                      aria-pressed={appWidePrivateMode}
                       aria-label={
-                        imagePrivateMode
-                          ? "Private image mode is on. Click to turn off and delete private images."
-                          : "Turn on private image mode for temporary images."
+                        appWidePrivateMode
+                          ? "Private mode is on. Click to turn private mode off app-wide."
+                          : "Turn on private mode app-wide."
                       }
                       title={
-                        imagePrivateMode
-                          ? "Private images on (turn off to auto-delete)"
-                          : "Private images off"
+                        appWidePrivateMode
+                          ? "Private mode on (app-wide)"
+                          : "Private mode off (app-wide)"
                       }
                       data-glyph-tooltip={
-                        imagePrivateMode
-                          ? "Private images on (turn off to auto-delete)"
-                          : "Private images off"
+                        appWidePrivateMode
+                          ? "Private mode on (app-wide)"
+                          : "Private mode off (app-wide)"
                       }
                       onClick={() => {
-                        setImagePrivateMode((current) => !current);
+                        setAppWidePrivateMode(!appWidePrivateMode);
                       }}
                     >
                       <IconKey />
@@ -32539,16 +32850,45 @@ function HomeContent(): React.JSX.Element {
                     openAiImageModelCatalogEntries
                   );
                   const thumbModelRaw = img.model?.trim() ?? "";
+                  const privateBlurred =
+                    imagePrivateGeneratedIds.includes(img.id) &&
+                    !imagePrivateRevealedIds.has(img.id) &&
+                    !appWidePrivateMode;
                   return (
-                    <div key={img.id} className={styles.imageThumbWrap}>
+                    <div
+                      key={img.id}
+                      className={`${styles.imageThumbWrap} ${
+                        privateBlurred ? styles.imageThumbWrapPrivateBlurred : ""
+                      }`}
+                    >
                       <button
                         type="button"
                         className={styles.imageThumbMain}
-                        onClick={() => setImageLightbox(img)}
-                        aria-label="View image larger"
+                        onClick={() => {
+                          if (privateBlurred) {
+                            setImagePrivateRevealedIds((current) => {
+                              if (current.has(img.id)) return current;
+                              const next = new Set(current);
+                              next.add(img.id);
+                              return next;
+                            });
+                            return;
+                          }
+                          setImageLightbox(img);
+                        }}
+                        aria-label={
+                          privateBlurred
+                            ? "Private image hidden. Click to reveal image."
+                            : "View image larger"
+                        }
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={galleryTileImageSrc(img)} alt={img.prompt} />
+                        {privateBlurred ? (
+                          <span className={styles.imageThumbPrivateBlurOverlay} aria-hidden="true">
+                            Private image hidden - click to reveal
+                          </span>
+                        ) : null}
                       </button>
                       <div className={styles.imageThumbActions}>
                         <span
@@ -32595,22 +32935,36 @@ function HomeContent(): React.JSX.Element {
             {activeImageGenScopeKey !== null ? (
               <div
                 className={`${styles.panelImagesGenOverlay} ${
-                  imagesGenOverlayPrismDefault ? styles.panelImagesGenOverlayRainbow : ""
+                  imagesGenOverlayPrivate ? styles.panelImagesGenOverlayPrivate : ""
+                } ${
+                  imagesGenOverlayPrismDefault && !imagesGenOverlayPrivate
+                    ? styles.panelImagesGenOverlayRainbow
+                    : ""
                 }`}
                 style={{
-                  ...imagesGenOverlayAccentStyle,
-                  ...prismGenOverlayPaletteStyle,
+                  ...(imagesGenOverlayPrivate ? {} : imagesGenOverlayAccentStyle),
+                  ...(imagesGenOverlayPrivate ? {} : prismGenOverlayPaletteStyle),
+                  ...(privateOverlayGlyphStyle ?? {}),
                 }}
                 role="presentation"
               >
                 <div className={styles.panelImagesGenOverlayInner}>
                   <div className={styles.panelImagesGenOverlayOrb} aria-hidden="true">
                     <div className={styles.panelImagesGenOverlayOrbFill} />
-                    <span className={styles.panelImagesGenOverlayGlyph}>
+                    <span
+                      className={`${styles.panelImagesGenOverlayGlyph} ${
+                        imagesGenOverlayPrivate ? styles.panelImagesGenOverlayGlyphPrivate : ""
+                      }`}
+                    >
                       <BotGlyph
                         name={overlayTintBot ? overlayTintBot.glyph : "triangle"}
                         size={30}
                         strokeWidth={1.95}
+                        className={
+                          imagesGenOverlayPrivate
+                            ? styles.panelImagesGenOverlayGlyphPrivateIcon
+                            : undefined
+                        }
                       />
                     </span>
                   </div>
@@ -37165,10 +37519,10 @@ function HomeContent(): React.JSX.Element {
           </button>
           <button
             type="button"
-            className={`${styles.privateChatButton} ${pendingIncognito ? styles.privateChatButtonActive : ""}`}
+            className={`${styles.privateChatButton} ${appWidePrivateMode ? styles.privateChatButtonActive : ""}`}
             style={privateChatButtonStyle}
-            onClick={() => startFreshConversation(true)}
-            aria-pressed={pendingIncognito}
+            onClick={() => setAppWidePrivateMode(!appWidePrivateMode)}
+            aria-pressed={appWidePrivateMode}
             title="Private chat — no saved history or memory"
           >
             <span className={styles.privateChatButtonIcon} aria-hidden="true">
@@ -37233,7 +37587,7 @@ function HomeContent(): React.JSX.Element {
               <button
                 type="button"
                 className={styles.hubHomeButton}
-                onClick={() => performShowAllBotsView()}
+                onClick={handleSandboxHeaderWordmarkClick}
                 data-home-affordance="identity"
                 aria-label="Return to all bots"
                 title="Return to all bots"
@@ -37378,7 +37732,7 @@ function HomeContent(): React.JSX.Element {
             // hue lens can step the density stage back when the ribbon
             // window contains far fewer bots than the full library.
             const pickerGeom =
-              !pendingIncognito && pickerBots.length > 0
+              pickerBots.length > 0
                 ? pickerGeometry(
                     pickerBots.length,
                     viewportWidth,
@@ -37596,8 +37950,7 @@ function HomeContent(): React.JSX.Element {
                 {/* Zen / Chat-like Sandbox hides compose bot picker; keep the
                     tile grid in this empty-thread shell so “show all bots”
                     and hue browsing stay grounded in the canvas. */}
-                {!pendingIncognito &&
-                  pickerBots.length > 0 &&
+                {pickerBots.length > 0 &&
                   (() => {
                   // Same geometry math as the Chat-mode picker: mobile
                   // stays square, desktop goes widescreen, and density
