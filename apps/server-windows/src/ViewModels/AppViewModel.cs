@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
@@ -26,6 +27,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     private string? _setupMessage;
     private bool _isStartingMemoryEngine;
     private bool _isDownloadingModel;
+    private bool _isInstallingOllama;
     private DisplayPairingCode? _pairingCode;
     private bool _isGeneratingPairingCode;
 
@@ -56,6 +58,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         RefreshCommand = Track(new AsyncRelayCommand(RefreshDependenciesAsync));
         StartMemoryEngineCommand = Track(new AsyncRelayCommand(StartMemoryEngineAsync, () => CanStartManagedMemoryEngine));
         DownloadDefaultModelCommand = Track(new AsyncRelayCommand(DownloadDefaultModelAsync, () => CanDownloadDefaultModel));
+        InstallOllamaCommand = Track(new AsyncRelayCommand(InstallOllamaAsync, () => CanInstallOllama));
         GeneratePairingCodeCommand = Track(new AsyncRelayCommand(GeneratePairingCodeAsync, () => RuntimeState.IsRunning && !IsGeneratingPairingCode));
         SaveConfigCommand = Track(new RelayCommand(SaveConfig));
         SaveAndRefreshCommand = Track(new AsyncRelayCommand(async () => { SaveConfig(); await RefreshDependenciesAsync().ConfigureAwait(true); }));
@@ -72,6 +75,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public ICommand RefreshCommand { get; }
     public ICommand StartMemoryEngineCommand { get; }
     public ICommand DownloadDefaultModelCommand { get; }
+    public ICommand InstallOllamaCommand { get; }
     public ICommand GeneratePairingCodeCommand { get; }
     public ICommand SaveConfigCommand { get; }
     public ICommand SaveAndRefreshCommand { get; }
@@ -144,6 +148,19 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             {
                 OnPropertyChanged(nameof(CanDownloadDefaultModel));
                 OnPropertyChanged(nameof(RequiredModelDownloadLabel));
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public bool IsInstallingOllama
+    {
+        get => _isInstallingOllama;
+        private set
+        {
+            if (SetField(ref _isInstallingOllama, value))
+            {
+                OnPropertyChanged(nameof(CanInstallOllama));
                 RaiseCommandStates();
             }
         }
@@ -268,6 +285,14 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         MissingRequiredModelNames.Count > 0 &&
         !IsDownloadingModel;
 
+    public bool CanInstallOllama =>
+        DependencyStatus.LocalAI.CanAutoInstallOllama &&
+        !DependencyStatus.LocalAI.Ollama.IsReady &&
+        !IsInstallingOllama;
+
+    public bool ShowInstallOllamaAction =>
+        !DependencyStatus.LocalAI.Ollama.IsReady && DependencyStatus.LocalAI.CanAutoInstallOllama;
+
     public string RequiredModelDownloadLabel
     {
         get
@@ -325,6 +350,8 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         DependencyStatus = await _dependencyService.CheckAsync(_config, resolution).ConfigureAwait(true);
         OnPropertyChanged(nameof(CanStartManagedMemoryEngine));
         OnPropertyChanged(nameof(CanDownloadDefaultModel));
+        OnPropertyChanged(nameof(CanInstallOllama));
+        OnPropertyChanged(nameof(ShowInstallOllamaAction));
         OnPropertyChanged(nameof(RequiredModelDownloadLabel));
         OnPropertyChanged(nameof(OwnershipFootnote));
         RaiseCommandStates();
@@ -341,10 +368,38 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public async Task SetUpPrismAsync()
     {
         SetupMessage = "Preparing Prism...";
-        await StartNodeStackAsync().ConfigureAwait(true);
+        await RunManagedSetupAndStartAsync().ConfigureAwait(true);
         if (RuntimeState.Status == RuntimeStatus.Failed)
         {
             SetupMessage = RuntimeState.Message;
+        }
+    }
+
+    public async Task InstallOllamaAsync()
+    {
+        if (!CanInstallOllama)
+        {
+            return;
+        }
+
+        IsInstallingOllama = true;
+        SetupMessage = "Installing Ollama with winget...";
+        try
+        {
+            await InstallOllamaWithWingetAsync().ConfigureAwait(true);
+            await RefreshDependenciesAsync().ConfigureAwait(true);
+            SetupMessage = DependencyStatus.LocalAI.Ollama.IsReady
+                ? "Ollama is ready."
+                : "Ollama installed. Open Ollama once, then refresh status.";
+        }
+        catch (Exception ex)
+        {
+            RuntimeState = RuntimeState.Failed(ex.Message);
+            SetupMessage = ex.Message;
+        }
+        finally
+        {
+            IsInstallingOllama = false;
         }
     }
 
@@ -376,6 +431,67 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             RuntimeState = RuntimeState.Failed(ex.Message);
             SetupMessage = ex.Message;
         }
+    }
+
+    private async Task RunManagedSetupAndStartAsync()
+    {
+        try
+        {
+            var resolution = await ResolveQdrantForRuntimeAsync().ConfigureAwait(true);
+            _qdrantResolution = resolution;
+
+            if (resolution.Ownership == QdrantOwnership.ManagedByPrism)
+            {
+                SetupMessage = "Starting Memory Engine...";
+                await _runtimeManager.StartMemoryEngineAsync(resolution).ConfigureAwait(true);
+            }
+
+            DependencyStatus = await _dependencyService.CheckAsync(_config, resolution).ConfigureAwait(true);
+
+            if (!DependencyStatus.LocalAI.Ollama.IsReady && DependencyStatus.LocalAI.CanAutoInstallOllama)
+            {
+                IsInstallingOllama = true;
+                try
+                {
+                    SetupMessage = "Installing Ollama with winget...";
+                    await InstallOllamaWithWingetAsync().ConfigureAwait(true);
+                    await WaitForOllamaReachableAsync(TimeSpan.FromSeconds(12)).ConfigureAwait(true);
+                    DependencyStatus = await _dependencyService.CheckAsync(_config, resolution).ConfigureAwait(true);
+                }
+                finally
+                {
+                    IsInstallingOllama = false;
+                }
+            }
+
+            if (DependencyStatus.LocalAI.Ollama.IsReady && MissingRequiredModelNames.Count > 0)
+            {
+                var models = MissingRequiredModelNames;
+                IsDownloadingModel = true;
+                try
+                {
+                    foreach (var model in models)
+                    {
+                        SetupMessage = $"Downloading {model}...";
+                        await _ollamaModelInstaller.PullAsync(model).ConfigureAwait(true);
+                    }
+                }
+                finally
+                {
+                    IsDownloadingModel = false;
+                }
+
+                DependencyStatus = await _dependencyService.CheckAsync(_config, resolution).ConfigureAwait(true);
+            }
+        }
+        catch (Exception ex)
+        {
+            RuntimeState = RuntimeState.Failed(ex.Message);
+            SetupMessage = ex.Message;
+            return;
+        }
+
+        await StartNodeStackAsync().ConfigureAwait(true);
     }
 
     public async Task StartMemoryEngineAsync()
@@ -505,6 +621,56 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         }
 
         return await _qdrantResolutionService.ResolveAsync(_config).ConfigureAwait(true);
+    }
+
+    private static async Task InstallOllamaWithWingetAsync(CancellationToken cancellationToken = default)
+    {
+        using var process = new Process();
+        process.StartInfo = new ProcessStartInfo
+        {
+            FileName = "winget",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        process.StartInfo.ArgumentList.Add("install");
+        process.StartInfo.ArgumentList.Add("-e");
+        process.StartInfo.ArgumentList.Add("--id");
+        process.StartInfo.ArgumentList.Add("Ollama.Ollama");
+        process.StartInfo.ArgumentList.Add("--scope");
+        process.StartInfo.ArgumentList.Add("user");
+        process.StartInfo.ArgumentList.Add("--accept-source-agreements");
+        process.StartInfo.ArgumentList.Add("--accept-package-agreements");
+
+        if (!process.Start())
+        {
+            throw new InvalidOperationException("Could not start Ollama install with winget.");
+        }
+
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException("Ollama install failed. Please check winget and try again.");
+        }
+    }
+
+    private async Task WaitForOllamaReachableAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var resolution = await ResolveQdrantForRuntimeAsync().ConfigureAwait(true);
+            var status = await _dependencyService.CheckAsync(_config, resolution, cancellationToken).ConfigureAwait(true);
+            if (status.LocalAI.Ollama.IsReady)
+            {
+                DependencyStatus = status;
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(true);
+        }
     }
 
     private void UpdateConfig(ServerConfig config, [CallerMemberName] string? propertyName = null)

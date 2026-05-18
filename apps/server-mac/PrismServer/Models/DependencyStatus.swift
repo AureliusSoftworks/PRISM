@@ -31,7 +31,9 @@ struct DependencyStatus: Equatable {
                 name: "Embedding model",
                 isReady: false,
                 detail: "Not checked yet."
-            )
+            ),
+            canAutoInstallOllama: false,
+            ollamaInstallHint: nil
         )
     )
 
@@ -56,6 +58,8 @@ struct LocalAIPillarStatus: Equatable {
     var ollama: PillarStatus
     var defaultModel: ModelSubstatus
     var embeddingModel: ModelSubstatus
+    var canAutoInstallOllama: Bool
+    var ollamaInstallHint: String?
 
     var isReady: Bool {
         ollama.isReady && defaultModel.isReady && embeddingModel.isReady

@@ -63,6 +63,7 @@ public sealed class DependencyService
     private LocalAIPillarStatus LocalAiPillar(ServerConfig config, string ollamaHost, IReadOnlyCollection<string> tags, bool ollamaReachable)
     {
         var onPath = _commandLocator.FindExecutable("ollama.exe") is not null || _commandLocator.FindExecutable("ollama") is not null;
+        var canAutoInstallOllama = !onPath && _commandLocator.FindExecutable("winget.exe") is not null;
         var model = config.OllamaModel.Trim();
         var embeddingModel = config.OllamaEmbeddingModel.Trim();
 
@@ -70,12 +71,16 @@ public sealed class DependencyService
             ? $"Ollama is responding at {ollamaHost}."
             : onPath
                 ? "Ollama is installed but not reachable. Start it, then refresh."
-                : "Ollama is not installed or not on PATH. Install it when you are ready to use local models.";
+                : canAutoInstallOllama
+                    ? "Ollama is not installed. Prism can install it automatically with winget."
+                    : "Ollama is not installed or not on PATH. Install App Installer to enable one-click install, or install Ollama manually.";
 
         return new LocalAIPillarStatus(
             new PillarStatus("Local AI Engine", ollamaReachable, ollamaDetail),
             ModelSubstatusFor("Default model", model, tags, ollamaReachable),
-            ModelSubstatusFor("Embedding model", embeddingModel, tags, ollamaReachable));
+            ModelSubstatusFor("Embedding model", embeddingModel, tags, ollamaReachable),
+            canAutoInstallOllama,
+            canAutoInstallOllama ? "Prism uses winget to install Ollama." : null);
     }
 
     private static ModelSubstatus ModelSubstatusFor(string label, string model, IReadOnlyCollection<string> tags, bool ollamaReachable)

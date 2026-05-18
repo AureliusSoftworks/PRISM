@@ -43,6 +43,12 @@ struct SetupWindowView: View {
                         .disabled(model.isStartingMemoryEngine)
                     }
                     ReadinessPillarView(status: model.dependencyStatus.localAI.ollama)
+                    if model.canInstallOllama {
+                        Button(model.isInstallingOllama ? "Installing Ollama…" : "Install Ollama") {
+                            model.installOllamaTapped()
+                        }
+                        .disabled(model.isInstallingOllama)
+                    }
                     ModelSubstatusView(status: model.dependencyStatus.localAI.defaultModel)
                     ModelSubstatusView(status: model.dependencyStatus.localAI.embeddingModel)
                     if model.canDownloadDefaultModel {
