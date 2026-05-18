@@ -8,6 +8,8 @@ DEFAULT_IOS_SIMULATOR_ID="29D05410-1ED7-4282-A174-92A2FDB70FCD"
 IOS_BUNDLE_ID="com.localai.prism-ios"
 IOS_APP_PATH="apps/ios-client/DerivedData/Build/Products/Debug-iphonesimulator/Prism.app"
 IOS_DEVICE_APP_PATH="apps/ios-client/DerivedData/Build/Products/Debug-iphoneos/Prism.app"
+API_PORT="18787"
+WEB_PORT="18788"
 
 MAC_CLIENT_BUNDLE_ID="com.localai.prism-client"
 MAC_CLIENT_APP_PATH="apps/client-mac/DerivedData/Build/Products/Debug/Prism.app"
@@ -23,6 +25,10 @@ Usage:
   prism mac-client
   prism mac-server
   prism web
+  prism standalone
+  prism standalone-win <version> [release-channel]
+  prism standalone-installer
+  prism reset [--force]
 
 Aliases:
   prism iphone
@@ -30,14 +36,120 @@ Aliases:
   prism server
 
 Notes:
-  prism web runs `next dev` on http://localhost:18788 and stays in the
-  foreground; press Ctrl+C to stop. Assumes the API is already running
-  (e.g. via `prism mac-server`).
+  prism web now runs the combined dev launcher (`npm run dev`) which
+  starts/restarts both API (http://localhost:18787) and web
+  (http://localhost:18788) together in one foreground session.
+  prism standalone builds the desktop app and opens the folder containing
+  the latest macOS DMG.
+  prism standalone-win dispatches the desktop release workflow for Windows
+  packaging and opens the desktop/v<version> release page on GitHub.
+  prism standalone-installer opens the latest macOS Prism Desktop installer
+  DMG (and builds one first if missing).
+  prism reset removes local Prism account/data state (factory reset) while
+  intentionally keeping launcher configuration files.
 
 Environment:
   SIMULATOR_ID="Simulator UDID" prism ios
   PHONE_DEVICE_ID="Device UDID" prism phone
 USAGE
+}
+
+print_reset_warning() {
+  cat <<'RESET_WARNING'
+WARNING: prism reset will permanently delete local Prism data:
+  - SQLite database files (localai.db, WAL, SHM)
+  - generated-images directories
+  - local Qdrant storage directories
+  - Prism app runtime logs/cache directories
+
+This keeps launcher configuration files (for example .env) in place.
+RESET_WARNING
+}
+
+confirm_reset() {
+  local reply
+  print_reset_warning
+  printf '\nType RESET to continue: '
+  read -r reply
+  if [[ "$reply" != "RESET" ]]; then
+    echo "Reset cancelled."
+    exit 0
+  fi
+}
+
+stop_reset_processes() {
+  local ports=(18787 18788 18789 18790 6333)
+  local port=""
+  for port in "${ports[@]}"; do
+    free_tcp_port "$port"
+  done
+
+  pkill -f "Prism Server.app/Contents/MacOS/Prism Server" >/dev/null 2>&1 || true
+  pkill -f "Prism.app/Contents/MacOS/Prism" >/dev/null 2>&1 || true
+  pkill -f "Prism Desktop.app/Contents/MacOS/Prism Desktop" >/dev/null 2>&1 || true
+}
+
+delete_path() {
+  local path="$1"
+  local label="$2"
+  if [[ -e "$path" ]]; then
+    rm -rf "$path"
+    echo "Removed: $label"
+  else
+    echo "Missing (skipped): $label"
+  fi
+}
+
+run_reset() {
+  local force_mode=0
+  if [[ "${1:-}" == "--force" ]]; then
+    force_mode=1
+  elif [[ -n "${1:-}" ]]; then
+    echo "Unknown reset flag: ${1}" >&2
+    echo "Usage: prism reset [--force]" >&2
+    exit 64
+  fi
+
+  if [[ "$force_mode" -eq 0 ]]; then
+    confirm_reset
+  fi
+
+  stop_reset_processes
+
+  local localai_data_dir="${LOCALAI_DATA_DIR:-}"
+  local api_dev_data_dir="$REPO_ROOT/apps/api/data"
+  local mac_app_support="$HOME/Library/Application Support/Prism"
+  local desktop_app_data="$HOME/Library/Application Support/com.localai.prism-desktop"
+  local client_webkit_local_storage="$HOME/Library/Containers/com.localai.prism-client/Data/Library/WebKit/WebsiteData/LocalStorage"
+
+  delete_path "$api_dev_data_dir/localai.db" "repo dev DB (apps/api/data/localai.db)"
+  delete_path "$api_dev_data_dir/localai.db-wal" "repo dev DB WAL (apps/api/data/localai.db-wal)"
+  delete_path "$api_dev_data_dir/localai.db-shm" "repo dev DB SHM (apps/api/data/localai.db-shm)"
+  delete_path "$api_dev_data_dir/generated-images" "repo generated images (apps/api/data/generated-images)"
+
+  if [[ -n "$localai_data_dir" ]]; then
+    delete_path "$localai_data_dir/localai.db" "LOCALAI_DATA_DIR DB ($localai_data_dir/localai.db)"
+    delete_path "$localai_data_dir/localai.db-wal" "LOCALAI_DATA_DIR DB WAL ($localai_data_dir/localai.db-wal)"
+    delete_path "$localai_data_dir/localai.db-shm" "LOCALAI_DATA_DIR DB SHM ($localai_data_dir/localai.db-shm)"
+    delete_path "$localai_data_dir/generated-images" "LOCALAI_DATA_DIR generated images ($localai_data_dir/generated-images)"
+  fi
+
+  delete_path "$mac_app_support/Data" "mac server data (~/Library/Application Support/Prism/Data)"
+  delete_path "$mac_app_support/Qdrant/storage" "mac server qdrant storage (~/Library/Application Support/Prism/Qdrant/storage)"
+  delete_path "$mac_app_support/Logs" "mac server logs (~/Library/Application Support/Prism/Logs)"
+
+  delete_path "$desktop_app_data" "desktop app data (~/Library/Application Support/com.localai.prism-desktop)"
+
+  delete_path "$client_webkit_local_storage/http_localhost_18788.localstorage" "client localStorage localhost:18788"
+  delete_path "$client_webkit_local_storage/http_localhost_18788.localstorage-shm" "client localStorage SHM localhost:18788"
+  delete_path "$client_webkit_local_storage/http_localhost_18788.localstorage-wal" "client localStorage WAL localhost:18788"
+  delete_path "$client_webkit_local_storage/http_localhost_18790.localstorage" "client localStorage localhost:18790"
+  delete_path "$client_webkit_local_storage/http_localhost_18790.localstorage-shm" "client localStorage SHM localhost:18790"
+  delete_path "$client_webkit_local_storage/http_localhost_18790.localstorage-wal" "client localStorage WAL localhost:18790"
+
+  echo
+  echo "Factory reset complete."
+  echo "Kept intentionally: launcher config files (for example .env files)."
 }
 
 resolve_phone_device_id() {
@@ -165,10 +277,227 @@ run_mac_server() {
   open "$MAC_SERVER_APP_PATH"
 }
 
+free_tcp_port() {
+  local port="$1"
+  local pids
+
+  pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return
+  fi
+
+  echo "Port $port is already in use. Stopping existing process(es): $pids"
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    kill "$pid" 2>/dev/null || true
+  done <<< "$pids"
+
+  sleep 0.5
+
+  pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -n "$pids" ]]; then
+    echo "Force-stopping stubborn process(es) on port $port: $pids"
+    while IFS= read -r pid; do
+      [[ -z "$pid" ]] && continue
+      kill -9 "$pid" 2>/dev/null || true
+    done <<< "$pids"
+  fi
+}
+
 # Foreground long-running dev server; exec replaces the script process so
 # Ctrl+C is delivered straight to `next dev` without a stray bash hop.
 run_web() {
-  exec npm run dev:web
+  free_tcp_port "$API_PORT"
+  free_tcp_port "$WEB_PORT"
+  exec npm run dev
+}
+
+run_standalone() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "prism standalone currently targets macOS DMG output and is only supported on macOS." >&2
+    exit 1
+  fi
+
+  echo "Building Prism Desktop DMG..."
+  npm run desktop:stage-runtime
+  npm run build -w apps/desktop
+
+  local dmg_path=""
+  local candidate=""
+  local newest_mtime=0
+  local mtime=0
+
+  shopt -s nullglob
+  for candidate in \
+    "$REPO_ROOT"/dist-desktop/Prism-Desktop-v*.dmg \
+    "$REPO_ROOT"/apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg; do
+    mtime="$(stat -f %m "$candidate" 2>/dev/null || echo 0)"
+    if [[ "$mtime" -gt "$newest_mtime" ]]; then
+      newest_mtime="$mtime"
+      dmg_path="$candidate"
+    fi
+  done
+  shopt -u nullglob
+
+  if [[ -z "$dmg_path" ]]; then
+    echo "Could not locate a desktop installer DMG after build." >&2
+    exit 1
+  fi
+
+  local dmg_dir
+  dmg_dir="$(dirname "$dmg_path")"
+  echo "Opening DMG folder:"
+  echo "  $dmg_dir"
+  open "$dmg_dir"
+}
+
+run_standalone_installer() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "prism standalone-installer currently opens a macOS DMG installer and is only supported on macOS." >&2
+    exit 1
+  fi
+  local dmg_path=""
+  local candidate=""
+  local newest_mtime=0
+  local mtime=0
+
+  shopt -s nullglob
+  for candidate in \
+    "$REPO_ROOT"/dist-desktop/Prism-Desktop-v*.dmg \
+    "$REPO_ROOT"/apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg; do
+    mtime="$(stat -f %m "$candidate" 2>/dev/null || echo 0)"
+    if [[ "$mtime" -gt "$newest_mtime" ]]; then
+      newest_mtime="$mtime"
+      dmg_path="$candidate"
+    fi
+  done
+  shopt -u nullglob
+
+  if [[ -z "$dmg_path" ]]; then
+    echo "No desktop installer DMG found. Building one now..."
+    npm run desktop:stage-runtime
+    npm run build -w apps/desktop
+
+    shopt -s nullglob
+    for candidate in \
+      "$REPO_ROOT"/dist-desktop/Prism-Desktop-v*.dmg \
+      "$REPO_ROOT"/apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg; do
+      mtime="$(stat -f %m "$candidate" 2>/dev/null || echo 0)"
+      if [[ "$mtime" -gt "$newest_mtime" ]]; then
+        newest_mtime="$mtime"
+        dmg_path="$candidate"
+      fi
+    done
+    shopt -u nullglob
+  fi
+
+  if [[ -z "$dmg_path" ]]; then
+    echo "Could not locate a desktop installer DMG after build." >&2
+    exit 1
+  fi
+
+  echo "Opening desktop installer:"
+  echo "  $dmg_path"
+  open "$dmg_path"
+}
+
+ensure_gh_ready() {
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "Install GitHub CLI first (brew install gh), then run: gh auth login" >&2
+    exit 1
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "GitHub CLI is not authenticated. Run: gh auth login" >&2
+    exit 1
+  fi
+}
+
+run_standalone_win() {
+  local version="${1:-}"
+  local release_channel="${2:-}"
+  local release_ref="${PRISM_RELEASE_REF:-main}"
+  local include_release_channel=0
+  local include_legacy_testflight=0
+
+  if [[ -z "$version" ]]; then
+    echo "Usage: prism standalone-win <version> [release-channel]" >&2
+    exit 64
+  fi
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Version must follow SemVer core format (example: 0.2.0)." >&2
+    exit 64
+  fi
+
+  ensure_gh_ready
+
+  if [[ -n "$release_channel" ]]; then
+    include_release_channel=1
+  fi
+
+  echo "Dispatching release-main.yml on ref '$release_ref' for Prism Desktop v$version..."
+  local attempt=1
+  local max_attempts=3
+  local dispatch_ok=0
+  local dispatch_output=""
+
+  while [[ "$attempt" -le "$max_attempts" ]]; do
+    local cmd=(
+      gh workflow run "release-main.yml"
+      --ref "$release_ref"
+      -f "version=$version"
+    )
+    if [[ "$include_release_channel" -eq 1 ]]; then
+      cmd+=(-f "desktop_release_channel=$release_channel")
+    fi
+    if [[ "$include_legacy_testflight" -eq 1 ]]; then
+      cmd+=(-f "client_testflight_build=false")
+    fi
+
+    dispatch_output="$("${cmd[@]}" 2>&1)" && dispatch_ok=1 || dispatch_ok=0
+    if [[ "$dispatch_ok" -eq 1 ]]; then
+      break
+    fi
+
+    if [[ "$dispatch_output" == *"Unexpected inputs provided: [\"desktop_release_channel\"]"* ]] && [[ "$include_release_channel" -eq 1 ]]; then
+      include_release_channel=0
+      attempt=$((attempt + 1))
+      continue
+    fi
+    if [[ "$dispatch_output" == *"Required input 'client_testflight_build' not provided"* ]] && [[ "$include_legacy_testflight" -eq 0 ]]; then
+      include_legacy_testflight=1
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    echo "$dispatch_output" >&2
+    exit 1
+  done
+
+  if [[ "$dispatch_ok" -ne 1 ]]; then
+    echo "$dispatch_output" >&2
+    exit 1
+  fi
+
+  local repo_full_name
+  repo_full_name="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+  local release_url="https://github.com/${repo_full_name}/releases/tag/desktop%2Fv${version}"
+  local actions_url="https://github.com/${repo_full_name}/actions/workflows/release-main.yml"
+  local target_url="$release_url"
+
+  if ! gh release view "desktop/v${version}" >/dev/null 2>&1; then
+    target_url="$actions_url"
+  fi
+
+  echo
+  echo "Windows build dispatched."
+  echo "Workflow runs: $actions_url"
+  echo "Desktop release page: $release_url"
+  if [[ "$target_url" != "$release_url" ]]; then
+    echo "Desktop tag not available yet on this workflow contract; opening workflow runs instead."
+  fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    open "$target_url"
+  fi
 }
 
 cd "$REPO_ROOT"
@@ -188,6 +517,21 @@ case "${1:-}" in
     ;;
   web)
     run_web
+    ;;
+  standalone | desktop)
+    run_standalone
+    ;;
+  standalone-win | desktop-win)
+    run_standalone_win "${2:-}" "${3:-}"
+    ;;
+  standalone-installer | desktop-installer)
+    run_standalone_installer
+    ;;
+  standalone-dev | desktop-dev)
+    run_standalone
+    ;;
+  reset)
+    run_reset "${2:-}"
     ;;
   help | -h | --help)
     usage

@@ -4,7 +4,14 @@ import { randomId } from "./security.ts";
 export interface ConversationSummary {
   id: string;
   title: string;
+  mode: "chat" | "sandbox" | "coffee";
   botId: string | null;
+  /** Coffee-only — the 2-5 bot ids participating in this group thread. */
+  botGroupIds?: string[];
+  /** Coffee-only — durable parent group for recurring table sessions. */
+  coffeeGroupId?: string | null;
+  /** Coffee-only — timed session duration once group-owned sessions are used. */
+  coffeeSessionDurationMinutes?: 1 | 5 | 10;
   incognito: boolean;
   lastBotId: string | null;
   lastBotColor: string | null;
@@ -13,9 +20,119 @@ export interface ConversationSummary {
   updatedAt: string;
 }
 
+export interface ConversationSweepResult {
+  batchId: string | null;
+  sweptGroups: number;
+  archivedConversationCount: number;
+  summaryConversationCount: number;
+  undoExpiresAt: string | null;
+}
+
+export interface ConversationSweepState {
+  canUndo: boolean;
+  latestBatchId: string | null;
+  latestSweepAt: string | null;
+}
+
 const DEV_SEED_CHAT_USER_MESSAGE = "Dev tools seeded this sidebar chat.";
 const DEV_SEED_CHAT_ASSISTANT_MESSAGE =
   "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+const SWEEP_UNDO_WINDOW_MS = 15000;
+
+function inClausePlaceholders(count: number): string {
+  return Array.from({ length: count }, () => "?").join(", ");
+}
+
+function clampSnippet(text: string, maxLen: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLen) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`;
+}
+
+function parseIdList(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((value): value is string => typeof value === "string" && value.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function deleteConversationsByIds(
+  db: DatabaseSync,
+  userId: string,
+  conversationIds: string[]
+): number {
+  if (conversationIds.length === 0) return 0;
+  const placeholders = inClausePlaceholders(conversationIds.length);
+  const scopedInClause = `user_id = ? AND id IN (${placeholders})`;
+  const messageScopedInClause = `user_id = ? AND conversation_id IN (${placeholders})`;
+
+  db.prepare(
+    `UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${placeholders})`
+  ).run(userId, ...conversationIds);
+  db.prepare(
+    `UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${placeholders})`
+  ).run(userId, ...conversationIds);
+  db.prepare(
+    `UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${placeholders})`
+  ).run(userId, ...conversationIds);
+  db.prepare(
+    `DELETE FROM conversation_exports WHERE user_id = ? AND conversation_id IN (${placeholders})`
+  ).run(userId, ...conversationIds);
+  db.prepare(
+    `DELETE FROM messages WHERE ${messageScopedInClause}`
+  ).run(userId, ...conversationIds);
+  const deleted = db.prepare(
+    `DELETE FROM conversations WHERE ${scopedInClause}`
+  ).run(userId, ...conversationIds);
+  return Number(deleted.changes ?? 0);
+}
+
+function composeSweepSummaryText(
+  db: DatabaseSync,
+  userId: string,
+  groupName: string,
+  conversationRows: Array<{ id: string; title: string }>
+): string {
+  const lines: string[] = [];
+  lines.push(`Sweep summary for ${groupName}.`);
+  lines.push(`Archived ${conversationRows.length} chats into this single recap.`);
+  lines.push("");
+  lines.push("Conversation highlights:");
+
+  for (const row of conversationRows.slice(0, 8)) {
+    const latestMessages = db
+      .prepare(
+        `SELECT role, content
+           FROM messages
+          WHERE user_id = ? AND conversation_id = ?
+          ORDER BY created_at DESC
+          LIMIT 4`
+      )
+      .all(userId, row.id) as Array<{ role: string; content: string }>;
+    const latestUser = latestMessages.find((message) => message.role === "user");
+    const latestAssistant = latestMessages.find((message) => message.role === "assistant");
+    const parts: string[] = [];
+    if (latestUser?.content) {
+      parts.push(`you: "${clampSnippet(latestUser.content, 96)}"`);
+    }
+    if (latestAssistant?.content) {
+      parts.push(`assistant: "${clampSnippet(latestAssistant.content, 96)}"`);
+    }
+    const suffix = parts.length > 0 ? ` (${parts.join(" | ")})` : "";
+    lines.push(`- ${row.title}${suffix}`);
+  }
+
+  if (conversationRows.length > 8) {
+    lines.push(`- +${conversationRows.length - 8} additional archived chats`);
+  }
+
+  lines.push("");
+  lines.push("Use Undo Sweep to restore the previous chat list.");
+  return lines.join("\n");
+}
 
 /**
  * Create saved, bot-attributed placeholder chats for Developer Tools.
@@ -40,7 +157,7 @@ export function createDevSeedConversations(
     .all(userId) as Array<{ id: string }>;
 
   const insertConversation = db.prepare(
-    "INSERT INTO conversations (id, user_id, title, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)"
+    "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, 'sandbox', ?, 0, ?, ?)"
   );
   const insertMessage = db.prepare(
     "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -108,7 +225,9 @@ export function listConversationSummaries(
   // the conversation, regardless of the conversation's locked bot_id.
   const rows = db
     .prepare(
-      `SELECT c.id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
+      `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
+              c.coffee_group_id, c.coffee_duration_minutes,
+              c.incognito, c.created_at, c.updated_at,
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
                    AND m.role = 'assistant'
@@ -124,12 +243,17 @@ export function listConversationSummaries(
          FROM conversations c
         WHERE c.user_id = ?
           AND COALESCE(c.incognito, 0) = 0
+          AND c.archived_at IS NULL
      ORDER BY c.updated_at DESC`
     )
     .all(userId) as Array<{
     id: string;
     title: string;
+    conversation_mode: string | null;
     bot_id: string | null;
+    bot_group_ids: string | null;
+    coffee_group_id: string | null;
+    coffee_duration_minutes: number | null;
     incognito: number;
     created_at: string;
     updated_at: string;
@@ -138,17 +262,299 @@ export function listConversationSummaries(
     has_assistant_reply: number;
   }>;
 
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    botId: row.bot_id ?? null,
-    incognito: row.incognito === 1,
-    lastBotId: row.last_bot_id ?? null,
-    lastBotColor: row.last_bot_color ?? null,
-    hasAssistantReply: row.has_assistant_reply === 1,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
+  return rows.map((row) => {
+    const mode: "chat" | "sandbox" | "coffee" =
+      row.conversation_mode === "chat"
+        ? "chat"
+        : row.conversation_mode === "coffee"
+          ? "coffee"
+          : "sandbox";
+    const botGroupIds = parseBotGroupIdsForSummary(row.bot_group_ids);
+    return {
+      id: row.id,
+      title: row.title,
+      mode,
+      botId: row.bot_id ?? null,
+      ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
+      ...(mode === "coffee" ? { coffeeGroupId: row.coffee_group_id ?? null } : {}),
+      ...(mode === "coffee" && isCoffeeSessionDurationMinutes(row.coffee_duration_minutes)
+        ? { coffeeSessionDurationMinutes: row.coffee_duration_minutes }
+        : {}),
+      incognito: row.incognito === 1,
+      lastBotId: row.last_bot_id ?? null,
+      lastBotColor: row.last_bot_color ?? null,
+      hasAssistantReply: row.has_assistant_reply === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  });
+}
+
+function isCoffeeSessionDurationMinutes(value: unknown): value is 1 | 5 | 10 {
+  return value === 1 || value === 5 || value === 10;
+}
+
+function parseBotGroupIdsForSummary(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (value): value is string => typeof value === "string" && value.length > 0
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function getConversationSweepState(
+  db: DatabaseSync,
+  userId: string
+): ConversationSweepState {
+  const latest = db
+    .prepare(
+      `SELECT id, created_at
+         FROM conversation_sweep_batches
+        WHERE user_id = ?
+          AND undone_at IS NULL
+          AND undo_expires_at > ?
+        ORDER BY created_at DESC
+        LIMIT 1`
+    )
+    .get(userId, new Date().toISOString()) as { id: string; created_at: string } | undefined;
+  return {
+    canUndo: Boolean(latest?.id),
+    latestBatchId: latest?.id ?? null,
+    latestSweepAt: latest?.created_at ?? null,
+  };
+}
+
+export function sweepConversations(
+  db: DatabaseSync,
+  userId: string,
+  mode: "chat" | "sandbox"
+): ConversationSweepResult {
+  const rows = db
+    .prepare(
+      `SELECT id, title, bot_id, updated_at
+         FROM conversations
+        WHERE user_id = ?
+          AND COALESCE(incognito, 0) = 0
+          AND archived_at IS NULL
+          AND conversation_mode = ?
+        ORDER BY updated_at DESC`
+    )
+    .all(userId, mode) as Array<{
+    id: string;
+    title: string;
+    bot_id: string | null;
+    updated_at: string;
+  }>;
+  if (rows.length === 0) {
+    return {
+      batchId: null,
+      sweptGroups: 0,
+      archivedConversationCount: 0,
+      summaryConversationCount: 0,
+      undoExpiresAt: null,
+    };
+  }
+
+  const botRows = db
+    .prepare("SELECT id, name FROM bots WHERE user_id = ?")
+    .all(userId) as Array<{ id: string; name: string }>;
+  const botNameById = new Map(botRows.map((row) => [row.id, row.name]));
+  const groups = new Map<string, { botId: string | null; name: string; conversations: typeof rows }>();
+  for (const row of rows) {
+    const botId = row.bot_id ?? null;
+    const key = botId ?? "__default__";
+    const existing = groups.get(key);
+    if (existing) {
+      existing.conversations.push(row);
+      continue;
+    }
+    groups.set(key, {
+      botId,
+      name: botId ? botNameById.get(botId) ?? "Bot" : "Prism",
+      conversations: [row],
+    });
+  }
+  const eligibleGroups = Array.from(groups.values()).filter(
+    (group) => group.conversations.length > 1
+  );
+  if (eligibleGroups.length === 0) {
+    return {
+      batchId: null,
+      sweptGroups: 0,
+      archivedConversationCount: 0,
+      summaryConversationCount: 0,
+      undoExpiresAt: null,
+    };
+  }
+
+  const nowMs = Date.now();
+  const batchId = randomId(12);
+  const archivedConversationIds = eligibleGroups.flatMap((group) =>
+    group.conversations.map((row) => row.id)
+  );
+  const summaryConversationIds: string[] = [];
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const closePriorBatchesAt = new Date(nowMs - 1).toISOString();
+    db.prepare(
+      "UPDATE conversation_sweep_batches SET undone_at = ? WHERE user_id = ? AND undone_at IS NULL"
+    ).run(closePriorBatchesAt, userId);
+
+    const archivedAt = new Date(nowMs).toISOString();
+    const archivePlaceholders = inClausePlaceholders(archivedConversationIds.length);
+    db.prepare(
+      `UPDATE conversations
+          SET archived_at = ?, archive_batch_id = ?
+        WHERE user_id = ? AND id IN (${archivePlaceholders})`
+    ).run(archivedAt, batchId, userId, ...archivedConversationIds);
+
+    let summaryIndex = 0;
+    for (const group of eligibleGroups) {
+      const conversationId = randomId(12);
+      summaryConversationIds.push(conversationId);
+      const createdAt = new Date(nowMs + summaryIndex * 2 + 1).toISOString();
+      const messageAt = new Date(nowMs + summaryIndex * 2 + 2).toISOString();
+      const title = `Sweep Summary - ${group.name}`;
+      const summaryText = composeSweepSummaryText(
+        db,
+        userId,
+        group.name,
+        group.conversations.map((conversation) => ({
+          id: conversation.id,
+          title: conversation.title,
+        }))
+      );
+
+      db.prepare(
+        `INSERT INTO conversations (
+          id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 0, ?, ?)`
+      ).run(
+        conversationId,
+        userId,
+        title,
+        mode,
+        group.botId,
+        createdAt,
+        messageAt
+      );
+      db.prepare(
+        `INSERT INTO messages (
+          id, conversation_id, user_id, role, content, bot_id, created_at
+        ) VALUES (?, ?, ?, 'assistant', ?, ?, ?)`
+      ).run(randomId(12), conversationId, userId, summaryText, group.botId, messageAt);
+      summaryIndex += 1;
+    }
+
+    db.prepare(
+      `INSERT INTO conversation_sweep_batches (
+        id, user_id, archived_conversation_ids, summary_conversation_ids, created_at, undo_expires_at, undone_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL)`
+    ).run(
+      batchId,
+      userId,
+      JSON.stringify(archivedConversationIds),
+      JSON.stringify(summaryConversationIds),
+      new Date(nowMs + summaryIndex * 2 + 3).toISOString(),
+      new Date(nowMs + SWEEP_UNDO_WINDOW_MS).toISOString()
+    );
+
+    db.exec("COMMIT");
+    return {
+      batchId,
+      sweptGroups: eligibleGroups.length,
+      archivedConversationCount: archivedConversationIds.length,
+      summaryConversationCount: summaryConversationIds.length,
+      undoExpiresAt: new Date(nowMs + SWEEP_UNDO_WINDOW_MS).toISOString(),
+    };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function undoLatestConversationSweep(
+  db: DatabaseSync,
+  userId: string,
+  batchId: string | null
+): ConversationSweepResult {
+  if (!batchId || batchId.trim().length === 0) {
+    return {
+      batchId: null,
+      sweptGroups: 0,
+      archivedConversationCount: 0,
+      summaryConversationCount: 0,
+      undoExpiresAt: null,
+    };
+  }
+  const latestBatch = db
+    .prepare(
+      `SELECT id, archived_conversation_ids, summary_conversation_ids, undo_expires_at
+         FROM conversation_sweep_batches
+        WHERE user_id = ?
+          AND id = ?
+          AND undone_at IS NULL
+          AND undo_expires_at > ?
+        LIMIT 1`
+    )
+    .get(userId, batchId.trim(), new Date().toISOString()) as
+    | {
+        id: string;
+        archived_conversation_ids: string;
+        summary_conversation_ids: string;
+        undo_expires_at: string;
+      }
+    | undefined;
+  if (!latestBatch?.id) {
+    return {
+      batchId: null,
+      sweptGroups: 0,
+      archivedConversationCount: 0,
+      summaryConversationCount: 0,
+      undoExpiresAt: null,
+    };
+  }
+
+  const archivedConversationIds = parseIdList(latestBatch.archived_conversation_ids);
+  const summaryConversationIds = parseIdList(latestBatch.summary_conversation_ids);
+  const archivedCount = archivedConversationIds.length;
+  const summaryCount = summaryConversationIds.length;
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    if (archivedConversationIds.length > 0) {
+      const placeholders = inClausePlaceholders(archivedConversationIds.length);
+      db.prepare(
+        `UPDATE conversations
+            SET archived_at = NULL,
+                archive_batch_id = NULL
+          WHERE user_id = ?
+            AND archive_batch_id = ?
+            AND id IN (${placeholders})`
+      ).run(userId, latestBatch.id, ...archivedConversationIds);
+    }
+    deleteConversationsByIds(db, userId, summaryConversationIds);
+    db.prepare(
+      "UPDATE conversation_sweep_batches SET undone_at = ? WHERE id = ? AND user_id = ?"
+    ).run(new Date().toISOString(), latestBatch.id, userId);
+    db.exec("COMMIT");
+    return {
+      batchId: latestBatch.id,
+      sweptGroups: 0,
+      archivedConversationCount: archivedCount,
+      summaryConversationCount: summaryCount,
+      undoExpiresAt: latestBatch.undo_expires_at,
+    };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 /**
@@ -217,14 +623,14 @@ export function deleteConversationsByBot(
   botId: string | null
 ): number {
   const botPredicate = botId === null ? "bot_id IS NULL" : "bot_id = ?";
-  const groupSubquery = `SELECT id FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND ${botPredicate}`;
+  const groupSubquery = `SELECT id FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND ${botPredicate}`;
   const groupParams: Array<string | null> = botId === null ? [userId] : [userId, botId];
 
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     const countRow = db
       .prepare(
-        `SELECT COUNT(*) AS n FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND ${botPredicate}`
+        `SELECT COUNT(*) AS n FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND ${botPredicate}`
       )
       .get(...groupParams) as { n: number };
     const conversationCount = Number(countRow.n ?? 0);
@@ -245,7 +651,7 @@ export function deleteConversationsByBot(
       `DELETE FROM messages WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
     ).run(userId, ...groupParams);
     db.prepare(
-      `DELETE FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND ${botPredicate}`
+      `DELETE FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND ${botPredicate}`
     ).run(...groupParams);
     db.exec("COMMIT");
     return conversationCount;
@@ -324,6 +730,59 @@ export function rewindConversation(
       content: target.content,
       deletedMessages: Number(deletedMessages.changes ?? 0),
       deletedMemories: 0,
+    };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
+ * Remove a single message from a conversation while preserving long-term memory rows.
+ *
+ * Behavior:
+ *   - Throws if the message is missing or not owned by `userId`.
+ *   - Deletes only the targeted message row.
+ *   - Invalidates conversation-scoped summaries so future context is rebuilt
+ *     from surviving messages.
+ *   - Leaves `memories` untouched, even when they reference the deleted message.
+ */
+export function deleteConversationMessage(
+  db: DatabaseSync,
+  userId: string,
+  messageId: string
+): { conversationId: string; deletedSummaries: number } {
+  const target = db
+    .prepare(
+      "SELECT id, conversation_id FROM messages WHERE id = ? AND user_id = ?"
+    )
+    .get(messageId, userId) as { id: string; conversation_id: string } | undefined;
+  if (!target) {
+    throw new Error("Message not found.");
+  }
+
+  const conversation = db
+    .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+    .get(target.conversation_id, userId) as { id?: string } | undefined;
+  if (!conversation?.id) {
+    throw new Error("Conversation not found.");
+  }
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    db.prepare("DELETE FROM messages WHERE id = ? AND user_id = ?").run(messageId, userId);
+    const summaryDelete = db
+      .prepare(
+        "DELETE FROM memory_summaries WHERE user_id = ? AND conversation_id = ?"
+      )
+      .run(userId, target.conversation_id);
+    db.prepare(
+      "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+    ).run(new Date().toISOString(), target.conversation_id, userId);
+    db.exec("COMMIT");
+    return {
+      conversationId: target.conversation_id,
+      deletedSummaries: Number(summaryDelete.changes ?? 0),
     };
   } catch (error) {
     db.exec("ROLLBACK");

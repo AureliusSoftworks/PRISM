@@ -1,14 +1,23 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  BOT_FACT_KEY_LABELS,
   BOT_PROFILE_META_END,
   BOT_PROFILE_META_START,
+  ageFromIsoBirthday,
   composeBotProfileProse,
+  composeAugmentedImagePrompt,
+  buildImagePersonaContext,
+  DEFAULT_BOT_PROFILE_FIELDS,
+  listBotProfileFacts,
+  parseIsoYmdParts,
   parseStoredBotPrompt,
   randomBotProfile,
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
   stripPurposeStatementPrefixes,
+  westernZodiacFromIsoBirthday,
+  westernZodiacSignFromMonthDay,
 } from "./botProfile.ts";
 
 describe("bot profile serialization", () => {
@@ -154,5 +163,364 @@ describe("bot profile serialization", () => {
     assert.equal(profile.v, 2);
     assert.match(prose, /Purpose:/);
     assert.match(stored, /"v":2/);
+  });
+
+  it("random die profiles always set political perspective for the customizer slider", () => {
+    const politicalScale = [-2, -1, 0, 1, 2] as const;
+    for (let i = 0; i < 48; i++) {
+      const profile = randomBotProfile("Roll");
+      assert.ok(
+        profile.worldview.politicalView !== null
+          && politicalScale.includes(profile.worldview.politicalView),
+        `expected politicalView in [-2..2], got ${String(profile.worldview.politicalView)}`
+      );
+    }
+  });
+
+  it("defaults a missing facts section to empty", () => {
+    const profile = parseStoredBotPrompt("").fields;
+
+    assert.equal(profile.facts.birthday, "");
+    assert.equal(profile.facts.birthYear, "");
+    assert.equal(profile.facts.birthEra, "ad");
+    assert.equal(profile.facts.basedOnRealPersonOrCharacter, false);
+    assert.deepEqual(profile.facts.customFacts, []);
+  });
+
+  it("round-trips the birthday and custom facts", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthday = "1942-10-29";
+    profile.facts.birthYear = "1942";
+    profile.facts.customFacts = [
+      { label: "Catchphrase", value: "Happy little trees" },
+      { label: "Signature method", value: "Wet-on-wet oil painting" },
+    ];
+
+    const stored = serializeStoredBotPrompt(profile, "Bob Ross");
+    const parsed = parseStoredBotPrompt(stored).fields;
+
+    const stripRowIds = (facts: BotFactsProfile) => ({
+      birthday: facts.birthday,
+      birthYear: facts.birthYear,
+      birthEra: facts.birthEra,
+      customFacts: facts.customFacts.map(({ label, value }) => ({ label, value })),
+    });
+    assert.deepEqual(stripRowIds(parsed.facts), stripRowIds(profile.facts));
+  });
+
+  it("composes facts as canon prose so the model treats them as immutable", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthday = "1942-10-29";
+    profile.facts.birthYear = "1942";
+    profile.facts.customFacts = [
+      { label: "Catchphrase", value: "Happy little trees" },
+    ];
+
+    const prose = composeBotProfileProse(profile, "Bob Ross");
+
+    assert.match(prose, /Permanent facts \(canon, do not contradict\):/);
+    assert.match(prose, /Birthday: October 29, 1942/);
+    assert.match(prose, /Catchphrase: Happy little trees/);
+  });
+
+  it("uses canonical appearance guidance when flagged as real person/character", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.basedOnRealPersonOrCharacter = true;
+    profile.appearance.description = "old man with round spectacles";
+
+    const prose = composeBotProfileProse(profile, "Carl Jung");
+    assert.match(prose, /canonical real\/canon likeness/i);
+    assert.doesNotMatch(prose, /old man with round spectacles/i);
+
+    const rows = listBotProfileFacts(profile.facts);
+    assert.equal(rows[0]?.key, "known-entity");
+    assert.equal(rows[0]?.value, "Yes");
+  });
+
+  it("lists only filled facts, with a stable order and label", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthday = "1942-10-29";
+    profile.facts.customFacts = [
+      { label: "Catchphrase", value: "Happy little trees" },
+      { label: "", value: "" },
+    ];
+
+    const list = listBotProfileFacts(profile.facts);
+
+    assert.equal(list[0]?.key, "birthday");
+    assert.ok(
+      list[1]?.key.startsWith("custom:"),
+      "custom fact key should use custom: prefix"
+    );
+    assert.equal(list[0]?.label, BOT_FACT_KEY_LABELS.birthday);
+    assert.equal(list[1]?.label, "Catchphrase");
+    assert.equal(list[1]?.value, "Happy little trees");
+  });
+
+  it("formats ISO birthdays for display while leaving free-text values alone", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthday = "1942-10-29";
+
+    const rows = listBotProfileFacts(profile.facts);
+    const birthday = rows.find((row) => row.key === "birthday");
+
+    assert.ok(birthday, "birthday row should be present");
+    assert.equal(birthday?.value, "October 29, 1942");
+
+    // Legacy free-text birthdays must still display literally rather than
+    // disappear when the formatter cannot parse them.
+    profile.facts.birthday = "an unmarked Tuesday";
+    const legacyRows = listBotProfileFacts(profile.facts);
+    assert.equal(
+      legacyRows.find((row) => row.key === "birthday")?.value,
+      "an unmarked Tuesday"
+    );
+  });
+
+  it("represents BC births as era-aware years instead of present-day ages", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthEra = "bc";
+    profile.facts.birthYear = "256";
+    profile.facts.birthday = "1942-10-29";
+
+    const stored = serializeStoredBotPrompt(profile, "Hannibal");
+    const parsed = parseStoredBotPrompt(stored).fields;
+    const rows = listBotProfileFacts(parsed.facts);
+    const prose = composeBotProfileProse(parsed, "Hannibal");
+
+    assert.equal(parsed.facts.birthday, "");
+    assert.equal(rows[0]?.key, "birth-year");
+    assert.equal(rows[0]?.value, "256 BC");
+    assert.match(prose, /Birth year: 256 BC/);
+    assert.doesNotMatch(prose, /Birthday:/);
+  });
+
+  it("supports AD year-only birth facts when a full date is unknown", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthEra = "ad";
+    profile.facts.birthYear = "256";
+
+    const rows = listBotProfileFacts(profile.facts);
+
+    assert.equal(rows[0]?.key, "birth-year");
+    assert.equal(rows[0]?.value, "256 AD");
+  });
+
+  it("random birthdays are always ISO YYYY-MM-DD when populated", () => {
+    let isoCount = 0;
+    let populatedCount = 0;
+    const trials = 64;
+    for (let i = 0; i < trials; i += 1) {
+      const profile = randomBotProfile("Random");
+      const value = profile.facts.birthday;
+      if (!value) continue;
+      populatedCount += 1;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) isoCount += 1;
+      assert.equal(profile.facts.birthEra, "ad");
+      assert.equal(profile.facts.birthYear, String(Number(value.slice(0, 4))));
+    }
+    assert.ok(populatedCount > 0, "expected at least one populated birthday");
+    assert.equal(
+      isoCount,
+      populatedCount,
+      `every populated random birthday should be ISO YYYY-MM-DD; ${populatedCount - isoCount} were not`
+    );
+  });
+
+  it("randomized profiles populate the Facts section most of the time", () => {
+    let withFacts = 0;
+    const trials = 64;
+    for (let i = 0; i < trials; i += 1) {
+      const profile = randomBotProfile("Random");
+      const facts = profile.facts;
+      const filled = Boolean(
+        facts.birthday.trim() ||
+        facts.basedOnRealPersonOrCharacter ||
+        facts.customFacts.length > 0
+      );
+      if (filled) withFacts += 1;
+    }
+    // Birthday rolls at 0.85 and custom facts roll independently, so the
+    // chance of a single trial producing no facts is well under 15%. Across
+    // 64 trials we expect the vast majority to fill something.
+    assert.ok(
+      withFacts >= trials - 16,
+      `Expected at least ${trials - 16} of ${trials} random profiles to fill facts; got ${withFacts}.`
+    );
+  });
+
+  it("keeps surreal terms limited in a single randomized profile", () => {
+    const surrealTerm = /\b(?:eldritch|haunted|ghost|goblin|portal|cryptid|wizard|storm drain|space mall|accordion|cloud dentist|emotional forklift)\b/gi;
+    const trials = 96;
+
+    for (let i = 0; i < trials; i += 1) {
+      const profile = randomBotProfile("Random");
+      const text = [
+        profile.purpose.statement,
+        profile.core.traits,
+        profile.core.interests,
+        profile.core.quirks,
+        profile.identity.role,
+        profile.identity.background,
+        profile.appearance.description,
+        profile.worldview.values,
+      ].join(" ");
+      const hits = (text.match(surrealTerm) ?? []).length;
+      assert.ok(
+        hits <= 1,
+        `Expected at most 1 surreal term in a profile, got ${hits}: ${text}`
+      );
+    }
+  });
+
+  it("stays unique across a short randomization burst", () => {
+    const signatures = new Set<string>();
+    const trials = 18;
+
+    for (let i = 0; i < trials; i += 1) {
+      const profile = randomBotProfile("Random");
+      signatures.add(
+        [
+          profile.purpose.statement,
+          profile.core.traits,
+          profile.identity.role,
+          profile.appearance.description,
+          profile.worldview.values,
+        ]
+          .join("|")
+          .toLowerCase()
+      );
+    }
+
+    assert.ok(
+      signatures.size >= 14,
+      `Expected at least 14 unique profiles in ${trials} rolls; got ${signatures.size}.`
+    );
+  });
+
+  it("ignores malformed customFacts entries during parse", () => {
+    const stored = [
+      "Old prose",
+      BOT_PROFILE_META_START,
+      JSON.stringify({
+        v: 2,
+        purpose: { statement: "", legacyNotes: "" },
+        core: {},
+        identity: {},
+        worldview: {},
+        appearance: {},
+        facts: {
+          birthday: "1942-10-29",
+          customFacts: [
+            { label: "Catchphrase", value: "Happy little trees" },
+            "not an object",
+            { label: "", value: "" },
+            null,
+          ],
+        },
+      }),
+      BOT_PROFILE_META_END,
+    ].join("\n");
+
+    const parsed = parseStoredBotPrompt(stored).fields;
+
+    assert.equal(parsed.facts.birthday, "1942-10-29");
+    assert.equal(parsed.facts.customFacts.length, 1);
+    assert.equal(parsed.facts.customFacts[0]?.label, "Catchphrase");
+    assert.equal(parsed.facts.customFacts[0]?.value, "Happy little trees");
+    assert.ok(
+      parsed.facts.customFacts[0]?.rowId && parsed.facts.customFacts[0].rowId.length > 0,
+      "expected a generated rowId"
+    );
+  });
+});
+
+describe("birthday age and zodiac helpers", () => {
+  it("parseIsoYmdParts accepts real dates and rejects calendar impossibilities", () => {
+    assert.deepEqual(parseIsoYmdParts("2004-02-29"), {
+      year: 2004,
+      month: 2,
+      day: 29,
+    });
+    assert.equal(parseIsoYmdParts("2001-02-29"), null);
+    assert.equal(parseIsoYmdParts("not-a-date"), null);
+  });
+
+  it("computes whole-year age in the reference timezone's local calendar", () => {
+    const ref = new Date(2026, 4, 11);
+    assert.equal(ageFromIsoBirthday("1965-06-07", ref), 60);
+    assert.equal(ageFromIsoBirthday("1965-05-02", ref), 61);
+    assert.equal(ageFromIsoBirthday("2000-05-11", ref), 26);
+    assert.equal(ageFromIsoBirthday("2027-01-01", ref), null);
+  });
+
+  it("maps tropical zodiac from ISO birthdays and month/day boundaries", () => {
+    assert.equal(westernZodiacFromIsoBirthday("1965-06-07")?.id, "gemini");
+    assert.equal(westernZodiacFromIsoBirthday("1942-10-29")?.id, "scorpio");
+    assert.equal(westernZodiacFromIsoBirthday("invalid")?.id, undefined);
+
+    assert.equal(westernZodiacSignFromMonthDay(12, 21)?.id, "sagittarius");
+    assert.equal(westernZodiacSignFromMonthDay(12, 22)?.id, "capricorn");
+    assert.equal(westernZodiacSignFromMonthDay(1, 19)?.id, "capricorn");
+    assert.equal(westernZodiacSignFromMonthDay(1, 20)?.id, "aquarius");
+    assert.equal(westernZodiacSignFromMonthDay(3, 20)?.id, "pisces");
+    assert.equal(westernZodiacSignFromMonthDay(3, 21)?.id, "aries");
+  });
+});
+
+describe("image persona context", () => {
+  it("falls back to the bot name when the stored profile is empty", () => {
+    const ctx = buildImagePersonaContext({
+      botName: "Pat",
+      systemPrompt: "",
+      maxChars: 200,
+    });
+    assert.equal(ctx, "Character: Pat.");
+  });
+
+  it("includes appearance and caps long persona prose", () => {
+    const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+    fields.appearance.description = "Tall, silver hair";
+    fields.appearance.style = "cozy knits";
+    fields.identity.role = "librarian";
+    fields.purpose.statement = "x".repeat(400);
+    const stored = serializeStoredBotPrompt(fields, "River");
+    const ctx = buildImagePersonaContext({
+      botName: "River",
+      systemPrompt: stored,
+      maxChars: 500,
+    });
+    assert.ok(ctx.includes("River"));
+    assert.ok(ctx.includes("librarian"));
+    assert.ok(ctx.includes("silver hair"));
+    assert.ok(ctx.length <= 500);
+    assert.ok(!ctx.includes("x".repeat(300)));
+  });
+
+  it("composeAugmentedImagePrompt appends the scene request", () => {
+    const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+    fields.appearance.description = "round glasses";
+    const stored = serializeStoredBotPrompt(fields, "Mo");
+    const full = composeAugmentedImagePrompt({
+      botName: "Mo",
+      systemPrompt: stored,
+      userPrompt: "reading under a tree",
+    });
+    assert.ok(full.includes("Scene request: reading under a tree"));
+    assert.ok(full.startsWith("Character:"));
+  });
+
+  it("prefers canonical likeness when facts flag says this is a known person/character", () => {
+    const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+    fields.appearance.description = "old man with round glasses";
+    fields.facts.basedOnRealPersonOrCharacter = true;
+    const stored = serializeStoredBotPrompt(fields, "Carl Jung");
+    const ctx = buildImagePersonaContext({
+      botName: "Carl Jung",
+      systemPrompt: stored,
+      maxChars: 500,
+    });
+    assert.ok(ctx.includes("canonical likeness of Carl Jung"));
+    assert.ok(!ctx.includes("old man with round glasses"));
   });
 });

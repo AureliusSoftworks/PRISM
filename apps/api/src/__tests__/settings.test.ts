@@ -18,12 +18,25 @@ import {
 
 function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
   return {
+    displayName: "Alex",
     theme: "dark",
     preferredProvider: "local",
     providerLocked: 0,
     autoMemory: 1,
+    composerWritingAssist: 1,
+    fallbackModelMessageStripe: 1,
     hiddenBotModelIds: "[]",
+    preferredLocalModel: null,
+    preferredOnlineModel: null,
+    lenientLocalFallbackModel: null,
+    lenientLocalImageFallbackModel: null,
     secondaryOllamaHost: null,
+    comfyUiHost: null,
+    preferredLocalImageModel: null,
+    preferredOpenAiImageModel: null,
+    comfyUiWorkflows: [],
+    prismDefaultLlmModel: null,
+    prismImageToolLlmModel: null,
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
@@ -53,6 +66,29 @@ describe("resolveNextSettings — theme", () => {
   it("keeps the stored theme when the value is garbage", () => {
     const next = resolveNextSettings({ theme: "purple" }, baseline({ theme: "light" }));
     assert.equal(next.theme, "light");
+  });
+});
+
+describe("resolveNextSettings — displayName", () => {
+  it("stores trimmed displayName", () => {
+    const next = resolveNextSettings({ displayName: "  Jordan  " }, baseline());
+    assert.equal(next.displayName, "Jordan");
+  });
+
+  it("keeps the stored displayName when field is missing, empty, or invalid", () => {
+    const current = baseline({ displayName: "Taylor" });
+    assert.equal(resolveNextSettings({}, current).displayName, "Taylor");
+    assert.equal(resolveNextSettings({ displayName: "   " }, current).displayName, "Taylor");
+    assert.equal(
+      resolveNextSettings({ displayName: 42 as unknown as string }, current).displayName,
+      "Taylor"
+    );
+  });
+
+  it("caps displayName length at 80 characters", () => {
+    const veryLong = `${"a".repeat(100)}`;
+    const next = resolveNextSettings({ displayName: veryLong }, baseline());
+    assert.equal(next.displayName.length, 80);
   });
 });
 
@@ -125,6 +161,68 @@ describe("resolveNextSettings — autoMemory", () => {
   });
 });
 
+describe("resolveNextSettings — composerWritingAssist", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { composerWritingAssist: false },
+        baseline({ composerWritingAssist: 1 })
+      ).composerWritingAssist,
+      0
+    );
+    assert.equal(
+      resolveNextSettings(
+        { composerWritingAssist: true },
+        baseline({ composerWritingAssist: 0 })
+      ).composerWritingAssist,
+      1
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ composerWritingAssist: 0 });
+    assert.equal(resolveNextSettings({}, current).composerWritingAssist, 0);
+    assert.equal(
+      resolveNextSettings(
+        { composerWritingAssist: "true" as unknown as boolean },
+        current
+      ).composerWritingAssist,
+      0
+    );
+  });
+});
+
+describe("resolveNextSettings — fallbackModelMessageStripe", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { fallbackModelMessageStripe: false },
+        baseline({ fallbackModelMessageStripe: 1 })
+      ).fallbackModelMessageStripe,
+      0
+    );
+    assert.equal(
+      resolveNextSettings(
+        { fallbackModelMessageStripe: true },
+        baseline({ fallbackModelMessageStripe: 0 })
+      ).fallbackModelMessageStripe,
+      1
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ fallbackModelMessageStripe: 0 });
+    assert.equal(resolveNextSettings({}, current).fallbackModelMessageStripe, 0);
+    assert.equal(
+      resolveNextSettings(
+        { fallbackModelMessageStripe: "false" as unknown as boolean },
+        current
+      ).fallbackModelMessageStripe,
+      0
+    );
+  });
+});
+
 describe("resolveNextSettings — hiddenBotModelIds", () => {
   it("accepts a unique trimmed string list", () => {
     const next = resolveNextSettings(
@@ -154,6 +252,101 @@ describe("resolveNextSettings — hiddenBotModelIds", () => {
       resolveNextSettings({ hiddenBotModelIds: "nope" }, current).hiddenBotModelIds,
       ["gpt-3.5-turbo"]
     );
+  });
+});
+
+describe("resolveNextSettings — prismDefaultLlmModel", () => {
+  it("stores trimmed override and clears with empty string", () => {
+    const next = resolveNextSettings({ prismDefaultLlmModel: " mistral:latest " }, baseline());
+    assert.equal(next.prismDefaultLlmModel, "mistral:latest");
+    const cleared = resolveNextSettings(
+      { prismDefaultLlmModel: "" },
+      baseline({ prismDefaultLlmModel: "mistral:latest" })
+    );
+    assert.equal(cleared.prismDefaultLlmModel, null);
+  });
+});
+
+describe("resolveNextSettings — prismImageToolLlmModel", () => {
+  it("stores trimmed override and clears with empty string", () => {
+    const next = resolveNextSettings(
+      { prismImageToolLlmModel: " qwen3:latest " },
+      baseline()
+    );
+    assert.equal(next.prismImageToolLlmModel, "qwen3:latest");
+    const cleared = resolveNextSettings(
+      { prismImageToolLlmModel: "" },
+      baseline({ prismImageToolLlmModel: "qwen3:latest" })
+    );
+    assert.equal(cleared.prismImageToolLlmModel, null);
+  });
+});
+
+describe("resolveNextSettings — preferred auto models", () => {
+  it("stores trimmed values for local + online model hints", () => {
+    const next = resolveNextSettings(
+      { preferredLocalModel: " llama3.2 ", preferredOnlineModel: " gpt-4o-mini " },
+      baseline()
+    );
+    assert.equal(next.preferredLocalModel, "llama3.2");
+    assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
+  });
+
+  it("clears each preference independently with empty string", () => {
+    const current = baseline({
+      preferredLocalModel: "llama3.2",
+      preferredOnlineModel: "gpt-4o-mini",
+    });
+    const next = resolveNextSettings(
+      { preferredLocalModel: "", preferredOnlineModel: " " },
+      current
+    );
+    assert.equal(next.preferredLocalModel, null);
+    assert.equal(next.preferredOnlineModel, null);
+  });
+
+  it("keeps existing values when invalid types are sent", () => {
+    const current = baseline({
+      preferredLocalModel: "llama3.2",
+      preferredOnlineModel: "gpt-4o-mini",
+    });
+    const next = resolveNextSettings(
+      {
+        preferredLocalModel: 42 as unknown as string,
+        preferredOnlineModel: true as unknown as string,
+      },
+      current
+    );
+    assert.equal(next.preferredLocalModel, "llama3.2");
+    assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
+  });
+
+  it("stores and clears the lenient local fallback model", () => {
+    const stored = resolveNextSettings(
+      { lenientLocalFallbackModel: " llama3.1:8b " },
+      baseline()
+    );
+    assert.equal(stored.lenientLocalFallbackModel, "llama3.1:8b");
+
+    const cleared = resolveNextSettings(
+      { lenientLocalFallbackModel: " " },
+      baseline({ lenientLocalFallbackModel: "llama3.1:8b" })
+    );
+    assert.equal(cleared.lenientLocalFallbackModel, null);
+  });
+
+  it("stores and clears the lenient local image fallback model", () => {
+    const stored = resolveNextSettings(
+      { lenientLocalImageFallbackModel: " comfyui:flux.safetensors " },
+      baseline()
+    );
+    assert.equal(stored.lenientLocalImageFallbackModel, "comfyui:flux.safetensors");
+
+    const cleared = resolveNextSettings(
+      { lenientLocalImageFallbackModel: " " },
+      baseline({ lenientLocalImageFallbackModel: "comfyui:flux.safetensors" })
+    );
+    assert.equal(cleared.lenientLocalImageFallbackModel, null);
   });
 });
 
@@ -217,6 +410,71 @@ describe("resolveNextSettings — secondaryOllamaHost", () => {
         ),
       /different IP address/
     );
+  });
+});
+
+describe("resolveNextSettings — comfyUiHost", () => {
+  it("normalizes host + trims slashes", () => {
+    const next = resolveNextSettings(
+      { comfyUiHost: "192.168.1.10:8188/" },
+      baseline()
+    );
+    assert.equal(next.comfyUiHost, "http://192.168.1.10:8188");
+  });
+
+  it("clears when empty string or null", () => {
+    const current = baseline({ comfyUiHost: "http://127.0.0.1:8188" });
+    assert.equal(resolveNextSettings({ comfyUiHost: "" }, current).comfyUiHost, null);
+    assert.equal(resolveNextSettings({ comfyUiHost: null }, current).comfyUiHost, null);
+  });
+
+  it("keeps stored value when field missing or invalid type", () => {
+    const current = baseline({ comfyUiHost: "http://127.0.0.1:8188" });
+    assert.equal(resolveNextSettings({}, current).comfyUiHost, current.comfyUiHost);
+    assert.equal(
+      resolveNextSettings({ comfyUiHost: 8188 }, current).comfyUiHost,
+      current.comfyUiHost
+    );
+  });
+
+  it("throws on malformed URL", () => {
+    assert.throws(() => resolveNextSettings({ comfyUiHost: "http://" }, baseline()), /ComfyUI host/);
+  });
+});
+
+describe("resolveNextSettings — image panel model picks", () => {
+  it("stores preferred local image model id", () => {
+    const next = resolveNextSettings(
+      { preferredLocalImageModel: "x/flux2-klein-4b" },
+      baseline()
+    );
+    assert.equal(next.preferredLocalImageModel, "x/flux2-klein-4b");
+  });
+
+  it("stores preferred OpenAI image model id", () => {
+    const next = resolveNextSettings(
+      { preferredOpenAiImageModel: "dall-e-2" },
+      baseline()
+    );
+    assert.equal(next.preferredOpenAiImageModel, "dall-e-2");
+  });
+
+  it("clears local image model when given empty string", () => {
+    const current = baseline({ preferredLocalImageModel: "old" });
+    assert.equal(
+      resolveNextSettings({ preferredLocalImageModel: "" }, current).preferredLocalImageModel,
+      null
+    );
+  });
+
+  it("keeps stored ids when the patch omits them", () => {
+    const current = baseline({
+      preferredLocalImageModel: "comfyui:abc.safetensors",
+      preferredOpenAiImageModel: "dall-e-3",
+    });
+    const next = resolveNextSettings({ theme: "light" }, current);
+    assert.equal(next.preferredLocalImageModel, "comfyui:abc.safetensors");
+    assert.equal(next.preferredOpenAiImageModel, "dall-e-3");
   });
 });
 
@@ -340,6 +598,81 @@ describe("sanitizeOpenAiKeyInput", () => {
   });
 });
 
+const minimalComfyWorkflow = (): Record<string, unknown> => ({
+  "6": { class_type: "CLIPTextEncode", inputs: { text: "seed", clip: ["4", 1] } },
+  "5": { class_type: "EmptyLatentImage", inputs: { width: 512, height: 512, batch_size: 1 } },
+});
+
+const minimalComfyPatch = () => ({
+  positivePrompt: { nodeId: "6", inputKey: "text" },
+  width: { nodeId: "5", inputKey: "width" },
+  height: { nodeId: "5", inputKey: "height" },
+});
+
+describe("resolveNextSettings — comfyUiWorkflows", () => {
+  it("keeps current workflows when the field is omitted", () => {
+    const reg = [
+      {
+        id: "w1",
+        label: "W",
+        workflow: minimalComfyWorkflow(),
+        patch: minimalComfyPatch(),
+      },
+    ];
+    const next = resolveNextSettings({}, baseline({ comfyUiWorkflows: reg }));
+    assert.deepEqual(next.comfyUiWorkflows, reg);
+  });
+
+  it("replaces workflows when a valid array is sent", () => {
+    const reg = [
+      {
+        id: "flux-txt",
+        label: "Flux",
+        workflow: minimalComfyWorkflow(),
+        patch: minimalComfyPatch(),
+      },
+    ];
+    const next = resolveNextSettings({ comfyUiWorkflows: reg }, baseline());
+    assert.equal(next.comfyUiWorkflows.length, 1);
+    assert.equal(next.comfyUiWorkflows[0]?.id, "flux-txt");
+  });
+
+  it("throws when patch positivePrompt points at a missing input key", () => {
+    assert.throws(
+      () =>
+        resolveNextSettings(
+          {
+            comfyUiWorkflows: [
+              {
+                id: "bad",
+                label: "Bad",
+                workflow: minimalComfyWorkflow(),
+                patch: { positivePrompt: { nodeId: "6", inputKey: "nope" } },
+              },
+            ],
+          },
+          baseline()
+        ),
+      /no input/
+    );
+  });
+
+  it("accepts remotePath-only binding without inline workflow", () => {
+    const reg = [
+      {
+        id: "bind",
+        label: "Bind",
+        remotePath: "default/workflows/foo.json",
+        patch: minimalComfyPatch(),
+      },
+    ];
+    const next = resolveNextSettings({ comfyUiWorkflows: reg }, baseline());
+    assert.equal(next.comfyUiWorkflows.length, 1);
+    assert.equal(next.comfyUiWorkflows[0]?.remotePath, "default/workflows/foo.json");
+    assert.equal(next.comfyUiWorkflows[0]?.workflow, undefined);
+  });
+});
+
 describe("resolveNextSettings — independence", () => {
   // A partial PATCH must never clobber unrelated fields. This is the property
   // that makes the settings UI feel reliable.
@@ -349,12 +682,16 @@ describe("resolveNextSettings — independence", () => {
       preferredProvider: "openai",
       providerLocked: 1,
       autoMemory: 0,
+      composerWritingAssist: 0,
+      fallbackModelMessageStripe: 0,
     });
     const next = resolveNextSettings({ theme: "system" }, current);
     assert.equal(next.theme, "system");
     assert.equal(next.preferredProvider, "openai");
     assert.equal(next.providerLocked, 1);
     assert.equal(next.autoMemory, 0);
+    assert.equal(next.composerWritingAssist, 0);
+    assert.equal(next.fallbackModelMessageStripe, 0);
     assert.deepEqual(next.openAiKeyIntent, { action: "keep" });
   });
 

@@ -1,13 +1,16 @@
+import type { ComfyUiWorkflowRegistration } from "@localai/shared";
+import { validateComfyUiWorkflowsPayload } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 
 /**
  * Pure validation + merge logic for PATCH /api/settings.
  *
  * Extracted from `server.ts` so the theme/provider/lock/openAiKey semantics
- * can be unit-tested without standing up an HTTP server. This file intentionally
- * has zero runtime dependencies beyond types — every branch is a plain function
- * of `body` and `current`, which is what makes it safe to pin in tests and
- * cheap to reason about when adding new fields.
+ * can be unit-tested without standing up an HTTP server. This file keeps
+ * runtime dependencies minimal (shared validation for ComfyUI workflow JSON);
+ * every merge branch is a plain function of `body` and `current`, which is
+ * what makes it safe to pin in tests and cheap to reason about when adding
+ * new fields.
  *
  * Any future setting added to the PATCH handler should be plumbed through
  * `resolveNextSettings` with a matching test case in
@@ -29,23 +32,53 @@ const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
 
 /** Current persisted settings loaded from the users table. */
 export interface CurrentSettings {
+  displayName: string;
   theme: Theme;
   preferredProvider: Provider;
   providerLocked: number;
   autoMemory: number;
+  composerWritingAssist: number;
+  /** 1 = show left-edge stripe on assistant bubbles when the copyright lenient fallback answered. */
+  fallbackModelMessageStripe: number;
   hiddenBotModelIds: string;
+  preferredLocalModel: string | null;
+  preferredOnlineModel: string | null;
+  lenientLocalFallbackModel: string | null;
+  lenientLocalImageFallbackModel: string | null;
   secondaryOllamaHost: string | null;
+  comfyUiHost: string | null;
+  preferredLocalImageModel: string | null;
+  preferredOpenAiImageModel: string | null;
+  /** Parsed `users.comfyui_workflows` JSON; empty when unset or invalid. */
+  comfyUiWorkflows: ComfyUiWorkflowRegistration[];
+  /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
+  prismDefaultLlmModel: string | null;
+  /** Null/empty → use normal hub chat model for turns that emit `sendGeneratedImage`. */
+  prismImageToolLlmModel: string | null;
   primaryOllamaHost: string;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
 export interface NextSettings {
+  displayName: string;
   theme: Theme;
   preferredProvider: Provider;
   providerLocked: number;
   autoMemory: number;
+  composerWritingAssist: number;
+  fallbackModelMessageStripe: number;
   hiddenBotModelIds: string[];
+  preferredLocalModel: string | null;
+  preferredOnlineModel: string | null;
+  lenientLocalFallbackModel: string | null;
+  lenientLocalImageFallbackModel: string | null;
   secondaryOllamaHost: string | null;
+  comfyUiHost: string | null;
+  preferredLocalImageModel: string | null;
+  preferredOpenAiImageModel: string | null;
+  comfyUiWorkflows: ComfyUiWorkflowRegistration[];
+  prismDefaultLlmModel: string | null;
+  prismImageToolLlmModel: string | null;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -88,6 +121,34 @@ function normalizeOllamaHostValue(input: string): string {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Second Ollama host must use http:// or https://.");
+  }
+  return normalized;
+}
+
+function normalizeComfyUiHostValue(input: string): string {
+  const raw = input.trim();
+  if (!raw) {
+    return "";
+  }
+
+  let normalized = raw;
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `http://${normalized}`;
+  }
+  normalized = normalized.replace(
+    /\/\/0\.0\.0\.0(?=$|[:\/])/i,
+    "//127.0.0.1"
+  );
+  normalized = normalized.replace(/\/+$/, "");
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error("ComfyUI host must be a valid host or URL.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("ComfyUI host must use http:// or https://.");
   }
   return normalized;
 }
@@ -143,6 +204,38 @@ export function normalizeOllamaHostForStatusCheck(value: unknown): string | null
   return normalizeOllamaHostValue(trimmed);
 }
 
+/**
+ * Normalize ComfyUI base URL for connectivity probes (same rules as Ollama URL normalization).
+ */
+export function normalizeComfyUiHostForStatusCheck(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return normalizeComfyUiHostValue(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeComfyUiHostInput(
+  value: unknown
+): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  if (value.trim().length === 0) {
+    return null;
+  }
+  return normalizeComfyUiHostValue(value.trim());
+}
+
 export function parseHiddenBotModelIds(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
@@ -171,6 +264,20 @@ function readHiddenBotModelIds(value: unknown, fallback: string): string[] {
         .filter(Boolean)
     )
   ));
+}
+
+function readPreferredModel(value: unknown, fallback: string | null): string | null {
+  if (value === undefined) return fallback;
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function readDisplayName(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return fallback;
+  return trimmed.slice(0, 80);
 }
 
 /**
@@ -221,6 +328,7 @@ export function resolveNextSettings(
   body: Record<string, unknown>,
   current: CurrentSettings
 ): NextSettings {
+  const displayName = readDisplayName(body.displayName, current.displayName);
   const theme: Theme = isTheme(body.theme) ? body.theme : current.theme;
   const preferredProvider: Provider = isProvider(body.preferredProvider)
     ? body.preferredProvider
@@ -233,9 +341,33 @@ export function resolveNextSettings(
     typeof body.autoMemory === "boolean"
       ? Number(body.autoMemory)
       : current.autoMemory;
+  const composerWritingAssist =
+    typeof body.composerWritingAssist === "boolean"
+      ? Number(body.composerWritingAssist)
+      : current.composerWritingAssist;
+  const fallbackModelMessageStripe =
+    typeof body.fallbackModelMessageStripe === "boolean"
+      ? Number(body.fallbackModelMessageStripe)
+      : current.fallbackModelMessageStripe;
   const hiddenBotModelIds = readHiddenBotModelIds(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
+  );
+  const preferredLocalModel = readPreferredModel(
+    body.preferredLocalModel,
+    current.preferredLocalModel
+  );
+  const preferredOnlineModel = readPreferredModel(
+    body.preferredOnlineModel,
+    current.preferredOnlineModel
+  );
+  const lenientLocalFallbackModel = readPreferredModel(
+    body.lenientLocalFallbackModel,
+    current.lenientLocalFallbackModel
+  );
+  const lenientLocalImageFallbackModel = readPreferredModel(
+    body.lenientLocalImageFallbackModel,
+    current.lenientLocalImageFallbackModel
   );
   const normalizedSecondaryOllamaHost = normalizeSecondaryOllamaHostInput(
     body.secondaryOllamaHost,
@@ -245,6 +377,32 @@ export function resolveNextSettings(
     normalizedSecondaryOllamaHost === undefined
       ? current.secondaryOllamaHost
       : normalizedSecondaryOllamaHost;
+
+  const normalizedComfyUiHost = normalizeComfyUiHostInput(body.comfyUiHost);
+  const comfyUiHost =
+    normalizedComfyUiHost === undefined ? current.comfyUiHost : normalizedComfyUiHost;
+
+  const preferredLocalImageModel = readPreferredModel(
+    body.preferredLocalImageModel,
+    current.preferredLocalImageModel
+  );
+  const preferredOpenAiImageModel = readPreferredModel(
+    body.preferredOpenAiImageModel,
+    current.preferredOpenAiImageModel
+  );
+  const prismDefaultLlmModel = readPreferredModel(
+    body.prismDefaultLlmModel,
+    current.prismDefaultLlmModel
+  );
+  const prismImageToolLlmModel = readPreferredModel(
+    body.prismImageToolLlmModel,
+    current.prismImageToolLlmModel
+  );
+
+  const comfyUiWorkflows =
+    body.comfyUiWorkflows === undefined
+      ? current.comfyUiWorkflows
+      : validateComfyUiWorkflowsPayload(body.comfyUiWorkflows);
 
   let openAiKeyIntent: NextSettings["openAiKeyIntent"] = { action: "keep" };
   if (typeof body.openAiApiKey === "string") {
@@ -264,12 +422,25 @@ export function resolveNextSettings(
   }
 
   return {
+    displayName,
     theme,
     preferredProvider,
     providerLocked,
     autoMemory,
+    composerWritingAssist,
+    fallbackModelMessageStripe,
     hiddenBotModelIds,
+    preferredLocalModel,
+    preferredOnlineModel,
+    lenientLocalFallbackModel,
+    lenientLocalImageFallbackModel,
     secondaryOllamaHost,
+    comfyUiHost,
+    preferredLocalImageModel,
+    preferredOpenAiImageModel,
+    comfyUiWorkflows,
+    prismDefaultLlmModel,
+    prismImageToolLlmModel,
     openAiKeyIntent,
   };
 }

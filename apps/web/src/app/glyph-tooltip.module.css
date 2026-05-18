@@ -1,0 +1,54 @@
+.glyphTooltip {
+  position: fixed;
+  z-index: 4000;
+  pointer-events: none;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  box-shadow: var(--shadow-lg);
+  color: var(--fg);
+  font-size: 11.5px;
+  line-height: 1.35;
+  white-space: normal;
+  text-align: center;
+}
+
+.glyphTooltipTop {
+  transform-origin: center bottom;
+  animation: glyphTooltipInTop 0.12s ease-out;
+}
+
+.glyphTooltipBottom {
+  transform-origin: center top;
+  animation: glyphTooltipInBottom 0.12s ease-out;
+}
+
+@keyframes glyphTooltipInTop {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes glyphTooltipInBottom {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .glyphTooltip {
+    display: none;
+  }
+}

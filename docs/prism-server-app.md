@@ -1,5 +1,8 @@
 # Prism Server.app
 
+> Archived reference only: Prism now ships as standalone Prism Desktop. This
+> runbook is non-canonical and retained only for historical migration context.
+
 Prism Server.app is the native macOS Dock app for the Prism server runtime. It
 wraps the existing Node API into a desktop app that can be signed, notarized,
 and distributed as a DMG.
@@ -84,6 +87,7 @@ launches the server API plus a hidden web surface for paired clients:
 The first-run window also exposes user-approved setup actions:
 
 - **Start Memory Engine** starts the managed Qdrant sidecar when Prism owns it.
+- **Install Ollama** runs `brew install --cask ollama` when Homebrew is available and Ollama is missing.
 - **Download Model** runs `ollama pull <configured-model>` only after the user
   clicks the button and Ollama is reachable.
 
@@ -126,10 +130,10 @@ acceleration path.
 First-run behavior:
 
 - If Ollama is already installed and reachable, use it.
-- If Ollama is missing, offer a clear "Install Ollama" action that opens or runs
-  the official install path with user consent.
-- If the default model is missing, offer a "Download default model" action with
-  visible progress and disk-size expectations.
+- If Ollama is missing and Homebrew is available, Prism can install Ollama from
+  the launcher.
+- If the default model is missing, Prism can pull required models during setup
+  (or from the "Download default model" action).
 
 Future Settings behavior:
 

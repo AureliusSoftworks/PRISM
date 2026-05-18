@@ -1,5 +1,13 @@
 # Prism App Store Review Checklist
 
+> **Status: Historical.** Prism does not ship through the App Store under the
+> current distribution model; see
+> [distribution-model.md](distribution-model.md). The Mac client is a
+> Developer ID signed and notarized DMG distributed from GitHub Releases, and
+> the iPhone client is a Progressive Web App served by Prism Server. This
+> review checklist is retained for archive only, in case App Store
+> distribution is ever revisited.
+
 This checklist prepares the official Prism iOS/Mac client for App Store review.
 The app should be submitted as a native companion client for a required
 user-controlled Prism Server.

@@ -1,5 +1,8 @@
 # Prism Server for Windows
 
+> Archived reference only: Prism now ships as standalone Prism Desktop. This
+> runbook is non-canonical and retained only for historical migration context.
+
 Prism Server for Windows is the native tray-app wrapper for the Prism server runtime. It mirrors the macOS Prism Server.app experience while using a normal Windows installer wizard and per-user install location.
 
 ## Product Experience Target
@@ -71,7 +74,9 @@ The setup window checks:
 - Ollama `/api/tags` at the configured `OLLAMA_HOST`
 - The configured default Ollama model
 
-Ollama is not bundled and is not chain-installed by the wizard. The app detects it on first run and can run `ollama pull <configured-model>` after the user clicks the download action.
+Ollama is not bundled and is not chain-installed by the wizard. The app detects
+it on first run and, when `winget` is available, can install Ollama directly
+from the launcher before pulling required models.
 
 ## Firewall Notes
 

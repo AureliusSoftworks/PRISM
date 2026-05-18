@@ -13,44 +13,8 @@ fi
 
 cd "${REPO_ROOT}"
 
-echo "Building Prism server runtime..."
-npm run build
-
-rm -rf "${OUTPUT_DIR}"
-mkdir -p "${OUTPUT_DIR}"
-
-echo "Staging API runtime..."
-mkdir -p "${OUTPUT_DIR}/apps/api" "${OUTPUT_DIR}/apps/web/.next" "${OUTPUT_DIR}/node_modules/@localai"
-API_DIST_SOURCE="apps/api/dist"
-if [ -f "apps/api/dist/apps/api/src/server.js" ]; then
-  # TypeScript emits the API under the monorepo-relative path because the app
-  # imports workspace packages via tsconfig paths. Flatten just the API output
-  # into the runtime shape that RuntimeManager launches.
-  API_DIST_SOURCE="apps/api/dist/apps/api/src"
-fi
-ditto "${API_DIST_SOURCE}" "${OUTPUT_DIR}/apps/api/dist"
-if [ ! -f "${OUTPUT_DIR}/apps/api/dist/server.js" ]; then
-  echo "Missing staged API entrypoint: ${OUTPUT_DIR}/apps/api/dist/server.js" >&2
-  exit 1
-fi
-ditto "apps/api/package.json" "${OUTPUT_DIR}/apps/api/package.json"
-ditto "package.json" "${OUTPUT_DIR}/package.json"
-ditto "package-lock.json" "${OUTPUT_DIR}/package-lock.json"
-
-echo "Staging API production dependencies..."
-ditto "packages/config" "${OUTPUT_DIR}/node_modules/@localai/config"
-ditto "packages/shared" "${OUTPUT_DIR}/node_modules/@localai/shared"
-ditto "node_modules/dnssd-advertise" "${OUTPUT_DIR}/node_modules/dnssd-advertise"
-
-echo "Staging Next.js standalone runtime..."
-ditto "apps/web/.next/standalone" "${OUTPUT_DIR}/apps/web/.next/standalone"
-mkdir -p "${OUTPUT_DIR}/apps/web/.next/standalone/apps/web/.next"
-ditto "apps/web/.next/static" "${OUTPUT_DIR}/apps/web/.next/standalone/apps/web/.next/static"
-if [ -d "apps/web/public" ]; then
-  ditto "apps/web/public" "${OUTPUT_DIR}/apps/web/.next/standalone/apps/web/public"
-fi
-
-echo "Runtime staged at ${OUTPUT_DIR}"
+echo "Staging Prism runtime with shared script..."
+node "${REPO_ROOT}/scripts/stage-desktop-runtime.mjs" --output-dir "${OUTPUT_DIR}"
 
 NODE_OUTPUT_DIR="${RESOURCE_DIR}/node"
 if [ "${VENDOR_NODE:-0}" = "1" ]; then

@@ -18,6 +18,9 @@ function createMemoryInferenceTestDb(): DatabaseSync {
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
       confidence REAL NOT NULL,
+      category TEXT NOT NULL DEFAULT 'user',
+      tier TEXT NOT NULL DEFAULT 'short_term',
+      durability REAL NOT NULL DEFAULT 0.5,
       source TEXT NOT NULL DEFAULT 'direct',
       certainty REAL,
       source_message_ids TEXT NOT NULL DEFAULT '[]',
@@ -65,7 +68,7 @@ async function seedDirectMemories(
     "bot-1",
     texts.map((text) => ({ text, confidence: 0.92 })),
     userKey,
-    { sourceMessageIds: ["message-1"] }
+    { sourceMessageIds: ["message-1"], durability: 0.4 }
   );
 }
 
@@ -174,6 +177,47 @@ describe("inferAndStoreBotMemories", () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.source, "inferred");
     assert.equal(payload.text, "Potatoes are spuds, and they are your favorite.");
+  });
+
+  it("does not consume long-term direct memories during inference", async () => {
+    const db = createMemoryInferenceTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    const provider = inferenceProvider(
+      JSON.stringify({
+        merges: [
+          {
+            text: "Your favorite instrument is the piano.",
+            parentIndices: [1, 2],
+            certainty: 0.92,
+          },
+        ],
+      })
+    );
+    await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [
+        { text: "Your favorite instrument has black and white keys.", confidence: 0.98 },
+        { text: "You like to play the piano.", confidence: 0.98 },
+      ],
+      userKey,
+      { sourceMessageIds: ["message-1"] }
+    );
+
+    const created = await inferAndStoreBotMemories(
+      db,
+      provider,
+      "user-1",
+      "bot-1",
+      userKey
+    );
+    const rows = memoryRows(db);
+
+    assert.equal(created.length, 0);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map((row) => row.source), ["direct", "direct"]);
   });
 
   it("preserves specific favorite descriptors when merging synonyms", async () => {

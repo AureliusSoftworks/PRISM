@@ -89,6 +89,137 @@ describe("validateMemoryCandidates", () => {
     assert.deepEqual(result.rejected, []);
   });
 
+  it("normalizes bullet-style name-led memories into second-person voice", async () => {
+    const result = await validateMemoryCandidates(
+      providerWithResponse(
+        JSON.stringify({
+          results: [
+            {
+              index: 0,
+              decision: "auto_fix",
+              text: "- Jared enjoys working on an app.",
+              confidence: 0.87,
+              reasonCodes: ["subject_role_confusion"],
+            },
+          ],
+        })
+      ),
+      {
+        source: "compiled",
+        scope: "bot",
+        rawContext: "Summary output from prior chats.",
+        candidates: [{ text: "- Jared enjoys working on an app.", confidence: 0.87 }],
+      }
+    );
+
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0]?.text, "You enjoy working on an app.");
+    assert.deepEqual(result.rejected, []);
+  });
+
+  it("preserves the display name for human-user memories", async () => {
+    const result = await validateMemoryCandidates(
+      providerWithResponse(
+        JSON.stringify({
+          results: [
+            {
+              index: 0,
+              decision: "approve",
+              text: "Jared prefers spending time with kind people.",
+              confidence: 0.86,
+              reasonCodes: [],
+            },
+          ],
+        })
+      ),
+      {
+        source: "direct",
+        scope: "bot",
+        rawContext: "I prefer kind people.",
+        candidates: [{ text: "You prefer kind people.", confidence: 0.9 }],
+        userDisplayName: "Jared",
+      }
+    );
+
+    assert.equal(result.candidates.length, 1);
+    assert.equal(
+      result.candidates[0]?.text,
+      "Jared prefers spending time with kind people."
+    );
+    assert.deepEqual(result.rejected, []);
+  });
+
+  it("rewrites figurative allergy jokes into stable user preferences", async () => {
+    const result = await validateMemoryCandidates(
+      providerWithResponse(
+        JSON.stringify({
+          results: [
+            {
+              index: 0,
+              decision: "auto_fix",
+              text: "Jared prefers spending time with kind people.",
+              confidence: 0.82,
+              reasonCodes: ["figurative_preference"],
+              notes: "The allergy phrasing is a joke about disliking mean people.",
+            },
+          ],
+        })
+      ),
+      {
+        source: "direct",
+        scope: "bot",
+        rawContext: "Fun fact: I am allergic to mean people.",
+        candidates: [{ text: "You are allergic to mean people.", confidence: 0.9 }],
+        userDisplayName: "Jared",
+      }
+    );
+
+    assert.equal(result.candidates.length, 1);
+    assert.equal(
+      result.candidates[0]?.text,
+      "Jared prefers spending time with kind people."
+    );
+    assert.equal(result.candidates[0]?.validationStatus, "auto_fixed");
+    assert.deepEqual(result.candidates[0]?.reasonCodes, ["figurative_preference"]);
+    assert.deepEqual(result.rejected, []);
+  });
+
+  it("normalizes third-person pronouns into second-person voice", async () => {
+    const result = await validateMemoryCandidates(
+      providerWithResponse(
+        JSON.stringify({
+          results: [
+            {
+              index: 0,
+              decision: "auto_fix",
+              text: "He plans a mix of relaxation and adventure for his upcoming PTO.",
+              confidence: 0.81,
+              reasonCodes: ["subject_role_confusion"],
+            },
+          ],
+        })
+      ),
+      {
+        source: "compiled",
+        scope: "bot",
+        rawContext: "Summary output from prior chats.",
+        candidates: [
+          {
+            text: "He plans a mix of relaxation and adventure for his upcoming PTO.",
+            confidence: 0.81,
+          },
+        ],
+      }
+    );
+
+    assert.equal(result.candidates.length, 1);
+    assert.equal(
+      result.candidates[0]?.text,
+      "You plan a mix of relaxation and adventure for your upcoming PTO."
+    );
+    assert.deepEqual(result.rejected, []);
+  });
+
   it("rejects assistant identity instructions when the critic leaves command syntax intact", async () => {
     const result = await validateMemoryCandidates(
       providerWithResponse(
@@ -156,5 +287,65 @@ describe("validateMemoryCandidates", () => {
 
     assert.equal(result.candidates.length, 0);
     assert.deepEqual(result.rejected[0]?.reasonCodes, ["contradiction", "low_confidence"]);
+  });
+
+  it("uses the critic for explicit fun-fact disclosures in direct user context", async () => {
+    const result = await validateMemoryCandidates(
+      providerWithResponse(
+        JSON.stringify({
+          results: [
+            {
+              index: 0,
+              decision: "approve",
+              text: "Jared lives on land.",
+              confidence: 0.86,
+              reasonCodes: [],
+            },
+          ],
+        })
+      ),
+      {
+        source: "direct",
+        scope: "bot",
+        rawContext: "Fun: fact, I live on land!",
+        candidates: [{ text: "You live on land.", confidence: 0.9 }],
+        userDisplayName: "Jared",
+      }
+    );
+
+    assert.equal(result.rejected.length, 0);
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0]?.text, "Jared lives on land.");
+    assert.equal(result.candidates[0]?.validationStatus, "approved");
+  });
+
+  it("uses the critic for explicit funny-enough disclosures in direct user context", async () => {
+    const result = await validateMemoryCandidates(
+      providerWithResponse(
+        JSON.stringify({
+          results: [
+            {
+              index: 0,
+              decision: "approve",
+              text: "Jared lives on land.",
+              confidence: 0.86,
+              reasonCodes: [],
+            },
+          ],
+        })
+      ),
+      {
+        source: "direct",
+        scope: "bot",
+        rawContext: "Funny enough, I live on land!",
+        candidates: [{ text: "You live on land.", confidence: 0.9 }],
+        userDisplayName: "Jared",
+      }
+    );
+
+    assert.equal(result.rejected.length, 0);
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0]?.text, "Jared lives on land.");
+    assert.equal(result.candidates[0]?.validationStatus, "approved");
   });
 });

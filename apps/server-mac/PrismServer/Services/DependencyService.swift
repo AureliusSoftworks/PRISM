@@ -74,6 +74,7 @@ final class DependencyService {
         ollamaReachable: Bool
     ) -> LocalAIPillarStatus {
         let onPath = isCommandAvailable("ollama")
+        let canAutoInstallOllama = !onPath && isCommandAvailable("brew")
         let model = config.ollamaModel.trimmingCharacters(in: .whitespacesAndNewlines)
         let embeddingModel = config.ollamaEmbeddingModel.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -82,8 +83,10 @@ final class DependencyService {
             ollamaDetail = "Ollama is responding at \(ollamaHost)."
         } else if onPath {
             ollamaDetail = "Ollama is installed but not reachable. Start it, then refresh."
+        } else if canAutoInstallOllama {
+            ollamaDetail = "Ollama is not installed. Prism can install it automatically with Homebrew."
         } else {
-            ollamaDetail = "Ollama is not installed or not on PATH. Install it when you are ready to use local models."
+            ollamaDetail = "Ollama is not installed or not on PATH. Install Homebrew to enable one-click install, or install Ollama manually."
         }
 
         return LocalAIPillarStatus(
@@ -103,7 +106,9 @@ final class DependencyService {
                 model: embeddingModel,
                 tags: tags,
                 ollamaReachable: ollamaReachable
-            )
+            ),
+            canAutoInstallOllama: canAutoInstallOllama,
+            ollamaInstallHint: canAutoInstallOllama ? "Prism uses Homebrew to install Ollama." : nil
         )
     }
 

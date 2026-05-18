@@ -2,12 +2,28 @@
 
 ## Goal
 
-A self-hosted AI playground — **Prism** — that runs headlessly on a
-Windows machine, serves a mobile-friendly UI across the LAN, and provides
-per-account isolation with encrypted memory. Positioned at the intersection
-of ChatGPT Gov's security posture and FL Studio's systems-minded creative
-permission: every account is its own sealed sandbox for AI testing across
-local and online providers.
+**Prism** is a self-hosted, **local-first intelligence environment**: a modular
+surface (Sandbox, Chat, Coffee today; more planned) for routing work across
+local models, optional cloud APIs, memory, tools, and bots — with per-account
+isolation and encrypted memory. It runs headlessly on a machine you own,
+serves a mobile-friendly UI across the LAN, and stays positioned at the
+intersection of ChatGPT Gov-style isolation and FL Studio-style creative
+systems thinking.
+
+Product framing and roadmap tiles live in the root [`README.md`](README.md)
+(sections *The Core vision*, *Why Core matters*, and *Feature status*). This
+document stays focused on **implemented** architecture, contracts, and privacy
+invariants (for example **LOCAL mode** never calling external chat providers).
+
+## Experience Principle: User-Player Parity
+
+Prism should not split people into "users" (utility) versus "players"
+(experience). Every feature should satisfy both.
+
+- **Practical value:** clarity, control, and reliability for real tasks
+- **Experiential value:** delight, engagement, and emotional comfort in use
+
+A design is incomplete if it serves only one side.
 
 ## Stack
 
@@ -52,6 +68,26 @@ Prompt assembly
 
 When incognito mode is active, no memories are read or written.
 
+## Chat vs Sandbox vs Coffee
+
+Prism treats **Chat** and **Sandbox** as hard-separated lanes, with **Coffee** as a third multi-bot surface:
+
+- **Chat (Companion Timeline)**
+  - Single persistent companion persona (no bot/provider/model switching in Chat UI)
+  - Cross-conversation continuity and personal memory recall
+  - Minimal controls by design to keep emotional tone steady and low-friction
+- **Sandbox (Command Center)**
+  - Full runtime controls (bot, provider, model, tooling)
+  - Thread-scoped memory compaction only
+  - Optimized for experimentation and test workflows
+- **Coffee (Group table)**
+  - Multiple bots in one seated session with server-orchestrated turns and social state
+  - Distinct UX and API path from single-thread Chat and Sandbox lab threads
+
+Server guardrails enforce the Chat/Sandbox split: advanced runtime knobs sent from Chat are
+ignored, and sandbox thread-compaction summaries are tagged so they cannot be
+reused as companion continuity context.
+
 ## Provider Architecture
 
 ```
@@ -83,7 +119,8 @@ user's network.
 | File | Host | When does it fire? |
 | --- | --- | --- |
 | `apps/api/src/providers.ts` (`LocalOllamaProvider`) | `OLLAMA_HOST` | Every LOCAL user-facing chat turn. Local by config. |
-| `apps/api/src/providers.ts` (`getAuxiliaryProvider`) | `OLLAMA_HOST` | Internal title, starter, summary, memory-critic, and memory-inference calls. Always local, pinned to `OLLAMA_AUXILIARY_MODEL`. |
+| `apps/api/src/providers.ts` (`getAuxiliaryProvider`) | `OLLAMA_HOST` | Internal title, starter, summary, memory-critic, memory-inference, and **image prompt suggestion** calls. Always local, pinned to `OLLAMA_AUXILIARY_MODEL`. |
+| `apps/api/src/image-prompt-suggestions.ts` (`inferBotImagePromptSuggestions`) | `OLLAMA_HOST` | `POST /api/images/prompt-suggestions` (Images panel, per-bot): short scene-request chips. Same auxiliary model. |
 | `apps/api/src/providers.ts` (`embedTextLocal`) | `OLLAMA_HOST` | All memory embeddings and Qdrant queries. Always local, pinned to `OLLAMA_EMBEDDING_MODEL`. |
 | `apps/api/src/providers.ts` (`OpenAiProvider`) | `api.openai.com` | Only when the effective mode is ONLINE for the user's actual chat reply. |
 | `apps/api/src/qdrant.ts` | `QDRANT_URL` | Memory summary vector read/write. Local by config. |
@@ -144,32 +181,32 @@ Docker Compose with four services:
 
 All services use `restart: unless-stopped` for headless boot recovery.
 
-## Apple Companion Roadmap
+## Clients and distribution (current)
 
-Prism's App Store direction is a two-binary split:
-
-1. **Prism Server** runs on Mac, Windows, or Linux as the user-controlled local
-   runtime. It owns data, providers, accounts, pairing, and the existing web UI.
-2. **Prism iOS/Mac** is the paid official native client. It discovers a Prism
-   Server on the local network, pairs with it, stores a Keychain session, and
-   calls the server API directly.
+Shipping posture today is **direct downloads** (GitHub Releases) plus **Prism on
+iPhone as a PWA** served by the server — not an App Store–first model. Native
+**Prism.app** on macOS is the paid shell that pairs to your server; the server
+remains the source of truth for accounts, memory, provider rules, and tenancy.
 
 The native client must not reimplement chat, memory, provider routing, or
-tenancy rules on-device. Those invariants stay in `apps/api`. The first native
-vertical slice is server discovery, pairing, `GET /api/auth/me`,
-`GET /api/conversations`, `GET /api/conversations/:id`, and `POST /api/chat`.
+tenancy rules on-device. Those invariants stay in `apps/api`.
+
+Historical App Store–oriented notes are archived under `docs/app-store-*.md`
+and `docs/native-client-mvp.md`; prefer [`README.md`](README.md) and
+[`docs/distribution-model.md`](docs/distribution-model.md) for current product
+story.
 
 Reference docs:
 
-- `docs/app-store-distribution.md`
+- `docs/distribution-model.md`
 - `docs/mobile-api-contract.md`
-- `docs/native-client-mvp.md`
-- `docs/app-store-review.md`
+- `docs/prism-client-app.md`
+- `docs/prism-ios-client.md`
 - `docs/licensing-and-brand.md`
 
 ## Future Extensions
 
-- Bot-to-bot sandbox (scenario entity, agent roster, turn loop, transcript export)
+- Deeper multi-bot scenarios beyond today’s **Coffee** table mode
 - Streaming token responses via SSE
 - Cloud backup adapters (S3-compatible)
 - Custom theme token sets beyond light/dark

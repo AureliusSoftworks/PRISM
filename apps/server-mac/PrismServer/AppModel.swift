@@ -10,6 +10,7 @@ final class AppModel: ObservableObject {
     @Published var setupMessage: String?
     @Published var isStartingMemoryEngine = false
     @Published var isDownloadingModel = false
+    @Published var isInstallingOllama = false
     @Published var pairingCode: DisplayPairingCode?
     @Published var isGeneratingPairingCode = false
 
@@ -113,6 +114,12 @@ final class AppModel: ObservableObject {
             && !isDownloadingModel
     }
 
+    var canInstallOllama: Bool {
+        dependencyStatus.localAI.canAutoInstallOllama
+            && !dependencyStatus.localAI.ollama.isReady
+            && !isInstallingOllama
+    }
+
     var requiredModelDownloadLabel: String {
         let missing = missingRequiredModelNames
         guard !missing.isEmpty else { return "Required Models" }
@@ -147,7 +154,7 @@ final class AppModel: ObservableObject {
     func setUpPrismTapped() {
         setupMessage = "Preparing Prism…"
         Task {
-            await startNodeStack()
+            await runManagedSetupAndStart()
             if case .failed(let message) = runtimeState {
                 setupMessage = message
             }
@@ -158,6 +165,30 @@ final class AppModel: ObservableObject {
         setupMessage = "Preparing Prism…"
         Task {
             await startNodeStack()
+        }
+    }
+
+    func installOllamaTapped() {
+        guard canInstallOllama else { return }
+        isInstallingOllama = true
+        setupMessage = "Installing Ollama with Homebrew…"
+        Task {
+            defer { isInstallingOllama = false }
+            do {
+                try await installOllamaWithHomebrew()
+                setupMessage = "Ollama installed. Starting Ollama…"
+                _ = try? await launchOllamaApp()
+                try? await waitForOllamaReachable(timeoutSeconds: 12)
+                await refreshDependencies()
+                if dependencyStatus.localAI.ollama.isReady {
+                    setupMessage = "Ollama is ready."
+                } else {
+                    setupMessage = "Ollama installed. Open Ollama once, then refresh status."
+                }
+            } catch {
+                runtimeState = .failed(error.localizedDescription)
+                setupMessage = error.localizedDescription
+            }
         }
     }
 
@@ -183,6 +214,98 @@ final class AppModel: ObservableObject {
             setupMessage = "Prism Server is running. Pairing from the client app is the next step."
         } catch {
             runtimeState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func runManagedSetupAndStart() async {
+        do {
+            let resolution = await resolveQdrantForRuntime()
+            qdrantResolution = resolution
+
+            if resolution.ownership == .managedByPrism {
+                setupMessage = "Starting Memory Engine…"
+                try await runtimeManager.startMemoryEngine(resolution: resolution)
+            }
+
+            dependencyStatus = await dependencyService.check(config: config, resolution: resolution)
+
+            if !dependencyStatus.localAI.ollama.isReady && dependencyStatus.localAI.canAutoInstallOllama {
+                isInstallingOllama = true
+                defer { isInstallingOllama = false }
+                setupMessage = "Installing Ollama with Homebrew…"
+                try await installOllamaWithHomebrew()
+                _ = try? await launchOllamaApp()
+                try? await waitForOllamaReachable(timeoutSeconds: 12)
+                dependencyStatus = await dependencyService.check(config: config, resolution: resolution)
+            }
+
+            if dependencyStatus.localAI.ollama.isReady && !missingRequiredModelNames.isEmpty {
+                let models = missingRequiredModelNames
+                isDownloadingModel = true
+                defer { isDownloadingModel = false }
+                for model in models {
+                    setupMessage = "Downloading \(model)…"
+                    try await ollamaModelInstaller.pull(model: model)
+                }
+                dependencyStatus = await dependencyService.check(config: config, resolution: resolution)
+            }
+        } catch {
+            runtimeState = .failed(error.localizedDescription)
+            setupMessage = error.localizedDescription
+            return
+        }
+
+        await startNodeStack()
+    }
+
+    private func installOllamaWithHomebrew() async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["brew", "install", "--cask", "ollama"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try await runAndWait(process, failedMessage: "Ollama install failed. Check Homebrew and try again.")
+    }
+
+    private func launchOllamaApp() async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Ollama"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try await runAndWait(process, failedMessage: "Ollama was installed, but Prism could not open it automatically.")
+    }
+
+    private func waitForOllamaReachable(timeoutSeconds: Int) async throws {
+        let deadline = Date().addingTimeInterval(Double(timeoutSeconds))
+        while Date() < deadline {
+            try Task.checkCancellation()
+            let resolution = await resolveQdrantForRuntime()
+            let status = await dependencyService.check(config: config, resolution: resolution)
+            if status.localAI.ollama.isReady {
+                dependencyStatus = status
+                return
+            }
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+    }
+
+    private func runAndWait(_ process: Process, failedMessage: String) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            process.terminationHandler = { terminated in
+                if terminated.terminationStatus == 0 {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: NSError(domain: "PrismServer", code: Int(terminated.terminationStatus), userInfo: [
+                        NSLocalizedDescriptionKey: failedMessage
+                    ]))
+                }
+            }
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
         }
     }
 

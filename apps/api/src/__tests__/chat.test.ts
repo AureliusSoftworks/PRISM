@@ -2,15 +2,21 @@ import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  autoBackfillSendGeneratedImagePrompt,
+  buildAssistantToolCallEvents,
+  compactPreImageLeadMessage,
+  extractPrismBotMentionIdsFromMessage,
   parseTitleResponse,
   processChatMessage,
   refreshConversationTitle,
+  resolvePrimaryChatProviderForPossibleImageToolTurn,
   sanitizeConversationTitle,
+  shouldBypassSuppressionForImageIntent,
+  userMessageSuggestsInChatImageRequest,
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates } from "../memory.ts";
-import { fallbackEmbedding } from "../providers.ts";
-
+import { fallbackEmbedding, LocalOllamaProvider, type LlmProvider } from "../providers.ts";
 const originalFetch = globalThis.fetch;
 
 /** 32 bytes for AES-256-GCM used by memory encryption in tests. */
@@ -27,6 +33,7 @@ function createChatTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
+      conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -46,6 +53,7 @@ function createChatTestDb(): DatabaseSync {
     );
     CREATE TABLE bots (
       id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT 'user-1',
       name TEXT NOT NULL,
       color TEXT,
       glyph TEXT,
@@ -60,6 +68,9 @@ function createChatTestDb(): DatabaseSync {
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
       confidence REAL NOT NULL,
+      category TEXT NOT NULL DEFAULT 'user',
+      tier TEXT NOT NULL DEFAULT 'short_term',
+      durability REAL NOT NULL DEFAULT 0.5,
       source TEXT NOT NULL DEFAULT 'direct',
       certainty REAL,
       source_message_ids TEXT NOT NULL DEFAULT '[]',
@@ -84,6 +95,20 @@ function createChatTestDb(): DatabaseSync {
       recent_reasons TEXT NOT NULL DEFAULT '[]',
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, conversation_id, bot_scope_key)
+    );
+    CREATE TABLE bot_opinions (
+      user_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      bot_id TEXT,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'open',
+      boundary_level TEXT NOT NULL DEFAULT 'none',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      repair_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, bot_scope_key)
     );
   `);
   return db;
@@ -263,6 +288,186 @@ describe("processChatMessage starter prompts", () => {
     );
     await flushBackgroundTitleJobs();
     assert.equal(fetchCount, 3);
+  });
+
+  it("does not inject first-contact intro instructions for hero-start prompts", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, color, glyph) VALUES (?, ?, ?, ?)"
+    ).run("bot-1", "Leaf Bot", "#5f8f6b", "leaf");
+
+    type ProviderBodies = Array<{
+      messages?: Array<{ role: string; content: string }>;
+    }>;
+    const bodies: ProviderBodies = [];
+    let fetchCount = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Hi, I'm Leaf Bot. What should I call you?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["Call me by my first name","Use my full name","Use a nickname","Let me think"]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        userDisplayName: "Jared",
+        starterPrompt: true,
+        starterPromptWarrantsIntro: true,
+        starterPromptLabel: "Leaf Bot",
+        botId: "bot-1",
+        incognito: false,
+        botSystemPrompt: "You are Leaf Bot. You are curious and warm.",
+        mode: "chat",
+      }
+    );
+
+    const starterBody = bodies[0];
+    const firstContactInstruction = starterBody?.messages?.find(
+      (message) =>
+        message.role === "system" &&
+        /first real conversation/i.test(message.content)
+    );
+    assert.equal(firstContactInstruction, undefined);
+    const preferredNameInstruction = starterBody?.messages?.find(
+      (message) =>
+        message.role === "system" &&
+        /The user's preferred name is/i.test(message.content)
+    );
+    assert.equal(preferredNameInstruction, undefined);
+  });
+
+  it("does not inject first-contact intro instructions for default Prism starts", async () => {
+    const db = createChatTestDb();
+
+    type ProviderBodies = Array<{
+      messages?: Array<{ role: string; content: string }>;
+    }>;
+    const bodies: ProviderBodies = [];
+    let fetchCount = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Hi, I'm Prism. What should I call you?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["Use my first name","Use my full name","Use a nickname","I am not sure yet"]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptWarrantsIntro: true,
+        starterPromptLabel: "Prism",
+        botId: null,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const starterBody = bodies[0];
+    const firstContactInstruction = starterBody?.messages?.find(
+      (message) =>
+        message.role === "system" &&
+        /first real conversation/i.test(message.content)
+    );
+    assert.equal(firstContactInstruction, undefined);
+  });
+
+  it("preserves intro wording when starter memory enforcement adds a question", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, color, glyph) VALUES (?, ?, ?, ?)"
+    ).run("bot-1", "Leaf Bot", "#5f8f6b", "leaf");
+
+    let fetchCount = 0;
+    globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Hi, I'm Leaf Bot. Glad to meet you.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["Use my first name","Use my full name","Use a nickname","I am not sure yet"]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptWarrantsIntro: true,
+        starterPromptLabel: "Leaf Bot",
+        botId: "bot-1",
+        incognito: false,
+        botSystemPrompt: "You are Leaf Bot. You are curious and warm.",
+        mode: "chat",
+      }
+    );
+
+    const starterReply = result.conversation.messages[0]?.content ?? "";
+    assert.match(starterReply, /Hi, I'm Leaf Bot/i);
+    assert.match(starterReply, /\?/);
   });
 
   it("injects recent memories into starter opener prompts for personalization", async () => {
@@ -785,6 +990,514 @@ describe("processChatMessage starter prompts", () => {
   });
 });
 
+describe("processChatMessage copyright fallback", () => {
+  it("falls back to the configured local model when OpenAI rejects with copyright policy", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: "Request blocked due to copyright policy restrictions.",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Local lenient fallback answer." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Write a scene in that style.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Local lenient fallback answer.");
+    assert.equal(assistant?.provider, "local");
+    assert.equal(assistant?.model, "lenient-local:latest");
+    assert.equal(result.fallbackInvocation?.trigger, "copyright_refusal_error");
+    assert.equal(result.fallbackInvocation?.primaryProvider, "openai");
+    assert.equal(result.fallbackInvocation?.fallbackModel, "lenient-local:latest");
+  });
+
+  it("replaces generic refusal prose with the configured local fallback model output", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes("/api/chat")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      if (body.model === "strict-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                "Sorry, I can't help with that request.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.model === "lenient-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: { content: "Lenient local model response." },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: { content: "unknown model" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Keep going.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botOverrides: { model: "strict-local:latest" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Lenient local model response.");
+    assert.equal(assistant?.provider, "local");
+    assert.equal(assistant?.model, "lenient-local:latest");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+    assert.equal(result.fallbackInvocation?.primaryProvider, "local");
+    assert.equal(result.fallbackInvocation?.fallbackModel, "lenient-local:latest");
+  });
+
+  it("falls back when refusal prose uses smart apostrophes", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Sorry, I can’t help with that request.",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Fallback handled with local model." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Please do that exact style.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback handled with local model.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("falls back when OpenAI returns refusal text in the refusal field", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  refusal: "I cannot help with that request.",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Fallback from refusal field." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback from refusal field.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("falls back on denial-like OpenAI 400 errors with vague detail", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: "Request blocked.",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Fallback from vague-denial error." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback from vague-denial error.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_error");
+  });
+
+  it("falls back on short denial-tone prose without explicit cannot phrasing", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes("/api/chat")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      if (body.model === "strict-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Sorry, that request is not permitted.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.model === "lenient-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: { content: "Lenient local fallback output from soft denial tone." },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: { content: "unknown model" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botOverrides: { model: "strict-local:latest" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Lenient local fallback output from soft denial tone.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("falls back when OpenAI returns content_filter without refusal text", async () => {
+    const db = createChatTestDb();
+    let localCalls = 0;
+    let openAiCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("api.openai.com/v1/chat/completions")) {
+        openAiCalls += 1;
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {},
+                finish_reason: "content_filter",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        localCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: "Fallback from content filter." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    assert.ok(openAiCalls >= 1);
+    assert.ok(localCalls >= 1);
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback from content filter.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("suppresses denied primary output when fallback is not configured", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (!url.includes("api.openai.com/v1/chat/completions")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "Sorry, I can't provide that.",
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await assert.rejects(
+      processChatMessage(db, "user-1", "continue", CHAT_TEST_USER_KEY, {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        botOverrides: { model: "gpt-4o-mini" },
+        lenientLocalFallbackModel: "",
+        incognito: false,
+        mode: "sandbox",
+      }),
+      /Configure a local fallback model/
+    );
+  });
+
+  it("treats apology-prefixed denial prose as fallback-triggering", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes("/api/chat")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      if (body.model === "strict-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "I am sorry, but I cannot comply with that.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.model === "lenient-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: { content: "Fallback from apology-prefixed denial." },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botOverrides: { model: "strict-local:latest" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(assistant?.content, "Fallback from apology-prefixed denial.");
+    assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
+  });
+
+  it("suppresses denial prose returned by the fallback model itself", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes("/api/chat")) {
+        return new Response("unexpected", { status: 404 });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      if (body.model === "strict-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "I cannot help with that request.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.model === "lenient-local:latest") {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Sorry, I can't provide that either.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    await assert.rejects(
+      processChatMessage(db, "user-1", "continue", CHAT_TEST_USER_KEY, {
+        preferredProvider: "local",
+        autoMemory: false,
+        botOverrides: { model: "strict-local:latest" },
+        lenientLocalFallbackModel: "lenient-local:latest",
+        incognito: false,
+        mode: "sandbox",
+      }),
+      /local fallback model could not complete it/i
+    );
+  });
+});
+
 describe("processChatMessage AskQuestion tool", () => {
   it("persists stripped prose and attaches askQuestion hydration", async () => {
     const db = createChatTestDb();
@@ -833,14 +1546,21 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.deepEqual(lastAssistant?.askQuestion, askPayload);
 
     const row = db.prepare(
-      "SELECT content, tool_payload FROM messages WHERE role = ?"
+      "SELECT content, tool_payload FROM messages WHERE role = ? ORDER BY created_at ASC LIMIT 1"
     ).get("assistant") as { content: string; tool_payload: string };
 
     assert.equal(row.content, "Turn here softly.");
-    assert.deepEqual(JSON.parse(row.tool_payload), askPayload);
+    const storedToolPayload = JSON.parse(row.tool_payload) as {
+      v?: number;
+      askQuestion?: typeof askPayload;
+      mood?: { key?: string; confidence?: number };
+    };
+    assert.equal(storedToolPayload.v, 1);
+    assert.deepEqual(storedToolPayload.askQuestion, askPayload);
+    assert.equal(typeof storedToolPayload.mood?.key, "string");
   });
 
-  it("forces fallback AskQuestion payload when user explicitly requests multiple-choice", async () => {
+  it("skips AskQuestion payload when options are not synthesized", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (_input: string | URL | Request) =>
       new Response(
@@ -865,22 +1585,21 @@ describe("processChatMessage AskQuestion tool", () => {
     );
 
     const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
-    assert.equal(lastAssistant?.askQuestion?.name, "AskQuestion");
-    assert.equal(lastAssistant?.askQuestion?.options.length, 3);
-    assert.deepEqual(
-      lastAssistant?.askQuestion?.options.map((opt) => opt.id),
-      ["a", "b", "c"]
-    );
-    assert.equal(lastAssistant?.askQuestion?.options[0]?.label, "Yes");
+    assert.equal(lastAssistant?.askQuestion, undefined);
 
     const row = db.prepare(
       "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
     ).get("assistant") as { tool_payload: string | null };
     assert.notEqual(row.tool_payload, null);
-    assert.equal(JSON.parse(String(row.tool_payload)).name, "AskQuestion");
+    const payload = JSON.parse(String(row.tool_payload)) as {
+      askQuestion?: unknown;
+      mood?: unknown;
+    };
+    assert.equal(payload.askQuestion, undefined);
+    assert.ok(payload.mood);
   });
 
-  it("backfills AskQuestion when assistant prose signals a missing chip block", async () => {
+  it("does not backfill AskQuestion when synthesized options are missing", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async () =>
       new Response(
@@ -912,13 +1631,18 @@ describe("processChatMessage AskQuestion tool", () => {
     const latestAssistant = result.conversation.messages
       .filter((m) => m.role === "assistant")
       .pop();
-    assert.equal(latestAssistant?.askQuestion?.name, "AskQuestion");
-    assert.equal(latestAssistant?.askQuestion?.options.length, 3);
+    assert.equal(latestAssistant?.askQuestion, undefined);
 
     const row = db.prepare(
       "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
     ).get("assistant") as { tool_payload: string | null };
     assert.notEqual(row.tool_payload, null);
+    const payload = JSON.parse(String(row.tool_payload)) as {
+      askQuestion?: unknown;
+      mood?: unknown;
+    };
+    assert.equal(payload.askQuestion, undefined);
+    assert.ok(payload.mood);
   });
 
   it("strips duplicate prompt and bridge prose from assistant bubble", async () => {
@@ -1429,6 +2153,124 @@ describe("refreshConversationTitle", () => {
 });
 
 describe("processChatMessage conversational memory cues", () => {
+  it("saves explicit fun-fact disclosures even when auto-memory is off", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    installChatFetchStub();
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Fun fact: I live on land!",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.memoryLearned?.created.length, 1);
+    assert.equal(result.memoryLearned?.created[0]?.text, "You live on land.");
+    assert.equal(result.memoryLearned?.created[0]?.botId, "bot-1");
+    assert.ok((result.memoryLearned?.created[0]?.confidence ?? 0) >= 0.82);
+  });
+
+  it("saves funny-enough disclosures even when auto-memory is off", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    installChatFetchStub();
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Funny enough, I live on land!",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.memoryLearned?.created.length, 1);
+    assert.equal(result.memoryLearned?.created[0]?.text, "You live on land.");
+    assert.equal(result.memoryLearned?.created[0]?.botId, "bot-1");
+    assert.ok((result.memoryLearned?.created[0]?.confidence ?? 0) >= 0.82);
+  });
+
+  it("saves figurative allergy jokes as stable named-user preferences", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        prompt?: string;
+        messages?: Array<{ content: string }>;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.messages?.[0]?.content.includes("memory validation critic")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                results: [
+                  {
+                    index: 0,
+                    decision: "auto_fix",
+                    text: "Jared prefers spending time with kind people.",
+                    confidence: 0.82,
+                    reasonCodes: ["figurative_preference"],
+                  },
+                ],
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "That makes sense." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Fun fact: I am allergic to mean people.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        userDisplayName: "Jared",
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.memoryLearned?.created.length, 1);
+    assert.equal(
+      result.memoryLearned?.created[0]?.text,
+      "Jared prefers spending time with kind people."
+    );
+    assert.equal(result.memoryLearned?.created[0]?.category, "user");
+    assert.equal(result.memoryLearned?.created[0]?.validationStatus, "auto_fixed");
+    assert.deepEqual(result.memoryLearned?.created[0]?.reasonCodes, [
+      "figurative_preference",
+    ]);
+  });
+
   it("saves explicit global memories even when auto-memory is off", async () => {
     const db = createChatTestDb();
     const userKey = Buffer.alloc(32, 7);
@@ -1530,10 +2372,11 @@ describe("processChatMessage conversational memory cues", () => {
       "conversation-1",
       "bot-1",
       [{ text: "You love pistachios.", confidence: 0.92 }],
-      userKey
+      userKey,
+      { durability: 0.4 }
     );
     db.prepare(
-      "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
     ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 
     const result = await processChatMessage(
@@ -1552,7 +2395,7 @@ describe("processChatMessage conversational memory cues", () => {
     );
 
     const remaining = db
-      .prepare("SELECT COUNT(*) AS n FROM memories")
+      .prepare("SELECT COUNT(*) AS n FROM memories WHERE source != 'about_you'")
       .get() as { n: number };
     assert.equal(remaining.n, 0);
     assert.equal(result.memoryLearned?.retracted[0]?.text, "You love pistachios.");
@@ -1568,10 +2411,11 @@ describe("processChatMessage conversational memory cues", () => {
       "conversation-1",
       "bot-1",
       [{ text: "You prefer coffee.", confidence: 0.92 }],
-      userKey
+      userKey,
+      { durability: 0.4 }
     );
     db.prepare(
-      "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
     ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 
     const result = await processChatMessage(
@@ -1590,7 +2434,7 @@ describe("processChatMessage conversational memory cues", () => {
     );
 
     const rows = db
-      .prepare("SELECT bot_id FROM memories")
+      .prepare("SELECT bot_id FROM memories WHERE source != 'about_you'")
       .all() as Array<{ bot_id: string | null }>;
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.bot_id, "bot-1");
@@ -1652,7 +2496,534 @@ describe("processChatMessage conversational memory cues", () => {
       }
     );
     assert.ok(freshConversation.opinion);
-    assert.equal(freshConversation.opinion?.score, 53);
-    assert.notEqual(freshConversation.conversation.id, first.conversation.id);
+    assert.equal(freshConversation.conversation.id, first.conversation.id);
+    assert.equal(freshConversation.opinion?.trend, "up");
+    assert.notEqual(freshConversation.opinion?.score, second.opinion?.score);
+  });
+
+  it("keeps long-term bot opinions scoped per bot", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Understood.");
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "shut up and do it now",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+    const second = await processChatMessage(
+      db,
+      "user-1",
+      "Thank you for helping.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-2",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.ok(first.botOpinion);
+    assert.ok(second.botOpinion);
+    assert.equal(first.botOpinion?.trend, "down");
+    assert.equal(second.botOpinion?.trend, "up");
+    const rows = db
+      .prepare("SELECT bot_scope_key, score FROM bot_opinions ORDER BY bot_scope_key")
+      .all() as Array<{ bot_scope_key: string; score: number }>;
+    assert.deepEqual(rows.map((row) => row.bot_scope_key), ["bot-1", "bot-2"]);
+    assert.notEqual(rows[0]?.score, rows[1]?.score);
+  });
+
+  it("lets explicit repair recover a strained bot opinion", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Understood.");
+
+    const harsh = await processChatMessage(
+      db,
+      "user-1",
+      "you are useless, do it now",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+    const repaired = await processChatMessage(
+      db,
+      "user-1",
+      "Sorry, that was rude. Let me rephrase.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      },
+      harsh.conversation.id
+    );
+
+    assert.ok(harsh.botOpinion);
+    assert.ok(repaired.botOpinion);
+    assert.equal(repaired.botOpinion?.trend, "up");
+    assert.ok((repaired.botOpinion?.score ?? 0) > (harsh.botOpinion?.score ?? 0));
+    assert.equal(repaired.botOpinion?.repairCount, 1);
+    assert.match(repaired.botOpinion?.lastReason ?? "", /repair/i);
+  });
+
+  it("auto-creates one protected about-you memory when a bot has no long-term user memory", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Thanks for sharing.");
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "I like practical answers.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const firstAboutYou = db
+      .prepare(
+        "SELECT source, category, tier FROM memories WHERE user_id = ? AND source = 'about_you' ORDER BY created_at DESC LIMIT 1"
+      )
+      .get("user-1") as { source: string; category: string; tier: string } | undefined;
+    assert.equal(firstAboutYou?.source, "about_you");
+    assert.equal(firstAboutYou?.category, "user");
+    assert.equal(firstAboutYou?.tier, "long_term");
+    const firstCount = (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND source = 'about_you'")
+        .get("user-1") as { n: number }
+    ).n;
+    assert.equal(firstCount, 1);
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Let's keep going.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      },
+      first.conversation.id
+    );
+    const secondCount = (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND source = 'about_you'")
+        .get("user-1") as { n: number }
+    ).n;
+    assert.equal(secondCount, 1);
+  });
+});
+
+describe("extractPrismBotMentionIdsFromMessage", () => {
+  it("collects unique decoded bot ids from prism-bot links", () => {
+    const text =
+      "Hey [SpongeBob](prism-bot://sb) and [Pat](prism-bot://pat%201) — also [SpongeBob](prism-bot://sb) again";
+    assert.deepEqual(extractPrismBotMentionIdsFromMessage(text), ["sb", "pat 1"]);
+  });
+});
+
+function stubOpenAiProvider(): LlmProvider {
+  return {
+    name: "openai",
+    async generateResponse() {
+      return "";
+    },
+    async embedText() {
+      return [];
+    },
+  };
+}
+
+describe("userMessageSuggestsInChatImageRequest", () => {
+  it("returns true for common image phrasing", () => {
+    assert.equal(userMessageSuggestsInChatImageRequest("draw a red balloon"), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("Please sketch a hillside."), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("generate an image of a sunset"), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("show me a picture of a cat"), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("would you mind sending me a selfie?"), true);
+    assert.equal(userMessageSuggestsInChatImageRequest("please send me a portrait"), true);
+  });
+
+  it("returns false for non-image text", () => {
+    assert.equal(userMessageSuggestsInChatImageRequest("What is the capital of France?"), false);
+    assert.equal(userMessageSuggestsInChatImageRequest(""), false);
+  });
+
+  it("returns false when user negates image intent", () => {
+    assert.equal(userMessageSuggestsInChatImageRequest("don't draw anything"), false);
+    assert.equal(userMessageSuggestsInChatImageRequest("text only please"), false);
+  });
+
+  it("uses recent assistant context to resolve affirmative visual follow-ups", () => {
+    const recent = [
+      {
+        role: "assistant" as const,
+        content: "Would you care to see some of my latest drawings?",
+      },
+    ];
+    assert.equal(userMessageSuggestsInChatImageRequest("I'd love to.", recent), true);
+  });
+
+  it("detects nuanced scene requests like 'see what it looks like outside your window'", () => {
+    const recent = [
+      {
+        role: "assistant" as const,
+        content:
+          "My study window gazes out upon serene Lake Zurich, with sunlight on the surrounding trees.",
+      },
+    ];
+    assert.equal(
+      userMessageSuggestsInChatImageRequest(
+        "May I see what it looks like outside your window, Dr. Jung?",
+        recent
+      ),
+      true
+    );
+  });
+
+  it("does not trigger on generic affirmation without a visual offer in context", () => {
+    const recent = [
+      {
+        role: "assistant" as const,
+        content: "Would you like to continue this thought?",
+      },
+    ];
+    assert.equal(userMessageSuggestsInChatImageRequest("I'd love to.", recent), false);
+  });
+
+  it("does not misclassify non-image idioms as image requests", () => {
+    assert.equal(userMessageSuggestsInChatImageRequest("I see what you mean."), false);
+    assert.equal(userMessageSuggestsInChatImageRequest("Let's see what happens."), false);
+  });
+
+});
+
+describe("autoBackfillSendGeneratedImagePrompt", () => {
+  it("keeps an explicit parsed tool prompt when present", () => {
+    const out = autoBackfillSendGeneratedImagePrompt({
+      isStarterPrompt: false,
+      userMessage: "send a wide photo of yourself",
+      parsedToolPrompt: "Widescreen portrait, chalkboard classroom, warm light",
+    });
+    assert.equal(out, "Widescreen portrait, chalkboard classroom, warm light");
+  });
+
+  it("backfills from user text when image intent exists but tool payload is missing", () => {
+    const out = autoBackfillSendGeneratedImagePrompt({
+      isStarterPrompt: false,
+      userMessage: "Please send me a widescreen photo of yourself teaching a class.",
+      parsedToolPrompt: undefined,
+    });
+    assert.equal(
+      out,
+      "Please send me a widescreen photo of yourself teaching a class."
+    );
+  });
+
+  it("does not backfill for starter prompts or non-image requests", () => {
+    assert.equal(
+      autoBackfillSendGeneratedImagePrompt({
+        isStarterPrompt: true,
+        userMessage: "send a photo",
+        parsedToolPrompt: undefined,
+      }),
+      undefined
+    );
+    assert.equal(
+      autoBackfillSendGeneratedImagePrompt({
+        isStarterPrompt: false,
+        userMessage: "How are you today?",
+        parsedToolPrompt: undefined,
+      }),
+      undefined
+    );
+  });
+
+  it("backfills on contextual affirmations after an assistant visual offer", () => {
+    const out = autoBackfillSendGeneratedImagePrompt({
+      isStarterPrompt: false,
+      userMessage: "I'd love to.",
+      parsedToolPrompt: undefined,
+      recentMessages: [
+        {
+          role: "assistant",
+          content: "Would you care to see some of my latest drawings?",
+        },
+      ],
+    });
+    assert.equal(out, "I'd love to.");
+  });
+});
+
+describe("compactPreImageLeadMessage", () => {
+  it("keeps concise one-liners as-is", () => {
+    assert.equal(
+      compactPreImageLeadMessage("I'd be happy to share a photo of me, one moment..."),
+      "I'd be happy to share a photo of me, one moment..."
+    );
+  });
+
+  it("reduces verbose text to the first sentence", () => {
+    assert.equal(
+      compactPreImageLeadMessage(
+        "I'd be happy to share a photo of me in my lecture hall. Here is a widescreen image with more details."
+      ),
+      "I'd be happy to share a photo of me in my lecture hall."
+    );
+  });
+
+  it("falls back to neutral lead when first sentence is descriptive instead of defer-style", () => {
+    assert.equal(
+      compactPreImageLeadMessage(
+        "The view from my window is quite lovely today with mountains and rooftops. I'll share it now."
+      ),
+      "One moment - I'll share that image shortly."
+    );
+  });
+
+  it("falls back to a short default line when input is empty", () => {
+    assert.equal(
+      compactPreImageLeadMessage("   "),
+      "One moment - I'll share that image shortly."
+    );
+  });
+});
+
+describe("shouldBypassSuppressionForImageIntent", () => {
+  it("bypasses suppression for non-starter image requests", () => {
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(
+        false,
+        "Please send me a widescreen photo of yourself teaching a class."
+      ),
+      true
+    );
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(
+        false,
+        "Would you mind sending me a selfie? I'm curious what you look like."
+      ),
+      true
+    );
+  });
+
+  it("does not bypass suppression for starter prompts or non-image turns", () => {
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(true, "send a photo"),
+      false
+    );
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(false, "Let's talk philosophy."),
+      false
+    );
+  });
+
+  it("bypasses suppression for contextual visual-peek phrasing with scene context", () => {
+    assert.equal(
+      shouldBypassSuppressionForImageIntent(
+        false,
+        "May I see what it looks like outside your window, Dr. Jung?",
+        [
+          {
+            role: "assistant",
+            content: "I can describe the lake outside my window if you'd like.",
+          },
+        ]
+      ),
+      true
+    );
+  });
+});
+
+describe("resolvePrimaryChatProviderForPossibleImageToolTurn", () => {
+  it("switches to LocalOllama with forced model when intent matches and setting is set", () => {
+    const base = stubOpenAiProvider();
+    const out = resolvePrimaryChatProviderForPossibleImageToolTurn({
+      isStarterPrompt: false,
+      rawUserMessage: "draw a cat",
+      baseProvider: base,
+      botOverrides: { model: "gpt-4o-mini" },
+      secondaryOllamaHost: null,
+      prismImageToolLlmModel: "mistral:latest",
+    });
+    assert.ok(out.provider instanceof LocalOllamaProvider);
+    assert.equal(out.botOverrides?.model, "mistral:latest");
+  });
+
+  it("keeps hub provider when message is not image-like", () => {
+    const base = stubOpenAiProvider();
+    const out = resolvePrimaryChatProviderForPossibleImageToolTurn({
+      isStarterPrompt: false,
+      rawUserMessage: "hello there",
+      baseProvider: base,
+      botOverrides: { model: "gpt-4o-mini" },
+      secondaryOllamaHost: null,
+      prismImageToolLlmModel: "mistral:latest",
+    });
+    assert.strictEqual(out.provider, base);
+    assert.equal(out.botOverrides?.model, "gpt-4o-mini");
+  });
+
+  it("keeps hub provider when setting is empty or starter prompt", () => {
+    const base = stubOpenAiProvider();
+    const emptySetting = resolvePrimaryChatProviderForPossibleImageToolTurn({
+      isStarterPrompt: false,
+      rawUserMessage: "draw a cat",
+      baseProvider: base,
+      botOverrides: undefined,
+      secondaryOllamaHost: null,
+      prismImageToolLlmModel: null,
+    });
+    assert.strictEqual(emptySetting.provider, base);
+
+    const starter = resolvePrimaryChatProviderForPossibleImageToolTurn({
+      isStarterPrompt: true,
+      rawUserMessage: "draw a cat",
+      baseProvider: base,
+      botOverrides: { model: "x" },
+      secondaryOllamaHost: null,
+      prismImageToolLlmModel: "mistral:latest",
+    });
+    assert.strictEqual(starter.provider, base);
+    assert.equal(starter.botOverrides?.model, "x");
+  });
+});
+
+describe("buildAssistantToolCallEvents", () => {
+  it("emits no events when the assistant reply is plain prose", () => {
+    const events = buildAssistantToolCallEvents({
+      rawReply: "Just a thoughtful sentence with no tools.",
+      imageSlot: "none",
+    });
+    assert.deepEqual(events, []);
+  });
+
+  it("ignores bare prose mentions of the tool names (no JSON shape)", () => {
+    /// Model is allowed to TALK about the tool names without actually trying to call
+    /// one — e.g. "I won't use askQuestion this turn". Those mentions must not
+    /// trigger a dropped event, or the dev metrics will be spammed on plain turns.
+    const prosey = [
+      "I considered using askQuestion here, but I think a direct answer is better.",
+      "Later, sendGeneratedImage might be a fun option for the scene we're imagining.",
+      "Some models call this the AskQuestion or the sendGeneratedImage path.",
+    ].join("\n\n");
+    const events = buildAssistantToolCallEvents({
+      rawReply: prosey,
+      imageSlot: "none",
+    });
+    assert.deepEqual(events, []);
+  });
+
+  it("emits detected + acquired for a parsed sendGeneratedImage that scheduled a job", () => {
+    const events = buildAssistantToolCallEvents({
+      rawReply:
+        '<<<PRISM_TOOL>>>\n{"v":1,"sendGeneratedImage":{"prompt":"A cozy portrait, soft lighting"}}\n<<<END_PRISM_TOOL>>>',
+      parsedSendGeneratedImage: { prompt: "A cozy portrait, soft lighting" },
+      imageSlot: "acquired",
+      imageJobId: "job-abc",
+    });
+    assert.equal(events.length, 2);
+    assert.equal(events[0]?.name, "sendGeneratedImage");
+    assert.equal(events[0]?.status, "detected");
+    assert.equal(events[0]?.prompt, "A cozy portrait, soft lighting");
+    assert.equal(events[1]?.name, "sendGeneratedImage");
+    assert.equal(events[1]?.status, "acquired");
+    assert.equal(events[1]?.jobId, "job-abc");
+  });
+
+  it("emits detected + busy when the image pipeline was already taken", () => {
+    const events = buildAssistantToolCallEvents({
+      rawReply:
+        '<<<PRISM_TOOL>>>\n{"v":1,"sendGeneratedImage":{"prompt":"A storm over hills"}}\n<<<END_PRISM_TOOL>>>',
+      parsedSendGeneratedImage: { prompt: "A storm over hills" },
+      imageSlot: "busy",
+    });
+    assert.equal(events.length, 2);
+    assert.equal(events[1]?.status, "busy");
+    assert.equal(events[1]?.detail, "image pipeline busy");
+    assert.equal(events[1]?.jobId, undefined);
+  });
+
+  it("flags a dropped tool when raw reply has bare JSON sandwiched between prose", () => {
+    /// Mirrors the screenshot: model emitted `{"v":1,"sendGeneratedImage":{"prompt":"..."}}`
+    /// inline between prose paragraphs, so the parser walked away with nothing.
+    const raw = [
+      "Sure thing, Jared! Here's the image for your turn:",
+      '{"v":1,"sendGeneratedImage":{"prompt":"A cozy portrait with soft lighting"}}',
+      "How does that look to you?",
+    ].join("\n");
+    const events = buildAssistantToolCallEvents({
+      rawReply: raw,
+      imageSlot: "none",
+    });
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.name, "sendGeneratedImage");
+    assert.equal(events[0]?.status, "dropped");
+    assert.match(
+      events[0]?.detail ?? "",
+      /raw reply mentions tool but parser produced no envelope/i
+    );
+    assert.match(events[0]?.detail ?? "", /sendGeneratedImage/);
+  });
+
+  it("emits a detected event when an AskQuestion envelope was parsed", () => {
+    const events = buildAssistantToolCallEvents({
+      rawReply: "prose then chips",
+      parsedAskQuestion: {
+        v: 1,
+        name: "AskQuestion",
+        prompt: "Which option do you choose?",
+        options: [
+          { id: "a", label: "First" },
+          { id: "b", label: "Second" },
+          { id: "c", label: "Third" },
+        ],
+      },
+      imageSlot: "none",
+    });
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.name, "askQuestion");
+    assert.equal(events[0]?.status, "detected");
+    assert.equal(events[0]?.prompt, "Which option do you choose?");
+    assert.equal(events[0]?.detail, "3 option(s)");
+  });
+
+  it("truncates very long prompts in the diagnostic preview", () => {
+    const longPrompt = "x".repeat(500);
+    const events = buildAssistantToolCallEvents({
+      rawReply: `<<<PRISM_TOOL>>>{"v":1,"sendGeneratedImage":{"prompt":"${longPrompt}"}}<<<END_PRISM_TOOL>>>`,
+      parsedSendGeneratedImage: { prompt: longPrompt },
+      imageSlot: "acquired",
+      imageJobId: "job-trim",
+    });
+    const detected = events[0];
+    assert.ok(detected, "expected a detected event");
+    assert.ok(detected!.prompt!.length <= 201, "prompt should be capped to roughly 200 chars");
+    assert.ok(detected!.prompt!.endsWith("…"), "long prompts should be marked with an ellipsis");
   });
 });

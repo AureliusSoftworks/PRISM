@@ -10,8 +10,8 @@ up the business model for the official frontend.
 | --- | --- | --- |
 | Prism Server | Open source, likely AGPLv3 | The server is the trust anchor and contains the local-first data/runtime guarantees. AGPLv3 preserves reciprocity for networked modifications. |
 | Existing web UI | Ship with the server unless later split | It is currently part of the self-hosted server experience and useful for setup/admin. |
-| Official Prism iOS/Mac | Proprietary paid App Store app | This is the polished native frontend and primary commercial product. |
-| Prism name, logos, icons, App Store copy | Protected brand assets | Forks and third-party clients should not appear official or reuse protected branding. |
+| Official Prism macOS client (and future desktop clients) | Proprietary paid download | Polished native shell distributed from GitHub Releases (not the App Store–first model). |
+| Prism name, logos, icons, marketing copy | Protected brand assets | Forks and third-party clients should not appear official or reuse protected branding. |
 
 This is not a full legal policy. Before public launch, the exact license files,
 trademark notice, contributor terms, and App Store EULA should be reviewed by a
@@ -38,8 +38,7 @@ Reasons:
 - They create support burden for legitimate self-hosted setups.
 - They conflict with the product's privacy and user-agency posture.
 
-The better moat is the official client experience: App Store convenience,
-native polish, secure storage, pairing flow, updates, support, and brand trust.
+The better moat is the official client experience: native polish, secure storage, pairing flow, updates, support, and brand trust.
 
 ## Brand Boundary
 
@@ -53,19 +52,21 @@ Not allowed without permission:
 
 - Calling a fork or third-party client "Prism" in a way that implies official
   status.
-- Reusing official Prism icons, App Store artwork, screenshots, or marketing
+- Reusing official Prism icons, store artwork, screenshots, or marketing
   copy.
-- Representing a third-party client as the official paid Apple app.
+- Representing a third-party client as the official paid Prism client.
 
 ## Distribution Copy
 
-README and release pages should use clear language:
+README and release pages should use clear language aligned with the current
+indie model (GitHub Releases for server + paid client; iPhone via PWA):
 
 ```text
 Prism Server is open source and available from GitHub Releases.
-The official Prism iOS/Mac client is distributed separately through the App
-Store as the paid native frontend.
+The Prism client (macOS today; more platforms planned) is distributed from
+GitHub Releases and activates with a license code. Prism on iPhone is a
+Progressive Web App served by your Prism Server — no App Store download.
 ```
 
-That keeps expectations clear for users, contributors, App Review, and future
-third-party developers.
+That keeps expectations clear for users, contributors, and future third-party
+developers.

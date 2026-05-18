@@ -14,6 +14,10 @@ prism phone
 prism mac-client
 prism mac-server
 prism web
+prism standalone
+prism standalone-win 0.2.0
+prism standalone-dev
+prism reset
 ```
 
 These commands call the repo-owned `scripts/prism` dispatcher. If needed, the
@@ -24,8 +28,12 @@ SIMULATOR_ID="Simulator UDID" prism ios
 PHONE_DEVICE_ID="Device UDID" prism phone
 ```
 
-`prism web` is the only command that runs a long-lived dev server rather than
-a build-and-launch — see [Web Dev Server](#web-dev-server) below.
+`prism web` and `prism standalone-dev` are the long-lived commands in this set:
+- `prism web` runs the browser dev server flow.
+- `prism standalone` opens the latest macOS desktop installer DMG (building one if needed).
+- `prism standalone-win <version> [channel]` dispatches the desktop release workflow (`release-main.yml`) for Windows packaging and opens the `desktop/v<version>` release page.
+- `prism standalone-dev` runs the desktop standalone dev flow.
+- `prism reset` performs a local factory reset (prompts unless `--force`).
 
 ## GitHub Actions release shortcuts (/🏗️)
 
@@ -190,6 +198,13 @@ repository root:
 .\scripts\prism.ps1 windows-server
 ```
 
+Factory reset from PowerShell:
+
+```powershell
+.\scripts\prism.ps1 reset
+.\scripts\prism.ps1 reset --force
+```
+
 Release installer builds run on `windows-latest` via
 `.github/workflows/release-server-windows.yml`. The workflow publishes the WPF
 tray app, stages the Node/Qdrant runtime, packages it with Inno Setup, and
@@ -208,4 +223,42 @@ prism web
 ```
 
 Equivalent to `npm run dev:web` from the repo root.
+
+## Desktop Standalone Installer
+
+Open the latest macOS Prism Desktop installer DMG. If none exists yet, the
+command builds one first, then opens it.
+
+```bash
+prism standalone
+```
+
+## Desktop Standalone Dev
+
+Desktop shell iteration with the embedded runtime staging flow. Runs the
+standalone command and stays attached to the terminal.
+
+```bash
+prism standalone-dev
+```
+
+Equivalent to `npm run desktop` from the repo root.
+
+## Factory Reset
+
+Use this when you want a clean local slate without reinstalling the app launcher.
+
+```bash
+prism reset
+prism reset --force
+```
+
+What `prism reset` deletes:
+- account and chat SQLite files (`localai.db`, `-wal`, `-shm`)
+- generated image files
+- local Qdrant storage folders
+- local Prism runtime logs and cache folders
+
+What it keeps intentionally:
+- launcher configuration files (for example `.env`)
 

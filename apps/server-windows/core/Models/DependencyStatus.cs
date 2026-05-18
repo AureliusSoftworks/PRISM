@@ -4,7 +4,12 @@ public sealed record PillarStatus(string Name, bool IsReady, string Detail);
 
 public sealed record ModelSubstatus(string Name, bool IsReady, string Detail);
 
-public sealed record LocalAIPillarStatus(PillarStatus Ollama, ModelSubstatus DefaultModel, ModelSubstatus EmbeddingModel)
+public sealed record LocalAIPillarStatus(
+    PillarStatus Ollama,
+    ModelSubstatus DefaultModel,
+    ModelSubstatus EmbeddingModel,
+    bool CanAutoInstallOllama,
+    string? OllamaInstallHint)
 {
     public bool IsReady => Ollama.IsReady && DefaultModel.IsReady && EmbeddingModel.IsReady;
 }
@@ -20,7 +25,9 @@ public sealed record DependencyStatus(
         new LocalAIPillarStatus(
             new PillarStatus("Local AI Engine", false, "Not checked yet."),
             new ModelSubstatus("Default model", false, "Not checked yet."),
-            new ModelSubstatus("Embedding model", false, "Not checked yet.")));
+            new ModelSubstatus("Embedding model", false, "Not checked yet."),
+            false,
+            null));
 
     /// <summary>
     /// Prism's app plumbing requires the local chat and embedding models to be present.

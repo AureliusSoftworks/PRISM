@@ -1,19 +1,35 @@
 export {
+  BOT_FACT_KEY_LABELS,
+  BOT_FACT_KEY_ORDER,
+  BOT_FACT_KEY_PLACEHOLDERS,
   BOT_PROFILE_CATEGORY_LABELS,
   BOT_PROFILE_CATEGORY_ORDER,
   BOT_PROFILE_META_END,
   BOT_PROFILE_META_START,
   BOT_VOICE_PRESET_LABELS,
   DEFAULT_BOT_PROFILE_FIELDS,
+  MAX_CUSTOM_FACTS,
   composeBotProfileProse,
   defaultBotPurpose,
+  listBotProfileFacts,
   parseStoredBotPrompt,
   randomBotProfile,
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
   stripPurposeStatementPrefixes,
+  ageFromIsoBirthday,
+  buildImagePersonaContext,
+  composeAugmentedImagePrompt,
+  DEFAULT_IMAGE_PERSONA_CONTEXT_MAX_CHARS,
+  parseIsoYmdParts,
+  westernZodiacFromIsoBirthday,
+  westernZodiacSignFromMonthDay,
   type BotAppearanceProfile,
+  type BotBirthEra,
   type BotCoreProfile,
+  type BotCustomFact,
+  type BotFactKey,
+  type BotFactsProfile,
   type BotIdentityProfile,
   type BotProfileCategoryId,
   type BotProfileFields,
@@ -22,6 +38,7 @@ export {
   type BotPurposeProfile,
   type BotVoicePreset,
   type BotWorldviewProfile,
+  type WesternZodiacSign,
 } from "./botProfile.js";
 
 export {
@@ -30,13 +47,62 @@ export {
   assistantContentHasPrismToolFraming,
   hydrateAssistantMessageParts,
   parseAssistantPrismTools,
+  parseStoredAssistantToolPayload,
   parseStoredToolPayload,
+  serializeAssistantToolPayload,
   serializeAskQuestionTool,
   type AskQuestionOption,
   type AskQuestionPayload,
   type ParsedAssistantTurn,
+  type ParsedStoredAssistantToolPayload,
+  type SentGeneratedImagePayload,
+  type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
+  type StoredMoodKey,
 } from "./prismTool.js";
+
+export {
+  OPENAI_IMAGE_MODEL_IDS,
+  OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
+  DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  DEFAULT_OLLAMA_IN_APP_PULL_MODEL,
+  isAllowedOpenAiImageModelId,
+  normalizeOpenAiImageModelId,
+  normalizeOpenAiImageGenerationParams,
+  catalogEntriesMatchingLocalImageHeuristic,
+  COMFYUI_MODEL_PREFIX,
+  encodeComfyUiModelId,
+  isComfyUiModelId,
+  parseComfyUiCheckpointName,
+  isAllowedInAppOllamaPullModelName,
+  type OpenAiImageModelId,
+  type NormalizedOpenAiImageSize,
+  type NormalizedOpenAiImageRequest,
+  type OpenAiImageSizeDalle3,
+  type OpenAiImageSizeDalle2,
+  type LocalImageModelCandidate,
+} from "./imageModels.js";
+
+export {
+  COMFYUI_REMOTE_WORKFLOW_PREFIX,
+  COMFYUI_WORKFLOW_MODEL_PREFIX,
+  MAX_COMFY_UI_WORKFLOW_REGISTRATIONS,
+  MAX_COMFY_UI_WORKFLOWS_STORED_JSON_BYTES,
+  encodeComfyUiRemoteWorkflowModelId,
+  encodeComfyUiWorkflowModelId,
+  findComfyUiWorkflowBindingByRemotePath,
+  findComfyUiWorkflowRegistration,
+  isComfyUiApiWorkflowNode,
+  isComfyUiRemoteWorkflowModelId,
+  isComfyUiWorkflowModelId,
+  parseComfyUiRemoteWorkflowPath,
+  parseComfyUiWorkflowSlug,
+  parseStoredComfyUiWorkflows,
+  validateComfyUiWorkflowsPayload,
+  type ComfyUiWorkflowInputRef,
+  type ComfyUiWorkflowPatchMap,
+  type ComfyUiWorkflowRegistration,
+} from "./comfyUiWorkflow.js";
 
 export {
   ACCENT_LUMINANCE_MAX_LIGHT,
@@ -58,7 +124,8 @@ export {
   swatchBorderCompensation,
 } from "./color.js";
 
-import type { AskQuestionPayload } from "./prismTool.js";
+import type { AskQuestionPayload, SentGeneratedImagePayload } from "./prismTool.js";
+import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 
 export type UserRole = "user";
 
@@ -93,22 +160,175 @@ export interface ChatMessage {
   botColor?: string;
   /** Bot's associated glyph identifier (opaque key looked up in the client's glyph registry). */
   botGlyph?: string;
+  /** Lightweight emotional cue for assistant-message mood rendering. */
+  moodKey?: BotMoodKey;
+  /** Optional confidence (0-1) for tuning and diagnostics. */
+  moodConfidence?: number;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
   askQuestion?: AskQuestionPayload;
+  /** When this assistant turn included a generated image shown in chat and the library. */
+  sentGeneratedImage?: SentGeneratedImagePayload;
 }
+
+/**
+ * Coffee-only hidden social metrics tracked per bot for a single session.
+ * Values are normalized (0-1) to keep prompt shaping and diagnostics simple.
+ */
+export interface CoffeeBotSocialSnapshot {
+  disposition: number;
+  valuesFriction: number;
+  restraint: number;
+  engagement: number;
+  leavePressure: number;
+}
+
+export interface CoffeeInterruptionSocialDelta {
+  botId: string;
+  dispositionDelta: number;
+  valuesFrictionDelta: number;
+}
+
+export interface CoffeePlayerInterruptionInput {
+  interruptedMessageId: string;
+  interruptedBotId: string;
+  visibleTokenCount: number;
+}
+
+export interface CoffeeInterruptionEvent {
+  kind: "playerInterruptsBot" | "botInterruptsPlayer";
+  interruptedBotId: string;
+  interrupterBotId?: string;
+  interruptedMessageId?: string;
+  visibleTokenCount?: number;
+  interruptedSnippet?: string;
+  socialConsequences: CoffeeInterruptionSocialDelta[];
+}
+
+export type CoffeeSessionDurationMinutes = 1 | 5 | 10;
+
+export const COFFEE_SESSION_DURATION_MINUTES = [1, 5, 10] as const;
+export const DEFAULT_COFFEE_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
+
+export type CoffeePresetMode = "manual" | "auto";
+
+/** How new Coffee Sessions pick a table topic for a saved Coffee Group. */
+export type CoffeeTopicSelectionMode = "manual" | "auto";
+
+export interface CoffeePreset {
+  id: string;
+  name: string;
+  settings: CoffeeSessionSettings;
+  builtIn: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CoffeeGroupEvent {
+  id: string;
+  groupId: string;
+  type:
+    | "created"
+    | "renamed"
+    | "settings_updated"
+    | "roster_updated"
+    | "session_created"
+    | "model_choice_updated";
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+/**
+ * Per-Coffee-Group model picker memory. Keys are provider ids; values are
+ * Auto picker model ids (e.g. `"llama3.2"`, `"gpt-5.1"`). Missing or empty
+ * keys mean "Auto" / fall back to per-bot defaults.
+ */
+export interface CoffeeGroupModelChoice {
+  local?: string;
+  openai?: string;
+}
+
+export interface CoffeeGroup {
+  id: string;
+  userId: string;
+  name: string;
+  botGroupIds: string[];
+  coffeeSeatBotIds: Array<string | null>;
+  coffeeSettings: CoffeeSessionSettings;
+  presetMode: CoffeePresetMode;
+  /** When `auto`, new group sessions pick a random generated topic server-side. */
+  topicSelectionMode?: CoffeeTopicSelectionMode;
+  /** Server-persisted Coffee model picker per provider. Empty = Auto. */
+  modelChoiceByProvider?: CoffeeGroupModelChoice;
+  moodSummary?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+}
+
+export {
+  COFFEE_HISTORY_WINDOW_HARD_CAP,
+  COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD,
+  COFFEE_TABLE_REPLY_MAX_CHARS_HARD,
+  DEFAULT_COFFEE_SESSION_SETTINGS,
+  coffeeEffectiveHistoryLimit,
+  coffeeEffectiveMemoryCallbacks,
+  coffeeReplyLengthCaps,
+  coffeeRouterTailMessageCount,
+  coffeeRouterTemperature,
+  normalizeCoffeeSessionSettings,
+  type CoffeeCrossTalkLevel,
+  type CoffeeMemoryCallbacks,
+  type CoffeeResponseLengthPreset,
+  type CoffeeSessionSettings,
+  type CoffeeTableEnergy,
+} from "./coffeeSettings.js";
 
 export interface Conversation {
   id: string;
   userId: string;
   title: string;
+  /** Owning surface for this conversation row. */
+  mode?: ChatMode;
   /**
    * Bot the conversation is locked to. Chosen at chat start (Chat mode
    * empty-state picker or Sandbox bot picker) and frozen for the whole
    * conversation — the same bot drives every assistant reply and
    * supplies the shell accent color when the chat is open. `null` means
    * the default grayscale persona (no color wheel, brand mark only).
+   *
+   * Coffee mode leaves this null and uses {@link botGroupIds} instead.
    */
   botId: string | null;
+  /**
+   * Coffee-only — ordered list of 2-5 bot ids that participate in this
+   * live session. Captured once when the Coffee thread is created and
+   * frozen for the conversation. The router LLM picks which one of these
+   * speaks next on each turn.
+   * Always undefined for `chat` and `sandbox` mode rows.
+   */
+  botGroupIds?: string[];
+  /** Coffee-only — durable parent group for recurring table sessions. */
+  coffeeGroupId?: string | null;
+  /**
+   * Coffee-only — fixed five-seat table layout. Entries are bot ids or null
+   * for an empty chair. This preserves visual seat placement separately from
+   * the compact participant list above.
+   */
+  coffeeSeatBotIds?: Array<string | null>;
+  /**
+   * Coffee-only hidden social values keyed by bot id for this conversation.
+   * This is primarily consumed by dev diagnostics and prompt shaping.
+   */
+  coffeeBotSocialById?: Record<string, CoffeeBotSocialSnapshot>;
+  /**
+   * Coffee-only — table feel / reply length / focus knobs for this session.
+   * Omitted for non-coffee rows.
+   */
+  coffeeSettings?: CoffeeSessionSettings;
+  /** Coffee-only — selected timed session duration, once group sessions own starts. */
+  coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
+  /** Coffee-only — shared anchor topic for this session (null until chosen). */
+  coffeeTopic?: string | null;
   /**
    * Private chat marker — once `true`, accent styling is suppressed to
    * grayscale, the thread stays client-held, and nothing is written to
@@ -158,14 +378,36 @@ export interface UserMemory {
   botId?: string;
   createdAt: string;
   confidence: number;
+  /** What this memory is about, used for memory-panel organization. */
+  category?: MemoryCategory;
+  /** Short-term memories can be rewritten/removed; long-term memories must be demoted first. */
+  tier?: MemoryTier;
   /** Origin of this memory item. */
-  source?: "direct" | "inferred" | "compiled";
+  source?: "direct" | "inferred" | "compiled" | "about_you";
   /** Separate certainty channel for inferred/compiled assumptions. */
   certainty?: number;
+  /** How likely this memory is to remain useful across future chats. */
+  durability?: number;
   /** Message ids this memory was derived from, used for edit/revert cleanup. */
   sourceMessageIds?: string[];
   text: string;
 }
+
+export type MemoryCategory = "general" | "user" | "bot_relation";
+export type MemoryTier = "short_term" | "long_term";
+
+export {
+  REQUIRED_LOCAL_MODELS,
+  REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  sanitizeHiddenModelIds,
+  resolveAutoModel,
+  type AutoModelProvider,
+  type CatalogShapeForAuto,
+  type ResolveAutoModelInput,
+  type ResolvedAutoModel,
+} from "./modelRouting.js";
+
+export { classifyMemoryCategoryFromText } from "./memoryClassification.js";
 
 export type MemoryValidationStatus = "approved" | "auto_fixed";
 
@@ -196,23 +438,62 @@ export interface MemoryValidationEvent {
  * - `"sandbox"`: the full command-center. Cross-session memory is disabled
  *   entirely here — the rolling message window IS the thread's memory. The
  *   `incognito` flag is ignored for Sandbox requests.
+ * - `"coffee"`: timed live conversation for 2-5 reactive bots. User turns and
+ *   autonomous timed turns trigger a router LLM pick (which bot speaks next
+ *   based on personality + context), then that bot replies through the Coffee
+ *   pipeline. Memory is thread-scoped only in the first pass.
  *
  * Defaults to `"sandbox"` on the server when omitted, so pre-`mode` clients
  * keep the previous cross-session memory behavior.
  */
-export type ChatMode = "chat" | "sandbox";
+export type ChatMode = "chat" | "sandbox" | "coffee";
+
+/**
+ * Companion-only preferences. These are intentionally "feel" controls, not
+ * runtime model knobs, so Chat can stay calm and low-control.
+ */
+export interface ChatCompanionPreferences {
+  /** Optional tone cue for the single companion persona. */
+  tone?: "grounded" | "warm" | "reflective";
+  /** Optional ritual cue used by lightweight Chat check-in UI. */
+  ritual?: "none" | "daily-check-in" | "weekly-reflection";
+}
+
+/**
+ * Advanced runtime controls reserved for Sandbox.
+ *
+ * In Chat mode these knobs are accepted for backwards compatibility but
+ * ignored server-side so the companion contract remains stable.
+ */
+export interface SandboxRuntimeControls {
+  preferredProvider?: "local" | "openai";
+  modelOverride?: string;
+  botId?: string | null;
+}
 
 export interface ChatRequestPayload {
   conversationId?: string;
+  /** When true, bypass "reuse latest chat" and start a fresh conversation row. */
+  forceNewConversation?: boolean;
   message: string;
   starterPrompt?: boolean;
   mode?: ChatMode;
+  /** Companion-only optional preferences (used only when mode === "chat"). */
+  companionPreferences?: ChatCompanionPreferences;
+  /** Advanced controls intended for Sandbox-only routing. */
+  sandboxControls?: SandboxRuntimeControls;
+  /** Back-compat top-level advanced knobs (ignored when mode === "chat"). */
+  preferredProvider?: "local" | "openai";
+  modelOverride?: string;
+  botId?: string | null;
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
    * prompt context only; private turns are never read from or written to
    * persisted conversation/message storage.
    */
   ephemeralMessages?: ChatMessage[];
+  /** Optional signal to trigger end-of-session rolling compaction. */
+  sessionEnding?: boolean;
 }
 
 /**
@@ -225,6 +506,7 @@ export interface StarterChatExtras {
 
 export type OpinionBand = "guarded" | "warming" | "trusting";
 export type OpinionTrend = "up" | "down" | "steady";
+export type BotMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained";
 
 export interface SessionOpinion {
   score: number;
@@ -235,10 +517,33 @@ export interface SessionOpinion {
   updatedAt: string;
 }
 
+export type BotOpinionBand = "wounded" | "careful" | "open" | "bonded";
+export type BotOpinionBoundaryLevel = "none" | "gentle" | "firm";
+
+export interface BotOpinion {
+  score: number;
+  band: BotOpinionBand;
+  boundaryLevel: BotOpinionBoundaryLevel;
+  trend: OpinionTrend;
+  lastReason: string;
+  recentReasons: string[];
+  repairCount: number;
+  updatedAt: string;
+}
+
 export interface ChatResponsePayload extends StarterChatExtras {
   conversation: Conversation;
   assistantMessage: ChatMessage;
   opinion?: SessionOpinion;
+  botOpinion?: BotOpinion;
+  summaryCompaction?: {
+    mode: ChatMode;
+    triggered: boolean;
+    inProgress: boolean;
+    reason: "milestone" | "mode_exit" | "manual";
+    latestSummary?: string;
+    latestSummaryAt?: string;
+  };
   memoryLearned?: {
     created: Array<{
       id: string;
@@ -246,8 +551,11 @@ export interface ChatResponsePayload extends StarterChatExtras {
       botId: string | null;
       conversationId?: string;
       confidence: number;
-      source?: "direct" | "inferred" | "compiled";
+      category?: MemoryCategory;
+      tier?: MemoryTier;
+      source?: "direct" | "inferred" | "compiled" | "about_you";
       certainty?: number;
+      durability?: number;
       sourceMessageIds?: string[];
       validationStatus?: MemoryValidationStatus;
       originalText?: string;
@@ -259,8 +567,11 @@ export interface ChatResponsePayload extends StarterChatExtras {
       botId: string | null;
       conversationId?: string;
       confidence: number;
-      source?: "direct" | "inferred" | "compiled";
+      category?: MemoryCategory;
+      tier?: MemoryTier;
+      source?: "direct" | "inferred" | "compiled" | "about_you";
       certainty?: number;
+      durability?: number;
       sourceMessageIds?: string[];
     }>;
     rejected?: Array<{
@@ -269,5 +580,102 @@ export interface ChatResponsePayload extends StarterChatExtras {
       notes?: string;
     }>;
     maxConfidence: number;
+  };
+}
+
+export interface ConversationSummaryDebug {
+  mode: ChatMode;
+  conversationId: string;
+  inProgress: boolean;
+  latestSummary: string | null;
+  latestSummaryAt: string | null;
+  summaryCount: number;
+  totalMessages: number;
+  messagesSinceLastCompaction: number;
+}
+
+export type CoffeeArrivalScenario =
+  | "user-first"
+  | "partial-table-in-progress"
+  | "full-table-present";
+
+/** Request body for `POST /api/coffee/sessions`. */
+export interface CoffeeSessionCreateRequest {
+  /** Fixed five-seat table layout; null entries are empty chairs. */
+  groupBotIds: Array<string | null>;
+  /** Optional session tuning; omitted rows use server defaults. */
+  coffeeSettings?: unknown;
+}
+
+/** Response body for `POST /api/coffee/sessions`. */
+export interface CoffeeSessionCreateResponse {
+  conversation: Conversation;
+  /** Opening setup used by the client arrival animation. */
+  arrivalScenario: CoffeeArrivalScenario;
+  /**
+   * Suggested topic chips for manual selection (omitted when the server
+   * already persisted {@link Conversation.coffeeTopic}, e.g. auto-topic groups).
+   */
+  coffeeStarterTopics?: string[];
+}
+
+/** Request body for `POST /api/coffee/sessions/:id/continue`. */
+export interface CoffeeContinueRequest {
+  /**
+   * Per-request provider override for the next bot reply. Per-bot online
+   * gating still wins — a bot with `online_enabled=0` falls back to local.
+   */
+  preferredProvider?: "local" | "openai";
+  /**
+   * Optional director-mode pick. When present, the server asks this seated bot
+   * to speak instead of running the automatic speaker router.
+   */
+  directedSpeakerBotId?: string;
+  /** Client hint used for rare bot-interrupt presentation while composing. */
+  userIsComposing?: boolean;
+}
+
+/** Request body for `PATCH /api/coffee/sessions/:id/settings`. */
+export interface CoffeeSessionSettingsPatchRequest {
+  coffeeSettings: unknown;
+}
+
+/** Request body for `POST /api/coffee/turn`. */
+export interface CoffeeTurnRequest {
+  /** Existing Coffee conversation id, or omitted for legacy first-turn creation. */
+  conversationId?: string;
+  /**
+   * Ordered list of 2-5 bot ids, or a fixed five-seat layout with null empty
+   * seats. Required only for legacy first-turn creation; ignored on subsequent
+   * turns (server uses the group stored on the conversation row). New clients
+   * should create a Coffee session first via `POST /api/coffee/sessions`.
+   */
+  groupBotIds?: Array<string | null>;
+  /**
+   * Per-request provider override (matches the Sandbox `/api/chat`
+   * `preferredProvider` semantics). When present, replaces the user's
+   * saved preference for this turn only. Per-bot online gating still
+   * wins — a bot with `online_enabled=0` always falls back to local.
+   */
+  preferredProvider?: "local" | "openai";
+  /** The user's outgoing message. */
+  message: string;
+  /** Optional player-interruption metadata from the live table reveal state. */
+  playerInterruption?: CoffeePlayerInterruptionInput;
+}
+
+/** Response body for `POST /api/coffee/turn`. */
+export interface CoffeeTurnResponse {
+  conversation: Conversation;
+  /** The bot id chosen by the router for this turn (matches the assistant message's bot_id). */
+  speakerBotId: string;
+  /** Optional human-readable router rationale for debugging/inspection. Never shown to the user verbatim. */
+  routerReason?: string;
+  /** Optional interruption event payload for live Coffee table presentation. */
+  interruption?: CoffeeInterruptionEvent;
+  /** Present when a Coffee user turn started an async image generation job. */
+  pendingImageJob?: {
+    jobId: string;
+    conversationId: string | null;
   };
 }

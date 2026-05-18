@@ -2,6 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Prism Server" Width="560" Height="680" MinWidth="520" MinHeight="560">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="20" Orientation="Vertical">
             <TextBlock Text="Welcome to Prism Server" FontSize="22" FontWeight="SemiBold" />
@@ -22,6 +25,11 @@
                     <Button Content="Start Memory Engine" Command="{Binding StartMemoryEngineCommand}" HorizontalAlignment="Left" Margin="0,0,0,8" />
                     <TextBlock Text="Local AI Engine" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding DependencyStatus.LocalAI.Ollama.Detail}" TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,8" />
+                    <Button Content="Install Ollama"
+                            Command="{Binding InstallOllamaCommand}"
+                            Visibility="{Binding ShowInstallOllamaAction, Converter={StaticResource BoolToVisibility}}"
+                            HorizontalAlignment="Left"
+                            Margin="0,0,0,8" />
                     <TextBlock Text="{Binding DependencyStatus.LocalAI.DefaultModel.Name}" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding DependencyStatus.LocalAI.DefaultModel.Detail}" TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,8" />
                     <TextBlock Text="{Binding DependencyStatus.LocalAI.EmbeddingModel.Name}" FontWeight="SemiBold" />

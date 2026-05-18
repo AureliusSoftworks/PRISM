@@ -17,47 +17,8 @@ $PayloadRoot = Split-Path -Parent $OutputDir
 
 Push-Location $RepoRoot
 try {
-    Write-Host "Building Prism server runtime..."
-    npm run build
-
-    if (Test-Path $OutputDir) { Remove-Item $OutputDir -Recurse -Force }
-    New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-
-    Write-Host "Staging API runtime..."
-    New-Item -ItemType Directory -Force -Path (Join-Path $OutputDir "apps\api") | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $OutputDir "apps\web\.next") | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $OutputDir "node_modules\@localai") | Out-Null
-
-    $apiDistSource = Join-Path $RepoRoot "apps\api\dist"
-    $nestedApiEntry = Join-Path $RepoRoot "apps\api\dist\apps\api\src\server.js"
-    if (Test-Path $nestedApiEntry) {
-        $apiDistSource = Join-Path $RepoRoot "apps\api\dist\apps\api\src"
-    }
-
-    Copy-Item $apiDistSource (Join-Path $OutputDir "apps\api\dist") -Recurse -Force
-    if (-not (Test-Path (Join-Path $OutputDir "apps\api\dist\server.js"))) {
-        throw "Missing staged API entrypoint: $OutputDir\apps\api\dist\server.js"
-    }
-
-    Copy-Item (Join-Path $RepoRoot "apps\api\package.json") (Join-Path $OutputDir "apps\api\package.json") -Force
-    Copy-Item (Join-Path $RepoRoot "package.json") (Join-Path $OutputDir "package.json") -Force
-    Copy-Item (Join-Path $RepoRoot "package-lock.json") (Join-Path $OutputDir "package-lock.json") -Force
-
-    Write-Host "Staging API production dependencies..."
-    Copy-Item (Join-Path $RepoRoot "packages\config") (Join-Path $OutputDir "node_modules\@localai\config") -Recurse -Force
-    Copy-Item (Join-Path $RepoRoot "packages\shared") (Join-Path $OutputDir "node_modules\@localai\shared") -Recurse -Force
-    Copy-Item (Join-Path $RepoRoot "node_modules\dnssd-advertise") (Join-Path $OutputDir "node_modules\dnssd-advertise") -Recurse -Force
-
-    Write-Host "Staging Next.js standalone runtime..."
-    Copy-Item (Join-Path $RepoRoot "apps\web\.next\standalone") (Join-Path $OutputDir "apps\web\.next\standalone") -Recurse -Force
-    New-Item -ItemType Directory -Force -Path (Join-Path $OutputDir "apps\web\.next\standalone\apps\web\.next") | Out-Null
-    Copy-Item (Join-Path $RepoRoot "apps\web\.next\static") (Join-Path $OutputDir "apps\web\.next\standalone\apps\web\.next\static") -Recurse -Force
-    $publicDir = Join-Path $RepoRoot "apps\web\public"
-    if (Test-Path $publicDir) {
-        Copy-Item $publicDir (Join-Path $OutputDir "apps\web\.next\standalone\apps\web\public") -Recurse -Force
-    }
-
-    Write-Host "Runtime staged at $OutputDir"
+    Write-Host "Staging Prism runtime with shared script..."
+    node (Join-Path $RepoRoot "scripts\stage-desktop-runtime.mjs") --output-dir $OutputDir
 
     $nodeOutputDir = Join-Path $PayloadRoot "node"
     if ($VendorNode) {

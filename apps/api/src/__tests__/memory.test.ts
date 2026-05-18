@@ -5,12 +5,15 @@ import { fallbackEmbedding } from "../providers.ts";
 import {
   analyzeMemoryIntent,
   createDevSeedMemories,
+  deleteMemoryById,
   deleteMemoriesLinkedToMessages,
+  demoteMemoryToShortTerm,
   deleteOrphanedBotMemories,
   findMemoryByCue,
   extractMemoryCandidates,
   filterConflictingMemories,
   persistMemoryCandidates,
+  restoreMemory,
   retrieveRelevantMemories,
 } from "../memory.ts";
 
@@ -26,6 +29,9 @@ function createMemoryTestDb(): DatabaseSync {
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
       confidence REAL NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      tier TEXT NOT NULL DEFAULT 'short_term',
+      durability REAL NOT NULL DEFAULT 0.5,
       source TEXT NOT NULL DEFAULT 'direct',
       certainty REAL,
       source_message_ids TEXT NOT NULL DEFAULT '[]',
@@ -55,6 +61,13 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
+
+function memoryCandidateCore(candidates: Array<{ text: string; confidence: number }>) {
+  return candidates.map((candidate) => ({
+    text: candidate.text,
+    confidence: candidate.confidence,
+  }));
+}
 
 function seedMemoryRow(
   db: DatabaseSync,
@@ -92,7 +105,7 @@ describe("extractMemoryCandidates", () => {
       "Please remember to talk like a Pirate. Do not forget."
     );
 
-    assert.deepEqual(candidates, [
+    assert.deepEqual(memoryCandidateCore(candidates), [
       { text: "To talk like a Pirate.", confidence: 0.98 },
     ]);
   });
@@ -111,7 +124,7 @@ describe("extractMemoryCandidates", () => {
       "Remember this: do not refer to yourself as AI."
     );
 
-    assert.deepEqual(candidates, [
+    assert.deepEqual(memoryCandidateCore(candidates), [
       { text: "Do not refer to yourself as AI.", confidence: 0.98 },
     ]);
   });
@@ -121,8 +134,18 @@ describe("extractMemoryCandidates", () => {
       "I love potatoes, don't you?"
     );
 
-    assert.deepEqual(candidates, [
+    assert.deepEqual(memoryCandidateCore(candidates), [
       { text: "You love potatoes.", confidence: 0.67 },
+    ]);
+  });
+
+  it("rewrites apology-prefixed self-state memories into concise user-facing wording", () => {
+    const candidates = extractMemoryCandidates(
+      "Sorry about that, I'm just distracted."
+    );
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      { text: "You seem a little distracted.", confidence: 0.72 },
     ]);
   });
 
@@ -141,6 +164,39 @@ describe("extractMemoryCandidates", () => {
 
     assert.match(candidates[0]?.text ?? "", /^Your favorite drink is coffee\.$/);
   });
+
+  it("captures habitat-style statements like i live and rewrites fun-fact prefixes", () => {
+    const candidates = extractMemoryCandidates(
+      "Fun: fact, I live on land!"
+    );
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      { text: "You live on land.", confidence: 0.9 },
+    ]);
+  });
+
+  it("captures funny-enough self-disclosures without storing the lead-in", () => {
+    const candidates = extractMemoryCandidates(
+      "Funny enough, I live on land!"
+    );
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      { text: "You live on land.", confidence: 0.9 },
+    ]);
+  });
+
+  it("keeps assistant-directed reminder preferences grammatically correct", () => {
+    const candidates = extractMemoryCandidates(
+      "Please don't forget that I do not want you to remind me that you are AI."
+    );
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      {
+        text: "You do not want me to remind you that I am AI.",
+        confidence: 0.98,
+      },
+    ]);
+  });
 });
 
 describe("analyzeMemoryIntent", () => {
@@ -152,7 +208,7 @@ describe("analyzeMemoryIntent", () => {
     assert.equal(intent.kind, "create");
     assert.equal(intent.scope, "global");
     assert.equal(intent.explicit, true);
-    assert.deepEqual(intent.candidates, [
+    assert.deepEqual(memoryCandidateCore(intent.candidates), [
       { text: "You love pistachios.", confidence: 0.63 },
     ]);
   });
@@ -177,7 +233,7 @@ describe("analyzeMemoryIntent", () => {
     assert.equal(intent.kind, "correct");
     assert.equal(intent.scope, "global");
     assert.deepEqual(intent.cuePhrases, ["Forget what I said earlier"]);
-    assert.deepEqual(intent.newCandidates, [
+    assert.deepEqual(memoryCandidateCore(intent.newCandidates), [
       { text: "You prefer matcha.", confidence: 0.66 },
     ]);
   });
@@ -188,8 +244,30 @@ describe("analyzeMemoryIntent", () => {
     assert.equal(intent.kind, "create");
     assert.equal(intent.scope, "bot");
     assert.equal(intent.explicit, false);
-    assert.deepEqual(intent.candidates, [
+    assert.deepEqual(memoryCandidateCore(intent.candidates), [
       { text: "You like quiet mornings.", confidence: 0.65 },
+    ]);
+  });
+
+  it("treats fun-fact disclosures as explicit bot-scoped memory intent", () => {
+    const intent = analyzeMemoryIntent("Fun: fact, I live on land.");
+
+    assert.equal(intent.kind, "create");
+    assert.equal(intent.scope, "bot");
+    assert.equal(intent.explicit, true);
+    assert.deepEqual(memoryCandidateCore(intent.candidates), [
+      { text: "You live on land.", confidence: 0.9 },
+    ]);
+  });
+
+  it("treats funny-enough disclosures as explicit bot-scoped memory intent", () => {
+    const intent = analyzeMemoryIntent("Funny enough, I live on land.");
+
+    assert.equal(intent.kind, "create");
+    assert.equal(intent.scope, "bot");
+    assert.equal(intent.explicit, true);
+    assert.deepEqual(memoryCandidateCore(intent.candidates), [
+      { text: "You live on land.", confidence: 0.9 },
     ]);
   });
 });
@@ -221,7 +299,7 @@ describe("persistMemoryCandidates", () => {
     assert.equal(row?.user_id, "user-1");
     assert.equal(row?.conversation_id, "conversation-1");
     assert.equal(row?.bot_id, "bot-1");
-    assert.equal(row?.confidence, 0.8);
+    assert.ok(Math.abs((row?.confidence ?? 0) - 0.72) < 1e-9);
   });
 
   it("stores source message ids on direct memories", async () => {
@@ -242,6 +320,242 @@ describe("persistMemoryCandidates", () => {
 
     assert.deepEqual(memory.sourceMessageIds, ["message-1"]);
     assert.deepEqual(JSON.parse(row?.source_message_ids ?? "[]"), ["message-1"]);
+  });
+
+  it("starts non-explicit direct memories at a conservative confidence", async () => {
+    const db = createMemoryTestDb();
+    const [memory] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You enjoy chai tea.", confidence: 0.66 }],
+      Buffer.alloc(32, 7)
+    );
+
+    assert.ok(Math.abs(memory.confidence - 0.58) < 1e-9);
+    assert.equal(memory.tier, "short_term");
+  });
+
+  it("reinforces repeated preference mentions instead of duplicating rows", async () => {
+    const db = createMemoryTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    const first = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You enjoy chai tea.", confidence: 0.66 }],
+      userKey,
+      { sourceMessageIds: ["m1"] }
+    );
+    const second = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-2",
+      "bot-1",
+      [{ text: "You like chai tea.", confidence: 0.67 }],
+      userKey,
+      { sourceMessageIds: ["m2"] }
+    );
+
+    const rows = db
+      .prepare("SELECT id, confidence, source_message_ids FROM memories WHERE user_id = ? AND bot_id = ?")
+      .all("user-1", "bot-1") as Array<{
+      id: string;
+      confidence: number;
+      source_message_ids: string;
+    }>;
+
+    assert.equal(rows.length, 1);
+    assert.equal(second[0]?.id, first[0]?.id);
+    assert.ok((second[0]?.confidence ?? 0) > (first[0]?.confidence ?? 0));
+    assert.deepEqual(JSON.parse(rows[0]?.source_message_ids ?? "[]"), ["m1", "m2"]);
+  });
+
+  it("promotes reinforced memories to long-term after repeated evidence", async () => {
+    const db = createMemoryTestDb();
+    const userKey = Buffer.alloc(32, 7);
+
+    await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You enjoy chai tea.", confidence: 0.66 }],
+      userKey
+    );
+    await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-2",
+      "bot-1",
+      [{ text: "You enjoy chai tea.", confidence: 0.67 }],
+      userKey
+    );
+    await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-3",
+      "bot-1",
+      [{ text: "You enjoy chai tea.", confidence: 0.68 }],
+      userKey
+    );
+    const [fourth] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-4",
+      "bot-1",
+      [{ text: "You enjoy chai tea.", confidence: 0.69 }],
+      userKey
+    );
+
+    assert.equal(fourth?.tier, "long_term");
+    assert.ok((fourth?.confidence ?? 0) >= 0.86);
+  });
+
+  it("assigns categories and promotes 95% confidence memories to long-term", async () => {
+    const db = createMemoryTestDb();
+    const [memory] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You love soft neon colors.", confidence: 0.98 }],
+      Buffer.alloc(32, 7)
+    );
+
+    const row = db
+      .prepare("SELECT category, tier FROM memories WHERE id = ?")
+      .get(memory.id) as { category: string; tier: string } | undefined;
+
+    assert.equal(memory.category, "user");
+    assert.equal(memory.tier, "long_term");
+    assert.equal(row?.category, "user");
+    assert.equal(row?.tier, "long_term");
+  });
+
+  it("requires confidence and certainty together for long-term promotion", async () => {
+    const db = createMemoryTestDb();
+    const [memory] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You love bright mossy greens.", confidence: 0.98 }],
+      Buffer.alloc(32, 7),
+      { certainty: 0.9, durability: 0.4 }
+    );
+
+    const row = db
+      .prepare("SELECT tier FROM memories WHERE id = ?")
+      .get(memory.id) as { tier: string } | undefined;
+
+    assert.equal(memory.tier, "short_term");
+    assert.equal(row?.tier, "short_term");
+  });
+
+  it("promotes durable assumptions when their truth score is good enough", async () => {
+    const db = createMemoryTestDb();
+    const [memory] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "Bob Ross believes painting can comfort people.", confidence: 0.8 }],
+      Buffer.alloc(32, 7),
+      { source: "inferred", certainty: 0.8, durability: 0.95 }
+    );
+
+    const row = db
+      .prepare("SELECT tier, durability FROM memories WHERE id = ?")
+      .get(memory.id) as { tier: string; durability: number } | undefined;
+
+    assert.equal(memory.source, "inferred");
+    assert.equal(memory.tier, "long_term");
+    assert.equal(row?.tier, "long_term");
+    assert.equal(row?.durability, 0.95);
+  });
+
+  it("promotes high-truth memories even when durability is only baseline", async () => {
+    const db = createMemoryTestDb();
+    const [memory] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "Bob Ross taught wet-on-wet oil painting.", confidence: 0.92 }],
+      Buffer.alloc(32, 7),
+      { certainty: 0.92, durability: 0.5 }
+    );
+
+    assert.equal(memory.tier, "long_term");
+  });
+
+  it("promotes durable biographical memories by content below 95 percent", async () => {
+    const db = createMemoryTestDb();
+    const [memory] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [
+        {
+          text: "Bob Ross Inc. grew around your painting method, instructional materials, art supplies, workshops, and certified instructors.",
+          confidence: 0.92,
+        },
+      ],
+      Buffer.alloc(32, 7)
+    );
+
+    assert.equal(memory.tier, "long_term");
+    assert.ok((memory.durability ?? 0) >= 0.88);
+  });
+
+  it("protects long-term memories from direct deletion until demoted", async () => {
+    const db = createMemoryTestDb();
+    const [memory] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You love happy little trees.", confidence: 0.98 }],
+      Buffer.alloc(32, 7)
+    );
+
+    assert.equal(deleteMemoryById(db, "user-1", memory.id), false);
+    assert.equal(demoteMemoryToShortTerm(db, "user-1", memory.id), true);
+    assert.equal(deleteMemoryById(db, "user-1", memory.id), true);
+  });
+
+  it("blocks about-you demotion and default deletes; explicit allowAboutYou deletes", async () => {
+    const db = createMemoryTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    const memory = await restoreMemory(db, "user-1", userKey, {
+      conversationId: "conversation-1",
+      botId: "bot-1",
+      text: "I'm learning your pace and trying to keep things calm and practical.",
+      confidence: 0.96,
+      certainty: 0.96,
+      category: "user",
+      tier: "long_term",
+      durability: 1,
+      source: "about_you",
+    });
+
+    assert.equal(demoteMemoryToShortTerm(db, "user-1", memory.id), false);
+    assert.equal(deleteMemoryById(db, "user-1", memory.id), false);
+    assert.equal(
+      deleteMemoryById(db, "user-1", memory.id, { allowLongTerm: true }),
+      false
+    );
+    assert.equal(
+      deleteMemoryById(db, "user-1", memory.id, {
+        allowLongTerm: true,
+        allowAboutYou: true,
+      }),
+      true
+    );
   });
 
   it("still stores memories when embedding generation is unavailable", async () => {
@@ -403,7 +717,7 @@ describe("persistMemoryCandidates", () => {
         { text: "The user prefers soft animation pacing.", confidence: 0.92 },
       ],
       userKey,
-      { sourceMessageIds: ["m1", "m2", "m3"] }
+      { sourceMessageIds: ["m1", "m2", "m3"], durability: 0.4 }
     );
 
     const rows = db
@@ -439,12 +753,12 @@ describe("persistMemoryCandidates", () => {
       "conversation-1",
       "bot-1",
       [
-        { text: "You like quiet mornings.", confidence: 0.98 },
-        { text: "You enjoy slow mornings.", confidence: 0.98 },
-        { text: "You prefer calm mornings.", confidence: 0.98 },
+        { text: "You like quiet mornings.", confidence: 0.9 },
+        { text: "You enjoy slow mornings.", confidence: 0.9 },
+        { text: "You prefer calm mornings.", confidence: 0.9 },
       ],
       userKey,
-      { sourceMessageIds: ["message-linked"] }
+      { sourceMessageIds: ["message-linked"], durability: 0.4 }
     );
 
     const deleted = deleteMemoriesLinkedToMessages(db, "user-1", ["message-linked"]);
@@ -456,7 +770,7 @@ describe("persistMemoryCandidates", () => {
     assert.equal(remaining.n, 0);
   });
 
-  it("culminates first-person preference statements like real chat input", async () => {
+  it("keeps long-term specifics out of automatic culmination deletion", async () => {
     const db = createMemoryTestDb();
     const userKey = Buffer.alloc(32, 7);
 
@@ -474,14 +788,14 @@ describe("persistMemoryCandidates", () => {
     );
 
     const rows = db
-      .prepare("SELECT source, COUNT(*) AS count FROM memories GROUP BY source")
-      .all() as Array<{ source: string; count: number }>;
-    const counts = new Map(rows.map((row) => [row.source, row.count]));
+      .prepare("SELECT source, tier, COUNT(*) AS count FROM memories GROUP BY source, tier")
+      .all() as Array<{ source: string; tier: string; count: number }>;
 
-    assert.equal(stored.length, 1);
-    assert.equal(stored[0]?.source, "compiled");
-    assert.equal(counts.get("direct") ?? 0, 0);
-    assert.equal(counts.get("compiled"), 1);
+    assert.equal(stored.length, 3);
+    assert.equal(stored.every((memory) => memory.tier === "long_term"), true);
+    assert.deepEqual(rows.map((row) => ({ ...row })), [
+      { source: "direct", tier: "long_term", count: 3 },
+    ]);
   });
 
   it("keeps specifics when certainty is below the deletion threshold", async () => {

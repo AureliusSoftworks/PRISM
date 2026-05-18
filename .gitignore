@@ -10,6 +10,9 @@ apps/web/.next/
 apps/web/out/
 apps/api/data/
 *.log
+.qdrant-initialized
+apps/api/.qdrant-initialized
+runtime/
 
 # Local Overseer operational artifacts
 .cursor/agents/
@@ -22,6 +25,9 @@ apps/api/data/
 .githooks/
 vault/.obsidian/workspace.json
 vault/.obsidian/workspace-mobile.json
+vault/.obsidian/graph.json
+vault/.obsidian/core-plugins.json
+vault/Untitled.canvas
 scripts/kb/.cache/
 vault/**/DerivedData/
 vault/02-apps/**/.next/

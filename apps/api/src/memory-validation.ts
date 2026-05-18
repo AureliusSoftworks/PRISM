@@ -1,7 +1,7 @@
 import type { MemoryCandidate } from "./memory-extraction.ts";
 import type { LlmProvider, ProviderMessage } from "./providers.ts";
 
-export type MemoryValidationSource = "direct" | "inferred" | "compiled";
+export type MemoryValidationSource = "direct" | "inferred" | "compiled" | "about_you";
 export type MemoryValidationScope = "bot" | "global";
 export type MemoryValidationDecision = "approve" | "auto_fix" | "reject";
 
@@ -12,6 +12,9 @@ export type MemoryValidationReasonCode =
   | "question_fragment"
   | "trailing_conversation_tag"
   | "lost_preference_payload"
+  | "figurative_preference"
+  | "implausible_literal"
+  | "joke_without_stable_signal"
   | "contradiction"
   | "low_confidence"
   | "malformed_text"
@@ -37,6 +40,7 @@ export interface MemoryValidationOptions {
   rawContext: string;
   candidates: MemoryCandidate[];
   existingMemories?: string[];
+  userDisplayName?: string;
 }
 
 export interface MemoryValidationOutcome {
@@ -67,7 +71,12 @@ Return JSON only:
 Rules:
 - Fix small grammar, typo, pronoun, and subject mistakes.
 - If a candidate is really an instruction to the assistant, save it only as a user preference when the source explicitly asks to remember it.
+- Review the raw user context for jokes, sarcasm, metaphors, and impossible literal claims before approving a memory.
+- If a literal candidate is figurative but reveals a stable preference, rewrite it to the underlying preference and use reasonCodes ["figurative_preference"].
+- If a joke has no stable user preference or fact, reject it with reasonCodes ["joke_without_stable_signal"].
+- If a literal claim is implausible and no useful preference can be inferred, reject it with reasonCodes ["implausible_literal"].
 - Reject one-off tasks, questions, ambiguous "you are" statements, malformed text, and low-confidence guesses.
+- If userDisplayName is provided and the memory is about the human user, write the final memory with that name (for example, "Jared prefers..."). If the memory is about a bot/persona, keep the existing second-person framing.
 - Never invent new personal facts.
 - Preserve the payload of favorites/preferences when merging or rewriting.`;
 
@@ -87,6 +96,9 @@ const VALID_REASON_CODES = new Set<MemoryValidationReasonCode>([
   "question_fragment",
   "trailing_conversation_tag",
   "lost_preference_payload",
+  "figurative_preference",
+  "implausible_literal",
+  "joke_without_stable_signal",
   "contradiction",
   "low_confidence",
   "malformed_text",
@@ -99,6 +111,115 @@ function clamp01(value: number): number {
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function stripListPrefix(text: string): string {
+  return text
+    .replace(/^(?:[-*•\u2022]\s*)+/u, "")
+    .replace(/^\d+[.):-]\s*/u, "")
+    .trim();
+}
+
+function toSecondPersonVerb(verb: string): string {
+  const lower = verb.toLowerCase();
+  const irregular = new Map<string, string>([
+    ["is", "are"],
+    ["was", "were"],
+    ["has", "have"],
+    ["does", "do"],
+  ]);
+  const irregularMatch = irregular.get(lower);
+  if (irregularMatch) return irregularMatch;
+  if (lower.endsWith("ies") && lower.length > 3) {
+    return `${lower.slice(0, -3)}y`;
+  }
+  if (/(ches|shes|sses|xes|zes|oes)$/.test(lower) && lower.length > 2) {
+    return lower.slice(0, -2);
+  }
+  if (lower.endsWith("s") && lower.length > 1) {
+    return lower.slice(0, -1);
+  }
+  return lower;
+}
+
+function normalizeSecondPersonLead(text: string, singularSubject: boolean): string {
+  if (!singularSubject) return text;
+  const lead = text.match(
+    /^You\s+(?:(always|usually|often|sometimes|generally|typically|currently|really)\s+)?([A-Za-z']+)(.*)$/u
+  );
+  if (!lead) return text;
+  const adverb = lead[1] ? `${lead[1]} ` : "";
+  const verb = toSecondPersonVerb(lead[2] ?? "");
+  const rest = lead[3] ?? "";
+  return `You ${adverb}${verb}${rest}`.replace(/\s+/g, " ").trim();
+}
+
+function looksLikeThirdPersonSingularVerb(word: string): boolean {
+  const lower = word.toLowerCase();
+  if (["is", "was", "has", "does"].includes(lower)) return true;
+  return lower.endsWith("s");
+}
+
+function displayNameLeadPattern(displayName: string | undefined): RegExp | null {
+  const trimmed = displayName?.trim();
+  if (!trimmed) return null;
+  const firstName = trimmed.split(/\s+/)[0]?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return firstName ? new RegExp(`^${firstName}\\b`, "iu") : null;
+}
+
+function canonicalizeMemoryPerspective(text: string, userDisplayName?: string): string {
+  let normalized = stripListPrefix(normalizeWhitespace(text));
+  if (!normalized) return normalized;
+
+  const userNameLead = displayNameLeadPattern(userDisplayName);
+  let singularSubject = false;
+  let perspectiveRewritten = false;
+  if (/^(?:the user|user)\b/i.test(normalized)) {
+    normalized = normalized.replace(/^(?:the user|user)\b/i, "You");
+    singularSubject = true;
+    perspectiveRewritten = true;
+  } else if (/^(?:he|she)\b/i.test(normalized)) {
+    normalized = normalized.replace(/^(?:he|she)\b/i, "You");
+    singularSubject = true;
+    perspectiveRewritten = true;
+  } else if (/^they\b/i.test(normalized)) {
+    normalized = normalized.replace(/^they\b/i, "You");
+    perspectiveRewritten = true;
+  } else {
+    const nameLead = normalized.match(
+      /^([A-Z][\p{L}'-]*(?:\s+[A-Z][\p{L}'-]*){0,2})\s+([a-z][a-z'-]*)(.*)$/u
+    );
+    if (nameLead) {
+      const name = (nameLead[1] ?? "").trim();
+      const leadVerb = (nameLead[2] ?? "").trim();
+      const reservedLead = /^(?:You|The|A|An|My|Your|I|We)$/u.test(name);
+      if (userNameLead?.test(name)) {
+        return normalized;
+      }
+      if (!reservedLead && looksLikeThirdPersonSingularVerb(leadVerb)) {
+        normalized = `You ${nameLead[2] ?? ""}${nameLead[3] ?? ""}`
+          .replace(/\s+/g, " ")
+          .trim();
+        singularSubject = true;
+        perspectiveRewritten = true;
+      }
+    }
+  }
+
+  normalized = normalizeSecondPersonLead(normalized, singularSubject);
+  if (perspectiveRewritten) {
+    normalized = normalized
+      .replace(/\bhis\b/gi, "your")
+      .replace(/\bher\b/gi, "your")
+      .replace(/\btheir\b/gi, "your")
+      .replace(/\bhim\b/gi, "you")
+      .replace(/\bthem\b/gi, "you");
+  }
+  return normalized;
+}
+
+export function normalizeMemoryDisplayText(text: string, userDisplayName?: string): string {
+  return sentenceCase(canonicalizeMemoryPerspective(text, userDisplayName));
 }
 
 function parseJsonPayload(raw: string): CriticPayload | null {
@@ -187,11 +308,12 @@ function deterministicPreReject(
 
 function normalizeCriticResult(
   result: CriticResult,
-  candidate: MemoryCandidate
+  candidate: MemoryCandidate,
+  userDisplayName?: string
 ): ValidatedMemoryCandidate | RejectedMemoryCandidate {
   const reasonCodes = reasonCodesFrom(result.reasonCodes);
   const rawText = typeof result.text === "string" ? result.text : candidate.text;
-  const text = sentenceCase(rawText);
+  const text = normalizeMemoryDisplayText(rawText, userDisplayName);
   const confidence =
     typeof result.confidence === "number" && Number.isFinite(result.confidence)
       ? Math.min(candidate.confidence, clamp01(result.confidence))
@@ -253,6 +375,7 @@ function buildValidationMessages(options: MemoryValidationOptions): ProviderMess
         scope: options.scope,
         rawContext: options.rawContext,
         existingMemories: options.existingMemories ?? [],
+        userDisplayName: options.userDisplayName,
         candidates: options.candidates.map((candidate, index) => ({
           index,
           text: candidate.text,
@@ -353,7 +476,7 @@ export async function validateMemoryCandidates(
       });
       continue;
     }
-    const normalized = normalizeCriticResult(result, candidate);
+    const normalized = normalizeCriticResult(result, candidate, options.userDisplayName);
     if ("validationStatus" in normalized) {
       accepted.push(normalized);
     } else {

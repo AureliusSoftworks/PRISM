@@ -1,29 +1,59 @@
 import { createServer } from "node:http";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { getAppConfig } from "@localai/config";
 import { createDatabase } from "./db.ts";
-import { clearCookie, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
+import { clearCookie, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import {
-  createClientAccessToken,
-  requireValidClientAccess,
   requireValidSession,
-  resolveClientAccessToken,
   resolveSessionToken,
 } from "./auth.ts";
 import { buildHealthResponse } from "./health.ts";
-import { consumePairingCode, createPairingCode } from "./pairing.ts";
+import { runAutoSetup } from "./setup-automation.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
-import { processChatMessage, refreshConversationTitle } from "./chat.ts";
+import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
+import { pollImageJobForUser, releaseImageSlot, tryAcquireImageSlot } from "./image-job-slot.ts";
+import {
+  createCoffeePreset,
+  createCoffeeGroup,
+  createCoffeeConversation,
+  createCoffeeConversationFromGroup,
+  deleteCoffeeGroup,
+  deleteCoffeePreset,
+  listCoffeeGroups,
+  listCoffeePresets,
+  parseStoredCoffeeSessionSettings,
+  processCoffeeAutonomousTurn,
+  processCoffeeTurn,
+  setCoffeeConversationTopic,
+  updateCoffeePreset,
+  updateCoffeeGroup,
+  updateCoffeeConversationSettings,
+} from "./coffee.ts";
 import {
   createDevSeedMemories,
+  demoteMemoryToShortTerm,
   deleteMemoryById,
   deleteOrphanedBotMemories,
   filterConflictingMemories,
+  normalizeMemoryDurability,
   restoreMemory
 } from "./memory.ts";
 import { inferAndStoreBotMemories } from "./memory-inference.ts";
-import { createDevSeedConversations, deleteAllConversations, deleteConversation, deleteConversationsByBot, listConversationSummaries, rewindConversation } from "./conversations.ts";
+import {
+  createDevSeedConversations,
+  deleteAllConversations,
+  deleteConversation,
+  deleteConversationMessage,
+  deleteConversationsByBot,
+  getConversationSweepState,
+  listConversationSummaries,
+  rewindConversation,
+  sweepConversations,
+  undoLatestConversationSweep,
+} from "./conversations.ts";
 import {
   composeBotSystemPrompt,
   deleteAllBots,
@@ -33,33 +63,135 @@ import {
   resolveBotExportHashForCreate,
 } from "./bots.ts";
 import {
+  normalizeComfyUiHostForStatusCheck,
   normalizeOllamaHostForStatusCheck,
   parseHiddenBotModelIds,
   resolveNextSettings,
 } from "./settings.ts";
-import { buildModelCatalog, checkLocalModelHostStatus, getAuxiliaryProvider } from "./providers.ts";
+import { normalizeMemoryDisplayText } from "./memory-validation.ts";
+import {
+  buildModelCatalog,
+  checkLocalModelHostStatus,
+  getAuxiliaryProvider,
+  selectProvider,
+} from "./providers.ts";
 import type { GenerateOptions } from "./providers.ts";
 import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
+import {
+  composeAugmentedImagePrompt,
+  DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  encodeComfyUiModelId,
+  encodeComfyUiRemoteWorkflowModelId,
+  hydrateAssistantMessageParts,
+  isAllowedInAppOllamaPullModelName,
+  parseStoredComfyUiWorkflows,
+  type BotOpinion,
+  type BotOpinionBoundaryLevel,
+  type ChatMessage,
+  type OpinionBand,
+  type OpinionTrend,
+  type SessionOpinion,
+} from "@localai/shared";
 import { generateImage } from "./image-provider.ts";
+import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
+import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
+import {
+  checkComfyUiHostStatus,
+  fetchComfyUiCheckpointNames,
+  listComfyUiWorkflowJsonRelPaths,
+  probeComfyUiHostReachable,
+} from "./comfyui-image.ts";
+import {
+  botBelongsToUser,
+  resolveImageGeneratePersistence,
+} from "./image-generate-resolve.ts";
+import {
+  buildGeneratedImageRelativePath,
+  downloadRemoteImage,
+  readGeneratedImageBytes,
+  removeGeneratedImagesDirectoryForUser,
+  tryUnlinkGeneratedImageFile,
+  writeGeneratedImageBytes,
+} from "./image-storage.ts";
+import { readOrCreateThumbBytes, tryGenerateThumbAfterPngWrite } from "./image-thumb.ts";
+import { inferBotImagePromptSuggestions, inferRandomImageSceneLine } from "./image-prompt-suggestions.ts";
+import {
+  clearThreadCompactions,
+  getLatestSandboxBotStatusSummary,
+  getLatestThreadDisplaySummary,
+  getLatestThreadSummary,
+  getThreadCompactionDebug,
+  summarizeSandboxBotStatus,
+  summarizeThreadCompact,
+} from "./memory-summarizer.ts";
 import {
   INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS,
   getInactiveAccountCutoff
 } from "./account-retention.ts";
-import {
-  GENERATED_IMAGE_CLEANUP_INTERVAL_MS,
-  purgeExpiredImages
-} from "./image-retention.ts";
 import { deleteVectorsForUser } from "./qdrant.ts";
-import { hydrateAssistantMessageParts, type ChatMessage } from "@localai/shared";
-
 const config = getAppConfig();
 const db = createDatabase();
 const masterKey = deriveMasterKey(config.encryptionMasterKey);
 const backupAdapter = new LocalOnlyBackupAdapter();
-const LOCAL_OWNER_EMAIL = "prism-owner@local.prism";
+const LOCAL_OWNER_USERNAME = "prism-owner";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
 const memoryInferenceCheckedAtByScope = new Map<string, string>();
+const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
+const IMAGE_GENERATION_ALLOWED_SIZES = new Set(["1024x1536", "1024x1024", "1536x1024"]);
+const IMAGE_GENERATION_DEFAULT_SIZE = "1024x1024";
+const IMAGE_GENERATION_VARIANT_TAGS = {
+  portrait: [
+    "selfie",
+    "portrait",
+    "headshot",
+    "close-up",
+    "closeup",
+    "vertical",
+    "9:16",
+    "phone wallpaper",
+    "profile photo",
+  ],
+  letterbox: ["square", "1:1", "avatar", "icon", "logo", "sticker", "profile pic"],
+  landscape: [
+    "landscape",
+    "widescreen",
+    "wide-screen",
+    "panorama",
+    "panoramic",
+    "cinematic",
+    "16:9",
+    "21:9",
+    "banner",
+  ],
+} as const;
+const COMPOSER_CLEANUP_SYSTEM_PROMPT =
+  "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
+
+function scorePromptTags(promptLower: string, tags: readonly string[]): number {
+  let score = 0;
+  for (const tag of tags) {
+    if (promptLower.includes(tag)) score += 1;
+  }
+  return score;
+}
+
+function inferImageGenerationSizeFromPrompt(prompt: string): string {
+  const promptLower = prompt.toLowerCase();
+  const portraitScore = scorePromptTags(promptLower, IMAGE_GENERATION_VARIANT_TAGS.portrait);
+  const letterboxScore = scorePromptTags(promptLower, IMAGE_GENERATION_VARIANT_TAGS.letterbox);
+  const landscapeScore = scorePromptTags(promptLower, IMAGE_GENERATION_VARIANT_TAGS.landscape);
+  if (portraitScore === 0 && letterboxScore === 0 && landscapeScore === 0) {
+    return IMAGE_GENERATION_DEFAULT_SIZE;
+  }
+  if (portraitScore >= landscapeScore && portraitScore >= letterboxScore) {
+    return "1024x1536";
+  }
+  if (landscapeScore >= portraitScore && landscapeScore >= letterboxScore) {
+    return "1536x1024";
+  }
+  return IMAGE_GENERATION_DEFAULT_SIZE;
+}
 
 interface UserDbRow {
   id: string;
@@ -74,9 +206,23 @@ interface UserDbRow {
   preferred_provider: "local" | "openai";
   provider_locked: number;
   auto_memory: number;
+  composer_writing_assist: number;
   auto_switch_model: number;
   hidden_bot_model_ids: string;
+  fallback_model_message_stripe: number;
+  preferred_local_model: string | null;
+  preferred_online_model: string | null;
+  lenient_local_fallback_model: string | null;
+  lenient_local_image_fallback_model: string | null;
   secondary_ollama_host: string | null;
+  comfyui_host: string | null;
+  preferred_local_image_model: string | null;
+  preferred_openai_image_model: string | null;
+  comfyui_workflows: string | null;
+  prism_default_llm_model: string | null;
+  prism_image_tool_llm_model: string | null;
+  dev_memories_enabled: number;
+  dev_memories_text: string;
   openai_key_ciphertext: string | null;
   openai_key_iv: string | null;
   openai_key_tag: string | null;
@@ -123,10 +269,6 @@ function requireAuth(ctx: RequestContext): string {
   return session.userId;
 }
 
-function requireClientAccess(ctx: RequestContext): void {
-  requireValidClientAccess(db, resolveClientAccessToken(ctx.req.headers));
-}
-
 function isLoopbackRequest(ctx: RequestContext): boolean {
   const address = ctx.req.socket.remoteAddress;
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
@@ -141,7 +283,7 @@ function requireLoopback(ctx: RequestContext): void {
 function getOrCreateLocalOwnerUser(): string {
   const existing = db
     .prepare("SELECT id FROM users WHERE email = ?")
-    .get(LOCAL_OWNER_EMAIL) as { id?: string } | undefined;
+    .get(LOCAL_OWNER_USERNAME) as { id?: string } | undefined;
   if (existing?.id) {
     touchUserActivity(existing.id);
     return existing.id;
@@ -162,7 +304,7 @@ function getOrCreateLocalOwnerUser(): string {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, 0, ?, ?)
   `).run(
     userId,
-    LOCAL_OWNER_EMAIL,
+    LOCAL_OWNER_USERNAME,
     LOCAL_OWNER_DISPLAY_NAME,
     passwordHash,
     salt,
@@ -179,7 +321,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, auto_switch_model, hidden_bot_model_ids, secondary_ollama_host, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -191,6 +333,7 @@ function getUserRow(userId: string): UserDbRow {
 function toUserProfile(row: UserDbRow): Record<string, unknown> {
   return {
     id: row.id,
+    username: row.email,
     email: row.email,
     displayName: row.display_name,
     role: "user",
@@ -239,6 +382,88 @@ function readOptionalString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function readComposerCleanupText(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("Composer text is required.");
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Composer text is required.");
+  }
+  if (trimmed.length > COMPOSER_CLEANUP_MAX_INPUT_CHARS) {
+    throw new Error("Composer text is too long to clean up at once.");
+  }
+  return trimmed;
+}
+
+function normalizeComposerCleanupResponse(raw: string, original: string): string {
+  const cleaned = raw.trim();
+  if (!cleaned) {
+    throw new Error("Writing cleanup returned an empty result.");
+  }
+  const fenced = cleaned.match(/^```(?:\w+)?\s*\n([\s\S]*?)\n```$/);
+  const unwrapped = fenced?.[1]?.trim() ?? cleaned;
+  if (!unwrapped) {
+    throw new Error("Writing cleanup returned an empty result.");
+  }
+  return unwrapped.length > COMPOSER_CLEANUP_MAX_INPUT_CHARS
+    ? original
+    : unwrapped;
+}
+
+function clampConnectionScore(value: number): number {
+  if (!Number.isFinite(value)) return 50;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function connectionBandFromScore(score: number): OpinionBand {
+  if (score >= 68) return "trusting";
+  if (score <= 34) return "guarded";
+  return "warming";
+}
+
+function readConnectionTrend(value: unknown): OpinionTrend {
+  return value === "up" || value === "down" || value === "steady" ? value : "steady";
+}
+
+function readConnectionReasons(value: unknown, fallback: string): string[] {
+  const reasons = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+  const cleaned = [fallback, ...reasons]
+    .map((reason) => reason.trim())
+    .filter((reason) => reason.length > 0);
+  return Array.from(new Set(cleaned)).slice(0, 4);
+}
+
+function parseConversationBotGroupIds(raw: string | null | undefined): string[] {
+  if (!raw || typeof raw !== "string") return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (value): value is string => typeof value === "string" && value.length > 0
+    );
+  } catch {
+    return [];
+  }
+}
+
+function parseConversationCoffeeSeatBotIds(raw: string | null | undefined): Array<string | null> {
+  if (!raw || typeof raw !== "string") return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || !parsed.some((value) => value === null)) return [];
+    const seats = parsed.slice(0, 5).map((value) =>
+      typeof value === "string" && value.length > 0 ? value : null
+    );
+    while (seats.length < 5) seats.push(null);
+    return seats;
+  } catch {
+    return [];
+  }
 }
 
 function parseSourceMessageIds(raw: string | null | undefined): string[] {
@@ -293,6 +518,12 @@ async function deleteUserAccount(userId: string): Promise<void> {
   }
 
   try {
+    removeGeneratedImagesDirectoryForUser(userId);
+  } catch {
+    // Best-effort filesystem cleanup after SQLite removes image rows.
+  }
+
+  try {
     await deleteVectorsForUser(userId);
   } catch {
     // Qdrant cleanup is best-effort; account data is already removed from SQLite.
@@ -312,19 +543,132 @@ async function purgeInactiveAccounts(): Promise<void> {
   }
 }
 
+function mapImageRowToClient(row: {
+  id: string;
+  prompt: string;
+  revised_prompt: string | null;
+  url: string;
+  size: string;
+  quality: string;
+  provider: string;
+  bot_id: string | null;
+  created_at: string;
+  local_rel_path: string | null;
+  model: string | null;
+}): Record<string, unknown> {
+  const hasLocalFile = Boolean(row.local_rel_path?.trim());
+  const displayUrl = hasLocalFile
+    ? `/api/images/${encodeURIComponent(row.id)}/file`
+    : row.url;
+  return {
+    id: row.id,
+    botId: row.bot_id,
+    prompt: row.prompt,
+    revisedPrompt: row.revised_prompt,
+    size: row.size,
+    quality: row.quality,
+    provider: row.provider,
+    model: row.model ?? DEFAULT_OPENAI_IMAGE_MODEL_ID,
+    createdAt: row.created_at,
+    url: row.url,
+    localRelPath: row.local_rel_path,
+    displayUrl,
+    hasLocalFile,
+  };
+}
+
+type ImageInsertPersistence = {
+  conversationIdForInsert: string | null;
+  persistedBotId: string | null;
+};
+
+/** Persists a ComfyUI or Ollama image and returns the standard JSON success body. */
+async function finalizeComfyOrOllamaGeneratedImageResponse(
+  ctx: RequestContext,
+  args: {
+    imageId: string;
+    userId: string;
+    persistence: ImageInsertPersistence;
+    prompt: string;
+    localRelPath: string;
+    size: string;
+    quality: string;
+    imageBytes: Buffer;
+    modelUsed: string;
+    provider: "comfyui" | "ollama";
+  }
+): Promise<void> {
+  try {
+    writeGeneratedImageBytes(args.localRelPath, args.imageBytes);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "write failed";
+    throw new Error(`Could not save generated image (${detail}).`);
+  }
+
+  await tryGenerateThumbAfterPngWrite(args.localRelPath);
+
+  const storedUrl = `/api/images/${encodeURIComponent(args.imageId)}/file`;
+
+  try {
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      args.imageId,
+      args.userId,
+      args.persistence.conversationIdForInsert,
+      args.persistence.persistedBotId,
+      args.prompt,
+      args.prompt,
+      storedUrl,
+      args.size,
+      args.quality,
+      args.provider,
+      args.modelUsed,
+      args.localRelPath,
+      new Date().toISOString()
+    );
+  } catch (error) {
+    tryUnlinkGeneratedImageFile(args.localRelPath);
+    throw error;
+  }
+
+  const displayUrl = storedUrl;
+  json(ctx.res, 200, {
+    ok: true,
+    image: {
+      id: args.imageId,
+      url: storedUrl,
+      revisedPrompt: args.prompt,
+      displayUrl,
+      hasLocalFile: true,
+      model: args.modelUsed,
+    },
+  });
+}
+
 function buildRoutes(): RouteDefinition[] {
   return [
+    route("POST", "/api/setup/auto", async (ctx) => {
+      requireLoopback(ctx);
+      const report = await runAutoSetup(config);
+      const health = await buildHealthResponse(db, config, process.uptime());
+      json(ctx.res, 200, {
+        ok: true,
+        report,
+        health,
+      });
+    }),
     route("POST", "/api/auth/register", async (ctx) => {
       const body = ctx.body as Record<string, unknown>;
-      const email = readString(body.email, "email").toLowerCase();
+      const username = readString(body.username, "username").toLowerCase();
       const password = readString(body.password, "password");
-      const displayName = readString(body.displayName, "displayName");
+      const displayName = readOptionalString(body.displayName) ?? username;
 
       const existing = db
         .prepare("SELECT id FROM users WHERE email = ?")
-        .get(email) as { id?: string } | undefined;
+        .get(username) as { id?: string } | undefined;
       if (existing?.id) {
-        throw new Error("Email is already registered.");
+        throw new Error("Username is already registered.");
       }
 
       // Seed the new user's theme from the client's pre-auth choice so the
@@ -350,7 +694,7 @@ function buildRoutes(): RouteDefinition[] {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, ?, ?)
       `).run(
         userId,
-        email,
+        username,
         displayName,
         passwordHash,
         salt,
@@ -373,7 +717,8 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         user: {
           id: userId,
-          email,
+          username,
+          email: username,
           displayName,
           role: "user",
           createdAt,
@@ -384,13 +729,13 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/auth/login", async (ctx) => {
       const body = ctx.body as Record<string, unknown>;
-      const email = readString(body.email, "email").toLowerCase();
+      const username = readString(body.username, "username").toLowerCase();
       const password = readString(body.password, "password");
       const user = db
         .prepare(
           "SELECT id, password_hash, password_salt FROM users WHERE email = ?"
         )
-        .get(email) as
+        .get(username) as
         | { id?: string; password_hash?: string; password_salt?: string }
         | undefined;
       if (!user?.id || !user.password_hash || !user.password_salt) {
@@ -447,9 +792,15 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, { ok: true });
     }),
     route("GET", "/api/auth/me", async (ctx) => {
+      const hasAnyAccounts =
+        (
+          db
+            .prepare("SELECT 1 AS present FROM users LIMIT 1")
+            .get() as { present?: number } | undefined
+        )?.present === 1;
       const sessionToken = getSessionToken(ctx);
       if (!sessionToken) {
-        json(ctx.res, 200, { ok: true, user: null });
+        json(ctx.res, 200, { ok: true, user: null, hasAnyAccounts });
         return;
       }
 
@@ -462,52 +813,70 @@ function buildRoutes(): RouteDefinition[] {
         touchUserActivity(session.userId);
       } catch {
         clearCookie(ctx.res, config.sessionCookieName);
-        json(ctx.res, 200, { ok: true, user: null });
+        json(ctx.res, 200, { ok: true, user: null, hasAnyAccounts });
         return;
       }
       const row = getUserRow(userId);
       json(ctx.res, 200, {
         ok: true,
-        user: toUserProfile(row)
+        user: toUserProfile(row),
+        hasAnyAccounts,
       });
     }),
     route("GET", "/api/client-access/me", async (ctx) => {
-      requireClientAccess(ctx);
-      json(ctx.res, 200, { ok: true });
+      // Standalone desktop mode no longer requires separate native-client access tokens.
+      // Keep endpoint alive for legacy callers.
+      json(ctx.res, 200, { ok: true, pairingRequired: false });
     }),
     route("POST", "/api/pairing/codes", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const pairingCode = createPairingCode(db, userId);
-      json(ctx.res, 201, { ok: true, pairingCode });
+      requireAuth(ctx);
+      throw new HttpError(410, "Pairing codes are disabled in standalone Prism Desktop.");
     }),
     route("POST", "/api/local/pairing/codes", async (ctx) => {
       requireLoopback(ctx);
-      const userId = getOrCreateLocalOwnerUser();
-      const pairingCode = createPairingCode(db, userId);
-      json(ctx.res, 201, { ok: true, pairingCode });
+      getOrCreateLocalOwnerUser();
+      throw new HttpError(410, "Local pairing codes are disabled in standalone Prism Desktop.");
     }),
     route("POST", "/api/pairing/exchange", async (ctx) => {
-      const body = ctx.body as Record<string, unknown>;
-      const code = readString(body.code, "code");
-      const { userId } = consumePairingCode(db, code);
-      const { token, expiresAt } = createSession(userId);
-      const clientAccess = createClientAccessToken(db, userId, config.sessionTtlHours);
-      touchUserActivity(userId);
-      const row = getUserRow(userId);
-      json(ctx.res, 200, {
-        ok: true,
-        token,
-        clientAccessToken: clientAccess.token,
-        clientAccessExpiresAt: clientAccess.expiresAt,
-        expiresAt,
-        user: toUserProfile(row)
-      });
+      // Explicitly disable code exchange to avoid stale clients silently succeeding.
+      throw new HttpError(410, "Pairing exchange is disabled in standalone Prism Desktop.");
     }),
     route("GET", "/api/conversations", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, {
         ok: true,
         conversations: listConversationSummaries(db, userId)
+      });
+    }),
+    route("GET", "/api/conversations/sweep/state", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        ...getConversationSweepState(db, userId),
+      });
+    }),
+    route("POST", "/api/conversations/sweep", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const mode = body.mode === "chat" ? "chat" : "sandbox";
+      const result = sweepConversations(db, userId, mode);
+      const state = getConversationSweepState(db, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
+        canUndo: state.canUndo,
+      });
+    }),
+    route("POST", "/api/conversations/sweep/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const batchId = typeof body.batchId === "string" ? body.batchId : null;
+      const result = undoLatestConversationSweep(db, userId, batchId);
+      const state = getConversationSweepState(db, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
+        canUndo: state.canUndo,
       });
     }),
     route("GET", "/api/conversations/:id", async (ctx) => {
@@ -519,7 +888,10 @@ function buildRoutes(): RouteDefinition[] {
       // + composer-dropdown sync the same way.
       const conversation = db
         .prepare(
-          `SELECT c.id, c.title, c.bot_id, c.incognito, c.created_at, c.updated_at,
+          `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
+                  c.coffee_settings, c.coffee_group_id, c.coffee_duration_minutes,
+                  c.coffee_topic,
+                  c.incognito, c.created_at, c.updated_at,
                   (SELECT m.bot_id FROM messages m
                      WHERE m.conversation_id = c.id
                        AND m.role = 'assistant'
@@ -539,7 +911,13 @@ function buildRoutes(): RouteDefinition[] {
         | {
             id: string;
             title: string;
+            conversation_mode: string | null;
             bot_id: string | null;
+            bot_group_ids: string | null;
+            coffee_settings: string | null;
+            coffee_group_id: string | null;
+            coffee_duration_minutes: number | null;
+            coffee_topic: string | null;
             incognito: number;
             created_at: string;
             updated_at: string;
@@ -597,7 +975,14 @@ function buildRoutes(): RouteDefinition[] {
         return {
           ...shared,
           content: assembled.content,
+          ...(assembled.moodKey ? { moodKey: assembled.moodKey } : {}),
+          ...(assembled.moodConfidence !== undefined
+            ? { moodConfidence: assembled.moodConfidence }
+            : {}),
           ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+          ...(assembled.sentGeneratedImage
+            ? { sentGeneratedImage: assembled.sentGeneratedImage }
+            : {}),
         };
       });
       const opinionRow = db
@@ -651,12 +1036,43 @@ function buildRoutes(): RouteDefinition[] {
             updatedAt: opinionRow.updated_at,
           }
         : undefined;
+      const botOpinion = readBotOpinion(db, userId, conversation.bot_id ?? null);
+      const conversationModeOut: "chat" | "sandbox" | "coffee" =
+        conversation.conversation_mode === "chat"
+          ? "chat"
+          : conversation.conversation_mode === "coffee"
+            ? "coffee"
+            : "sandbox";
+      const botGroupIdsOut = parseConversationBotGroupIds(conversation.bot_group_ids);
+      const coffeeSeatBotIdsOut = parseConversationCoffeeSeatBotIds(conversation.bot_group_ids);
+      const coffeeSettingsOut =
+        conversationModeOut === "coffee"
+          ? parseStoredCoffeeSessionSettings(conversation.coffee_settings)
+          : undefined;
       json(ctx.res, 200, {
         ok: true,
         conversation: {
           id: conversation.id,
           title: conversation.title,
+          mode: conversationModeOut,
           botId: conversation.bot_id ?? null,
+          ...(botGroupIdsOut.length > 0 ? { botGroupIds: botGroupIdsOut } : {}),
+          ...(conversationModeOut === "coffee"
+            ? { coffeeGroupId: conversation.coffee_group_id ?? null }
+            : {}),
+          ...(coffeeSeatBotIdsOut.length > 0 ? { coffeeSeatBotIds: coffeeSeatBotIdsOut } : {}),
+          ...(coffeeSettingsOut !== undefined ? { coffeeSettings: coffeeSettingsOut } : {}),
+          ...(conversationModeOut === "coffee" &&
+          (conversation.coffee_duration_minutes === 1 ||
+            conversation.coffee_duration_minutes === 5 ||
+            conversation.coffee_duration_minutes === 10)
+            ? { coffeeSessionDurationMinutes: conversation.coffee_duration_minutes }
+            : {}),
+          ...(conversationModeOut === "coffee" &&
+          typeof conversation.coffee_topic === "string" &&
+          conversation.coffee_topic.trim().length > 0
+            ? { coffeeTopic: conversation.coffee_topic.trim() }
+            : {}),
           incognito: conversation.incognito === 1,
           lastBotId: conversation.last_bot_id ?? null,
           lastBotColor: conversation.last_bot_color ?? null,
@@ -666,6 +1082,7 @@ function buildRoutes(): RouteDefinition[] {
           messages,
         },
         ...(opinion ? { opinion } : {}),
+        ...(botOpinion ? { botOpinion } : {}),
       });
     }),
     route("POST", "/api/conversations/:id/title", async (ctx) => {
@@ -674,6 +1091,136 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         conversation,
+      });
+    }),
+    route("GET", "/api/conversations/:id/summary", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const mode = ctx.query.get("mode") === "chat" ? "chat" : "sandbox";
+      const owned = db
+        .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+        .get(conversationId, userId) as { id?: string } | undefined;
+      if (!owned?.id) {
+        throw new Error("Conversation not found.");
+      }
+      const debug = getThreadCompactionDebug(db, userId, conversationId, mode);
+      json(ctx.res, 200, {
+        ok: true,
+        summary: getLatestThreadDisplaySummary(db, userId, conversationId, mode),
+        internalSummary: getLatestThreadSummary(db, userId, conversationId, mode),
+        latestSummaryAt: debug.latestSummaryAt,
+      });
+    }),
+    route("GET", "/api/bots/:id/summary", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const botId = ctx.params.id;
+      const mode = ctx.query.get("mode") === "chat" ? "chat" : "sandbox";
+      const owned = db
+        .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
+        .get(botId, userId) as { id?: string } | undefined;
+      if (!owned?.id) {
+        throw new Error("Bot not found.");
+      }
+      if (mode !== "sandbox") {
+        json(ctx.res, 200, { ok: true, summary: null });
+        return;
+      }
+      const user = getUserRow(userId);
+      // Always run a refresh pass so display-copy improvements and format
+      // updates can roll forward without requiring message activity.
+      await summarizeSandboxBotStatus(
+        db,
+        getAuxiliaryProvider(user.prism_default_llm_model),
+        userId,
+        botId,
+        { reason: "manual", userKey }
+      );
+      const summary = getLatestSandboxBotStatusSummary(db, userId, botId);
+      json(ctx.res, 200, {
+        ok: true,
+        summary,
+      });
+    }),
+    route("GET", "/api/conversations/:id/summarization-debug", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const mode = ctx.query.get("mode") === "chat" ? "chat" : "sandbox";
+      const owned = db
+        .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+        .get(conversationId, userId) as { id?: string } | undefined;
+      if (!owned?.id) {
+        throw new Error("Conversation not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        debug: getThreadCompactionDebug(db, userId, conversationId, mode),
+      });
+    }),
+    route("POST", "/api/conversations/:id/summarization-debug", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const body = ctx.body as Record<string, unknown>;
+      const mode =
+        body.mode === "chat" || ctx.query.get("mode") === "chat"
+          ? "chat"
+          : "sandbox";
+      const action = body.action === "reset" ? "reset" : "run";
+      const reason =
+        body.reason === "mode_exit"
+          ? "mode_exit"
+          : body.reason === "milestone"
+            ? "milestone"
+            : "manual";
+      const owned = db
+        .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+        .get(conversationId, userId) as { id?: string } | undefined;
+      if (!owned?.id) {
+        throw new Error("Conversation not found.");
+      }
+      if (action === "reset") {
+        const deleted = clearThreadCompactions(db, userId, conversationId, mode);
+        json(ctx.res, 200, {
+          ok: true,
+          deleted,
+          debug: getThreadCompactionDebug(db, userId, conversationId, mode),
+        });
+        return;
+      }
+      const user = getUserRow(userId);
+      const compacted = await summarizeThreadCompact(
+        db,
+        getAuxiliaryProvider(user.prism_default_llm_model),
+        userId,
+        conversationId,
+        { mode, reason, force: true }
+      );
+      if (mode === "sandbox" && reason === "mode_exit") {
+        const conversation = db
+          .prepare("SELECT bot_id, incognito FROM conversations WHERE id = ? AND user_id = ?")
+          .get(conversationId, userId) as {
+          bot_id: string | null;
+          incognito: number;
+        } | undefined;
+        const conversationBotId =
+          typeof conversation?.bot_id === "string" && conversation.bot_id.trim().length > 0
+            ? conversation.bot_id.trim()
+            : null;
+        if (conversation?.incognito !== 1 && conversationBotId) {
+          const userKey = decryptUserKey(userId);
+          await summarizeSandboxBotStatus(
+            db,
+            getAuxiliaryProvider(user.prism_default_llm_model),
+            userId,
+            conversationBotId,
+            { reason: "mode_exit", userKey }
+          );
+        }
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        compacted,
+        debug: getThreadCompactionDebug(db, userId, conversationId, mode),
       });
     }),
     route("DELETE", "/api/conversations/:id", async (ctx) => {
@@ -706,21 +1253,170 @@ function buildRoutes(): RouteDefinition[] {
       const created = createDevSeedConversations(db, userId, count);
       json(ctx.res, 200, { ok: true, created });
     }),
+    route("POST", "/api/conversations/:id/dev-connection", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversation = db
+        .prepare("SELECT id, bot_id FROM conversations WHERE id = ? AND user_id = ?")
+        .get(ctx.params.id, userId) as { id: string; bot_id: string | null } | undefined;
+      if (!conversation) {
+        throw new Error("Conversation not found.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const score = clampConnectionScore(Number(body.score));
+      const band = connectionBandFromScore(score);
+      const trend = readConnectionTrend(body.trend);
+      const lastReason =
+        readOptionalString(body.lastReason) ?? "Developer Tools set the connection state.";
+      const recentReasons = readConnectionReasons(body.recentReasons, lastReason);
+      const updatedAt = new Date().toISOString();
+      const botScopeKey = conversation.bot_id ?? "__default__";
+
+      db.prepare(
+        `INSERT INTO session_opinions (
+          user_id, conversation_id, bot_scope_key, bot_id, score, band, trend, last_reason, recent_reasons, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, conversation_id, bot_scope_key) DO UPDATE SET
+          bot_id = excluded.bot_id,
+          score = excluded.score,
+          band = excluded.band,
+          trend = excluded.trend,
+          last_reason = excluded.last_reason,
+          recent_reasons = excluded.recent_reasons,
+          updated_at = excluded.updated_at`
+      ).run(
+        userId,
+        conversation.id,
+        botScopeKey,
+        conversation.bot_id ?? null,
+        score,
+        band,
+        trend,
+        lastReason,
+        JSON.stringify(recentReasons),
+        updatedAt
+      );
+
+      const opinion: SessionOpinion = {
+        score,
+        band,
+        trend,
+        lastReason,
+        recentReasons,
+        updatedAt,
+      };
+      json(ctx.res, 200, { ok: true, opinion });
+    }),
+    route("POST", "/api/bots/:id/dev-opinion", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const requestedBotId = ctx.params.id === "_default" ? null : ctx.params.id;
+      if (requestedBotId) {
+        const bot = db
+          .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
+          .get(requestedBotId, userId) as { id?: string } | undefined;
+        if (!bot?.id) {
+          throw new Error("Bot not found.");
+        }
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const score = clampConnectionScore(Number(body.score));
+      const trend = readConnectionTrend(body.trend);
+      const lastReason =
+        readOptionalString(body.lastReason) ?? "Developer Tools set the bot opinion state.";
+      const recentReasons = readConnectionReasons(body.recentReasons, lastReason);
+      const repairCount =
+        typeof body.repairCount === "number" && Number.isFinite(body.repairCount)
+          ? Math.max(0, Math.round(body.repairCount))
+          : 0;
+      const botOpinion = upsertBotOpinion({
+        db,
+        userId,
+        botId: requestedBotId,
+        score,
+        trend,
+        lastReason,
+        recentReasons,
+        repairCount,
+        updatedAt: new Date().toISOString(),
+      });
+      json(ctx.res, 200, { ok: true, botOpinion });
+    }),
+    route("POST", "/api/composer/cleanup", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const text = readComposerCleanupText(body.text);
+      const user = getUserRow(userId);
+      if (user.composer_writing_assist === 0) {
+        throw new Error("Composer writing assistance is disabled in Settings.");
+      }
+
+      const forceLocal = body.forceLocal === true;
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      let effectiveProvider = forceLocal ? "local" : user.preferred_provider;
+      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
+      const resolvedAuto = resolveAutoModel({
+        provider: effectiveProvider,
+        explicitModelOverride: null,
+        botPreferredModel:
+          effectiveProvider === "local"
+            ? readOptionalString(user.preferred_local_model)
+            : readOptionalString(user.preferred_online_model),
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+      });
+      effectiveProvider = resolvedAuto.provider;
+
+      const provider = selectProvider(
+        effectiveProvider,
+        openAiApiKey,
+        user.secondary_ollama_host
+      );
+      const maxTokens = Math.min(1800, Math.max(160, Math.ceil(text.length / 2)));
+      try {
+        const raw = await provider.generateResponse(
+          [
+            { role: "system", content: COMPOSER_CLEANUP_SYSTEM_PROMPT },
+            { role: "user", content: text },
+          ],
+          {
+            model: resolvedAuto.model,
+            temperature: 0.05,
+            maxTokens,
+          }
+        );
+        const cleanedText = normalizeComposerCleanupResponse(raw, text);
+        json(ctx.res, 200, {
+          ok: true,
+          text: cleanedText,
+          changed: cleanedText !== text,
+          provider: effectiveProvider,
+          model: resolvedAuto.model,
+        });
+      } catch (error) {
+        if (resolvedAuto.usedRequiredLocalFallback) {
+          throw new Error(
+            `Prism Server setup problem: the required primary ${REQUIRED_PRIMARY_LOCAL_MODEL_ID} model is unavailable. Install it in Ollama, then try again.`
+          );
+        }
+        throw error;
+      }
+    }),
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const starterPrompt = body.starterPrompt === true;
+      const starterPromptWarrantsIntro =
+        starterPrompt && body.starterPromptWarrantsIntro === true;
       const message = starterPrompt ? "" : readString(body.message, "message");
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
-      // Three-valued parse so the server can distinguish:
+      const forceNewConversation = body.forceNewConversation === true;
+      const sessionEnding = body.sessionEnding === true;
+      // Three-valued parse for bot routing:
       //   - absent key           → leave conversation's bot alone
       //   - explicit null        → switch to Default persona (no bot)
       //   - string               → switch to that specific bot
-      // The Chat-mode client ALWAYS sends botId (string or null) so a
-      // mid-thread dropdown flip either persists a new bot or demotes
-      // the conversation back to Default. Sandbox callers still omit
-      // the key for the no-bot case; they get the legacy behavior.
       const botId: string | null | undefined =
         typeof body.botId === "string"
           ? body.botId
@@ -741,17 +1437,28 @@ function buildRoutes(): RouteDefinition[] {
       // Per-request provider override so a fresh sidebar switch takes effect
       // immediately, even if the settings PATCH is still in flight.
       const requestedProvider =
-        body.preferredProvider === "openai" || body.preferredProvider === "local"
+        (mode === "sandbox" || incognito) &&
+        (body.preferredProvider === "openai" || body.preferredProvider === "local")
           ? body.preferredProvider
           : undefined;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
-      // Incognito still needs the selected bot's prompt identity. Memory and
-      // persistence are disabled later via the incognito flags, not by erasing
-      // the bot before prompt composition.
       const effectiveBotId = botId;
-      const explicitModelOverride = readOptionalString(body.modelOverride);
+      const explicitModelOverride =
+        mode === "sandbox" ? readOptionalString(body.modelOverride) : null;
+      if (
+        mode === "chat" &&
+        !incognito &&
+        (
+          body.preferredProvider !== undefined ||
+          body.modelOverride !== undefined
+        )
+      ) {
+        console.info(
+          `[chat-contract] Ignored advanced Chat controls for user ${userId} (provider/model).`
+        );
+      }
       const ephemeralMessages = Array.isArray(body.ephemeralMessages)
         ? body.ephemeralMessages as ChatMessage[]
         : undefined;
@@ -812,7 +1519,11 @@ function buildRoutes(): RouteDefinition[] {
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
         explicitModelOverride: botForcesLocalProvider ? null : explicitModelOverride,
-        botPreferredModel,
+        botPreferredModel:
+          botPreferredModel ??
+          (effectiveProvider === "local"
+            ? readOptionalString(user.preferred_local_model)
+            : readOptionalString(user.preferred_online_model)),
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
       });
@@ -834,15 +1545,32 @@ function buildRoutes(): RouteDefinition[] {
             preferredProvider: effectiveProvider,
             autoMemory: !incognito && Boolean(user.auto_memory),
             openAiApiKey,
+            userDisplayName: user.display_name,
             starterPrompt,
+            starterPromptWarrantsIntro,
             starterPromptLabel,
             secondaryOllamaHost: user.secondary_ollama_host,
+            lenientLocalFallbackModel: user.lenient_local_fallback_model,
+            prismDefaultLlmModel: user.prism_default_llm_model,
+            prismImageToolLlmModel: user.prism_image_tool_llm_model,
+            devMemoriesEnabled: user.dev_memories_enabled === 1,
+            devMemoriesText: user.dev_memories_text,
+            assistantImageUserPrefs: {
+              preferredLocalImageModel: user.preferred_local_image_model,
+              preferredOpenAiImageModel: user.preferred_openai_image_model,
+              lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
+              comfyuiHost: user.comfyui_host,
+              comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+              secondaryOllamaHost: user.secondary_ollama_host,
+            },
             botId: effectiveBotId,
             incognito,
             ephemeralMessages,
             botSystemPrompt,
             botOverrides,
             mode,
+            sessionEnding,
+            forceNewConversation,
           },
           conversationId
         );
@@ -854,13 +1582,346 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
-      const { conversation, conversationStarters, memoryLearned, opinion } = result;
+      const {
+        conversation,
+        conversationStarters,
+        fallbackInvocation,
+        memoryLearned,
+        opinion,
+        botOpinion,
+        summaryCompaction,
+        pendingImageJob,
+      } = result;
       json(ctx.res, 200, {
         ok: true,
         conversation,
+        ...(fallbackInvocation ? { fallbackInvocation } : {}),
         ...(opinion ? { opinion } : {}),
+        ...(botOpinion ? { botOpinion } : {}),
+        ...(summaryCompaction ? { summaryCompaction } : {}),
         ...(memoryLearned ? { memoryLearned } : {}),
         ...(conversationStarters ? { conversationStarters } : {}),
+        ...(pendingImageJob ? { pendingImageJob } : {}),
+      });
+    }),
+    route("GET", "/api/image-jobs/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const jobId = decodeURIComponent((ctx.params.id ?? "").trim());
+      if (!jobId) {
+        throw new HttpError(400, "Missing job id.");
+      }
+      const result = pollImageJobForUser(userId, jobId);
+      if (!result.ok) {
+        if (result.error === "forbidden") {
+          throw new HttpError(403, "Forbidden.");
+        }
+        throw new HttpError(404, "Image job not found.");
+      }
+      if (result.status === "running") {
+        json(ctx.res, 200, { ok: true, status: "running" });
+        return;
+      }
+      if (result.status === "succeeded") {
+        json(ctx.res, 200, { ok: true, status: "succeeded", messages: result.messages });
+        return;
+      }
+      json(ctx.res, 200, { ok: true, status: "failed", error: result.error });
+    }),
+    // Coffee mode (timed live sessions for 3-5 reactive bots). Lives on its own
+    // endpoint rather than inside /api/chat so the lighter coffee
+    // pipeline (router LLM + per-bot reply, no cross-thread memory) can
+    // evolve independently of the heavier Chat/Sandbox flow.
+    route("GET", "/api/coffee/groups", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        groups: listCoffeeGroups(db, userId),
+      });
+    }),
+    route("GET", "/api/coffee/presets", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        presets: listCoffeePresets(db, userId),
+      });
+    }),
+    route("POST", "/api/coffee/presets", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const preset = createCoffeePreset(db, userId, {
+        name: body.name,
+        coffeeSettings: body.coffeeSettings,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        preset,
+      });
+    }),
+    route("PATCH", "/api/coffee/presets/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const preset = updateCoffeePreset(db, userId, ctx.params.id, {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.coffeeSettings !== undefined ? { coffeeSettings: body.coffeeSettings } : {}),
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        preset,
+      });
+    }),
+    route("DELETE", "/api/coffee/presets/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      deleteCoffeePreset(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/coffee/groups", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const groupBotIds = Array.isArray(body.groupBotIds)
+        ? body.groupBotIds
+        : undefined;
+      const group = createCoffeeGroup(db, userId, {
+        name: body.name,
+        groupBotIds,
+        coffeeSettings: body.coffeeSettings,
+        ...(body.modelChoiceByProvider !== undefined
+          ? { modelChoiceByProvider: body.modelChoiceByProvider }
+          : {}),
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        group,
+      });
+    }),
+    route("PATCH", "/api/coffee/groups/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const groupBotIds = Array.isArray(body.groupBotIds)
+        ? body.groupBotIds
+        : undefined;
+      const group = updateCoffeeGroup(db, userId, ctx.params.id, {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(groupBotIds !== undefined ? { groupBotIds } : {}),
+        ...(body.coffeeSettings !== undefined ? { coffeeSettings: body.coffeeSettings } : {}),
+        ...(body.presetMode !== undefined ? { presetMode: body.presetMode } : {}),
+        ...(body.topicSelectionMode !== undefined ? { topicSelectionMode: body.topicSelectionMode } : {}),
+        ...(body.modelChoiceByProvider !== undefined
+          ? { modelChoiceByProvider: body.modelChoiceByProvider }
+          : {}),
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        group,
+      });
+    }),
+    route("DELETE", "/api/coffee/groups/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      deleteCoffeeGroup(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/coffee/groups/:id/sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const result = await createCoffeeConversationFromGroup(
+        db,
+        userId,
+        ctx.params.id,
+        {
+          coffeeSettings: body.coffeeSettings,
+          durationMinutes: body.durationMinutes,
+          presetId: body.presetId,
+        },
+        { prismDefaultLlmModel: user.prism_default_llm_model }
+      );
+      json(ctx.res, 201, {
+        ok: true,
+        ...result,
+      });
+    }),
+    route("POST", "/api/coffee/sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const groupBotIds = Array.isArray(body.groupBotIds)
+        ? body.groupBotIds
+        : undefined;
+      const result = await createCoffeeConversation(
+        db,
+        userId,
+        {
+          groupBotIds,
+          coffeeSettings: body.coffeeSettings,
+        },
+        { prismDefaultLlmModel: user.prism_default_llm_model }
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/topic", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const conversation = await setCoffeeConversationTopic(
+        db,
+        userId,
+        ctx.params.id,
+        body.topic
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
+      });
+    }),
+    route("PATCH", "/api/coffee/sessions/:id/settings", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const coffeeSettings = updateCoffeeConversationSettings(
+        db,
+        userId,
+        ctx.params.id,
+        body.coffeeSettings ?? body
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        coffeeSettings,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/continue", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
+      const directedSpeakerBotId =
+        typeof body.directedSpeakerBotId === "string"
+          ? body.directedSpeakerBotId
+          : undefined;
+      const userIsComposing = body.userIsComposing === true;
+      const sessionRemainingMs =
+        typeof body.sessionRemainingMs === "number" &&
+        Number.isFinite(body.sessionRemainingMs)
+          ? Math.max(0, body.sessionRemainingMs)
+          : null;
+      const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const result = await processCoffeeAutonomousTurn(
+        db,
+        userId,
+        ctx.params.id,
+        {
+          preferredProvider: effectiveProvider,
+          openAiApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          userDisplayName: user.display_name,
+          userKey,
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          assistantImageUserPrefs: {
+            preferredLocalImageModel: user.preferred_local_image_model,
+            preferredOpenAiImageModel: user.preferred_openai_image_model,
+            lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
+            comfyuiHost: user.comfyui_host,
+            comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+            secondaryOllamaHost: user.secondary_ollama_host,
+          },
+          sessionRemainingMs,
+          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+        },
+        userIsComposing,
+        directedSpeakerBotId
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
+      });
+    }),
+    route("POST", "/api/coffee/turn", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const message = readString(body.message, "message");
+      const conversationId =
+        typeof body.conversationId === "string" ? body.conversationId : undefined;
+      const groupBotIds = Array.isArray(body.groupBotIds)
+        ? body.groupBotIds
+        : undefined;
+      const interruptionInput =
+        body.playerInterruption && typeof body.playerInterruption === "object"
+          ? (body.playerInterruption as Record<string, unknown>)
+          : undefined;
+      const playerInterruption =
+        interruptionInput &&
+        typeof interruptionInput.interruptedMessageId === "string" &&
+        typeof interruptionInput.interruptedBotId === "string"
+          ? {
+              interruptedMessageId: interruptionInput.interruptedMessageId,
+              interruptedBotId: interruptionInput.interruptedBotId,
+              visibleTokenCount:
+                typeof interruptionInput.visibleTokenCount === "number"
+                  ? interruptionInput.visibleTokenCount
+                  : 1,
+            }
+          : undefined;
+      const directedSpeakerBotId =
+        typeof body.directedSpeakerBotId === "string"
+          ? body.directedSpeakerBotId
+          : undefined;
+      const sessionRemainingMs =
+        typeof body.sessionRemainingMs === "number" &&
+        Number.isFinite(body.sessionRemainingMs)
+          ? Math.max(0, body.sessionRemainingMs)
+          : null;
+      // Per-request provider override matches Sandbox's /api/chat semantics:
+      // the client toggle wins over the user's saved preferred_provider for
+      // this single turn. Anything else (including absent or malformed)
+      // falls back to the saved preference.
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const result = await processCoffeeTurn(
+        db,
+        userId,
+        {
+          conversationId,
+          groupBotIds,
+          message,
+          playerInterruption,
+          directedSpeakerBotId,
+        },
+        {
+          preferredProvider: effectiveProvider,
+          openAiApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          userDisplayName: user.display_name,
+          userKey,
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          assistantImageUserPrefs: {
+            preferredLocalImageModel: user.preferred_local_image_model,
+            preferredOpenAiImageModel: user.preferred_openai_image_model,
+            lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
+            comfyuiHost: user.comfyui_host,
+            comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+            secondaryOllamaHost: user.secondary_ollama_host,
+          },
+          sessionRemainingMs,
+          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+        }
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
       });
     }),
     route("GET", "/api/memories", async (ctx) => {
@@ -892,7 +1953,12 @@ function buildRoutes(): RouteDefinition[] {
           memoryInferenceCheckedAtByScope.get(inferenceScopeKey) !== latestDirectAt;
         if (shouldInfer) {
           try {
-            const auxiliaryProvider = getAuxiliaryProvider();
+            const prismModel = (
+              db.prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?").get(userId) as
+                | { m: string | null }
+                | undefined
+            )?.m;
+            const auxiliaryProvider = getAuxiliaryProvider(prismModel);
             await inferAndStoreBotMemories(db, auxiliaryProvider, userId, botId, userKey);
           } catch (error) {
             console.warn("Memory inference skipped:", error);
@@ -906,7 +1972,10 @@ function buildRoutes(): RouteDefinition[] {
         conversation_id: string | null;
         bot_id: string | null;
         confidence: number;
-        source: "direct" | "inferred" | "compiled";
+        category: "general" | "user" | "bot_relation";
+        tier: "short_term" | "long_term";
+        durability: number | null;
+        source: "direct" | "inferred" | "compiled" | "about_you";
         certainty: number | null;
         source_message_ids: string;
         ciphertext: string;
@@ -917,24 +1986,24 @@ function buildRoutes(): RouteDefinition[] {
       const rows = botId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId, botId) as MemoryRow[]
         : scope === "default"
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId) as MemoryRow[]
         : conversationId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId, conversationId) as MemoryRow[]
         : db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
             )
             .all(userId) as MemoryRow[];
       const memoryCountRows = db
@@ -960,15 +2029,20 @@ function buildRoutes(): RouteDefinition[] {
           },
           userKey
         ) as { text?: string };
+        const text = normalizeMemoryDisplayText(payload.text ?? "");
+        const durability = normalizeMemoryDurability(row.durability, text);
         return {
           id: row.id,
           conversationId: row.conversation_id ?? undefined,
           botId: row.bot_id ?? undefined,
           confidence: row.confidence,
+          category: row.category,
+          tier: row.tier,
+          durability,
           source: row.source,
           certainty: row.certainty ?? row.confidence,
           sourceMessageIds: parseSourceMessageIds(row.source_message_ids),
-          text: payload.text ?? "",
+          text,
           createdAt: row.created_at
         };
       });
@@ -992,10 +2066,26 @@ function buildRoutes(): RouteDefinition[] {
       const requestedBotId = readOptionalString(body.botId);
       const requestedSource = readOptionalString(body.source);
       const source = requestedSource === "inferred" || requestedSource === "compiled"
+        || requestedSource === "about_you"
         ? requestedSource
         : "direct";
+      const requestedCategory = readOptionalString(body.category);
+      const category =
+        requestedCategory === "user" || requestedCategory === "bot_relation"
+          ? requestedCategory
+          : requestedCategory === "general"
+            ? "general"
+            : undefined;
+      const requestedTier = readOptionalString(body.tier);
+      const tier =
+        requestedTier === "long_term" || requestedTier === "short_term"
+          ? requestedTier
+          : undefined;
       const requestedCertainty = typeof body.certainty === "number" && Number.isFinite(body.certainty)
         ? Math.max(0, Math.min(1, body.certainty))
+        : undefined;
+      const requestedDurability = typeof body.durability === "number" && Number.isFinite(body.durability)
+        ? Math.max(0, Math.min(1, body.durability))
         : undefined;
       const botIds = requestedBotId
         ? (
@@ -1014,14 +2104,67 @@ function buildRoutes(): RouteDefinition[] {
       const created = createDevSeedMemories(db, userId, userKey, count, botIds, {
         randomizeAcrossBots: !requestedBotId,
         source,
+        category,
+        tier,
+        durability: requestedDurability,
         certainty: requestedCertainty,
       });
       json(ctx.res, 200, { ok: true, created });
     }),
     route("DELETE", "/api/memories", async (ctx) => {
       const userId = requireAuth(ctx);
-      const result = db.prepare("DELETE FROM memories WHERE user_id = ?").run(userId);
+      const result = db
+        .prepare(
+          "DELETE FROM memories WHERE user_id = ? AND COALESCE(source, 'direct') != 'about_you'"
+        )
+        .run(userId);
       json(ctx.res, 200, { ok: true, deleted: Number(result.changes ?? 0) });
+    }),
+    // Hard-reset per-user memory artifacts: extracted memory facts, SQLite
+    // summary rows (both thread-scoped and global), and matching Qdrant
+    // vectors. Powers dev slash commands:
+    // - `/clear` (default): keeps `about_you` profile rows in SQLite.
+    // - `/forget`: same clear path with `includeAboutYou = true`.
+    // Qdrant cleanup is best-effort because the local stack often runs
+    // without a vector DB attached; SQLite truth wins either way.
+    route("POST", "/api/dev/clear-session-memory", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const includeAboutYou = body.includeAboutYou === true;
+      let deletedMemories = 0;
+      let deletedSummaries = 0;
+      db.exec("BEGIN IMMEDIATE TRANSACTION");
+      try {
+        const memoryResult = db
+          .prepare(includeAboutYou
+            ? "DELETE FROM memories WHERE user_id = ?"
+            : "DELETE FROM memories WHERE user_id = ? AND COALESCE(source, 'direct') != 'about_you'"
+          )
+          .run(userId);
+        const summaryResult = db
+          .prepare("DELETE FROM memory_summaries WHERE user_id = ?")
+          .run(userId);
+        deletedMemories = Number(memoryResult.changes ?? 0);
+        deletedSummaries = Number(summaryResult.changes ?? 0);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      let vectorsCleared = false;
+      try {
+        await deleteVectorsForUser(userId);
+        vectorsCleared = true;
+      } catch {
+        vectorsCleared = false;
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        deletedMemories,
+        deletedSummaries,
+        includeAboutYou,
+        vectorsCleared,
+      });
     }),
     route("POST", "/api/memories/restore", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -1041,9 +2184,21 @@ function buildRoutes(): RouteDefinition[] {
       const conversationId = readOptionalString(body.conversationId);
       const requestedSource = readOptionalString(body.source);
       const source =
-        requestedSource === "inferred" || requestedSource === "compiled"
+        requestedSource === "inferred" || requestedSource === "compiled" || requestedSource === "about_you"
           ? requestedSource
           : "direct";
+      const requestedCategory = readOptionalString(body.category);
+      const category =
+        requestedCategory === "user" || requestedCategory === "bot_relation"
+          ? requestedCategory
+          : requestedCategory === "general"
+            ? "general"
+            : undefined;
+      const requestedTier = readOptionalString(body.tier);
+      const tier =
+        requestedTier === "long_term" || requestedTier === "short_term"
+          ? requestedTier
+          : undefined;
       const confidence =
         typeof body.confidence === "number" && Number.isFinite(body.confidence)
           ? Math.max(0, Math.min(1, body.confidence))
@@ -1052,6 +2207,10 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.certainty === "number" && Number.isFinite(body.certainty)
           ? Math.max(0, Math.min(1, body.certainty))
           : confidence;
+      const durability =
+        typeof body.durability === "number" && Number.isFinite(body.durability)
+          ? Math.max(0, Math.min(1, body.durability))
+          : undefined;
       const sourceMessageIds = Array.isArray(body.sourceMessageIds)
         ? body.sourceMessageIds.filter((value): value is string => typeof value === "string")
         : [];
@@ -1060,15 +2219,33 @@ function buildRoutes(): RouteDefinition[] {
         botId,
         conversationId,
         confidence,
+        category,
+        tier,
+        durability,
         source,
         certainty,
         sourceMessageIds,
       });
       json(ctx.res, 200, { ok: true, memory });
     }),
+    route("POST", "/api/memories/:id/demote", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const confidence =
+        typeof body.confidence === "number" && Number.isFinite(body.confidence)
+          ? Math.max(0, Math.min(1, body.confidence))
+          : undefined;
+      const demoted = demoteMemoryToShortTerm(db, userId, ctx.params.id, confidence);
+      json(ctx.res, 200, { ok: true, demoted });
+    }),
     route("DELETE", "/api/memories/:id", async (ctx) => {
       const userId = requireAuth(ctx);
-      const deleted = deleteMemoryById(db, userId, ctx.params.id);
+      const allowLongTerm = ctx.query.get("allowLongTerm") === "true";
+      const allowAboutYou = ctx.query.get("allowAboutYou") === "true";
+      const deleted = deleteMemoryById(db, userId, ctx.params.id, {
+        allowLongTerm,
+        allowAboutYou,
+      });
       json(ctx.res, 200, { ok: true, deleted });
     }),
     route("PATCH", "/api/messages/:id", async (ctx) => {
@@ -1115,22 +2292,48 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
       });
     }),
+    route("DELETE", "/api/messages/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const messageId = ctx.params.id;
+      const result = deleteConversationMessage(db, userId, messageId);
+      json(ctx.res, 200, {
+        ok: true,
+        deleted: true,
+        conversationId: result.conversationId,
+      });
+    }),
     route("GET", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       json(ctx.res, 200, {
         ok: true,
         settings: {
+          displayName: user.display_name,
           theme: user.theme,
           preferredProvider: user.preferred_provider,
           providerLocked: Boolean(user.provider_locked),
           autoMemory: Boolean(user.auto_memory),
+          composerWritingAssist: user.composer_writing_assist !== 0,
+          fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+          preferredLocalModel: user.preferred_local_model ?? "",
+          preferredOnlineModel: user.preferred_online_model ?? "",
+          lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
+          lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model ?? "",
+          prismDefaultLlmModel: user.prism_default_llm_model ?? "",
+          prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
           ollamaModel: config.ollamaModel,
+          ollamaAuxiliaryModel: config.ollamaAuxiliaryModel || "llama3.2",
           secondaryOllamaHost: user.secondary_ollama_host ?? "",
+          comfyUiHost: user.comfyui_host ?? "",
+          preferredLocalImageModel: user.preferred_local_image_model ?? "",
+          preferredOpenAiImageModel: user.preferred_openai_image_model ?? "",
+          comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+          devMemoriesEnabled: user.dev_memories_enabled === 1,
+          devMemoriesText: user.dev_memories_text ?? "",
         },
       });
     }),
@@ -1141,7 +2344,64 @@ function buildRoutes(): RouteDefinition[] {
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
-      json(ctx.res, 200, { ok: true, catalog });
+      // Prefer draft URL from query (matches Settings status probe before save); else persisted column.
+      const comfyHostFromQuery = normalizeComfyUiHostForStatusCheck(
+        ctx.query.get("comfyUiHost")
+      );
+      const comfyHostRaw =
+        comfyHostFromQuery && comfyHostFromQuery.length > 0
+          ? comfyHostFromQuery
+          : user.comfyui_host?.trim() ?? "";
+      let comfyUi: {
+        configured: boolean;
+        reachable: boolean;
+        checkpoints: Array<{
+          id: string;
+          label: string;
+          provider: "local";
+          imageSource: "comfyui" | "comfyui-remote";
+        }>;
+      };
+      if (comfyHostRaw) {
+        const names = await fetchComfyUiCheckpointNames(comfyHostRaw);
+        const reachable =
+          names.length > 0 || (await probeComfyUiHostReachable(comfyHostRaw));
+        const checkpointRows = names.map((name) => ({
+          id: encodeComfyUiModelId(name),
+          label: `${name} (ComfyUI)`,
+          provider: "local" as const,
+          imageSource: "comfyui" as const,
+        }));
+        let remoteDiskRows: Array<{
+          id: string;
+          label: string;
+          provider: "local";
+          imageSource: "comfyui-remote";
+        }> = [];
+        try {
+          const relPaths = await listComfyUiWorkflowJsonRelPaths(comfyHostRaw);
+          remoteDiskRows = relPaths.map((path) => ({
+            id: encodeComfyUiRemoteWorkflowModelId(path),
+            label: `${path} (ComfyUI disk)`,
+            provider: "local" as const,
+            imageSource: "comfyui-remote" as const,
+          }));
+        } catch {
+          remoteDiskRows = [];
+        }
+        comfyUi = {
+          configured: true,
+          reachable,
+          checkpoints: [...checkpointRows, ...remoteDiskRows],
+        };
+      } else {
+        comfyUi = {
+          configured: false,
+          reachable: false,
+          checkpoints: [],
+        };
+      }
+      json(ctx.res, 200, { ok: true, catalog, comfyUi });
     }),
     route("GET", "/api/settings/secondary-ollama-status", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -1153,21 +2413,52 @@ function buildRoutes(): RouteDefinition[] {
       const status = await checkLocalModelHostStatus(hostToCheck);
       json(ctx.res, 200, { ok: true, status });
     }),
+    route("GET", "/api/settings/comfyui-status", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      let hostToCheck: string | null = user.comfyui_host;
+      if (ctx.query.has("host")) {
+        hostToCheck = normalizeComfyUiHostForStatusCheck(ctx.query.get("host"));
+      }
+      const status = await checkComfyUiHostStatus(hostToCheck);
+      json(ctx.res, 200, { ok: true, status });
+    }),
     route("PATCH", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const user = getUserRow(userId);
+      const devMemoriesEnabled =
+        typeof body.devMemoriesEnabled === "boolean"
+          ? Number(body.devMemoriesEnabled)
+          : user.dev_memories_enabled;
+      const devMemoriesText =
+        typeof body.devMemoriesText === "string"
+          ? body.devMemoriesText.trim().slice(0, 8000)
+          : user.dev_memories_text;
 
       // Validation + merge live in `./settings.ts` so the semantics are pinned
       // by unit tests. See `__tests__/settings.test.ts` for the contract.
       const next = resolveNextSettings(body, {
+        displayName: user.display_name,
         theme: user.theme,
         preferredProvider: user.preferred_provider,
         providerLocked: user.provider_locked,
         autoMemory: user.auto_memory,
+        composerWritingAssist: user.composer_writing_assist,
+        fallbackModelMessageStripe: user.fallback_model_message_stripe,
         hiddenBotModelIds: user.hidden_bot_model_ids,
+        preferredLocalModel: user.preferred_local_model,
+        preferredOnlineModel: user.preferred_online_model,
+        lenientLocalFallbackModel: user.lenient_local_fallback_model,
+        lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
         secondaryOllamaHost: user.secondary_ollama_host,
+        comfyUiHost: user.comfyui_host,
+        preferredLocalImageModel: user.preferred_local_image_model,
+        preferredOpenAiImageModel: user.preferred_openai_image_model,
+        comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+        prismDefaultLlmModel: user.prism_default_llm_model,
+        prismImageToolLlmModel: user.prism_image_tool_llm_model,
         primaryOllamaHost: config.ollamaHost,
       });
 
@@ -1191,16 +2482,34 @@ function buildRoutes(): RouteDefinition[] {
       // another migration.
       db.prepare(`
         UPDATE users
-        SET theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, hidden_bot_model_ids = ?,
-            secondary_ollama_host = ?, openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
+        SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?,
+            preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            preferred_local_image_model = ?, preferred_openai_image_model = ?, comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
+            dev_memories_enabled = ?, dev_memories_text = ?,
+            openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
         WHERE id = ?
       `).run(
+        next.displayName,
         next.theme,
         next.preferredProvider,
         next.providerLocked,
         next.autoMemory,
+        next.composerWritingAssist,
+        next.fallbackModelMessageStripe,
         JSON.stringify(next.hiddenBotModelIds),
+        next.preferredLocalModel,
+        next.preferredOnlineModel,
+        next.lenientLocalFallbackModel,
+        next.lenientLocalImageFallbackModel,
         next.secondaryOllamaHost,
+        next.comfyUiHost,
+        next.preferredLocalImageModel,
+        next.preferredOpenAiImageModel,
+        JSON.stringify(next.comfyUiWorkflows),
+        next.prismDefaultLlmModel,
+        next.prismImageToolLlmModel,
+        devMemoriesEnabled,
+        devMemoriesText,
         openAiCipher,
         openAiIv,
         openAiTag,
@@ -1230,51 +2539,553 @@ function buildRoutes(): RouteDefinition[] {
       const versions = await backupAdapter.listVersions(userId);
       json(ctx.res, 200, { ok: true, versions });
     }),
-    route("POST", "/api/images/generate", async (ctx) => {
+    route("POST", "/api/images/prompt-suggestions", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const botId = readString(body.botId, "botId").trim();
+      const row = db
+        .prepare(
+          "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId) as { name: string; system_prompt: string } | undefined;
+      if (!row) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      const user = getUserRow(userId);
+      const suggestions = await inferBotImagePromptSuggestions(
+        getAuxiliaryProvider(user.prism_default_llm_model),
+        { botName: row.name, systemPrompt: row.system_prompt }
+      );
+      json(ctx.res, 200, { ok: true, suggestions });
+    }),
+    route("POST", "/api/images/random-prompt", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const botIdRaw =
+        typeof body.botId === "string" ? body.botId.trim() : "";
+      let botName: string | undefined;
+      let systemPrompt: string | undefined;
+      if (botIdRaw.length > 0) {
+        const row = db
+          .prepare(
+            "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
+          )
+          .get(botIdRaw, userId) as
+          | { name: string; system_prompt: string }
+          | undefined;
+        if (!row) {
+          throw new HttpError(404, "Bot not found.");
+        }
+        botName = row.name;
+        systemPrompt = row.system_prompt;
+      }
+      const user = getUserRow(userId);
+      const prompt = await inferRandomImageSceneLine(
+        getAuxiliaryProvider(user.prism_default_llm_model),
+        {
+          botName,
+          systemPrompt,
+        }
+      );
+      json(ctx.res, 200, { ok: true, prompt });
+    }),
+    route("POST", "/api/images/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const imageGenAbort = new AbortController();
+      const onImageGenClientClose = () => imageGenAbort.abort();
+      ctx.req.once("close", onImageGenClientClose);
+      try {
+      const body = ctx.body as Record<string, unknown>;
       const prompt = readString(body.prompt, "prompt");
-      const size = (body.size as string) ?? "1024x1024";
+      const requestedSize =
+        typeof body.size === "string" ? body.size.trim() : IMAGE_GENERATION_DEFAULT_SIZE;
+      const size = IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
+        ? requestedSize
+        : inferImageGenerationSizeFromPrompt(prompt);
       const quality = (body.quality as string) ?? "standard";
-      const conversationId = typeof body.conversationId === "string" ? body.conversationId : null;
+      const bodyModel =
+        typeof body.model === "string" && body.model.trim().length > 0
+          ? body.model.trim()
+          : undefined;
+      const conversationIdRaw =
+        typeof body.conversationId === "string" ? body.conversationId.trim() : "";
+      const bodyBotId =
+        typeof body.botId === "string" && body.botId.trim().length > 0
+          ? body.botId.trim()
+          : undefined;
 
-      // Privacy gate: image generation always calls OpenAI DALL-E, so it
-      // must never fire while the user has LOCAL mode selected. Mirror the
-      // chat route's per-request override: the body can carry a
-      // `preferredProvider` for per-send intent, falling back to the user's
-      // stored mode.
+      // ONLINE → OpenAI Images API; LOCAL → Ollama image checkpoint on this Mac.
+      // Body may override `preferredProvider` for this request (same pattern as chat).
       const user = getUserRow(userId);
       const requestedProvider =
         body.preferredProvider === "openai" || body.preferredProvider === "local"
           ? body.preferredProvider
           : undefined;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      if (effectiveProvider === "local") {
+
+      const persistence = resolveImageGeneratePersistence({
+        db,
+        userId,
+        conversationIdRaw,
+        bodyBotId,
+      });
+      if (!persistence.ok) {
+        throw new Error(persistence.message);
+      }
+
+      let promptForModel = prompt;
+      const personaBotId = persistence.personaBotId;
+      type BotPersonaImageRow = {
+        name: string;
+        system_prompt: string;
+        local_image_model: string | null;
+        openai_image_model: string | null;
+      };
+      let botPersona: BotPersonaImageRow | undefined;
+      if (personaBotId) {
+        botPersona = db
+          .prepare(
+            "SELECT name, system_prompt, local_image_model, openai_image_model FROM bots WHERE id = ? AND user_id = ?"
+          )
+          .get(personaBotId, userId) as BotPersonaImageRow | undefined;
+        if (botPersona) {
+          promptForModel = composeAugmentedImagePrompt({
+            botName: botPersona.name,
+            systemPrompt: botPersona.system_prompt,
+            userPrompt: prompt,
+          });
+        }
+      }
+
+      const resolvedLocalImageModel =
+        (bodyModel && bodyModel.trim()) ||
+        (botPersona?.local_image_model?.trim() ?? "") ||
+        (user.preferred_local_image_model?.trim() ?? "");
+
+      const resolvedOpenAiImageModel =
+        (bodyModel && bodyModel.trim()) ||
+        (botPersona?.openai_image_model?.trim() ?? "") ||
+        (user.preferred_openai_image_model?.trim() ?? "");
+      if (effectiveProvider === "local" && !resolvedLocalImageModel) {
         throw new Error(
-          "Image generation requires ONLINE mode. Switch to ONLINE in the sidebar or compose toggle and try again."
+          "Pick a local image model in the Images panel header, then try again."
         );
+      }
+
+      const acqPanel = await tryAcquireImageSlot({
+        userId,
+        conversationId: conversationIdRaw.length > 0 ? conversationIdRaw : null,
+        botId: bodyBotId ?? null,
+        mode: "sandbox",
+        incognito: false,
+        captionPrompt: prompt,
+        userMessage: `[Images panel] ${prompt.slice(0, 500)}`,
+        source: "images_panel",
+      });
+      if (!acqPanel.ok) {
+        throw new HttpError(
+          503,
+          "Another image is generating right now. Wait for it to finish, then try again."
+        );
+      }
+
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+
+      if (effectiveProvider === "local") {
+        const lenientImageFb = user.lenient_local_image_fallback_model?.trim() ?? "";
+        const runLocalBytes = (modelId: string) =>
+          generateLocalImageBytesByModelId({
+            modelId,
+            promptForModel,
+            size,
+            signal: imageGenAbort.signal,
+            comfyUiHost: user.comfyui_host,
+            comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+            secondaryOllamaHost: user.secondary_ollama_host,
+            primaryOllamaHost: config.ollamaHost,
+          });
+
+        let localOut: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+        try {
+          localOut = await runLocalBytes(resolvedLocalImageModel);
+        } catch (primaryError) {
+          if (
+            lenientImageFb &&
+            lenientImageFb !== resolvedLocalImageModel.trim() &&
+            shouldAttemptLenientLocalImageFallback(primaryError)
+          ) {
+            localOut = await runLocalBytes(lenientImageFb);
+          } else {
+            throw primaryError;
+          }
+        }
+
+        await finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
+          imageId,
+          userId,
+          persistence: {
+            conversationIdForInsert: persistence.conversationIdForInsert,
+            persistedBotId: persistence.persistedBotId,
+          },
+          prompt,
+          localRelPath,
+          size,
+          quality,
+          imageBytes: localOut.imageBytes,
+          modelUsed: localOut.modelUsed,
+          provider: localOut.provider,
+        });
+        return;
       }
 
       const userKey = decryptUserKey(userId);
       const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const result = await generateImage(
-        prompt,
-        apiKey,
-        size as "1024x1024" | "1024x1792" | "1792x1024",
-        quality as "standard" | "hd"
-      );
-      const imageId = randomId(12);
-      db.prepare(
-        "INSERT INTO images (id, user_id, conversation_id, prompt, revised_prompt, url, size, quality, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?)"
-      ).run(imageId, userId, conversationId, prompt, result.revisedPrompt, result.url, size, quality, new Date().toISOString());
-      json(ctx.res, 200, { ok: true, image: { id: imageId, ...result } });
+      const lenientImageFbOnline = user.lenient_local_image_fallback_model?.trim() ?? "";
+
+      let openAiResult: Awaited<ReturnType<typeof generateImage>> | null = null;
+      try {
+        openAiResult = await generateImage(promptForModel, apiKey, {
+          model: resolvedOpenAiImageModel || undefined,
+          size,
+          quality,
+          signal: imageGenAbort.signal,
+        });
+      } catch (primaryError) {
+        if (
+          lenientImageFbOnline &&
+          shouldAttemptLenientLocalImageFallback(primaryError)
+        ) {
+          const localOut = await generateLocalImageBytesByModelId({
+            modelId: lenientImageFbOnline,
+            promptForModel,
+            size,
+            signal: imageGenAbort.signal,
+            comfyUiHost: user.comfyui_host,
+            comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+            secondaryOllamaHost: user.secondary_ollama_host,
+            primaryOllamaHost: config.ollamaHost,
+          });
+          await finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
+            imageId,
+            userId,
+            persistence: {
+              conversationIdForInsert: persistence.conversationIdForInsert,
+              persistedBotId: persistence.persistedBotId,
+            },
+            prompt,
+            localRelPath,
+            size,
+            quality,
+            imageBytes: localOut.imageBytes,
+            modelUsed: localOut.modelUsed,
+            provider: localOut.provider,
+          });
+          return;
+        }
+        throw primaryError;
+      }
+
+      const result = openAiResult;
+      if (!result) {
+        throw new Error("OpenAI image generation did not return a result.");
+      }
+
+      let imageBytes: Buffer;
+      try {
+        imageBytes = await downloadRemoteImage(result.url, {
+          signal: imageGenAbort.signal,
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "download failed";
+        throw new Error(`Could not download image for local storage (${detail}).`);
+      }
+
+      try {
+        writeGeneratedImageBytes(localRelPath, imageBytes);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "write failed";
+        throw new Error(`Could not save generated image (${detail}).`);
+      }
+
+      await tryGenerateThumbAfterPngWrite(localRelPath);
+
+      try {
+        db.prepare(
+          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?)"
+        ).run(
+          imageId,
+          userId,
+          persistence.conversationIdForInsert,
+          persistence.persistedBotId,
+          prompt,
+          result.revisedPrompt,
+          result.url,
+          size,
+          quality,
+          result.model,
+          localRelPath,
+          new Date().toISOString()
+        );
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      json(ctx.res, 200, {
+        ok: true,
+        image: {
+          id: imageId,
+          url: result.url,
+          revisedPrompt: result.revisedPrompt,
+          displayUrl,
+          hasLocalFile: true,
+          model: result.model,
+        },
+      });
+      } finally {
+        ctx.req.off("close", onImageGenClientClose);
+        await releaseImageSlot(userId);
+      }
+    }),
+    route("POST", "/api/ollama/pull-primary", async (ctx) => {
+      requireAuth(ctx);
+      const pullName = config.ollamaInAppPullModel.trim();
+      if (!isAllowedInAppOllamaPullModelName(pullName)) {
+        json(ctx.res, 500, {
+          ok: false,
+          error: "In-app pull model is misconfigured.",
+        });
+        return;
+      }
+
+      let ollamaRes: Response;
+      try {
+        ollamaRes = await fetch(`${config.ollamaHost}/api/pull`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: pullName, stream: true }),
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "network error";
+        json(ctx.res, 502, {
+          ok: false,
+          error: `Could not reach Ollama (${detail}).`,
+        });
+        return;
+      }
+
+      if (!ollamaRes.ok) {
+        const text = await ollamaRes.text();
+        json(ctx.res, 502, {
+          ok: false,
+          error: text.trim() || `Ollama pull failed (${ollamaRes.status}).`,
+        });
+        return;
+      }
+
+      const webBody = ollamaRes.body;
+      if (!webBody) {
+        json(ctx.res, 502, { ok: false, error: "Ollama returned an empty body." });
+        return;
+      }
+
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+
+      try {
+        const nodeReadable = Readable.fromWeb(
+          webBody as import("stream/web").ReadableStream
+        );
+        await pipeline(nodeReadable, ctx.res);
+      } catch {
+        if (!ctx.res.writableEnded) {
+          ctx.res.destroy();
+        }
+      }
     }),
     route("GET", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);
-      const rows = db.prepare(
-        "SELECT id, prompt, revised_prompt, url, size, quality, created_at FROM images WHERE user_id = ? ORDER BY created_at DESC LIMIT 50"
-      ).all(userId);
-      json(ctx.res, 200, { ok: true, images: rows });
+      const filterBotId = readOptionalString(ctx.query.get("botId"));
+      const generalOnly = ctx.query.get("general") === "1";
+      if (generalOnly && filterBotId) {
+        throw new Error("Cannot combine botId filter with general=1.");
+      }
+      if (filterBotId && !botBelongsToUser(db, userId, filterBotId)) {
+        throw new Error("Unknown bot for this account.");
+      }
+      const limitRaw = ctx.query.get("limit");
+      let limit = 120;
+      if (limitRaw) {
+        const n = Number(limitRaw);
+        if (Number.isFinite(n)) {
+          limit = Math.min(200, Math.max(1, Math.floor(n)));
+        }
+      }
+      const rows = generalOnly
+        ? db
+            .prepare(
+              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
+               FROM images WHERE user_id = ? AND bot_id IS NULL
+               ORDER BY created_at DESC LIMIT ?`
+            )
+            .all(userId, limit)
+        : filterBotId
+          ? db
+              .prepare(
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
+                 FROM images WHERE user_id = ? AND bot_id = ?
+                 ORDER BY created_at DESC LIMIT ?`
+              )
+              .all(userId, filterBotId, limit)
+          : db
+              .prepare(
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
+                 FROM images WHERE user_id = ?
+                 ORDER BY created_at DESC LIMIT ?`
+              )
+              .all(userId, limit);
+      const images = (rows as Array<{
+        id: string;
+        prompt: string;
+        revised_prompt: string | null;
+        url: string;
+        size: string;
+        quality: string;
+        provider: string;
+        bot_id: string | null;
+        created_at: string;
+        local_rel_path: string | null;
+        model: string | null;
+      }>).map((row) => mapImageRowToClient(row));
+      json(ctx.res, 200, { ok: true, images });
+    }),
+    route("GET", "/api/images/:id/thumb", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const imageId = ctx.params.id;
+      const row = db
+        .prepare("SELECT user_id, local_rel_path FROM images WHERE id = ?")
+        .get(imageId) as
+        | { user_id: string; local_rel_path: string | null }
+        | undefined;
+      if (!row || row.user_id !== userId) {
+        throw new HttpError(404, "Image not found.");
+      }
+      const rel = row.local_rel_path?.trim();
+      if (!rel) {
+        throw new HttpError(404, "Image thumbnail not available.");
+      }
+      let bytes: Buffer;
+      try {
+        bytes = await readOrCreateThumbBytes(rel);
+      } catch {
+        throw new HttpError(404, "Image thumbnail not found.");
+      }
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", "image/webp");
+      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.end(bytes);
+    }),
+    route("GET", "/api/images/:id/file", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const imageId = ctx.params.id;
+      const row = db
+        .prepare(
+          "SELECT user_id, local_rel_path FROM images WHERE id = ?"
+        )
+        .get(imageId) as
+        | { user_id: string; local_rel_path: string | null }
+        | undefined;
+      if (!row || row.user_id !== userId) {
+        throw new HttpError(404, "Image not found.");
+      }
+      const rel = row.local_rel_path?.trim();
+      if (!rel) {
+        throw new HttpError(404, "Image file not available.");
+      }
+      let bytes: Buffer;
+      try {
+        bytes = readGeneratedImageBytes(rel);
+      } catch {
+        throw new HttpError(404, "Image file not found.");
+      }
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", "image/png");
+      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.end(bytes);
+    }),
+    route("DELETE", "/api/images", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const filterBotId = readOptionalString(ctx.query.get("botId"));
+      const rows = (
+        filterBotId
+          ? db
+              .prepare(
+                "SELECT id, local_rel_path FROM images WHERE user_id = ? AND bot_id = ?"
+              )
+              .all(userId, filterBotId)
+          : db
+              .prepare("SELECT id, local_rel_path FROM images WHERE user_id = ?")
+              .all(userId)
+      ) as Array<{ id: string; local_rel_path: string | null }>;
+      if (rows.length === 0) {
+        json(ctx.res, 200, { ok: true, deleted: 0 });
+        return;
+      }
+      if (filterBotId) {
+        db.prepare("DELETE FROM images WHERE user_id = ? AND bot_id = ?").run(
+          userId,
+          filterBotId
+        );
+      } else {
+        db.prepare("DELETE FROM images WHERE user_id = ?").run(userId);
+      }
+      for (const row of rows) {
+        const rel = row.local_rel_path?.trim();
+        if (!rel) continue;
+        try {
+          tryUnlinkGeneratedImageFile(rel);
+        } catch (error) {
+          console.error(
+            `[images] orphan file after bulk delete imageId=${row.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
+      json(ctx.res, 200, { ok: true, deleted: rows.length });
+    }),
+    route("DELETE", "/api/images/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const imageId = ctx.params.id;
+      const row = db
+        .prepare(
+          "SELECT user_id, local_rel_path FROM images WHERE id = ? AND user_id = ?"
+        )
+        .get(imageId, userId) as
+        | { user_id: string; local_rel_path: string | null }
+        | undefined;
+      if (!row) {
+        throw new HttpError(404, "Image not found.");
+      }
+      db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+        imageId,
+        userId
+      );
+      const rel = row.local_rel_path?.trim();
+      if (rel) {
+        try {
+          tryUnlinkGeneratedImageFile(rel);
+        } catch (error) {
+          console.error(
+            `[images] orphan file after DB delete imageId=${imageId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
+      json(ctx.res, 200, { ok: true });
     }),
     route("POST", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -1284,6 +3095,8 @@ function buildRoutes(): RouteDefinition[] {
       const model = readOptionalString(body.model);
       const localModel = readOptionalString(body.localModel);
       const onlineModel = readOptionalString(body.onlineModel);
+      const localImageModel = readOptionalString(body.localImageModel);
+      const openaiImageModel = readOptionalString(body.openaiImageModel);
       const onlineEnabled = body.onlineEnabled === false ? 0 : 1;
       const deleteProtected = body.deleteProtected === true ? 1 : 0;
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
@@ -1314,8 +3127,28 @@ function buildRoutes(): RouteDefinition[] {
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
-      ).run(botId, userId, name, systemPrompt, exportHash, model, localModel, onlineModel, onlineEnabled, deleteProtected, temperature, maxTokens, color, glyph, chatEnabled, now, now);
+        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+      ).run(
+        botId,
+        userId,
+        name,
+        systemPrompt,
+        exportHash,
+        model,
+        localModel,
+        onlineModel,
+        localImageModel,
+        openaiImageModel,
+        onlineEnabled,
+        deleteProtected,
+        temperature,
+        maxTokens,
+        color,
+        glyph,
+        chatEnabled,
+        now,
+        now
+      );
       json(ctx.res, 201, {
         ok: true,
         bot: {
@@ -1326,6 +3159,8 @@ function buildRoutes(): RouteDefinition[] {
           model,
           local_model: localModel,
           online_model: onlineModel,
+          local_image_model: localImageModel,
+          openai_image_model: openaiImageModel,
           online_enabled: onlineEnabled,
           delete_protected: deleteProtected,
           temperature,
@@ -1339,7 +3174,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -1363,6 +3198,14 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.onlineModel === "string") {
         fields.push("online_model = ?");
         values.push(readOptionalString(body.onlineModel));
+      }
+      if (typeof body.localImageModel === "string") {
+        fields.push("local_image_model = ?");
+        values.push(readOptionalString(body.localImageModel));
+      }
+      if (typeof body.openaiImageModel === "string") {
+        fields.push("openai_image_model = ?");
+        values.push(readOptionalString(body.openaiImageModel));
       }
       if (typeof body.onlineEnabled === "boolean") {
         fields.push("online_enabled = ?");
@@ -1448,21 +3291,78 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const conversationId = ctx.params.id;
       const conversation = db.prepare(
-        "SELECT id, title, bot_id, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
-      ).get(conversationId, userId) as { id: string; title: string; bot_id: string | null; created_at: string; updated_at: string } | undefined;
+        "SELECT id, title, conversation_mode, bot_id, bot_group_ids, coffee_settings, coffee_group_id, coffee_duration_minutes, coffee_preset_id, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
+      ).get(conversationId, userId) as {
+        id: string;
+        title: string;
+        conversation_mode: string | null;
+        bot_id: string | null;
+        bot_group_ids: string | null;
+        coffee_settings: string | null;
+        coffee_group_id: string | null;
+        coffee_duration_minutes: number | null;
+        coffee_preset_id: string | null;
+        created_at: string;
+        updated_at: string;
+      } | undefined;
       if (!conversation) {
         throw new Error("Conversation not found.");
       }
       const messages = db.prepare(
-        "SELECT role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
-      ).all(conversationId, userId) as Array<{ role: string; content: string; created_at: string }>;
+        `SELECT m.role, m.content, m.created_at, b.name AS bot_name, b.color AS bot_color
+           FROM messages m
+           LEFT JOIN bots b ON b.id = m.bot_id
+          WHERE m.conversation_id = ? AND m.user_id = ?
+          ORDER BY m.created_at ASC`
+      ).all(conversationId, userId) as Array<{
+        role: string;
+        content: string;
+        created_at: string;
+        bot_name: string | null;
+        bot_color: string | null;
+      }>;
       const lines = [
         `# ${conversation.title}`,
         `> Exported ${new Date().toISOString()}`,
         "",
       ];
+      if (conversation.conversation_mode === "coffee") {
+        const botIds = parseConversationBotGroupIds(conversation.bot_group_ids);
+        const assistantMessages = messages.filter((message) => message.role === "assistant");
+        const speakerCounts = new Map<string, number>();
+        for (const message of assistantMessages) {
+          const name = message.bot_name ?? "Assistant";
+          speakerCounts.set(name, (speakerCounts.get(name) ?? 0) + 1);
+        }
+        lines.push("## Coffee Session");
+        lines.push("");
+        lines.push(`- Duration: ${conversation.coffee_duration_minutes ?? "legacy"} minute(s)`);
+        lines.push(`- Coffee Group: ${conversation.coffee_group_id ?? "legacy / ungrouped"}`);
+        lines.push(`- Preset: ${conversation.coffee_preset_id ?? "group defaults / legacy"}`);
+        lines.push(`- Bots: ${botIds.length > 0 ? botIds.join(", ") : "unknown"}`);
+        lines.push(`- Messages: ${messages.length}`);
+        lines.push(`- Bot replies: ${assistantMessages.length}`);
+        lines.push(
+          `- Speaker balance: ${
+            speakerCounts.size > 0
+              ? Array.from(speakerCounts.entries()).map(([name, count]) => `${name} ${count}`).join(", ")
+              : "none"
+          }`
+        );
+        lines.push(`- Started: ${conversation.created_at}`);
+        lines.push(`- Updated: ${conversation.updated_at}`);
+        lines.push("");
+        lines.push("## Transcript");
+        lines.push("");
+      }
       for (const msg of messages) {
-        lines.push(`**${msg.role === "assistant" ? "Assistant" : "You"}** _(${msg.created_at})_`);
+        const speaker =
+          msg.role === "assistant"
+            ? msg.bot_name ?? "Assistant"
+            : msg.role === "user"
+              ? "You"
+              : "System";
+        lines.push(`**${speaker}** _(${msg.created_at})_`);
         lines.push("");
         lines.push(msg.content);
         lines.push("");
@@ -1602,14 +3502,6 @@ setInterval(() => {
   void purgeInactiveAccounts();
 }, INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS);
 
-// Periodic purge of generated-image rows past their 30-day retention. OpenAI
-// image URLs expire on their side long before this cutoff, so the rows are
-// just dead references by the time they age out.
-purgeExpiredImages(db);
-setInterval(() => {
-  purgeExpiredImages(db);
-}, GENERATED_IMAGE_CLEANUP_INTERVAL_MS);
-
 const server = createServer(async (req, res) => {
   try {
     setCorsHeaders(res, req.headers.origin as string | undefined);
@@ -1641,7 +3533,9 @@ const server = createServer(async (req, res) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    json(res, 400, {
+    const status =
+      error instanceof HttpError ? error.statusCode : 400;
+    json(res, status, {
       ok: false,
       error: message
     });

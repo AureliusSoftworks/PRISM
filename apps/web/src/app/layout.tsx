@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Geist_Mono, Instrument_Sans, Raleway } from "next/font/google";
+import { Geist_Mono, Instrument_Sans, Lora, Raleway } from "next/font/google";
+import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
 import "./globals.css";
 
@@ -12,6 +13,12 @@ const titleSans = Raleway({
   variable: "--font-title-sans",
   subsets: ["latin"],
   weight: ["300"],
+});
+
+const chatSerif = Lora({
+  variable: "--font-chat-serif",
+  subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 const geistMono = Geist_Mono({
@@ -52,10 +59,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${uiSans.variable} ${titleSans.variable} ${geistMono.variable}`}
+      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
       <body>
+        <BlockBrowserInspection />
         <DisableNativeTooltips />
         {children}
       </body>

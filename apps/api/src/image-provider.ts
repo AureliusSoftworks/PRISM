@@ -1,22 +1,55 @@
 import { getAppConfig } from "@localai/config";
+import {
+  DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  normalizeOpenAiImageGenerationParams,
+} from "@localai/shared";
 import { readOpenAiErrorMessage } from "./providers.ts";
+
+/** @deprecated Use DEFAULT_OPENAI_IMAGE_MODEL_ID from @localai/shared */
+export const DALLE_IMAGE_MODEL_ID = DEFAULT_OPENAI_IMAGE_MODEL_ID;
 
 export interface ImageGenerationResult {
   url: string;
   revisedPrompt: string;
+  /** OpenAI `images.generations` model id used for the call. */
+  model: string;
 }
 
 const config = getAppConfig();
 
 export async function generateImage(
   prompt: string,
-  apiKey?: string,
-  size: "1024x1024" | "1024x1792" | "1792x1024" = "1024x1024",
-  quality: "standard" | "hd" = "standard"
+  apiKey: string | undefined,
+  request: {
+    model?: string;
+    size?: string;
+    quality?: string;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<ImageGenerationResult> {
   const key = apiKey ?? config.openAiApiKey;
   if (!key) {
     throw new Error("OpenAI API key is required for image generation.");
+  }
+
+  const normalized = normalizeOpenAiImageGenerationParams(
+    request.model,
+    request.size,
+    request.quality
+  );
+
+  const body: Record<string, unknown> = {
+    model: normalized.model,
+    prompt,
+    n: 1,
+    response_format: "url",
+  };
+
+  if (normalized.model === "dall-e-3") {
+    body.size = normalized.size;
+    body.quality = normalized.quality ?? "standard";
+  } else {
+    body.size = normalized.size;
   }
 
   const response = await fetch("https://api.openai.com/v1/images/generations", {
@@ -25,20 +58,11 @@ export async function generateImage(
       "content-type": "application/json",
       authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify({
-      model: "dall-e-3",
-      prompt,
-      n: 1,
-      size,
-      quality,
-      response_format: "url",
-    }),
+    body: JSON.stringify(body),
+    signal: request.signal,
   });
 
   if (!response.ok) {
-    // Reuse the shared OpenAI error parser so the message we echo back is
-    // the actual `error.message` (e.g. "Your prompt was rejected by our
-    // safety system.") rather than a raw JSON blob dumped verbatim.
     const detail = await readOpenAiErrorMessage(response);
     console.error(
       `[openai] image generation failed status=${response.status} detail=${
@@ -62,5 +86,6 @@ export async function generateImage(
   return {
     url: item.url,
     revisedPrompt: item.revised_prompt ?? prompt,
+    model: normalized.model,
   };
 }

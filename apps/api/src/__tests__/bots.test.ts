@@ -151,6 +151,7 @@ function createTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
+      conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -173,6 +174,9 @@ function createTestDb(): DatabaseSync {
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
       confidence REAL NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      tier TEXT NOT NULL DEFAULT 'short_term',
+      durability REAL NOT NULL DEFAULT 0.5,
       source TEXT NOT NULL DEFAULT 'direct',
       certainty REAL,
       source_message_ids TEXT NOT NULL DEFAULT '[]',

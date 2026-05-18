@@ -10,8 +10,6 @@ const MONOREPO_ROOT = path.join(
   ".."
 );
 
-const apiOrigin = process.env.LOCALAI_API_ORIGIN ?? "http://127.0.0.1:18787";
-
 /**
  * Returns every non-internal IPv4 address bound to this host, so LAN devices
  * (phones, laptops) can reach `next dev` running on 0.0.0.0 without Next 16's
@@ -50,14 +48,8 @@ const nextConfig: NextConfig = {
     ...collectLanAddresses(),
     ...extraDevOrigins,
   ],
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${apiOrigin}/api/:path*`,
-      },
-    ];
-  },
+  // `/api/*` is proxied by `src/app/api/[[...path]]/route.ts` so long-running
+  // requests (image generation) are not cut off by Next’s rewrite proxy timeout.
 };
 
 export default nextConfig;

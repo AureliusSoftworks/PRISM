@@ -31,10 +31,10 @@ describe("parseAssistantPrismTools", () => {
     assert.equal(out.askQuestion, undefined);
   });
 
-  it("does not strip when the closing delimiter is missing", () => {
+  it("strips incomplete tool tails when the closing delimiter is missing", () => {
     const raw = `Hello.\n${PRISM_TOOL_START}\n{"v":1`;
     const out = parseAssistantPrismTools(raw);
-    assert.equal(out.displayContent, raw);
+    assert.equal(out.displayContent, "Hello.");
     assert.equal(out.askQuestion, undefined);
   });
 
@@ -168,6 +168,148 @@ describe("parseAssistantPrismTools", () => {
     assert.match(out.displayContent, /noise$/);
     assert.equal(out.askQuestion?.prompt, "second");
   });
+
+  it("parses sendGeneratedImage request without AskQuestion", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: { prompt: "A red balloon over calm water at sunset." },
+    });
+    const raw = `Here you go.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Here you go.");
+    assert.equal(out.askQuestion, undefined);
+    assert.deepEqual(out.sendGeneratedImage, {
+      prompt: "A red balloon over calm water at sunset.",
+    });
+  });
+
+  it("parses envelope with AskQuestion and sendGeneratedImage together", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      askQuestion: validAskJson(),
+      sendGeneratedImage: { prompt: "Soft watercolor hillside." },
+    });
+    const raw = `Two things.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.deepEqual(out.askQuestion, validAskJson());
+    assert.deepEqual(out.sendGeneratedImage, { prompt: "Soft watercolor hillside." });
+  });
+
+  it("strips outer markdown fences that wrapped the Prism tool block", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: { prompt: "A blue door." },
+    });
+    const raw = `Thoughts pending.\n\n\`\`\`json\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}\n\`\`\`\n`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Thoughts pending.");
+    assert.deepEqual(out.sendGeneratedImage, { prompt: "A blue door." });
+  });
+
+  it("parses sendGeneratedImage inside a standalone markdown fence (no Prism delimiters)", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: { prompt: "Neon alley in rain." },
+    });
+    const raw = `Here you go.\n\n\`\`\`json\n${inner}\n\`\`\`\n`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Here you go.");
+    assert.deepEqual(out.sendGeneratedImage, { prompt: "Neon alley in rain." });
+  });
+
+  it("parses trailing bare JSON (no Prism delimiters, no markdown fence)", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: { prompt: "Cartoon plankton in a lab coat." },
+    });
+    const raw = `Portrait time.\n${inner}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Portrait time.");
+    assert.deepEqual(out.sendGeneratedImage, { prompt: "Cartoon plankton in a lab coat." });
+  });
+
+  it("parses LM-style <|sendGeneratedImage|> with flat {prompt} (same line as prose)", () => {
+    const json = '{"prompt":"Sheldon J. Plankton in a lab coat."}';
+    const raw = `Here is a treat. <|sendGeneratedImage|>${json}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Here is a treat.");
+    assert.deepEqual(out.sendGeneratedImage, { prompt: "Sheldon J. Plankton in a lab coat." });
+  });
+
+  it("parses spaced <| sendGeneratedImage |> with flat prompt and optional v", () => {
+    const json = '{"v":"1","prompt":"Neon city."}';
+    const raw = `Done.\n<| sendGeneratedImage |>\n${json}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Done.");
+    assert.deepEqual(out.sendGeneratedImage, { prompt: "Neon city." });
+  });
+
+  it("parses <|sendGeneratedImage|> with full Prism envelope JSON", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: { prompt: "Full envelope path." },
+    });
+    const raw = `Image follows.<|sendGeneratedImage|>${inner}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Image follows.");
+    assert.deepEqual(out.sendGeneratedImage, { prompt: "Full envelope path." });
+  });
+
+  it("does not coerce flat JSON with extra keys after <|sendGeneratedImage|>", () => {
+    const json = '{"prompt":"x","extra":1}';
+    const raw = `Hi.<|sendGeneratedImage|>${json}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent, raw);
+    assert.equal(out.sendGeneratedImage, undefined);
+  });
+
+  it("does not strip <|sendGeneratedImage|> when following JSON is invalid", () => {
+    const raw = "Hello.<|sendGeneratedImage|>{not valid json";
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent, raw);
+    assert.equal(out.sendGeneratedImage, undefined);
+  });
+
+  it("parses sendGeneratedImage inside XML-style <PRISM_TOOL>…</PRISM_TOOL> (common model mistake)", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: {
+        prompt: "Sheldon J. Plankton, a small green copepod with a single large eye.",
+      },
+    });
+    const raw = `Sure thing!\n<PRISM_TOOL> ${inner} </PRISM_TOOL>`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Sure thing!");
+    assert.deepEqual(out.sendGeneratedImage, {
+      prompt: "Sheldon J. Plankton, a small green copepod with a single large eye.",
+    });
+  });
+
+  it("parses XML-style Prism tags case-insensitively", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: { prompt: "A red door." },
+    });
+    const raw = `Hi.\n<Prism_Tool>\n${inner}\n</Prism_Tool>`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Hi.");
+    assert.deepEqual(out.sendGeneratedImage, { prompt: "A red door." });
+  });
+
+  it("strips incomplete XML-style tool tails when closing tag is missing", () => {
+    const raw = "Hello.\n<PRISM_TOOL>\n{\"v\":1";
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent, "Hello.");
+    assert.equal(out.sendGeneratedImage, undefined);
+  });
+
+  it("strips XML-style block with non-JSON inner (no brace) without treating as tool", () => {
+    const raw = "Note.\n<PRISM_TOOL>not json at all</PRISM_TOOL>";
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Note.");
+    assert.equal(out.askQuestion, undefined);
+    assert.equal(out.sendGeneratedImage, undefined);
+  });
 });
 
 describe("hydrateAssistantMessageParts", () => {
@@ -183,6 +325,17 @@ describe("hydrateAssistantMessageParts", () => {
     assert.deepEqual(h.askQuestion, payload);
   });
 
+  it("strips XML-style sendGeneratedImage stub from content when tool_payload is absent", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      sendGeneratedImage: { prompt: "A sleepy cat." },
+    });
+    const leaky = `Sure.\n<PRISM_TOOL>${inner}</PRISM_TOOL>`;
+    const h = hydrateAssistantMessageParts({ content: leaky, toolPayload: undefined });
+    assert.equal(h.content.trim(), "Sure.");
+    assert.equal(h.sentGeneratedImage, undefined);
+  });
+
   it("re-parses fenced JSON inside tool framing when tool_payload missing", () => {
     const payload = validAskJson();
     const inner = `\`\`\`json\n${serializeAskQuestionTool(payload)}\n\`\`\``;
@@ -190,6 +343,96 @@ describe("hydrateAssistantMessageParts", () => {
     const h = hydrateAssistantMessageParts({ content: leaky, toolPayload: null });
     assert.equal(h.content.trim(), "Hi.");
     assert.deepEqual(h.askQuestion, payload);
+  });
+
+  it("surfaces persisted sentGeneratedImage from tool_payload without model stubs", () => {
+    const stored = JSON.stringify({
+      v: 1,
+      sentGeneratedImage: {
+        imageId: "img1",
+        displayUrl: "/api/images/img1/file",
+        prompt: "A sleepy cat.",
+      },
+    });
+    const h = hydrateAssistantMessageParts({
+      content: "Hello.",
+      toolPayload: stored,
+    });
+    assert.deepEqual(h.sentGeneratedImage, {
+      imageId: "img1",
+      displayUrl: "/api/images/img1/file",
+      prompt: "A sleepy cat.",
+    });
+  });
+
+  it("preserves imageModel on persisted sentGeneratedImage payloads", () => {
+    const stored = JSON.stringify({
+      v: 1,
+      sentGeneratedImage: {
+        imageId: "img2",
+        displayUrl: "/api/images/img2/file",
+        prompt: "A red door.",
+        imageModel: "comfyui-remote:user/workflows/x.json",
+      },
+    });
+    const h = hydrateAssistantMessageParts({
+      content: "Here.",
+      toolPayload: stored,
+    });
+    assert.deepEqual(h.sentGeneratedImage, {
+      imageId: "img2",
+      displayUrl: "/api/images/img2/file",
+      prompt: "A red door.",
+      imageModel: "comfyui-remote:user/workflows/x.json",
+    });
+  });
+
+  it("strips leaky fenced JSON from persisted content while keeping attachment metadata", () => {
+    const leak = '{"v":1,"sendGeneratedImage":{"prompt":"A sleepy cat."}}';
+    const content = `Sure thing.\n\n\`\`\`json\n${leak}\n\`\`\`\n`;
+    const stored = JSON.stringify({
+      v: 1,
+      sentGeneratedImage: {
+        imageId: "abc",
+        displayUrl: "/api/images/abc/file",
+        prompt: "A sleepy cat.",
+      },
+    });
+    const h = hydrateAssistantMessageParts({ content, toolPayload: stored });
+    assert.equal(h.content.trim(), "Sure thing.");
+    assert.equal(h.sentGeneratedImage?.imageId, "abc");
+  });
+
+  it("strips trailing bare tool JSON from persisted content while keeping attachment metadata", () => {
+    const leak = '{"v":1,"sendGeneratedImage":{"prompt":"A sleepy cat."}}';
+    const content = `Sure thing.\n\n${leak}`;
+    const stored = JSON.stringify({
+      v: 1,
+      sentGeneratedImage: {
+        imageId: "abc2",
+        displayUrl: "/api/images/abc2/file",
+        prompt: "A sleepy cat.",
+      },
+    });
+    const h = hydrateAssistantMessageParts({ content, toolPayload: stored });
+    assert.equal(h.content.trim(), "Sure thing.");
+    assert.equal(h.sentGeneratedImage?.imageId, "abc2");
+  });
+
+  it("strips legacy <|sendGeneratedImage|> stub from persisted content while keeping attachment metadata", () => {
+    const leak = '<|sendGeneratedImage|>{"prompt":"A sleepy cat."}';
+    const content = `Sure thing.\n${leak}`;
+    const stored = JSON.stringify({
+      v: 1,
+      sentGeneratedImage: {
+        imageId: "abc3",
+        displayUrl: "/api/images/abc3/file",
+        prompt: "A sleepy cat.",
+      },
+    });
+    const h = hydrateAssistantMessageParts({ content, toolPayload: stored });
+    assert.equal(h.content.trim(), "Sure thing.");
+    assert.equal(h.sentGeneratedImage?.imageId, "abc3");
   });
 });
 
