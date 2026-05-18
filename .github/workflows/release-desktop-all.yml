@@ -194,7 +194,7 @@ jobs:
             "https://github.com/qdrant/qdrant/releases/download/v1.17.1/qdrant-x86_64-unknown-linux-gnu.tar.gz" \
             --output /tmp/prism-qdrant-linux/qdrant.tar.gz
           tar -xzf /tmp/prism-qdrant-linux/qdrant.tar.gz -C /tmp/prism-qdrant-linux
-          qdrant_bin="$(python3 -c 'import os; root=\"/tmp/prism-qdrant-linux\"; matches=[]; [matches.append(os.path.join(r,\"qdrant\")) for r,_,f in os.walk(root) if \"qdrant\" in f]; print(matches[0] if matches else \"\")')"
+          qdrant_bin="$(find /tmp/prism-qdrant-linux -type f -name qdrant | head -n 1)"
           if [ -z "${qdrant_bin}" ]; then
             echo "Failed to locate extracted qdrant binary."
             exit 1

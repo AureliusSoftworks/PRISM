@@ -15,15 +15,16 @@ if (!command) {
 
 const env = { ...process.env };
 const delimiter = path.delimiter;
-const currentPath = env.PATH ?? "";
+const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+const currentPath = env[pathKey] ?? "";
 const pathEntries = currentPath.split(delimiter).filter(Boolean);
 const cargoBin = path.join(os.homedir(), ".cargo", "bin");
 
 if (fs.existsSync(cargoBin) && !pathEntries.includes(cargoBin)) {
-  env.PATH = `${cargoBin}${delimiter}${currentPath}`;
+  env[pathKey] = `${cargoBin}${delimiter}${currentPath}`;
 }
 
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCommand = "npm";
 
 const child = spawn(npmCommand, ["exec", "tauri", "--", command, ...args], {
   stdio: "inherit",
