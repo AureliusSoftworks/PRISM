@@ -16,13 +16,16 @@ Usage:
   .\scripts\prism.ps1 windows-server
   .\scripts\prism.ps1 web
   .\scripts\prism.ps1 standalone
+  .\scripts\prism.ps1 standalone-win <version> [release-channel]
   .\scripts\prism.ps1 reset [--force]
 
 Notes:
   windows-server is Windows-only and runs the WPF tray app from source.
   web runs the combined dev launcher and starts both API
   (http://localhost:18787) and web (http://localhost:18788).
-  standalone runs the desktop standalone launcher (`npm run desktop`).
+  standalone runs the desktop standalone launcher (npm run desktop).
+  standalone-win dispatches the desktop release workflow and opens the
+  desktop/v<version> release page in the browser.
   reset removes local Prism account/data state (factory reset) while
   intentionally keeping launcher configuration files.
 "@
@@ -128,6 +131,95 @@ function Invoke-Reset {
     Write-Host "Kept intentionally: launcher configuration files (for example .env files)."
 }
 
+function Ensure-GhReady {
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        throw "Install GitHub CLI first, then run: gh auth login"
+    }
+    gh auth status *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "GitHub CLI is not authenticated. Run: gh auth login"
+    }
+}
+
+function Invoke-StandaloneWin {
+    $version = if ($Arguments.Count -ge 1) { $Arguments[0] } else { "" }
+    $releaseChannel = if ($Arguments.Count -ge 2) { $Arguments[1] } else { "" }
+    $releaseRef = if ($env:PRISM_RELEASE_REF) { $env:PRISM_RELEASE_REF } else { "main" }
+    $includeReleaseChannel = -not [string]::IsNullOrWhiteSpace($releaseChannel)
+    $includeLegacyTestflight = $false
+
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        throw "Usage: .\scripts\prism.ps1 standalone-win <version> [release-channel]"
+    }
+    if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+        throw "Version must follow SemVer core format (example: 0.2.0)."
+    }
+
+    Ensure-GhReady
+
+    Write-Host "Dispatching release-main.yml on ref '$releaseRef' for Prism Desktop v$version..."
+    $dispatchOk = $false
+    $dispatchError = ""
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $dispatchArgs = @("workflow", "run", "release-main.yml", "--ref", $releaseRef, "-f", "version=$version")
+        if ($includeReleaseChannel) {
+            $dispatchArgs += @("-f", "desktop_release_channel=$releaseChannel")
+        }
+        if ($includeLegacyTestflight) {
+            $dispatchArgs += @("-f", "client_testflight_build=false")
+        }
+
+        try {
+            $dispatchOutput = & gh @dispatchArgs 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $dispatchOk = $true
+                break
+            }
+            $dispatchError = ($dispatchOutput | Out-String)
+        } catch {
+            $dispatchError = $_.Exception.Message
+        }
+
+        if ($includeReleaseChannel -and $dispatchError -like '*Unexpected inputs provided: ["desktop_release_channel"]*') {
+            $includeReleaseChannel = $false
+            continue
+        }
+        if (-not $includeLegacyTestflight -and $dispatchError -like "*Required input 'client_testflight_build' not provided*") {
+            $includeLegacyTestflight = $true
+            continue
+        }
+
+        break
+    }
+
+    if (-not $dispatchOk) {
+        throw "Failed to dispatch release-main.yml. $dispatchError"
+    }
+
+    $repoFullName = gh repo view --json nameWithOwner --jq .nameWithOwner
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoFullName)) {
+        throw "Workflow dispatched, but failed to resolve GitHub repository name."
+    }
+
+    $releaseUrl = "https://github.com/$repoFullName/releases/tag/desktop%2Fv$version"
+    $actionsUrl = "https://github.com/$repoFullName/actions/workflows/release-main.yml"
+    $targetUrl = $releaseUrl
+
+    gh release view "desktop/v$version" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        $targetUrl = $actionsUrl
+    }
+
+    Write-Host ""
+    Write-Host "Windows build dispatched."
+    Write-Host "Workflow runs: $actionsUrl"
+    Write-Host "Desktop release page: $releaseUrl"
+    if ($targetUrl -ne $releaseUrl) {
+        Write-Host "Desktop tag not available yet on this workflow contract; opening workflow runs instead."
+    }
+    Start-Process $targetUrl
+}
+
 switch ($Command.ToLowerInvariant()) {
     { $_ -in @("windows-server", "server-windows", "server") } {
         $isWindowsHost = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
@@ -144,6 +236,10 @@ switch ($Command.ToLowerInvariant()) {
     }
     { $_ -in @("standalone", "desktop") } {
         npm run desktop
+        break
+    }
+    { $_ -in @("standalone-win", "desktop-win") } {
+        Invoke-StandaloneWin
         break
     }
     "reset" {

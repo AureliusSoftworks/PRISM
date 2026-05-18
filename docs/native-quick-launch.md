@@ -15,6 +15,7 @@ prism mac-client
 prism mac-server
 prism web
 prism standalone
+prism standalone-win 0.2.0
 prism standalone-dev
 prism reset
 ```
@@ -30,6 +31,7 @@ PHONE_DEVICE_ID="Device UDID" prism phone
 `prism web` and `prism standalone-dev` are the long-lived commands in this set:
 - `prism web` runs the browser dev server flow.
 - `prism standalone` opens the latest macOS desktop installer DMG (building one if needed).
+- `prism standalone-win <version> [channel]` dispatches the desktop release workflow (`release-main.yml`) for Windows packaging and opens the `desktop/v<version>` release page.
 - `prism standalone-dev` runs the desktop standalone dev flow.
 - `prism reset` performs a local factory reset (prompts unless `--force`).
 

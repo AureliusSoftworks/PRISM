@@ -26,6 +26,7 @@ Usage:
   prism mac-server
   prism web
   prism standalone
+  prism standalone-win <version> [release-channel]
   prism standalone-installer
   prism reset [--force]
 
@@ -40,6 +41,8 @@ Notes:
   (http://localhost:18788) together in one foreground session.
   prism standalone builds the desktop app and opens the folder containing
   the latest macOS DMG.
+  prism standalone-win dispatches the desktop release workflow for Windows
+  packaging and opens the desktop/v<version> release page on GitHub.
   prism standalone-installer opens the latest macOS Prism Desktop installer
   DMG (and builds one first if missing).
   prism reset removes local Prism account/data state (factory reset) while
@@ -398,6 +401,105 @@ run_standalone_installer() {
   open "$dmg_path"
 }
 
+ensure_gh_ready() {
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "Install GitHub CLI first (brew install gh), then run: gh auth login" >&2
+    exit 1
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "GitHub CLI is not authenticated. Run: gh auth login" >&2
+    exit 1
+  fi
+}
+
+run_standalone_win() {
+  local version="${1:-}"
+  local release_channel="${2:-}"
+  local release_ref="${PRISM_RELEASE_REF:-main}"
+  local include_release_channel=0
+  local include_legacy_testflight=0
+
+  if [[ -z "$version" ]]; then
+    echo "Usage: prism standalone-win <version> [release-channel]" >&2
+    exit 64
+  fi
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Version must follow SemVer core format (example: 0.2.0)." >&2
+    exit 64
+  fi
+
+  ensure_gh_ready
+
+  if [[ -n "$release_channel" ]]; then
+    include_release_channel=1
+  fi
+
+  echo "Dispatching release-main.yml on ref '$release_ref' for Prism Desktop v$version..."
+  local attempt=1
+  local max_attempts=3
+  local dispatch_ok=0
+  local dispatch_output=""
+
+  while [[ "$attempt" -le "$max_attempts" ]]; do
+    local cmd=(
+      gh workflow run "release-main.yml"
+      --ref "$release_ref"
+      -f "version=$version"
+    )
+    if [[ "$include_release_channel" -eq 1 ]]; then
+      cmd+=(-f "desktop_release_channel=$release_channel")
+    fi
+    if [[ "$include_legacy_testflight" -eq 1 ]]; then
+      cmd+=(-f "client_testflight_build=false")
+    fi
+
+    dispatch_output="$("${cmd[@]}" 2>&1)" && dispatch_ok=1 || dispatch_ok=0
+    if [[ "$dispatch_ok" -eq 1 ]]; then
+      break
+    fi
+
+    if [[ "$dispatch_output" == *"Unexpected inputs provided: [\"desktop_release_channel\"]"* ]] && [[ "$include_release_channel" -eq 1 ]]; then
+      include_release_channel=0
+      attempt=$((attempt + 1))
+      continue
+    fi
+    if [[ "$dispatch_output" == *"Required input 'client_testflight_build' not provided"* ]] && [[ "$include_legacy_testflight" -eq 0 ]]; then
+      include_legacy_testflight=1
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    echo "$dispatch_output" >&2
+    exit 1
+  done
+
+  if [[ "$dispatch_ok" -ne 1 ]]; then
+    echo "$dispatch_output" >&2
+    exit 1
+  fi
+
+  local repo_full_name
+  repo_full_name="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+  local release_url="https://github.com/${repo_full_name}/releases/tag/desktop%2Fv${version}"
+  local actions_url="https://github.com/${repo_full_name}/actions/workflows/release-main.yml"
+  local target_url="$release_url"
+
+  if ! gh release view "desktop/v${version}" >/dev/null 2>&1; then
+    target_url="$actions_url"
+  fi
+
+  echo
+  echo "Windows build dispatched."
+  echo "Workflow runs: $actions_url"
+  echo "Desktop release page: $release_url"
+  if [[ "$target_url" != "$release_url" ]]; then
+    echo "Desktop tag not available yet on this workflow contract; opening workflow runs instead."
+  fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    open "$target_url"
+  fi
+}
+
 cd "$REPO_ROOT"
 
 case "${1:-}" in
@@ -418,6 +520,9 @@ case "${1:-}" in
     ;;
   standalone | desktop)
     run_standalone
+    ;;
+  standalone-win | desktop-win)
+    run_standalone_win "${2:-}" "${3:-}"
     ;;
   standalone-installer | desktop-installer)
     run_standalone_installer
