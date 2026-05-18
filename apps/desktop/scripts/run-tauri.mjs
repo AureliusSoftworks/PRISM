@@ -23,7 +23,9 @@ if (fs.existsSync(cargoBin) && !pathEntries.includes(cargoBin)) {
   env.PATH = `${cargoBin}${delimiter}${currentPath}`;
 }
 
-const child = spawn("tauri", [command, ...args], {
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+
+const child = spawn(npmCommand, ["exec", "tauri", "--", command, ...args], {
   stdio: "inherit",
   env,
   shell: process.platform === "win32",
