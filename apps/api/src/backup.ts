@@ -1,10 +1,58 @@
 import type { DatabaseSync } from "node:sqlite";
-import { decryptJson, encryptJson } from "./security.ts";
+import { decryptJson, decryptText, encryptJson, encryptText } from "./security.ts";
 import { normalizeMemoryTier } from "./memory.ts";
+
+export interface BackupUserSettings {
+  theme: "light" | "dark" | "system";
+  preferredProvider: "local" | "openai";
+  providerLocked: boolean;
+  autoMemory: boolean;
+  composerWritingAssist: boolean;
+  fallbackModelMessageStripe: boolean;
+  hiddenBotModelIds: string[];
+  preferredLocalModel: string;
+  preferredOnlineModel: string;
+  lenientLocalFallbackModel: string;
+  lenientLocalImageFallbackModel: string;
+  secondaryOllamaHost: string;
+  comfyUiHost: string;
+  comfyUiWorkflows: unknown[];
+  preferredLocalImageModel: string;
+  preferredOpenAiImageModel: string;
+  prismDefaultLlmModel: string;
+  prismImageToolLlmModel: string;
+  devMemoriesEnabled: boolean;
+  devMemoriesText: string;
+  openAiApiKey?: string;
+}
+
+export interface BackupBotSnapshot {
+  id: string;
+  name: string;
+  systemPrompt: string;
+  exportHash?: string | null;
+  model?: string | null;
+  localModel?: string | null;
+  onlineModel?: string | null;
+  localImageModel?: string | null;
+  openaiImageModel?: string | null;
+  onlineEnabled: boolean;
+  deleteProtected: boolean;
+  temperature: number;
+  maxTokens: number;
+  color?: string | null;
+  glyph?: string | null;
+  chatEnabled: boolean;
+  visibility: "private" | "public";
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface BackupSnapshot {
   version: 1;
   exportedAt: string;
+  settings?: BackupUserSettings;
+  bots?: BackupBotSnapshot[];
   conversations: Array<{
     id: string;
     title: string;
@@ -66,6 +114,146 @@ export function exportUserSnapshot(
   userId: string,
   userKey: Buffer
 ): BackupSnapshot {
+  const user = db
+    .prepare(
+      `SELECT
+         theme,
+         preferred_provider,
+         provider_locked,
+         auto_memory,
+         composer_writing_assist,
+         fallback_model_message_stripe,
+         hidden_bot_model_ids,
+         preferred_local_model,
+         preferred_online_model,
+         lenient_local_fallback_model,
+         lenient_local_image_fallback_model,
+         secondary_ollama_host,
+         comfyui_host,
+         comfyui_workflows,
+         preferred_local_image_model,
+         preferred_openai_image_model,
+         prism_default_llm_model,
+         prism_image_tool_llm_model,
+         dev_memories_enabled,
+         dev_memories_text,
+         openai_key_ciphertext,
+         openai_key_iv,
+         openai_key_tag
+       FROM users
+       WHERE id = ?`
+    )
+    .get(userId) as
+    | {
+        theme: "light" | "dark" | "system";
+        preferred_provider: "local" | "openai";
+        provider_locked: number;
+        auto_memory: number;
+        composer_writing_assist: number;
+        fallback_model_message_stripe: number;
+        hidden_bot_model_ids: string | null;
+        preferred_local_model: string | null;
+        preferred_online_model: string | null;
+        lenient_local_fallback_model: string | null;
+        lenient_local_image_fallback_model: string | null;
+        secondary_ollama_host: string | null;
+        comfyui_host: string | null;
+        comfyui_workflows: string | null;
+        preferred_local_image_model: string | null;
+        preferred_openai_image_model: string | null;
+        prism_default_llm_model: string | null;
+        prism_image_tool_llm_model: string | null;
+        dev_memories_enabled: number;
+        dev_memories_text: string | null;
+        openai_key_ciphertext: string | null;
+        openai_key_iv: string | null;
+        openai_key_tag: string | null;
+      }
+    | undefined;
+  const settings: BackupUserSettings | undefined = user
+    ? {
+        theme: user.theme,
+        preferredProvider: user.preferred_provider,
+        providerLocked: user.provider_locked === 1,
+        autoMemory: user.auto_memory === 1,
+        composerWritingAssist: user.composer_writing_assist !== 0,
+        fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
+        hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
+        preferredLocalModel: user.preferred_local_model ?? "",
+        preferredOnlineModel: user.preferred_online_model ?? "",
+        lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
+        lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model ?? "",
+        secondaryOllamaHost: user.secondary_ollama_host ?? "",
+        comfyUiHost: user.comfyui_host ?? "",
+        comfyUiWorkflows: safeParseArray(user.comfyui_workflows),
+        preferredLocalImageModel: user.preferred_local_image_model ?? "",
+        preferredOpenAiImageModel: user.preferred_openai_image_model ?? "",
+        prismDefaultLlmModel: user.prism_default_llm_model ?? "",
+        prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
+        devMemoriesEnabled: user.dev_memories_enabled === 1,
+        devMemoriesText: user.dev_memories_text ?? "",
+        ...(user.openai_key_ciphertext && user.openai_key_iv && user.openai_key_tag
+          ? {
+              openAiApiKey: decryptText(
+                {
+                  ciphertext: user.openai_key_ciphertext,
+                  iv: user.openai_key_iv,
+                  tag: user.openai_key_tag,
+                },
+                userKey
+              ),
+            }
+          : {}),
+      }
+    : undefined;
+  const bots = db
+    .prepare(
+      `SELECT
+         id,
+         name,
+         system_prompt,
+         export_hash,
+         model,
+         local_model,
+         online_model,
+         local_image_model,
+         openai_image_model,
+         online_enabled,
+         delete_protected,
+         temperature,
+         max_tokens,
+         color,
+         glyph,
+         chat_enabled,
+         visibility,
+         created_at,
+         updated_at
+       FROM bots
+       WHERE user_id = ?
+       ORDER BY updated_at DESC`
+    )
+    .all(userId) as Array<{
+    id: string;
+    name: string;
+    system_prompt: string;
+    export_hash: string | null;
+    model: string | null;
+    local_model: string | null;
+    online_model: string | null;
+    local_image_model: string | null;
+    openai_image_model: string | null;
+    online_enabled: number;
+    delete_protected: number;
+    temperature: number | null;
+    max_tokens: number | null;
+    color: string | null;
+    glyph: string | null;
+    chat_enabled: number;
+    visibility: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+
   const conversations = db
     .prepare(
       "SELECT id, title, created_at, updated_at FROM conversations WHERE user_id = ? ORDER BY updated_at DESC"
@@ -143,6 +331,28 @@ export function exportUserSnapshot(
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
+    settings,
+    bots: bots.map((bot) => ({
+      id: bot.id,
+      name: bot.name,
+      systemPrompt: bot.system_prompt,
+      exportHash: bot.export_hash,
+      model: bot.model,
+      localModel: bot.local_model,
+      onlineModel: bot.online_model,
+      localImageModel: bot.local_image_model,
+      openaiImageModel: bot.openai_image_model,
+      onlineEnabled: bot.online_enabled !== 0,
+      deleteProtected: bot.delete_protected === 1,
+      temperature: typeof bot.temperature === "number" ? bot.temperature : 0.7,
+      maxTokens: typeof bot.max_tokens === "number" ? bot.max_tokens : 2048,
+      color: bot.color,
+      glyph: bot.glyph,
+      chatEnabled: bot.chat_enabled !== 0,
+      visibility: bot.visibility === "public" ? "public" : "private",
+      createdAt: bot.created_at,
+      updatedAt: bot.updated_at,
+    })),
     conversations: conversationPayload,
     memories: memories.map((memory) => ({
       id: memory.id,
@@ -171,6 +381,137 @@ export function importUserSnapshot(
   snapshot: BackupSnapshot,
   userKey: Buffer
 ): void {
+  if (snapshot.settings) {
+    const settings = snapshot.settings;
+    const openAiApiKey =
+      typeof settings.openAiApiKey === "string" && settings.openAiApiKey.length > 0
+        ? settings.openAiApiKey
+        : null;
+    const encryptedOpenAiKey = openAiApiKey ? encryptText(openAiApiKey, userKey) : null;
+    db.prepare(`
+      UPDATE users
+      SET
+        theme = ?,
+        preferred_provider = ?,
+        provider_locked = ?,
+        auto_memory = ?,
+        composer_writing_assist = ?,
+        fallback_model_message_stripe = ?,
+        hidden_bot_model_ids = ?,
+        preferred_local_model = ?,
+        preferred_online_model = ?,
+        lenient_local_fallback_model = ?,
+        lenient_local_image_fallback_model = ?,
+        secondary_ollama_host = ?,
+        comfyui_host = ?,
+        comfyui_workflows = ?,
+        preferred_local_image_model = ?,
+        preferred_openai_image_model = ?,
+        prism_default_llm_model = ?,
+        prism_image_tool_llm_model = ?,
+        dev_memories_enabled = ?,
+        dev_memories_text = ?,
+        openai_key_ciphertext = ?,
+        openai_key_iv = ?,
+        openai_key_tag = ?
+      WHERE id = ?
+    `).run(
+      settings.theme === "light" || settings.theme === "dark" ? settings.theme : "system",
+      settings.preferredProvider === "openai" ? "openai" : "local",
+      settings.providerLocked ? 1 : 0,
+      settings.autoMemory ? 1 : 0,
+      settings.composerWritingAssist ? 1 : 0,
+      settings.fallbackModelMessageStripe ? 1 : 0,
+      JSON.stringify(
+        Array.isArray(settings.hiddenBotModelIds)
+          ? settings.hiddenBotModelIds.filter(
+              (value): value is string => typeof value === "string" && value.trim().length > 0
+            )
+          : []
+      ),
+      settings.preferredLocalModel?.trim() ?? "",
+      settings.preferredOnlineModel?.trim() ?? "",
+      settings.lenientLocalFallbackModel?.trim() ?? "",
+      settings.lenientLocalImageFallbackModel?.trim() ?? "",
+      settings.secondaryOllamaHost?.trim() ?? "",
+      settings.comfyUiHost?.trim() ?? "",
+      JSON.stringify(Array.isArray(settings.comfyUiWorkflows) ? settings.comfyUiWorkflows : []),
+      settings.preferredLocalImageModel?.trim() ?? "",
+      settings.preferredOpenAiImageModel?.trim() ?? "",
+      settings.prismDefaultLlmModel?.trim() ?? "",
+      settings.prismImageToolLlmModel?.trim() ?? "",
+      settings.devMemoriesEnabled ? 1 : 0,
+      settings.devMemoriesText ?? "",
+      encryptedOpenAiKey?.ciphertext ?? null,
+      encryptedOpenAiKey?.iv ?? null,
+      encryptedOpenAiKey?.tag ?? null,
+      userId
+    );
+  }
+
+  if (Array.isArray(snapshot.bots)) {
+    const insertBot = db.prepare(`
+      INSERT OR REPLACE INTO bots (
+        id,
+        user_id,
+        name,
+        system_prompt,
+        export_hash,
+        model,
+        local_model,
+        online_model,
+        local_image_model,
+        openai_image_model,
+        online_enabled,
+        delete_protected,
+        temperature,
+        max_tokens,
+        color,
+        glyph,
+        chat_enabled,
+        visibility,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const bot of snapshot.bots) {
+      if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
+      const now = new Date().toISOString();
+      insertBot.run(
+        bot.id.trim(),
+        userId,
+        typeof bot.name === "string" && bot.name.trim().length > 0 ? bot.name.trim() : "Imported Bot",
+        typeof bot.systemPrompt === "string" ? bot.systemPrompt : "",
+        typeof bot.exportHash === "string" && bot.exportHash.trim().length > 0
+          ? bot.exportHash.trim().toLowerCase()
+          : null,
+        typeof bot.model === "string" && bot.model.trim().length > 0 ? bot.model.trim() : null,
+        typeof bot.localModel === "string" && bot.localModel.trim().length > 0
+          ? bot.localModel.trim()
+          : null,
+        typeof bot.onlineModel === "string" && bot.onlineModel.trim().length > 0
+          ? bot.onlineModel.trim()
+          : null,
+        typeof bot.localImageModel === "string" && bot.localImageModel.trim().length > 0
+          ? bot.localImageModel.trim()
+          : null,
+        typeof bot.openaiImageModel === "string" && bot.openaiImageModel.trim().length > 0
+          ? bot.openaiImageModel.trim()
+          : null,
+        bot.onlineEnabled === false ? 0 : 1,
+        bot.deleteProtected === true ? 1 : 0,
+        typeof bot.temperature === "number" ? bot.temperature : 0.7,
+        typeof bot.maxTokens === "number" ? Math.max(1, Math.floor(bot.maxTokens)) : 2048,
+        typeof bot.color === "string" && bot.color.trim().length > 0 ? bot.color.trim() : null,
+        typeof bot.glyph === "string" && bot.glyph.trim().length > 0 ? bot.glyph.trim() : null,
+        bot.chatEnabled === false ? 0 : 1,
+        bot.visibility === "public" ? "public" : "private",
+        typeof bot.createdAt === "string" && bot.createdAt.trim().length > 0 ? bot.createdAt : now,
+        typeof bot.updatedAt === "string" && bot.updatedAt.trim().length > 0 ? bot.updatedAt : now
+      );
+    }
+  }
+
   const insertConversation = db.prepare(`
     INSERT OR REPLACE INTO conversations (id, user_id, title, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?)
@@ -241,4 +582,20 @@ export function importUserSnapshot(
       memory.createdAt
     );
   }
+}
+
+function safeParseArray(raw: string | null): unknown[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeParseStringArray(raw: string | null): string[] {
+  return safeParseArray(raw).filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0
+  );
 }

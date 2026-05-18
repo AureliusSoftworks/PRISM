@@ -117,11 +117,18 @@ function newCustomFactRowId(): string {
  * domain-specific extras outside the standard fixed keys.
  */
 export interface BotFactsProfile {
+  /** Full AD birthday when known; kept ISO so date pickers and old bots keep working. */
   birthday: string;
+  /** Birth year without leading zeroes, used for year-only and BC entries. */
+  birthYear: string;
+  /** Calendar era for birth details. BC uses only `birthYear`; AD may also use `birthday`. */
+  birthEra: BotBirthEra;
   /** True when this bot maps to a known real/canonical identity. */
   basedOnRealPersonOrCharacter: boolean;
   customFacts: BotCustomFact[];
 }
+
+export type BotBirthEra = "ad" | "bc";
 
 export interface BotProfileV2 {
   v: 2;
@@ -213,6 +220,8 @@ export const DEFAULT_BOT_PROFILE_FIELDS: BotProfileFields = {
   },
   facts: {
     birthday: "",
+    birthYear: "",
+    birthEra: "ad",
     basedOnRealPersonOrCharacter: false,
     customFacts: [],
   },
@@ -261,6 +270,10 @@ function readString(record: Record<string, unknown>, key: string): string {
 
 function readBoolean(record: Record<string, unknown>, key: string): boolean {
   return record[key] === true;
+}
+
+function readBirthEra(record: Record<string, unknown>, key: string): BotBirthEra {
+  return record[key] === "bc" ? "bc" : "ad";
 }
 
 function readObject(record: Record<string, unknown>, key: string): Record<string, unknown> {
@@ -388,6 +401,22 @@ function addLines(title: string, lines: string[]): string {
   return `${title}:\n${filled.map((line) => `- ${line}`).join("\n")}`;
 }
 
+function normalizedBirthYear(raw: string): string {
+  return raw.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+}
+
+function birthYearFromIsoBirthday(raw: string): string {
+  const parts = parseIsoYmdParts(raw);
+  return parts ? String(parts.year) : "";
+}
+
+function makeUtcCalendarDate(year: number, month: number, day: number): Date {
+  // Date.UTC treats years 0-99 as 1900-1999; setUTCFullYear keeps ancient dates literal.
+  const date = new Date(Date.UTC(2000, month - 1, day));
+  date.setUTCFullYear(year);
+  return date;
+}
+
 /**
  * Returns the standard facts plus any custom facts as flat label/value rows
  * that are non-empty. UI surfaces use this to render Memories-panel facts
@@ -413,7 +442,7 @@ function formatFactValueForDisplay(key: string, raw: string): string {
     return raw;
   }
   // Construct the date in UTC to avoid timezone drift shifting the day.
-  const date = new Date(Date.UTC(year, month - 1, day));
+  const date = makeUtcCalendarDate(year, month, day);
   if (Number.isNaN(date.getTime())) return raw;
   try {
     return date.toLocaleDateString("en-US", {
@@ -449,7 +478,7 @@ export function parseIsoYmdParts(
   ) {
     return null;
   }
-  const date = new Date(Date.UTC(year, month - 1, day));
+  const date = makeUtcCalendarDate(year, month, day);
   if (Number.isNaN(date.getTime())) return null;
   if (
     date.getUTCFullYear() !== year ||
@@ -556,13 +585,27 @@ export function listBotProfileFacts(
       value: "Yes",
     });
   }
-  for (const key of BOT_FACT_KEY_ORDER) {
-    const value = facts[key]?.trim();
-    if (!value) continue;
+  const birthEra = facts.birthEra === "bc" ? "bc" : "ad";
+  const birthYear = normalizedBirthYear(facts.birthYear || birthYearFromIsoBirthday(facts.birthday));
+  if (birthEra === "bc") {
+    if (birthYear) {
+      rows.push({
+        key: "birth-year",
+        label: "Birth year",
+        value: `${birthYear} BC`,
+      });
+    }
+  } else if (facts.birthday?.trim()) {
     rows.push({
-      key,
-      label: BOT_FACT_KEY_LABELS[key],
-      value: formatFactValueForDisplay(key, value),
+      key: "birthday",
+      label: BOT_FACT_KEY_LABELS.birthday,
+      value: formatFactValueForDisplay("birthday", facts.birthday.trim()),
+    });
+  } else if (birthYear) {
+    rows.push({
+      key: "birth-year",
+      label: "Birth year",
+      value: `${birthYear} AD`,
     });
   }
   for (let i = 0; i < (facts.customFacts?.length ?? 0); i += 1) {
@@ -761,6 +804,10 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
   const worldview = readObject(parsed, "worldview");
   const appearance = readObject(parsed, "appearance");
   const facts = readObject(parsed, "facts");
+  const birthEra = readBirthEra(facts, "birthEra");
+  const rawBirthday = readString(facts, "birthday");
+  const birthYear =
+    normalizedBirthYear(readString(facts, "birthYear")) || birthYearFromIsoBirthday(rawBirthday);
   return {
     v: 2,
     purpose: {
@@ -802,7 +849,9 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
       presence: readString(appearance, "presence"),
     },
     facts: {
-      birthday: readString(facts, "birthday"),
+      birthday: birthEra === "bc" ? "" : rawBirthday,
+      birthYear,
+      birthEra,
       basedOnRealPersonOrCharacter: readBoolean(facts, "basedOnRealPersonOrCharacter"),
       customFacts: readCustomFacts(facts),
     },
@@ -1661,9 +1710,12 @@ function buildRandomBotProfileCandidate(): BotProfileFields {
   if (chance(0.85)) {
     const useFunnyBirthday =
       whimsyState.used < whimsyState.budget && chance(0.35) && takeWhimsy(whimsyState);
-    profile.facts.birthday = useFunnyBirthday
+    const birthday = useFunnyBirthday
       ? randomString(RANDOM_FUNNY_BIRTHDAYS)
       : randomString(RANDOM_SERIOUS_BIRTHDAYS);
+    profile.facts.birthday = birthday;
+    profile.facts.birthEra = "ad";
+    profile.facts.birthYear = birthYearFromIsoBirthday(birthday);
   }
   profile.facts.customFacts = randomCustomFacts(whimsyState);
   return profile;
@@ -1683,6 +1735,8 @@ function randomProfileSignature(profile: BotProfileFields): string {
       ? `politicalScale:${profile.worldview.politicalView}`
       : "",
     profile.facts.birthday,
+    profile.facts.birthYear,
+    profile.facts.birthEra,
     ...profile.facts.customFacts.map((fact) => `${fact.label}:${fact.value}`),
   ]
     .join(" | ")

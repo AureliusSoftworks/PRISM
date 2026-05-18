@@ -28,7 +28,7 @@ describe("buildHealthResponse", () => {
     assert.equal(health.appName, "Prism Server");
     assert.equal(health.serverVersion, "0.1.0");
     assert.equal(health.apiVersion, 1);
-    assert.equal(health.pairingEnabled, true);
+    assert.equal(health.pairingEnabled, false);
     assert.equal(health.serverName, "Test Prism");
     assert.deepEqual(health.services, {
       sqlite: "ready",

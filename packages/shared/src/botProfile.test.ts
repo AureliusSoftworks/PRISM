@@ -181,6 +181,8 @@ describe("bot profile serialization", () => {
     const profile = parseStoredBotPrompt("").fields;
 
     assert.equal(profile.facts.birthday, "");
+    assert.equal(profile.facts.birthYear, "");
+    assert.equal(profile.facts.birthEra, "ad");
     assert.equal(profile.facts.basedOnRealPersonOrCharacter, false);
     assert.deepEqual(profile.facts.customFacts, []);
   });
@@ -188,6 +190,7 @@ describe("bot profile serialization", () => {
   it("round-trips the birthday and custom facts", () => {
     const profile = parseStoredBotPrompt("").fields;
     profile.facts.birthday = "1942-10-29";
+    profile.facts.birthYear = "1942";
     profile.facts.customFacts = [
       { label: "Catchphrase", value: "Happy little trees" },
       { label: "Signature method", value: "Wet-on-wet oil painting" },
@@ -198,6 +201,8 @@ describe("bot profile serialization", () => {
 
     const stripRowIds = (facts: BotFactsProfile) => ({
       birthday: facts.birthday,
+      birthYear: facts.birthYear,
+      birthEra: facts.birthEra,
       customFacts: facts.customFacts.map(({ label, value }) => ({ label, value })),
     });
     assert.deepEqual(stripRowIds(parsed.facts), stripRowIds(profile.facts));
@@ -206,6 +211,7 @@ describe("bot profile serialization", () => {
   it("composes facts as canon prose so the model treats them as immutable", () => {
     const profile = parseStoredBotPrompt("").fields;
     profile.facts.birthday = "1942-10-29";
+    profile.facts.birthYear = "1942";
     profile.facts.customFacts = [
       { label: "Catchphrase", value: "Happy little trees" },
     ];
@@ -271,6 +277,35 @@ describe("bot profile serialization", () => {
     );
   });
 
+  it("represents BC births as era-aware years instead of present-day ages", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthEra = "bc";
+    profile.facts.birthYear = "256";
+    profile.facts.birthday = "1942-10-29";
+
+    const stored = serializeStoredBotPrompt(profile, "Hannibal");
+    const parsed = parseStoredBotPrompt(stored).fields;
+    const rows = listBotProfileFacts(parsed.facts);
+    const prose = composeBotProfileProse(parsed, "Hannibal");
+
+    assert.equal(parsed.facts.birthday, "");
+    assert.equal(rows[0]?.key, "birth-year");
+    assert.equal(rows[0]?.value, "256 BC");
+    assert.match(prose, /Birth year: 256 BC/);
+    assert.doesNotMatch(prose, /Birthday:/);
+  });
+
+  it("supports AD year-only birth facts when a full date is unknown", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthEra = "ad";
+    profile.facts.birthYear = "256";
+
+    const rows = listBotProfileFacts(profile.facts);
+
+    assert.equal(rows[0]?.key, "birth-year");
+    assert.equal(rows[0]?.value, "256 AD");
+  });
+
   it("random birthdays are always ISO YYYY-MM-DD when populated", () => {
     let isoCount = 0;
     let populatedCount = 0;
@@ -281,6 +316,8 @@ describe("bot profile serialization", () => {
       if (!value) continue;
       populatedCount += 1;
       if (/^\d{4}-\d{2}-\d{2}$/.test(value)) isoCount += 1;
+      assert.equal(profile.facts.birthEra, "ad");
+      assert.equal(profile.facts.birthYear, String(Number(value.slice(0, 4))));
     }
     assert.ok(populatedCount > 0, "expected at least one populated birthday");
     assert.equal(

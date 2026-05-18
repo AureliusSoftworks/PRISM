@@ -70,7 +70,7 @@ export async function buildHealthResponse(
       appName: "Prism Server",
       serverVersion: PRISM_SERVER_VERSION,
       apiVersion: PRISM_API_VERSION,
-      pairingEnabled: true,
+      pairingEnabled: false,
       serverName: config.serverName ?? process.env.PRISM_SERVER_NAME ?? "Prism Server",
       services: {
         sqlite,
@@ -96,7 +96,7 @@ export async function buildHealthResponse(
     appName: "Prism Server",
     serverVersion: PRISM_SERVER_VERSION,
     apiVersion: PRISM_API_VERSION,
-    pairingEnabled: true,
+    pairingEnabled: false,
     serverName: config.serverName ?? process.env.PRISM_SERVER_NAME ?? "Prism Server",
     services: {
       sqlite,

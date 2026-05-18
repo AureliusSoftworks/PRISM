@@ -7,14 +7,11 @@ import { clearCookie, HttpError, json, readJsonBody, setCookie, setCorsHeaders }
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import {
-  createClientAccessToken,
-  requireValidClientAccess,
   requireValidSession,
-  resolveClientAccessToken,
   resolveSessionToken,
 } from "./auth.ts";
 import { buildHealthResponse } from "./health.ts";
-import { consumePairingCode, createPairingCode } from "./pairing.ts";
+import { runAutoSetup } from "./setup-automation.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
 import { pollImageJobForUser, releaseImageSlot, tryAcquireImageSlot } from "./image-job-slot.ts";
@@ -137,7 +134,7 @@ const config = getAppConfig();
 const db = createDatabase();
 const masterKey = deriveMasterKey(config.encryptionMasterKey);
 const backupAdapter = new LocalOnlyBackupAdapter();
-const LOCAL_OWNER_EMAIL = "prism-owner@local.prism";
+const LOCAL_OWNER_USERNAME = "prism-owner";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
 const memoryInferenceCheckedAtByScope = new Map<string, string>();
 const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
@@ -272,10 +269,6 @@ function requireAuth(ctx: RequestContext): string {
   return session.userId;
 }
 
-function requireClientAccess(ctx: RequestContext): void {
-  requireValidClientAccess(db, resolveClientAccessToken(ctx.req.headers));
-}
-
 function isLoopbackRequest(ctx: RequestContext): boolean {
   const address = ctx.req.socket.remoteAddress;
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
@@ -290,7 +283,7 @@ function requireLoopback(ctx: RequestContext): void {
 function getOrCreateLocalOwnerUser(): string {
   const existing = db
     .prepare("SELECT id FROM users WHERE email = ?")
-    .get(LOCAL_OWNER_EMAIL) as { id?: string } | undefined;
+    .get(LOCAL_OWNER_USERNAME) as { id?: string } | undefined;
   if (existing?.id) {
     touchUserActivity(existing.id);
     return existing.id;
@@ -311,7 +304,7 @@ function getOrCreateLocalOwnerUser(): string {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, 0, ?, ?)
   `).run(
     userId,
-    LOCAL_OWNER_EMAIL,
+    LOCAL_OWNER_USERNAME,
     LOCAL_OWNER_DISPLAY_NAME,
     passwordHash,
     salt,
@@ -340,6 +333,7 @@ function getUserRow(userId: string): UserDbRow {
 function toUserProfile(row: UserDbRow): Record<string, unknown> {
   return {
     id: row.id,
+    username: row.email,
     email: row.email,
     displayName: row.display_name,
     role: "user",
@@ -654,17 +648,27 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
 
 function buildRoutes(): RouteDefinition[] {
   return [
+    route("POST", "/api/setup/auto", async (ctx) => {
+      requireLoopback(ctx);
+      const report = await runAutoSetup(config);
+      const health = await buildHealthResponse(db, config, process.uptime());
+      json(ctx.res, 200, {
+        ok: true,
+        report,
+        health,
+      });
+    }),
     route("POST", "/api/auth/register", async (ctx) => {
       const body = ctx.body as Record<string, unknown>;
-      const email = readString(body.email, "email").toLowerCase();
+      const username = readString(body.username, "username").toLowerCase();
       const password = readString(body.password, "password");
-      const displayName = readString(body.displayName, "displayName");
+      const displayName = readOptionalString(body.displayName) ?? username;
 
       const existing = db
         .prepare("SELECT id FROM users WHERE email = ?")
-        .get(email) as { id?: string } | undefined;
+        .get(username) as { id?: string } | undefined;
       if (existing?.id) {
-        throw new Error("Email is already registered.");
+        throw new Error("Username is already registered.");
       }
 
       // Seed the new user's theme from the client's pre-auth choice so the
@@ -690,7 +694,7 @@ function buildRoutes(): RouteDefinition[] {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, ?, ?)
       `).run(
         userId,
-        email,
+        username,
         displayName,
         passwordHash,
         salt,
@@ -713,7 +717,8 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         user: {
           id: userId,
-          email,
+          username,
+          email: username,
           displayName,
           role: "user",
           createdAt,
@@ -724,13 +729,13 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/auth/login", async (ctx) => {
       const body = ctx.body as Record<string, unknown>;
-      const email = readString(body.email, "email").toLowerCase();
+      const username = readString(body.username, "username").toLowerCase();
       const password = readString(body.password, "password");
       const user = db
         .prepare(
           "SELECT id, password_hash, password_salt FROM users WHERE email = ?"
         )
-        .get(email) as
+        .get(username) as
         | { id?: string; password_hash?: string; password_salt?: string }
         | undefined;
       if (!user?.id || !user.password_hash || !user.password_salt) {
@@ -787,9 +792,15 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, { ok: true });
     }),
     route("GET", "/api/auth/me", async (ctx) => {
+      const hasAnyAccounts =
+        (
+          db
+            .prepare("SELECT 1 AS present FROM users LIMIT 1")
+            .get() as { present?: number } | undefined
+        )?.present === 1;
       const sessionToken = getSessionToken(ctx);
       if (!sessionToken) {
-        json(ctx.res, 200, { ok: true, user: null });
+        json(ctx.res, 200, { ok: true, user: null, hasAnyAccounts });
         return;
       }
 
@@ -802,46 +813,33 @@ function buildRoutes(): RouteDefinition[] {
         touchUserActivity(session.userId);
       } catch {
         clearCookie(ctx.res, config.sessionCookieName);
-        json(ctx.res, 200, { ok: true, user: null });
+        json(ctx.res, 200, { ok: true, user: null, hasAnyAccounts });
         return;
       }
       const row = getUserRow(userId);
       json(ctx.res, 200, {
         ok: true,
-        user: toUserProfile(row)
+        user: toUserProfile(row),
+        hasAnyAccounts,
       });
     }),
     route("GET", "/api/client-access/me", async (ctx) => {
-      requireClientAccess(ctx);
-      json(ctx.res, 200, { ok: true });
+      // Standalone desktop mode no longer requires separate native-client access tokens.
+      // Keep endpoint alive for legacy callers.
+      json(ctx.res, 200, { ok: true, pairingRequired: false });
     }),
     route("POST", "/api/pairing/codes", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const pairingCode = createPairingCode(db, userId);
-      json(ctx.res, 201, { ok: true, pairingCode });
+      requireAuth(ctx);
+      throw new HttpError(410, "Pairing codes are disabled in standalone Prism Desktop.");
     }),
     route("POST", "/api/local/pairing/codes", async (ctx) => {
       requireLoopback(ctx);
-      const userId = getOrCreateLocalOwnerUser();
-      const pairingCode = createPairingCode(db, userId);
-      json(ctx.res, 201, { ok: true, pairingCode });
+      getOrCreateLocalOwnerUser();
+      throw new HttpError(410, "Local pairing codes are disabled in standalone Prism Desktop.");
     }),
     route("POST", "/api/pairing/exchange", async (ctx) => {
-      const body = ctx.body as Record<string, unknown>;
-      const code = readString(body.code, "code");
-      const { userId } = consumePairingCode(db, code);
-      const { token, expiresAt } = createSession(userId);
-      const clientAccess = createClientAccessToken(db, userId, config.sessionTtlHours);
-      touchUserActivity(userId);
-      const row = getUserRow(userId);
-      json(ctx.res, 200, {
-        ok: true,
-        token,
-        clientAccessToken: clientAccess.token,
-        clientAccessExpiresAt: clientAccess.expiresAt,
-        expiresAt,
-        user: toUserProfile(row)
-      });
+      // Explicitly disable code exchange to avoid stale clients silently succeeding.
+      throw new HttpError(410, "Pairing exchange is disabled in standalone Prism Desktop.");
     }),
     route("GET", "/api/conversations", async (ctx) => {
       const userId = requireAuth(ctx);

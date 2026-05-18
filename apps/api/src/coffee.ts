@@ -2089,18 +2089,28 @@ function maybeInjectAutonomousPeerAddress(args: {
   const { replyText, turnKind, speaker, latestAssistantBeforeTurn, group } = args;
   if (turnKind !== "autonomous") return replyText;
   if (!latestAssistantBeforeTurn || latestAssistantBeforeTurn.role !== "assistant") return replyText;
-  const priorSpeakerId = latestAssistantBeforeTurn.botId ?? null;
+  const priorSpeakerId = resolveAssistantSpeakerBotId(latestAssistantBeforeTurn, group);
   if (!priorSpeakerId || priorSpeakerId === speaker.id) return replyText;
   const priorSpeaker = group.find((bot) => bot.id === priorSpeakerId);
   if (!priorSpeaker) return replyText;
   const alreadyAddressesPeer =
     replyText.includes("prism-bot://") ||
-    new RegExp(`\\b${escapeRegex(priorSpeaker.name)}\\b`, "i").test(replyText);
+    new RegExp(`\\b${escapeRegExp(priorSpeaker.name)}\\b`, "i").test(replyText);
   if (alreadyAddressesPeer) return replyText;
   // Encourage direct bot-to-bot texture on most autonomous turns.
   if (Math.random() > 0.65) return replyText;
   const mention = formatBotMentionMarkdownInline(priorSpeaker);
   return `${mention}, ${replyText}`.trim();
+}
+
+function resolveAssistantSpeakerBotId(
+  message: ChatMessage,
+  group: readonly CoffeeBotProfile[]
+): string | null {
+  const botName = typeof message.botName === "string" ? message.botName.trim() : "";
+  if (!botName) return null;
+  const match = group.find((bot) => bot.name.trim().toLowerCase() === botName.toLowerCase());
+  return match?.id ?? null;
 }
 
 /**
@@ -3263,7 +3273,7 @@ async function generateCoffeeBotReply(args: {
     const addressedBotId = latestAssistantBeforeTurn
       ? extractLastAddressedBotId({
           line: latestAssistantBeforeTurn.content,
-          speakerBotId: latestAssistantBeforeTurn.botId ?? null,
+          speakerBotId: resolveAssistantSpeakerBotId(latestAssistantBeforeTurn, group),
           seatedBotIds,
         })
       : null;

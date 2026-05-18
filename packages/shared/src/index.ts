@@ -25,6 +25,7 @@ export {
   westernZodiacFromIsoBirthday,
   westernZodiacSignFromMonthDay,
   type BotAppearanceProfile,
+  type BotBirthEra,
   type BotCoreProfile,
   type BotCustomFact,
   type BotFactKey,
