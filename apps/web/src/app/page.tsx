@@ -37,7 +37,6 @@ import { Image as ImageGlyph } from "lucide-react";
 import styles from "./page.module.css";
 import {
   BOT_FACT_KEY_LABELS,
-  BOT_FACT_KEY_ORDER,
   BOT_VOICE_PRESET_LABELS,
   MAX_CUSTOM_FACTS,
   ageFromIsoBirthday,
@@ -58,7 +57,7 @@ import {
   resolveAutoModel,
   normalizeCoffeeSessionSettings,
   type BotCustomFact,
-  type BotFactKey,
+  type BotBirthEra,
   type CoffeeBotSocialSnapshot,
   type CoffeeSessionSettings,
   type CoffeeTopicSelectionMode,
@@ -102,6 +101,7 @@ import {
   prismBotMarkdownArrowCaret,
   shouldBlockPlainTextKeyInPrismBotLockedRegion,
 } from "./prismBotMarkdownNav";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   applyComposeMentionTabToEditor,
   applyMentionTabToEditor,
@@ -155,6 +155,9 @@ function parseCoffeeGroupDeleteKey(key: string | null): string | null {
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 const CONVERSATION_GROUP_ORDER_STORAGE_KEY = "prism_conversation_group_order";
+const BOT_LIBRARY_GROUPS_STORAGE_KEY = "prism_bot_library_groups";
+const BOT_LIBRARY_FAVORITES_GROUP_ID = "builtin:favorites";
+const COMMAND_CENTER_STATE_STORAGE_KEY = "prism_command_center_state";
 
 // Namespace bot-delete keys so they can share the same single "armed" state
 // slot used for conversation deletion without id collisions.
@@ -208,6 +211,7 @@ const CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 420;
 // `pendingDeleteKey` slot, so outside-click / Escape / auto-disarm still
 // apply uniformly.
 const DELETE_ALL_BOTS_KEY = "__delete_all_bots__";
+const BOT_MARQUEE_DRAG_THRESHOLD_PX = 5;
 
 /** Prefix for long-term memory row actions (demote / remove) in `pendingDeleteKey`. */
 const LONG_TERM_MEMORY_ACTION_PREFIX = "ltm:";
@@ -223,12 +227,21 @@ function memoryCardDeleteKey(memoryId: string): string {
   return `${MEMORY_CARD_DELETE_PREFIX}${memoryId}`;
 }
 
-// Developer Tools are enabled by default for Prism's local/native builds.
-// Set NEXT_PUBLIC_DEV_TOOLS=0 only when a distribution build must hide them.
-const DEV_TOOLS_ENABLED = process.env.NEXT_PUBLIC_DEV_TOOLS !== "0";
-// The pairing placeholder is a production/native shell affordance. Local `next dev`
-// should always render the full web UI so frontend iteration is not blocked.
-const CLIENT_ACCESS_REQUIRED = process.env.NODE_ENV === "production";
+// Developer tools stay off for production/release builds unless explicitly enabled.
+// Local/dev remains on by default, and can still be forced off with NEXT_PUBLIC_DEV_TOOLS=0.
+const DEV_TOOLS_ENABLED =
+  process.env.NEXT_PUBLIC_DEV_TOOLS === "1" ||
+  (process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_DEV_TOOLS !== "0");
+// Floating shell applets (phone hamburger/handle/gear) are dev-only by default.
+// Release builds keep shell controls anchored in-header unless explicitly re-enabled.
+const FLOATING_SHELL_APPLETS_ENABLED =
+  process.env.NEXT_PUBLIC_FLOATING_SHELL_APPLETS === "1" ||
+  process.env.NODE_ENV !== "production";
+// Pairing/native-client access gating is disabled for standalone Prism Desktop.
+// Keep a legacy override for emergency rollback.
+const CLIENT_ACCESS_REQUIRED = process.env.NEXT_PUBLIC_PRISM_LEGACY_PAIRING_REQUIRED === "1";
+const DESKTOP_FIRST_RUN_CHECKLIST_KEY = "prism_desktop_first_run_complete_v2";
+const DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS = 5000;
 
 const DEV_TOOLS_BOT_QUANTITY_MIN = 0;
 const DEV_TOOLS_BOT_QUANTITY_DEFAULT = 10;
@@ -448,8 +461,33 @@ type MemoryBubbleDragState = {
   rafId: number | null;
   dragged: boolean;
 };
+type CanvasBotMarqueeRect = { left: number; top: number; width: number; height: number };
+type CanvasBotMarqueeDragState = {
+  pointerId: number;
+  frame: HTMLElement;
+  frameRect: DOMRect;
+  startClientX: number;
+  startClientY: number;
+  active: boolean;
+  tileRects: Array<{ botId: string; rect: DOMRect }>;
+};
 
 type MessageMenuAnchor = "pointer" | "center" | "below";
+
+function stringSetsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) {
+    if (!b.has(value)) return false;
+  }
+  return true;
+}
+
+function rectsIntersect(
+  a: { left: number; top: number; right: number; bottom: number },
+  b: { left: number; top: number; right: number; bottom: number }
+): boolean {
+  return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
+}
 
 const MESSAGE_COPY_FEEDBACK_MS = 1600;
 const MEMORY_TOAST_DISMISS_MS = 7000;
@@ -2220,7 +2258,7 @@ function selectedRowTextColor(
 
 type Provider = "local" | "openai";
 type Theme = "dark" | "light" | "system";
-type PanelView = null | "settings" | "bots" | "images" | "memories";
+type PanelView = null | "settings" | "bots" | "images" | "memories" | "command-center";
 type MemoryPanelScope = "bot" | "default" | "session" | "all";
 type ClientAccessState = "checking" | "allowed" | "blocked";
 const AUTO_TITLE_REFRESH_DELAYS_MS = [1500, 4000, 8000] as const;
@@ -2675,7 +2713,14 @@ function coffeeMessageHasTableText(
   return mainText.trim().length > 0;
 }
 
-interface SessionUser { id: string; email: string; displayName: string; theme: Theme; preferredProvider: Provider; }
+interface SessionUser {
+  id: string;
+  username?: string;
+  email?: string;
+  displayName: string;
+  theme: Theme;
+  preferredProvider: Provider;
+}
 interface ConversationSummary {
   id: string;
   title: string;
@@ -4149,10 +4194,6 @@ interface UserSettings {
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
 }
-interface PairingCode {
-  code: string;
-  expiresAt: string;
-}
 interface DevChatDebugEvent {
   id: string;
   createdAt: string;
@@ -4350,8 +4391,237 @@ interface BotExportPayloadV1 {
   exportedAt?: string;
 }
 
+interface AccountExportBundleV1 {
+  schema: "prism-account-backup-v1";
+  exportedAt: string;
+  snapshot: unknown;
+}
+
+interface BotLibraryGroup {
+  id: string;
+  name: string;
+  description: string;
+  botIds: string[];
+  builtIn: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CommandCenterArgument {
+  key: string;
+  value: string;
+}
+
+interface CommandCenterCommand {
+  id: string;
+  name: string;
+  title: string;
+  command: string;
+  arguments: CommandCenterArgument[];
+  builtIn: boolean;
+  readOnly: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CommandCenterStateV1 {
+  schema: "prism-command-center-v1";
+  preferredModel?: string;
+  commands?: unknown;
+}
+
+interface BotGroupManifestV1 {
+  schema: "prism-bot-group-manifest-v1";
+  group?: {
+    name?: string;
+    description?: string;
+    botFileNames?: string[];
+  };
+}
+
+interface ImportBotOptions {
+  allowDuplicateHash?: boolean;
+  suppressNotice?: boolean;
+  suppressPanelReset?: boolean;
+}
+
+interface ImportBotResult {
+  botId: string;
+  importedName: string;
+  importedBotHash: string | null;
+  restoredMemories: number;
+}
+
 /** Max UTF-8 size for pasted or file-read bot export text before JSON parse. */
 const BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES = 512 * 1024;
+
+function createFavoritesBotGroup(): BotLibraryGroup {
+  const now = new Date().toISOString();
+  return {
+    id: BOT_LIBRARY_FAVORITES_GROUP_ID,
+    name: "Favorites",
+    description: "Pinned bots you want to keep close.",
+    botIds: [],
+    builtIn: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function normalizeBotLibraryGroups(raw: unknown): BotLibraryGroup[] {
+  const normalized = Array.isArray(raw)
+    ? raw
+        .map((candidate): BotLibraryGroup | null => {
+          if (!candidate || typeof candidate !== "object") return null;
+          const record = candidate as Partial<BotLibraryGroup>;
+          if (typeof record.id !== "string" || typeof record.name !== "string") return null;
+          const now = new Date().toISOString();
+          return {
+            id: record.id.trim(),
+            name: record.name.trim() || "Untitled group",
+            description: typeof record.description === "string" ? record.description : "",
+            botIds: Array.isArray(record.botIds)
+              ? record.botIds.filter((id): id is string => typeof id === "string")
+              : [],
+            builtIn: record.id === BOT_LIBRARY_FAVORITES_GROUP_ID || record.builtIn === true,
+            createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
+            updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now,
+          };
+        })
+        .filter((candidate): candidate is BotLibraryGroup => Boolean(candidate))
+    : [];
+  const byId = new Map<string, BotLibraryGroup>();
+  for (const group of normalized) {
+    if (group.id.length === 0) continue;
+    byId.set(group.id, {
+      ...group,
+      botIds: Array.from(new Set(group.botIds)),
+    });
+  }
+  const favorites = byId.get(BOT_LIBRARY_FAVORITES_GROUP_ID) ?? createFavoritesBotGroup();
+  byId.set(BOT_LIBRARY_FAVORITES_GROUP_ID, {
+    ...favorites,
+    builtIn: true,
+    name: "Favorites",
+  });
+  return Array.from(byId.values()).sort((a, b) => {
+    if (a.id === BOT_LIBRARY_FAVORITES_GROUP_ID) return -1;
+    if (b.id === BOT_LIBRARY_FAVORITES_GROUP_ID) return 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function createBuiltInHelpCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/help",
+    name: "help",
+    title: "help",
+    command:
+      "Take the following request from the user and break it down for them in a way that is easy to understand, as if they were a 'layman'. If nothing else follows the command, please tell the user how the PRISM app works, and where to get started.",
+    arguments: [
+      { key: "f", value: "Please be concise" },
+      { key: "v", value: "Please be verbose" },
+    ],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function normalizeCommandCenterState(raw: unknown): {
+  preferredModel: string;
+  commands: CommandCenterCommand[];
+} {
+  const fallbackHelp = createBuiltInHelpCommand();
+  const parsed: CommandCenterStateV1 | null =
+    raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
+  const preferredModel = normalizeModelChoice(parsed?.preferredModel);
+  const commandListRaw = Array.isArray(parsed?.commands) ? parsed.commands : [];
+  const seen = new Set<string>();
+  const commands: CommandCenterCommand[] = [];
+  for (const candidate of commandListRaw) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const record = candidate as Partial<CommandCenterCommand>;
+    const name = typeof record.name === "string" ? record.name.trim().toLowerCase() : "";
+    const normalizedName =
+      name.startsWith("/") ? name.slice(1).trim() : name.trim();
+    if (!normalizedName) continue;
+    if (seen.has(normalizedName)) continue;
+    seen.add(normalizedName);
+    const now = new Date().toISOString();
+    commands.push({
+      id:
+        typeof record.id === "string" && record.id.trim().length > 0
+          ? record.id.trim()
+          : `cmd:${normalizedName}`,
+      name: normalizedName,
+      title:
+        typeof record.title === "string" && record.title.trim().length > 0
+          ? record.title.trim()
+          : normalizedName,
+      command: typeof record.command === "string" ? record.command : "",
+      arguments: Array.isArray(record.arguments)
+        ? record.arguments
+            .map((argument): CommandCenterArgument | null => {
+              if (!argument || typeof argument !== "object") return null;
+              const entry = argument as Partial<CommandCenterArgument>;
+              return {
+                key: typeof entry.key === "string" ? entry.key.trim() : "",
+                value: typeof entry.value === "string" ? entry.value.trim() : "",
+              };
+            })
+            .filter((argument): argument is CommandCenterArgument => Boolean(argument))
+        : [],
+      builtIn: record.builtIn === true || normalizedName === "help",
+      readOnly: record.readOnly === true || normalizedName === "help",
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
+      updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now,
+    });
+  }
+  const existingHelp = commands.find((command) => command.name === "help");
+  if (existingHelp) {
+    existingHelp.id = "builtin:/help";
+    existingHelp.title = "help";
+    existingHelp.builtIn = true;
+    existingHelp.readOnly = true;
+    if (!existingHelp.command.trim()) existingHelp.command = fallbackHelp.command;
+    if (existingHelp.arguments.length === 0) existingHelp.arguments = fallbackHelp.arguments;
+  } else {
+    commands.unshift(fallbackHelp);
+  }
+  return {
+    preferredModel,
+    commands,
+  };
+}
+
+function createUserCommandDraft(existingCommands: readonly CommandCenterCommand[]): CommandCenterCommand {
+  const existing = new Set(existingCommands.map((command) => command.name.trim().toLowerCase()));
+  let index = 1;
+  let nextName = "command";
+  while (existing.has(nextName)) {
+    index += 1;
+    nextName = `command-${index}`;
+  }
+  const now = new Date().toISOString();
+  const id =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? `cmd:${crypto.randomUUID()}`
+      : `cmd:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return {
+    id,
+    name: nextName,
+    title: nextName,
+    command: "",
+    arguments: [],
+    builtIn: false,
+    readOnly: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 function botImportUtf8ByteLength(text: string): number {
   return new TextEncoder().encode(text).length;
@@ -4488,6 +4758,8 @@ const BOT_REPLY_LENGTH_PRESETS = [
 ] as const;
 const BOT_REPLY_LENGTH_DEFAULT_TOKENS = 2048;
 const BOT_RANDOM_TEMPERATURES = [0.25, 0.45, 0.7, 0.95, 1.1] as const;
+const BOT_BIRTH_YEAR_MAX_DIGITS = 6;
+const HTML_DATE_YEAR_DIGITS = 4;
 
 type BotProfileBuilderPageId = "purpose" | "personality" | "character" | "facts";
 
@@ -4545,6 +4817,21 @@ function randomBotReplyLengthTokens(): number {
 
 function profileTextFilled(...values: Array<string | null | undefined>): number {
   return values.filter((value) => typeof value === "string" && value.trim()).length;
+}
+
+function normalizeBotBirthYearInput(value: string): string {
+  return value.replace(/\D/g, "").slice(0, BOT_BIRTH_YEAR_MAX_DIGITS);
+}
+
+function displayBirthYearFromIsoDate(value: string): string {
+  const match = value.match(/^(\d{4})-\d{2}-\d{2}$/);
+  if (!match) return "";
+  return String(Number(match[1]));
+}
+
+function isoYearFromBirthYear(value: string): string | null {
+  if (!value || value.length > HTML_DATE_YEAR_DIGITS) return null;
+  return value.padStart(HTML_DATE_YEAR_DIGITS, "0");
 }
 
 function profileScaleFilled(...values: Array<BotProfileScaleValue | null>): number {
@@ -4606,9 +4893,7 @@ function botProfileCategoryCount(
 function botProfileFactCount(profile: BotProfileFields): number {
   let count = 0;
   if (profile.facts?.basedOnRealPersonOrCharacter) count += 1;
-  for (const key of BOT_FACT_KEY_ORDER) {
-    if (profile.facts?.[key]?.trim()) count += 1;
-  }
+  if (profile.facts?.birthday?.trim() || profile.facts?.birthYear?.trim()) count += 1;
   for (const fact of profile.facts?.customFacts ?? []) {
     if (fact?.label?.trim() || fact?.value?.trim()) count += 1;
   }
@@ -5877,6 +6162,9 @@ const IMAGE_KEYWORD_CHIP_CHAR_WIDTH_PX = 7.1;
 const IMAGE_KEYWORD_CHIP_MIN_PACK_WIDTH_PX = 120;
 const IMAGE_KEYWORD_EDITOR_KINDS = ["negative", "positive"] as const;
 
+/** Sandbox hero mini library: newest saved images for the visually selected bot. */
+const HERO_MINI_LIBRARY_MAX_TILES = 12;
+
 const EMPTY_SCOPED_IMAGE_KEYWORDS: ScopedImageKeywords = {
   positive: [],
   negative: [],
@@ -6241,6 +6529,14 @@ function conversationGroupOrderStorageKey(userId: string): string {
   return `${CONVERSATION_GROUP_ORDER_STORAGE_KEY}:${userId}`;
 }
 
+function botLibraryGroupsStorageKey(userId: string): string {
+  return `${BOT_LIBRARY_GROUPS_STORAGE_KEY}:${userId}`;
+}
+
+function commandCenterStateStorageKey(userId: string): string {
+  return `${COMMAND_CENTER_STATE_STORAGE_KEY}:${userId}`;
+}
+
 function loadConversationGroupOrder(userId: string): string[] {
   if (typeof window === "undefined") return [];
   try {
@@ -6445,6 +6741,24 @@ function BookmarkGlyph(): React.ReactElement {
   return (
     <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
       <path d="M4.25 3.25h7.5v9.5l-3.75-2.35-3.75 2.35z" />
+    </svg>
+  );
+}
+
+function StarGlyph(): React.ReactElement {
+  return (
+    <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m8 2.15 1.73 3.5 3.86.56-2.8 2.73.66 3.86L8 11.01l-3.45 1.79.66-3.86-2.8-2.73 3.86-.56z" />
+    </svg>
+  );
+}
+
+function SlashCommandGlyph(): React.ReactElement {
+  return (
+    <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M10.8 2.5 5.2 13.5" />
+      <path d="M2.9 5.9h2.15" />
+      <path d="M10.95 10.1h2.15" />
     </svg>
   );
 }
@@ -8757,6 +9071,7 @@ function EmptyStateIcon({
           aria-hidden="true"
           className={styles.brandIcon}
         />
+        <PrismTriangleMark className={styles.brandIconLight} />
       </div>
     );
   }
@@ -8801,13 +9116,7 @@ function EmptyStateIcon({
         aria-hidden="true"
         className={styles.brandIcon}
       />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/icon-triangle.svg"
-        alt=""
-        aria-hidden="true"
-        className={styles.brandIconLight}
-      />
+      <PrismTriangleMark className={styles.brandIconLight} />
     </div>
   );
 }
@@ -11826,15 +12135,20 @@ function MessageBody({
       : visibleTokenCount;
 
   useEffect(() => {
+    const deferVisibleCount = (next: number) => {
+      window.setTimeout(() => {
+        setVisibleTokenCount(next);
+      }, 0);
+    };
     if (!preferLocalProgressiveReveal && forcedVisibleTokenCount !== undefined) {
-      setVisibleTokenCount(Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length)));
+      deferVisibleCount(Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length)));
       return;
     }
     if ((!revealWordByWord && !preferLocalProgressiveReveal) || tokens.length <= 1) {
-      setVisibleTokenCount(tokens.length);
+      deferVisibleCount(tokens.length);
       return;
     }
-    setVisibleTokenCount(1);
+    deferVisibleCount(1);
     let nextCount = 1;
     let timer: number | null = null;
     const scheduleNextReveal = () => {
@@ -11843,7 +12157,7 @@ function MessageBody({
       const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey);
       timer = window.setTimeout(() => {
         nextCount += 1;
-        setVisibleTokenCount(Math.min(nextCount, tokens.length));
+        deferVisibleCount(Math.min(nextCount, tokens.length));
         scheduleNextReveal();
       }, delayMs);
     };
@@ -12977,7 +13291,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           <ComposerBotMentionPopover
             open={taMention.open}
             caretRect={taMention.caretRect}
-            themeSource={textareaRef.current?.closest("form") ?? null}
+            themeSource={null}
             bots={taMention.filtered}
             resolvedTheme={resolvedTheme}
             highlightIndex={taMention.highlight}
@@ -13155,10 +13469,46 @@ function BotProfileBuilder({
       worldview: { ...previous.worldview, [field]: value },
     }));
   };
-  const updateFactField = (field: BotFactKey, value: string) => {
+  const updateBirthDate = (value: string) => {
     onProfileChange((previous) => ({
       ...previous,
-      facts: { ...previous.facts, [field]: value },
+      facts: {
+        ...previous.facts,
+        birthday: value,
+        birthEra: "ad",
+        birthYear: value ? displayBirthYearFromIsoDate(value) : previous.facts.birthYear,
+      },
+    }));
+  };
+  const updateBirthYear = (value: string) => {
+    const birthYear = normalizeBotBirthYearInput(value);
+    onProfileChange((previous) => {
+      const isoYear = isoYearFromBirthYear(birthYear);
+      const canRewriteDate = previous.facts.birthEra !== "bc" && Boolean(previous.facts.birthday);
+      let birthday = previous.facts.birthday;
+      if (canRewriteDate) {
+        birthday = isoYear
+          ? `${isoYear}${previous.facts.birthday.slice(HTML_DATE_YEAR_DIGITS)}`
+          : "";
+      }
+      return {
+        ...previous,
+        facts: {
+          ...previous.facts,
+          birthYear,
+          birthday,
+        },
+      };
+    });
+  };
+  const updateBirthEra = (birthEra: BotBirthEra) => {
+    onProfileChange((previous) => ({
+      ...previous,
+      facts: {
+        ...previous.facts,
+        birthEra,
+        birthday: birthEra === "bc" ? "" : previous.facts.birthday,
+      },
     }));
   };
   const updateKnownEntityToggle = (enabled: boolean) => {
@@ -13452,17 +13802,16 @@ function BotProfileBuilder({
                 </button>
               )}
               {(() => {
-                // Birthday is the only standard fact key. It is rendered as a
-                // real `<input type="date">` so we never end up with ambiguous
-                // values like "the morning after a meteor shower". Stored as
-                // ISO YYYY-MM-DD; the browser renders it in the user's locale
-                // automatically. Any legacy free-text value that is not a
-                // valid ISO date displays as empty until the user picks a real
-                // date, at which point the new ISO string replaces it.
+                // AD dates can use the browser date picker. BC dates intentionally
+                // stay year-only so the model sees "256 BC" rather than age 256.
                 const storedBirthday = profile.facts.birthday;
-                const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(storedBirthday)
+                const birthEra = profile.facts.birthEra === "bc" ? "bc" : "ad";
+                const isBcBirth = birthEra === "bc";
+                const dateValue = !isBcBirth && /^\d{4}-\d{2}-\d{2}$/.test(storedBirthday)
                   ? storedBirthday
                   : "";
+                const birthYear =
+                  profile.facts.birthYear || displayBirthYearFromIsoDate(dateValue);
                 const birthdayAge = dateValue
                   ? ageFromIsoBirthday(dateValue)
                   : null;
@@ -13490,15 +13839,50 @@ function BotProfileBuilder({
                       ) : null}
                     </div>
                     <div className={styles.botProfileBirthdayRow}>
-                      <input
-                        type="date"
-                        className={styles.botProfileBirthdayDateInput}
-                        value={dateValue}
-                        onChange={(event) =>
-                          updateFactField("birthday", event.currentTarget.value)
-                        }
-                        aria-labelledby="bot-profile-birthday-label"
-                      />
+                      <label className={styles.botProfileBirthdayControl}>
+                        <span>DOB</span>
+                        <input
+                          type="date"
+                          className={styles.botProfileBirthdayDateInput}
+                          value={dateValue}
+                          disabled={isBcBirth}
+                          onChange={(event) =>
+                            updateBirthDate(event.currentTarget.value)
+                          }
+                          aria-labelledby="bot-profile-birthday-label"
+                          aria-describedby="bot-profile-birthday-hint"
+                        />
+                      </label>
+                      <label className={styles.botProfileBirthdayControl}>
+                        <span>Year</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={BOT_BIRTH_YEAR_MAX_DIGITS}
+                          className={styles.botProfileBirthdayYearInput}
+                          value={birthYear}
+                          onChange={(event) =>
+                            updateBirthYear(event.currentTarget.value)
+                          }
+                          placeholder="256"
+                          aria-label="Birth year"
+                        />
+                      </label>
+                      <label className={styles.botProfileBirthdayControl}>
+                        <span>Era</span>
+                        <select
+                          className={styles.botProfileBirthdayEraSelect}
+                          value={birthEra}
+                          onChange={(event) =>
+                            updateBirthEra(event.currentTarget.value as BotBirthEra)
+                          }
+                          aria-label="Birth era"
+                        >
+                          <option value="ad">AD</option>
+                          <option value="bc">BC</option>
+                        </select>
+                      </label>
                       <div className={styles.botProfileBirthdayAgeWrap}>
                         <span
                           className={styles.botProfileBirthdayAgeLabel}
@@ -13517,6 +13901,10 @@ function BotProfileBuilder({
                         />
                       </div>
                     </div>
+                    <small id="bot-profile-birthday-hint">
+                      BC uses year only; full DOB is disabled to avoid turning
+                      ancient figures into present-day ages.
+                    </small>
                   </div>
                 );
               })()}
@@ -13618,7 +14006,7 @@ function BotProfileBuilder({
 function HomeContent(): React.JSX.Element {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const authMode = searchParams.get("mode") === "login" ? "login" : "register";
+  const requestedAuthMode = searchParams.get("mode") === "login" ? "login" : "register";
   // Post-auth surface is derived from the URL so refreshes preserve the
   // current mode and browser back/forward walk naturally between Hub,
   // Chat, Sandbox, and Coffee. Anything unrecognised (missing param,
@@ -13742,8 +14130,12 @@ function HomeContent(): React.JSX.Element {
         </div>
       </div>
     ) : null;
-  const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [hasAnyAccounts, setHasAnyAccounts] = useState(true);
+  const authMode = hasAnyAccounts ? requestedAuthMode : "register";
   const [clientAccessState, setClientAccessState] = useState<ClientAccessState>(
     CLIENT_ACCESS_REQUIRED ? "checking" : "allowed"
   );
@@ -13799,9 +14191,18 @@ function HomeContent(): React.JSX.Element {
   const [comfyUiStatus, setComfyUiStatus] = useState<SecondaryOllamaStatus | null>(null);
   const [comfyUiStatusChecking, setComfyUiStatusChecking] = useState(false);
   const [openAiKey, setOpenAiKey] = useState("");
-  const [pairingCode, setPairingCode] = useState<PairingCode | null>(null);
-  const [pairingBusy, setPairingBusy] = useState(false);
-  const [pairingCopyStatus, setPairingCopyStatus] = useState<string | null>(null);
+  const [desktopFirstRunChecklistOpen, setDesktopFirstRunChecklistOpen] = useState(false);
+  const [desktopFirstRunChecklistBusy, setDesktopFirstRunChecklistBusy] = useState(false);
+  const [desktopFirstRunAutoSetupBusy, setDesktopFirstRunAutoSetupBusy] = useState(false);
+  const [desktopFirstRunAutoSetupSteps, setDesktopFirstRunAutoSetupSteps] = useState<string[]>([]);
+  const desktopFirstRunAutoSetupAttemptedRef = useRef(false);
+  const [preAuthChecklistComplete, setPreAuthChecklistComplete] = useState(false);
+  const [desktopFirstRunHealth, setDesktopFirstRunHealth] = useState<{
+    services?: {
+      qdrant?: string;
+      ollama?: string;
+    };
+  } | null>(null);
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [botMemories, setBotMemories] = useState<UserMemory[]>([]);
   const [memoryToasts, setMemoryToasts] = useState<MemoryToast[]>([]);
@@ -13940,6 +14341,7 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const [botContextMenu, setBotContextMenu] = useState<{
     botId: string;
+    selectedBotIds: string[];
     x: number;
     y: number;
   } | null>(null);
@@ -14069,11 +14471,28 @@ function HomeContent(): React.JSX.Element {
     botContextLongPressRef.current = null;
   }, []);
   const [bots, setBots] = useState<Bot[]>([]);
+  const [botLibraryGroups, setBotLibraryGroups] = useState<BotLibraryGroup[]>(() => [
+    createFavoritesBotGroup(),
+  ]);
+  const [commandCenterPreferredModel, setCommandCenterPreferredModel] =
+    useState<string>(AUTO_MODEL_CHOICE);
+  const [commandCenterCommands, setCommandCenterCommands] = useState<CommandCenterCommand[]>(
+    () => [createBuiltInHelpCommand()]
+  );
+  const [commandCenterSelectedCommandId, setCommandCenterSelectedCommandId] =
+    useState<string | null>(null);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   // Visual bot focus in the Sandbox canvas should only come from explicit
   // bot-square picks in the grid, not from sidebar conversation navigation.
   const [sandboxGridSelectedBotId, setSandboxGridSelectedBotId] =
     useState<string | null>(null);
+  const [canvasSelectedBotIds, setCanvasSelectedBotIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [canvasBotMarqueeRect, setCanvasBotMarqueeRect] =
+    useState<CanvasBotMarqueeRect | null>(null);
+  const canvasBotMarqueeDragRef = useRef<CanvasBotMarqueeDragState | null>(null);
+  const canvasBotMarqueeSuppressClickRef = useRef(false);
   const [chatModelChoiceByProvider, setChatModelChoiceByProvider] =
     useState<Record<Provider, string>>({
       local: AUTO_MODEL_CHOICE,
@@ -14374,6 +14793,7 @@ function HomeContent(): React.JSX.Element {
   const [settingsHostsModalOpen, setSettingsHostsModalOpen] = useState(false);
   const [settingsDefaultsModalOpen, setSettingsDefaultsModalOpen] = useState(false);
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
+  const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
   const [changePasswordNew, setChangePasswordNew] = useState("");
   const [changePasswordConfirm, setChangePasswordConfirm] = useState("");
   const [botProfileActivePage, setBotProfileActivePage] =
@@ -14540,6 +14960,9 @@ function HomeContent(): React.JSX.Element {
   const emptyStateSearchRef = useRef<HTMLDivElement | null>(null);
   const draftComposerRef = useRef<ComposerInputHandle | null>(null);
   const botImportInputRef = useRef<HTMLInputElement | null>(null);
+  const accountImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [accountBackupBusy, setAccountBackupBusy] = useState(false);
+  const [accountRestoreBusy, setAccountRestoreBusy] = useState(false);
   type ImportBotModalPhase = "closed" | "choose" | "paste";
   const [importBotModalPhase, setImportBotModalPhase] = useState<ImportBotModalPhase>("closed");
   const [importBotPasteText, setImportBotPasteText] = useState("");
@@ -14713,6 +15136,12 @@ function HomeContent(): React.JSX.Element {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [changePasswordModalOpen]);
+
+  useEffect(() => {
+    if (!deleteAccountArmed) return;
+    const timeout = window.setTimeout(() => setDeleteAccountArmed(false), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [deleteAccountArmed]);
 
   useEffect(() => {
     setChatOverflowMenuOpen(false);
@@ -14964,6 +15393,7 @@ function HomeContent(): React.JSX.Element {
     setImageLightbox(null);
     setImagePrivateMode(false);
     setImagePrivateRevealedIds((current) => (current.size === 0 ? current : new Set()));
+    setCommandCenterSelectedCommandId(null);
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     setBotLibraryExpanded(false);
     setBotPanelLibraryEnabled(true);
@@ -15005,6 +15435,174 @@ function HomeContent(): React.JSX.Element {
       setMemoryPhysicsSeed((seed) => seed + 1);
     }
   }, []);
+
+  const apiProxyLooksDown = useCallback((error: unknown): boolean => {
+    const text = error instanceof Error ? error.message : String(error ?? "");
+    const lowered = text.toLowerCase();
+    return lowered.includes("prism api unreachable") || lowered.includes("lost connection loading /api");
+  }, []);
+
+  const requestApiWithLoopbackFallback = useCallback(
+    async <T,>(path: string, options?: RequestInit): Promise<T> => {
+      try {
+        return await api<T>(path, options);
+      } catch (error) {
+        if (!apiProxyLooksDown(error) || typeof window === "undefined") {
+          throw error;
+        }
+
+        const candidates: string[] = [];
+        try {
+          const origin = new URL(window.location.origin);
+          const currentPort = Number(origin.port || (origin.protocol === "https:" ? "443" : "80"));
+          if (Number.isFinite(currentPort) && currentPort > 1) {
+            const neighbor = new URL(origin.toString());
+            neighbor.port = String(currentPort - 1);
+            candidates.push(neighbor.origin);
+          }
+        } catch {
+          // Ignore malformed browser origin and continue with defaults.
+        }
+        candidates.push("http://127.0.0.1:18787", "http://localhost:18787");
+
+        const headers: HeadersInit = {
+          "content-type": "application/json",
+          ...authHeadersForFetch(),
+          ...(options?.headers ?? {}),
+        };
+
+        for (const origin of Array.from(new Set(candidates))) {
+          try {
+            const response = await fetch(`${origin}${path}`, {
+              credentials: "include",
+              headers,
+              ...options,
+            });
+            const payload = (await response.json()) as T & { ok?: boolean; error?: string };
+            if (!response.ok || payload?.ok === false) {
+              continue;
+            }
+            return payload as T;
+          } catch {
+            // Try next loopback candidate.
+          }
+        }
+        throw error;
+      }
+    },
+    [apiProxyLooksDown]
+  );
+
+  const refreshDesktopFirstRunHealth = useCallback(async () => {
+    setDesktopFirstRunChecklistBusy(true);
+    try {
+      const health = await requestApiWithLoopbackFallback<{
+        services?: {
+          qdrant?: string;
+          ollama?: string;
+        };
+      }>("/api/health");
+      setDesktopFirstRunHealth(health);
+    } catch {
+      setDesktopFirstRunHealth(null);
+    } finally {
+      setDesktopFirstRunChecklistBusy(false);
+    }
+  }, [requestApiWithLoopbackFallback]);
+
+  const runDesktopFirstRunAutoSetup = useCallback(async () => {
+    setDesktopFirstRunAutoSetupBusy(true);
+    setError(null);
+    try {
+      const result = await requestApiWithLoopbackFallback<{
+        report?: { steps?: string[]; services?: { qdrant?: string; ollama?: string } };
+        health?: {
+          services?: {
+            qdrant?: string;
+            ollama?: string;
+          };
+        };
+      }>("/api/setup/auto", { method: "POST" });
+      setDesktopFirstRunAutoSetupSteps(result.report?.steps ?? []);
+      if (result.health) {
+        setDesktopFirstRunHealth(result.health);
+      } else {
+        await refreshDesktopFirstRunHealth();
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Automatic setup failed.");
+    } finally {
+      setDesktopFirstRunAutoSetupBusy(false);
+    }
+  }, [refreshDesktopFirstRunHealth, requestApiWithLoopbackFallback]);
+
+  const completeDesktopFirstRunChecklist = useCallback(() => {
+    try {
+      localStorage.setItem(DESKTOP_FIRST_RUN_CHECKLIST_KEY, "done");
+    } catch {
+      // Ignore storage failures; checklist still closes for this session.
+    }
+    setDesktopFirstRunChecklistOpen(false);
+    if (user) {
+      setPanelNotice("Setup checklist completed. You can reopen Settings any time.");
+    }
+  }, [user]);
+
+  const continueFromPreAuthChecklist = useCallback(() => {
+    completeDesktopFirstRunChecklist();
+    setPreAuthChecklistComplete(true);
+    setError(null);
+  }, [completeDesktopFirstRunChecklist]);
+
+  useEffect(() => {
+    if (CLIENT_ACCESS_REQUIRED) return;
+    if (!user && !preAuthChecklistComplete && !hasAnyAccounts) {
+      void refreshDesktopFirstRunHealth();
+    }
+  }, [user, preAuthChecklistComplete, hasAnyAccounts, refreshDesktopFirstRunHealth]);
+
+  useEffect(() => {
+    if (CLIENT_ACCESS_REQUIRED || user || preAuthChecklistComplete || hasAnyAccounts) return;
+    const timer = window.setInterval(() => {
+      void refreshDesktopFirstRunHealth();
+    }, DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [user, preAuthChecklistComplete, hasAnyAccounts, refreshDesktopFirstRunHealth]);
+
+  useEffect(() => {
+    if (CLIENT_ACCESS_REQUIRED || user || preAuthChecklistComplete || hasAnyAccounts) return;
+    const qdrantState = desktopFirstRunHealth?.services?.qdrant ?? "unknown";
+    const ollamaState = desktopFirstRunHealth?.services?.ollama ?? "unknown";
+    const qdrantReady = qdrantState === "ready" || qdrantState === "configured";
+    const ollamaReady = ollamaState === "ready" || ollamaState === "configured";
+    if (qdrantReady && ollamaReady) return;
+    if (desktopFirstRunAutoSetupBusy) return;
+    if (desktopFirstRunAutoSetupAttemptedRef.current) return;
+    desktopFirstRunAutoSetupAttemptedRef.current = true;
+    void runDesktopFirstRunAutoSetup();
+  }, [
+    CLIENT_ACCESS_REQUIRED,
+    user,
+    preAuthChecklistComplete,
+    hasAnyAccounts,
+    desktopFirstRunHealth,
+    desktopFirstRunAutoSetupBusy,
+    runDesktopFirstRunAutoSetup,
+  ]);
+
+  useEffect(() => {
+    if (!user || CLIENT_ACCESS_REQUIRED || hasAnyAccounts) return;
+    let completed = false;
+    try {
+      completed = localStorage.getItem(DESKTOP_FIRST_RUN_CHECKLIST_KEY) === "done";
+    } catch {
+      completed = false;
+    }
+    if (completed) return;
+    setDesktopFirstRunChecklistOpen(true);
+    openRightPanel("settings");
+    void refreshDesktopFirstRunHealth();
+  }, [user, CLIENT_ACCESS_REQUIRED, hasAnyAccounts, openRightPanel, refreshDesktopFirstRunHealth]);
 
   useEffect(() => {
     return () => {
@@ -15518,6 +16116,21 @@ function HomeContent(): React.JSX.Element {
     }
     return entries;
   }, [imageBotDirectorySnapshot, bots, view, chatScopedGalleryBotId]);
+
+  const heroBotMiniLibraryImages = useMemo(() => {
+    const botId = activeBot?.id ?? null;
+    if (!botId) return [];
+    const pool =
+      imageBotDirectorySnapshot.length > 0 ? imageBotDirectorySnapshot : images;
+    return pool
+      .filter((img) => img.botId === botId)
+      .sort(
+        (a, b) =>
+          String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")),
+      )
+      .slice(0, HERO_MINI_LIBRARY_MAX_TILES);
+  }, [activeBot?.id, imageBotDirectorySnapshot, images]);
+
   /** Sandbox threads only — Chat/Coffee conversations cannot attach DALL·E rows. */
   const sandboxImageGenConversationId =
     selectedId != null && detail?.mode === "sandbox" ? selectedId : null;
@@ -16032,12 +16645,37 @@ function HomeContent(): React.JSX.Element {
       visibleModelChoice,
       modelProvider
     );
+    const botHasCommenced = !!detail && detail.messages.length > 0;
+    const botDisabled = view === "chat" ? !detail : false;
+    const botPickerBots = botHasCommenced ? bots : filteredBots;
     return (
       <div
         className={`${styles.chatHeaderModelPicker} ${
           headerTitleCollapsedForAccordion ? styles.chatHeaderTitleCollapsed : ""
         }`}
       >
+        {view === "chat" && bots.length > 0 ? (
+          <ComposerBotPicker
+            value={selectedBotId ?? ""}
+            onChange={(next) => setSelectedBotId(next || null)}
+            bots={botPickerBots}
+            resolvedTheme={resolvedTheme}
+            disabled={botDisabled}
+            title={
+              !detail
+                ? "Pick a bot from the grid above to start the chat. You can swap here between sends once it begins."
+                : undefined
+            }
+            ariaLabel="Bot for the next message"
+            showName={botHasCommenced}
+            enableFilters={botHasCommenced}
+            hueFilterCenter={hueFilterCenter}
+            onHueChange={setHueFilterCenter}
+            hueLensAvailable={hueLensAvailable}
+            hueLensTrackGradient={hueLensTrackGradient}
+            hueLensTrackSegments={hueLensTrackSegments}
+          />
+        ) : null}
         {renderProviderModeToggle(styles.chatHeaderModeToggle)}
         <ComposerModelPicker
           value={visibleModelChoice}
@@ -16066,7 +16704,7 @@ function HomeContent(): React.JSX.Element {
             modelProvider
           )}
         />
-    </div>
+      </div>
     );
   };
 
@@ -16270,6 +16908,83 @@ function HomeContent(): React.JSX.Element {
   }, [user]);
 
   useEffect(() => {
+    if (!user) {
+      setBotLibraryGroups([createFavoritesBotGroup()]);
+      return;
+    }
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(botLibraryGroupsStorageKey(user.id));
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      setBotLibraryGroups(normalizeBotLibraryGroups(parsed));
+    } catch {
+      setBotLibraryGroups([createFavoritesBotGroup()]);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        botLibraryGroupsStorageKey(user.id),
+        JSON.stringify(botLibraryGroups)
+      );
+    } catch {
+      // Non-fatal: groups still work for this page session.
+    }
+  }, [botLibraryGroups, user]);
+
+  useEffect(() => {
+    if (!user) {
+      const defaults = normalizeCommandCenterState(null);
+      setCommandCenterPreferredModel(defaults.preferredModel);
+      setCommandCenterCommands(defaults.commands);
+      return;
+    }
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(commandCenterStateStorageKey(user.id));
+      const parsed: unknown = raw ? JSON.parse(raw) : null;
+      const normalized = normalizeCommandCenterState(parsed);
+      setCommandCenterPreferredModel(normalized.preferredModel);
+      setCommandCenterCommands(normalized.commands);
+    } catch {
+      const defaults = normalizeCommandCenterState(null);
+      setCommandCenterPreferredModel(defaults.preferredModel);
+      setCommandCenterCommands(defaults.commands);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || typeof window === "undefined") return;
+    const normalized = normalizeCommandCenterState({
+      schema: "prism-command-center-v1",
+      preferredModel: commandCenterPreferredModel,
+      commands: commandCenterCommands,
+    });
+    try {
+      window.localStorage.setItem(
+        commandCenterStateStorageKey(user.id),
+        JSON.stringify({
+          schema: "prism-command-center-v1",
+          preferredModel: normalized.preferredModel,
+          commands: normalized.commands,
+        })
+      );
+    } catch {
+      // Non-fatal: command center still works for this page session.
+    }
+  }, [commandCenterCommands, commandCenterPreferredModel, user]);
+
+  useEffect(() => {
+    if (!commandCenterSelectedCommandId) return;
+    const stillExists = commandCenterCommands.some(
+      (command) => command.id === commandCenterSelectedCommandId
+    );
+    if (!stillExists) setCommandCenterSelectedCommandId(null);
+  }, [commandCenterCommands, commandCenterSelectedCommandId]);
+
+  useEffect(() => {
     if (!user) return;
     setConversationGroupOrder((previous) => {
       const next = previous.filter((key) => conversationGroupsByKey.has(key));
@@ -16278,6 +16993,19 @@ function HomeContent(): React.JSX.Element {
       return next;
     });
   }, [conversationGroupsByKey, user]);
+
+  useEffect(() => {
+    const existingBotIds = new Set(bots.map((bot) => bot.id));
+    setBotLibraryGroups((current) =>
+      normalizeBotLibraryGroups(
+        current.map((group) => ({
+          ...group,
+          botIds: group.botIds.filter((botId) => existingBotIds.has(botId)),
+          updatedAt: group.updatedAt,
+        }))
+      )
+    );
+  }, [bots]);
 
   useEffect(() => {
     if (
@@ -16321,6 +17049,7 @@ function HomeContent(): React.JSX.Element {
   const zenPresentationActive = view === "sandbox" && sandboxZenMode;
   const effectiveChatPresentation = view === "chat" || zenPresentationActive;
   const chatLikeSurface = effectiveChatPresentation;
+  const chatMentionsEnabled = view !== "chat";
   /** Autoscroll + dynamic type on chat-like surfaces (includes Sandbox focus layout). */
   const assistantRevealActive = chatEphemeralMode || zenPresentationActive;
   /**
@@ -18257,6 +18986,25 @@ function HomeContent(): React.JSX.Element {
     [filteredBots, resolvedTheme, panelColorHarmonyActive]
   );
 
+  useEffect(() => {
+    const visibleBotIds = new Set(pickerBots.map((bot) => bot.id));
+    setCanvasSelectedBotIds((current) => {
+      if (current.size === 0) return current;
+      const next = new Set<string>();
+      for (const botId of current) {
+        if (visibleBotIds.has(botId)) next.add(botId);
+      }
+      return stringSetsEqual(current, next) ? current : next;
+    });
+  }, [pickerBots]);
+
+  useEffect(() => {
+    if ((view === "chat" || view === "sandbox") && !detail && !pendingReplyVisible) return;
+    canvasBotMarqueeDragRef.current = null;
+    setCanvasBotMarqueeRect(null);
+    setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
+  }, [detail, pendingReplyVisible, view]);
+
   // Bucket the already color-sorted list into the five Prism letters
   // (plus an `other` bucket for grayscale/colorless bots). Rendered
   // only at high bot counts; the underlying sortedPanelBots ordering
@@ -18320,7 +19068,24 @@ function HomeContent(): React.JSX.Element {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
     try {
-      const d = await api<{ user: SessionUser }>("/api/auth/me", { signal: controller.signal });
+      const d = await api<{ user: SessionUser | null; hasAnyAccounts?: boolean }>("/api/auth/me", { signal: controller.signal });
+      setHasAnyAccounts(d.hasAnyAccounts !== false);
+      let checklistCompleted = false;
+      try {
+        checklistCompleted = localStorage.getItem(DESKTOP_FIRST_RUN_CHECKLIST_KEY) === "done";
+      } catch {
+        checklistCompleted = false;
+      }
+      if (!checklistCompleted) {
+        try {
+          await api("/api/auth/logout", { method: "POST", body: "{}" });
+        } catch {
+          // Best effort: continue with local sign-out even if server logout fails.
+        }
+        clearNativeSessionToken();
+        setUser(null);
+        return;
+      }
       setUser(d.user);
     } catch {
       setUser(null);
@@ -19923,10 +20688,24 @@ function HomeContent(): React.JSX.Element {
   async function submitAuth(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setError(null);
     try {
-      if (authMode === "register") await api("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, displayName, theme: preAuthTheme }) });
-      else await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      if (authMode === "register") {
+        if (password !== confirmPassword) {
+          throw new Error("Passwords do not match.");
+        }
+        await api("/api/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ username, password, theme: preAuthTheme }),
+        });
+      } else {
+        await api("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ username, password }),
+        });
+      }
       clearNativeSessionToken();
-      await bootstrap(); setPassword("");
+      await bootstrap();
+      setPassword("");
+      setConfirmPassword("");
     } catch (err) { setError(err instanceof Error ? err.message : "Auth failed."); }
     finally { setBusy(false); }
   }
@@ -19935,6 +20714,7 @@ function HomeContent(): React.JSX.Element {
     await api("/api/auth/logout", { method: "POST", body: "{}" });
     clearNativeSessionToken();
     setUser(null);
+    setPreAuthChecklistComplete(false);
     setConversations([]);
     setDetail(null);
     setSessionOpinion(null);
@@ -19950,19 +20730,23 @@ function HomeContent(): React.JSX.Element {
     navigateToView("hub");
   }
 
-  async function deleteAccount() {
-    const confirmed = window.confirm(
-      "Delete your account and all associated chats, memories, bots, images, and exports? This cannot be undone."
-    );
-    if (!confirmed) {
+  function deleteAccount() {
+    setPanelError(null);
+    if (!deleteAccountArmed) {
+      setDeleteAccountArmed(true);
       return;
     }
+    void deleteAccountConfirmed();
+  }
 
+  async function deleteAccountConfirmed() {
     setBusy(true);
     setPanelError(null);
     try {
       await api("/api/account", { method: "DELETE" });
+      setDeleteAccountArmed(false);
       setUser(null);
+      setPreAuthChecklistComplete(false);
       setConversations([]);
       setDetail(null);
       setSessionOpinion(null);
@@ -22072,44 +22856,6 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
-  async function generatePairingCode() {
-    setPairingBusy(true);
-    setPairingCopyStatus(null);
-    setPanelError(null);
-    try {
-      const response = await api<{ pairingCode: PairingCode }>(
-        "/api/pairing/codes",
-        { method: "POST" }
-      );
-      setPairingCode(response.pairingCode);
-    } catch (err) {
-      setPanelError(err instanceof Error ? err.message : "Pairing code failed.");
-    } finally {
-      setPairingBusy(false);
-    }
-  }
-
-  async function copyPairingCode() {
-    if (!pairingCode) return;
-    try {
-      await writeClipboardText(pairingCode.code);
-      setPairingCopyStatus("Copied");
-    } catch {
-      setPanelError("Copy failed. Select the code and copy it manually.");
-    }
-  }
-
-  function formatPairingExpiry(expiresAt: string): string {
-    const expiry = new Date(expiresAt);
-    if (Number.isNaN(expiry.getTime())) {
-      return "Expires soon";
-    }
-    return `Expires at ${expiry.toLocaleTimeString([], {
-      hour: "numeric",
-      minute: "2-digit",
-    })}`;
-  }
-
   async function switchProvider(provider: Provider) {
     if (!settings || settings.preferredProvider === provider) return;
     const previous = settings;
@@ -22444,14 +23190,27 @@ function HomeContent(): React.JSX.Element {
     };
   }
 
-  const openBotContextMenu = useCallback((bot: Bot, x: number, y: number) => {
+  const openBotContextMenu = useCallback((
+    bot: Bot,
+    x: number,
+    y: number,
+    selectedBotIds?: string[]
+  ) => {
     const clamped = clampContextMenuPosition(
       x,
       y,
       BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
       BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX
     );
-    setBotContextMenu({ botId: bot.id, x: clamped.x, y: clamped.y });
+    setBotContextMenu({
+      botId: bot.id,
+      selectedBotIds:
+        Array.isArray(selectedBotIds) && selectedBotIds.length > 1
+          ? Array.from(new Set(selectedBotIds))
+          : [],
+      x: clamped.x,
+      y: clamped.y,
+    });
     closeMessageContextOverlay();
     setConversationGroupContextMenu(null);
     setCanvasToolsContextMenu(null);
@@ -22814,9 +23573,12 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function exportBotProfile(bot: Bot) {
-    setPanelError(null);
-    setPanelNotice(null);
+  async function buildBotExportFile(bot: Bot): Promise<{
+    trimmedName: string;
+    exportHash: string | null;
+    memoriesCount: number;
+    json: string;
+  }> {
     const trimmedName = bot.name.trim() || "Unnamed bot";
     let exportHash = normalizeImportedBotHash(bot.export_hash);
     if (!exportHash) {
@@ -22854,9 +23616,16 @@ function HomeContent(): React.JSX.Element {
       }>;
     }>(`/api/memories?botId=${encodeURIComponent(bot.id)}`);
     const memories: BotExportMemory[] = (memoryResult.memories ?? [])
-      .filter((memory): memory is { text: string; confidence?: number; category?: MemoryCategory; tier?: MemoryTier; source?: "direct" | "inferred" | "compiled" | "about_you"; certainty?: number; durability?: number; sourceMessageIds?: string[] } =>
-        typeof memory.text === "string" && memory.text.trim().length > 0
-      )
+      .filter((memory): memory is {
+        text: string;
+        confidence?: number;
+        category?: MemoryCategory;
+        tier?: MemoryTier;
+        source?: "direct" | "inferred" | "compiled" | "about_you";
+        certainty?: number;
+        durability?: number;
+        sourceMessageIds?: string[];
+      } => typeof memory.text === "string" && memory.text.trim().length > 0)
       .map((memory) => ({
         text: memory.text.trim(),
         confidence: memory.confidence,
@@ -22867,7 +23636,7 @@ function HomeContent(): React.JSX.Element {
         durability: memory.durability,
         sourceMessageIds: Array.isArray(memory.sourceMessageIds) ? memory.sourceMessageIds : [],
       }));
-    const exportPayload = {
+    const exportPayload: BotExportPayloadV1 = {
       schema: "prism-bot-export-v1",
       botHash: exportHash ?? undefined,
       bot: {
@@ -22889,24 +23658,184 @@ function HomeContent(): React.JSX.Element {
       memories,
       exportedAt: new Date().toISOString(),
     };
-    const json = `${JSON.stringify(exportPayload, null, 2)}\n`;
-    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    return {
+      trimmedName,
+      exportHash,
+      memoriesCount: memories.length,
+      json: `${JSON.stringify(exportPayload, null, 2)}\n`,
+    };
+  }
+
+  async function exportBotProfile(bot: Bot) {
+    setPanelError(null);
+    setPanelNotice(null);
+    const built = await buildBotExportFile(bot);
+    const blob = new Blob([built.json], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `bot-${slugifyFileToken(trimmedName)}.bot`;
+    a.download = `bot-${slugifyFileToken(built.trimmedName)}.bot`;
     a.click();
     URL.revokeObjectURL(url);
     setPanelNotice(
-      memories.length > 0
-        ? `${trimmedName} exported with ${memories.length} memories.`
-        : `${trimmedName} exported.`
+      built.memoriesCount > 0
+        ? `${built.trimmedName} exported with ${built.memoriesCount} memories.`
+        : `${built.trimmedName} exported.`
     );
   }
 
-  async function importBotFromExportRawText(raw: string): Promise<void> {
+  async function exportBotsAsZip(selectedBots: Bot[]): Promise<void> {
+    if (selectedBots.length === 0) return;
     setPanelError(null);
     setPanelNotice(null);
+    const files: Record<string, Uint8Array> = {};
+    const usedNames = new Set<string>();
+    let totalMemories = 0;
+    for (const bot of selectedBots) {
+      const built = await buildBotExportFile(bot);
+      totalMemories += built.memoriesCount;
+      const base = `bot-${slugifyFileToken(built.trimmedName)}`;
+      let candidate = `${base}.bot`;
+      let suffix = 2;
+      while (usedNames.has(candidate)) {
+        candidate = `${base}-${suffix}.bot`;
+        suffix += 1;
+      }
+      usedNames.add(candidate);
+      files[candidate] = strToU8(built.json);
+    }
+    const zipped = zipSync(files, { level: 6 });
+    const blob = new Blob([zipped], { type: "application/zip" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    anchor.href = url;
+    anchor.download = `bots-${selectedBots.length}-${stamp}.zip`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setPanelNotice(
+      totalMemories > 0
+        ? `${selectedBots.length} bots exported to ZIP with ${totalMemories} memories.`
+        : `${selectedBots.length} bots exported to ZIP.`
+    );
+  }
+
+  async function exportAccountAsPrismArchive(): Promise<void> {
+    setPanelError(null);
+    setPanelNotice(null);
+    setAccountBackupBusy(true);
+    try {
+      const response = await api<{ snapshot?: unknown }>("/api/backup/export");
+      if (!response.snapshot) {
+        throw new Error("Backup export did not return snapshot data.");
+      }
+      const exportedAt = new Date().toISOString();
+      const bundle: AccountExportBundleV1 = {
+        schema: "prism-account-backup-v1",
+        exportedAt,
+        snapshot: response.snapshot,
+      };
+      const files: Record<string, Uint8Array> = {
+        "backup.json": strToU8(`${JSON.stringify(bundle, null, 2)}\n`),
+      };
+      const zipped = zipSync(files, { level: 6 });
+      const blob = new Blob([zipped], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const stamp = exportedAt.replace(/[:.]/g, "-");
+      anchor.href = url;
+      anchor.download = `prism-account-${stamp}.prism`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setPanelNotice("Account backup exported as .prism.");
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Account export failed.");
+    } finally {
+      setAccountBackupBusy(false);
+    }
+  }
+
+  function parseAccountSnapshotFromJson(raw: string): unknown {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripOptionalLeadingUtf8Bom(raw));
+    } catch {
+      throw new Error("Could not read .prism backup JSON.");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Backup file is not a valid JSON object.");
+    }
+    const record = parsed as Record<string, unknown>;
+    if (record.schema === "prism-account-backup-v1") {
+      if (!("snapshot" in record)) {
+        throw new Error("Backup file is missing snapshot data.");
+      }
+      return record.snapshot;
+    }
+    if (record.version === 1 && Array.isArray(record.conversations) && Array.isArray(record.memories)) {
+      return record;
+    }
+    throw new Error("Unsupported .prism backup format.");
+  }
+
+  async function importAccountFromPrismFile(file: File): Promise<void> {
+    const archiveBytes = new Uint8Array(await file.arrayBuffer());
+    let entries: Record<string, Uint8Array>;
+    try {
+      entries = unzipSync(archiveBytes);
+    } catch {
+      throw new Error("Could not read .prism archive.");
+    }
+    const preferredEntry = Object.entries(entries).find(
+      ([name]) => name.trim().toLowerCase() === "backup.json"
+    );
+    const fallbackEntry = Object.entries(entries).find(
+      ([name]) => name.trim().toLowerCase().endsWith(".json")
+    );
+    const jsonEntry = preferredEntry ?? fallbackEntry;
+    if (!jsonEntry) {
+      throw new Error(".prism file does not contain a JSON backup payload.");
+    }
+    const snapshot = parseAccountSnapshotFromJson(strFromU8(jsonEntry[1]));
+    await api("/api/backup/import", {
+      method: "POST",
+      body: JSON.stringify({ snapshot }),
+    });
+    await refreshAll();
+    setPanelNotice("Account backup imported.");
+  }
+
+  async function handleAccountImportFileSelection(
+    event: React.ChangeEvent<HTMLInputElement>
+  ): Promise<void> {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!file.name.trim().toLowerCase().endsWith(".prism")) {
+      setPanelError("Only .prism files can be imported here.");
+      return;
+    }
+    setPanelError(null);
+    setPanelNotice(null);
+    setAccountRestoreBusy(true);
+    try {
+      await importAccountFromPrismFile(file);
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Account import failed.");
+    } finally {
+      setAccountRestoreBusy(false);
+    }
+  }
+
+  function openAccountImportPicker(): void {
+    setPanelError(null);
+    setPanelNotice(null);
+    queueMicrotask(() => {
+      accountImportInputRef.current?.click();
+    });
+  }
+
+  function parseBotExportPayload(raw: string): Partial<BotExportPayloadV1> {
     const normalized = stripOptionalLeadingUtf8Bom(raw);
     if (botImportUtf8ByteLength(normalized) > BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES) {
       throw new Error(
@@ -22926,14 +23855,31 @@ function HomeContent(): React.JSX.Element {
     if (parsed.schema !== "prism-bot-export-v1" || !parsed.bot?.name) {
       throw new Error("Invalid bot export file.");
     }
+    return parsed;
+  }
+
+  async function importBotFromExportRawText(
+    raw: string,
+    options?: ImportBotOptions
+  ): Promise<ImportBotResult> {
+    if (!options?.suppressPanelReset) {
+      setPanelError(null);
+      setPanelNotice(null);
+    }
+    const parsed = parseBotExportPayload(raw);
     const importedBotHash = normalizeImportedBotHash(parsed.botHash);
     if (
       importedBotHash &&
+      !options?.allowDuplicateHash &&
       bots.some((candidate) => normalizeImportedBotHash(candidate.export_hash) === importedBotHash)
     ) {
       throw new Error("This bot is already in your library!");
     }
-    const importedName = parsed.bot.name.trim();
+    const parsedBot = parsed.bot;
+    if (!parsedBot) {
+      throw new Error("Invalid bot export file.");
+    }
+    const importedName = parsedBot.name.trim();
     if (!importedName) {
       throw new Error("Bot export is missing a valid name.");
     }
@@ -22959,32 +23905,32 @@ function HomeContent(): React.JSX.Element {
       body: JSON.stringify({
         name: importedName,
         systemPrompt,
-        localModel: parsed.bot.localModel ?? "",
-        onlineModel: parsed.bot.onlineModel ?? "",
+        localModel: parsedBot.localModel ?? "",
+        onlineModel: parsedBot.onlineModel ?? "",
         localImageModel:
-          typeof parsed.bot.localImageModel === "string"
-            ? parsed.bot.localImageModel
+          typeof parsedBot.localImageModel === "string"
+            ? parsedBot.localImageModel
             : "",
         openaiImageModel:
-          typeof parsed.bot.openaiImageModel === "string"
-            ? parsed.bot.openaiImageModel
+          typeof parsedBot.openaiImageModel === "string"
+            ? parsedBot.openaiImageModel
             : "",
-        onlineEnabled: parsed.bot.onlineEnabled !== false,
-        chatEnabled: parsed.bot.chatEnabled !== false,
-        deleteProtected: parsed.bot.deleteProtected === true,
+        onlineEnabled: parsedBot.onlineEnabled !== false,
+        chatEnabled: parsedBot.chatEnabled !== false,
+        deleteProtected: parsedBot.deleteProtected === true,
         temperature:
-          typeof parsed.bot.temperature === "number"
-            ? normalizeBotTemperature(parsed.bot.temperature)
+          typeof parsedBot.temperature === "number"
+            ? normalizeBotTemperature(parsedBot.temperature)
             : BOT_TEMPERATURE_DEFAULT,
         maxTokens:
-          typeof parsed.bot.maxTokens === "number"
-            ? normalizeBotMaxTokens(parsed.bot.maxTokens)
+          typeof parsedBot.maxTokens === "number"
+            ? normalizeBotMaxTokens(parsedBot.maxTokens)
             : BOT_REPLY_LENGTH_DEFAULT_TOKENS,
-        color: typeof parsed.bot.color === "string" && parsed.bot.color.trim().length > 0
-          ? parsed.bot.color.trim()
+        color: typeof parsedBot.color === "string" && parsedBot.color.trim().length > 0
+          ? parsedBot.color.trim()
           : null,
-        glyph: typeof parsed.bot.glyph === "string" && parsed.bot.glyph.trim().length > 0
-          ? parsed.bot.glyph.trim()
+        glyph: typeof parsedBot.glyph === "string" && parsedBot.glyph.trim().length > 0
+          ? parsedBot.glyph.trim()
           : null,
         exportHash: importedBotHash,
       }),
@@ -23029,14 +23975,173 @@ function HomeContent(): React.JSX.Element {
     await refreshMemories();
     await refreshBotMemories(createdBotId);
     setSelectedBotId(createdBotId);
-    setPanelNotice(
-      restored > 0
-        ? `${importedName} imported with ${restored} memories.`
-        : `${importedName} imported.`
-    );
+    if (!options?.suppressNotice) {
+      setPanelNotice(
+        restored > 0
+          ? `${importedName} imported with ${restored} memories.`
+          : `${importedName} imported.`
+      );
+    }
     if (panelRef.current === "bots") {
       closePanel();
     }
+    return {
+      botId: createdBotId,
+      importedName,
+      importedBotHash,
+      restoredMemories: restored,
+    };
+  }
+
+  function parseBotGroupManifest(raw: string): BotGroupManifestV1 | null {
+    try {
+      const parsedUnknown = JSON.parse(raw) as unknown;
+      if (!parsedUnknown || typeof parsedUnknown !== "object" || Array.isArray(parsedUnknown)) {
+        return null;
+      }
+      const manifest = parsedUnknown as Partial<BotGroupManifestV1>;
+      if (manifest.schema !== "prism-bot-group-manifest-v1") return null;
+      return manifest as BotGroupManifestV1;
+    } catch {
+      return null;
+    }
+  }
+
+  async function importBotZipBundle(file: File): Promise<void> {
+    setPanelError(null);
+    setPanelNotice(null);
+    const archiveBytes = new Uint8Array(await file.arrayBuffer());
+    let entries: Record<string, Uint8Array>;
+    try {
+      entries = unzipSync(archiveBytes);
+    } catch {
+      throw new Error("Could not read ZIP archive.");
+    }
+    const allEntries = Object.entries(entries);
+    const botEntries = allEntries.filter(([name]) => name.trim().toLowerCase().endsWith(".bot"));
+    if (botEntries.length === 0) {
+      throw new Error("ZIP contains no .bot files.");
+    }
+    const manifestEntry = allEntries.find(
+      ([name]) => name.trim().toLowerCase().endsWith("manifest.json")
+    );
+    const manifest = manifestEntry
+      ? parseBotGroupManifest(strFromU8(manifestEntry[1]))
+      : null;
+    const botIdByHash = new Map<string, string>();
+    for (const bot of bots) {
+      const hash = normalizeImportedBotHash(bot.export_hash);
+      if (hash) botIdByHash.set(hash, bot.id);
+    }
+    const importedBotIds: string[] = [];
+    const importedBotIdByEntryName = new Map<string, string>();
+    let importedCount = 0;
+    let overwrittenCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    let restoredTotal = 0;
+
+    for (const [entryName, bytes] of botEntries) {
+      const raw = strFromU8(bytes);
+      try {
+        const parsed = parseBotExportPayload(raw);
+        const importedHash = normalizeImportedBotHash(parsed.botHash);
+        let allowDuplicateHash = false;
+        if (importedHash && botIdByHash.has(importedHash)) {
+          const duplicateName =
+            typeof parsed.bot?.name === "string" && parsed.bot.name.trim().length > 0
+              ? parsed.bot.name.trim()
+              : entryName;
+          const shouldOverwrite = window.confirm(
+            `${duplicateName} already exists. Click OK to overwrite, or Cancel to skip it.`
+          );
+          if (!shouldOverwrite) {
+            skippedCount += 1;
+            continue;
+          }
+          const existingId = botIdByHash.get(importedHash);
+          if (existingId) {
+            await api(`/api/bots/${encodeURIComponent(existingId)}`, { method: "DELETE" });
+          }
+          botIdByHash.delete(importedHash);
+          allowDuplicateHash = true;
+          overwrittenCount += 1;
+        }
+        const result = await importBotFromExportRawText(raw, {
+          allowDuplicateHash,
+          suppressNotice: true,
+          suppressPanelReset: true,
+        });
+        importedCount += 1;
+        restoredTotal += result.restoredMemories;
+        importedBotIds.push(result.botId);
+        importedBotIdByEntryName.set(entryName.trim().toLowerCase(), result.botId);
+        if (result.importedBotHash) {
+          botIdByHash.set(result.importedBotHash, result.botId);
+        }
+      } catch {
+        failedCount += 1;
+      }
+    }
+
+    if (manifest?.group?.name && importedBotIds.length > 0) {
+      const manifestName = manifest.group.name.trim();
+      const manifestDescription =
+        typeof manifest.group.description === "string" ? manifest.group.description.trim() : "";
+      const manifestBotIds =
+        Array.isArray(manifest.group.botFileNames) && manifest.group.botFileNames.length > 0
+          ? manifest.group.botFileNames
+              .map((name) => importedBotIdByEntryName.get(String(name).trim().toLowerCase()) ?? null)
+              .filter((id): id is string => Boolean(id))
+          : [];
+      const targetBotIds = manifestBotIds.length > 0 ? manifestBotIds : importedBotIds;
+      setBotLibraryGroups((current) => {
+        const normalized = normalizeBotLibraryGroups(current);
+        const existingIndex = normalized.findIndex(
+          (group) => group.name.trim().toLowerCase() === manifestName.toLowerCase()
+        );
+        if (existingIndex >= 0) {
+          const existing = normalized[existingIndex];
+          const next = [...normalized];
+          next[existingIndex] = {
+            ...existing,
+            description: manifestDescription || existing.description,
+            botIds: Array.from(new Set([...existing.botIds, ...targetBotIds])),
+            updatedAt: new Date().toISOString(),
+          };
+          return normalizeBotLibraryGroups(next);
+        }
+        return normalizeBotLibraryGroups([
+          ...normalized,
+          {
+            id:
+              typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? `group:${crypto.randomUUID()}`
+                : `group:${Date.now().toString(36)}`,
+            name: manifestName,
+            description: manifestDescription,
+            botIds: Array.from(new Set(targetBotIds)),
+            builtIn: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ]);
+      });
+    }
+
+    if (importedCount === 0 && failedCount > 0) {
+      throw new Error("ZIP import failed. None of the .bot files could be imported.");
+    }
+    const summaryParts = [
+      `${importedCount} imported`,
+      `${overwrittenCount} overwritten`,
+      `${skippedCount} skipped`,
+      `${failedCount} failed`,
+    ];
+    if (restoredTotal > 0) {
+      summaryParts.push(`${restoredTotal} memories restored`);
+    }
+    setPanelNotice(`ZIP import complete: ${summaryParts.join(" · ")}.`);
   }
 
   async function handleBotImportFileSelection(
@@ -23046,8 +24151,10 @@ function HomeContent(): React.JSX.Element {
     event.currentTarget.value = "";
     if (!file) return;
     const lower = file.name.trim().toLowerCase();
-    if (!lower.endsWith(".bot")) {
-      setPanelError("Only .bot files can be imported from disk.");
+    const isBotFile = lower.endsWith(".bot");
+    const isZipFile = lower.endsWith(".zip");
+    if (!isBotFile && !isZipFile) {
+      setPanelError("Only .bot and .zip files can be imported from disk.");
       return;
     }
     setImportBotFileBusy(true);
@@ -23055,12 +24162,17 @@ function HomeContent(): React.JSX.Element {
     setImportBotFileBusyColor(null);
     setImportBotFileBusyGlyph(DEFAULT_BOT_GLYPH);
     try {
-      const raw = await file.text();
-      const hint = parseImportBotLoadingHint(raw);
-      if (hint.name) setImportBotFileBusyName(hint.name);
-      setImportBotFileBusyColor(hint.color);
-      setImportBotFileBusyGlyph(hint.glyph);
-      await importBotFromExportRawText(raw);
+      if (isZipFile) {
+        setImportBotFileBusyName(file.name);
+        await importBotZipBundle(file);
+      } else {
+        const raw = await file.text();
+        const hint = parseImportBotLoadingHint(raw);
+        if (hint.name) setImportBotFileBusyName(hint.name);
+        setImportBotFileBusyColor(hint.color);
+        setImportBotFileBusyGlyph(hint.glyph);
+        await importBotFromExportRawText(raw);
+      }
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Bot import failed.");
     } finally {
@@ -23106,13 +24218,139 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  const updateCanvasBotMarqueeSelection = useCallback((
+    drag: CanvasBotMarqueeDragState,
+    clientX: number,
+    clientY: number
+  ) => {
+    const frameRect = drag.frameRect;
+    const clampedStartX = Math.max(frameRect.left, Math.min(frameRect.right, drag.startClientX));
+    const clampedStartY = Math.max(frameRect.top, Math.min(frameRect.bottom, drag.startClientY));
+    const clampedCurrentX = Math.max(frameRect.left, Math.min(frameRect.right, clientX));
+    const clampedCurrentY = Math.max(frameRect.top, Math.min(frameRect.bottom, clientY));
+    const left = Math.min(clampedStartX, clampedCurrentX);
+    const top = Math.min(clampedStartY, clampedCurrentY);
+    const right = Math.max(clampedStartX, clampedCurrentX);
+    const bottom = Math.max(clampedStartY, clampedCurrentY);
+    const viewportRect = { left, top, right, bottom };
+    setCanvasBotMarqueeRect({
+      left: left - frameRect.left,
+      top: top - frameRect.top,
+      width: right - left,
+      height: bottom - top,
+    });
+    const nextSelectedIds = new Set<string>();
+    for (const { botId, rect } of drag.tileRects) {
+      if (rectsIntersect(viewportRect, rect)) nextSelectedIds.add(botId);
+    }
+    setCanvasSelectedBotIds((current) =>
+      stringSetsEqual(current, nextSelectedIds) ? current : nextSelectedIds
+    );
+  }, []);
+
+  const handleCanvasBotMarqueePointerDown = useCallback((
+    event: React.PointerEvent<HTMLDivElement>
+  ): boolean => {
+    if (detail || pendingReplyVisible) return false;
+    if (event.pointerType === "touch") return false;
+    if (event.button !== 0) return false;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest("button, input, textarea, select, a, [role='button'], [data-bot-id]")
+    ) {
+      return false;
+    }
+    const frame = event.currentTarget;
+    const frameRect = frame.getBoundingClientRect();
+    if (frameRect.width <= 0 || frameRect.height <= 0) return false;
+    const tileRects = Array.from(frame.querySelectorAll<HTMLElement>("[data-bot-id]"))
+      .map((node) => {
+        const botId = node.dataset.botId;
+        if (!botId) return null;
+        return { botId, rect: node.getBoundingClientRect() };
+      })
+      .filter((entry): entry is { botId: string; rect: DOMRect } => Boolean(entry));
+    if (tileRects.length === 0) return false;
+    canvasBotMarqueeDragRef.current = {
+      pointerId: event.pointerId,
+      frame,
+      frameRect,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      active: false,
+      tileRects,
+    };
+    setCanvasBotMarqueeRect(null);
+    try {
+      frame.setPointerCapture(event.pointerId);
+    } catch {
+      // Some browser/test environments do not expose pointer capture.
+    }
+    return true;
+  }, [detail, pendingReplyVisible]);
+
+  const handleCanvasBotMarqueePointerMove = useCallback((
+    event: React.PointerEvent<HTMLDivElement>
+  ): boolean => {
+    const drag = canvasBotMarqueeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return false;
+    const dx = event.clientX - drag.startClientX;
+    const dy = event.clientY - drag.startClientY;
+    if (!drag.active) {
+      if (Math.hypot(dx, dy) < BOT_MARQUEE_DRAG_THRESHOLD_PX) return true;
+      drag.active = true;
+    }
+    event.preventDefault();
+    updateCanvasBotMarqueeSelection(drag, event.clientX, event.clientY);
+    return true;
+  }, [updateCanvasBotMarqueeSelection]);
+
+  const handleCanvasBotMarqueePointerEnd = useCallback((
+    event: React.PointerEvent<HTMLDivElement>
+  ): boolean => {
+    const drag = canvasBotMarqueeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return false;
+    const wasActive = drag.active;
+    if (wasActive) {
+      updateCanvasBotMarqueeSelection(drag, event.clientX, event.clientY);
+      canvasBotMarqueeSuppressClickRef.current = true;
+      window.setTimeout(() => {
+        canvasBotMarqueeSuppressClickRef.current = false;
+      }, 0);
+      event.preventDefault();
+      event.stopPropagation();
+    } else {
+      setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
+    }
+    setCanvasBotMarqueeRect(null);
+    canvasBotMarqueeDragRef.current = null;
+    try {
+      if (drag.frame.hasPointerCapture(event.pointerId)) {
+        drag.frame.releasePointerCapture(event.pointerId);
+      }
+    } catch {
+      // Non-fatal: capture may already be released.
+    }
+    return true;
+  }, [updateCanvasBotMarqueeSelection]);
+
   const resetEmptyStateBotSelection = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
     setSelectedBotId(null);
     setSandboxGridSelectedBotId(null);
+    setCanvasBotMarqueeRect(null);
+    canvasBotMarqueeDragRef.current = null;
+    setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
   }, [cancelPendingEmptyStateSearchOpen]);
 
   const handleEmptyStateBackgroundClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (canvasBotMarqueeSuppressClickRef.current) {
+      canvasBotMarqueeSuppressClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (detail || pendingIncognito) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -23120,7 +24358,7 @@ function HomeContent(): React.JSX.Element {
       "button, input, textarea, select, a, [role='button'], [data-starter-bot-affordance='true'], [data-bot-picker-frame='true']"
     );
     if (interactiveTarget) return;
-    // Intentionally no-op: empty canvas clicks should not change directory/state.
+    setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
   }, [
     detail,
     pendingIncognito,
@@ -23180,6 +24418,9 @@ function HomeContent(): React.JSX.Element {
   }, [closeEmptyStateBotSearch, focusDraftInput]);
 
   const commitEmptyStateBotSelection = useCallback((botId: string) => {
+    canvasBotMarqueeDragRef.current = null;
+    setCanvasBotMarqueeRect(null);
+    setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
     if (selectedBotId === botId) {
       setSandboxGridSelectedBotId(botId);
       focusDraftInput();
@@ -24399,6 +25640,105 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  function resolveCommonBotGroupForSelection(selectedBotIds: string[]): BotLibraryGroup | null {
+    if (selectedBotIds.length < 2) return null;
+    const selectedSet = new Set(selectedBotIds);
+    const matching = botLibraryGroups.filter((group) =>
+      selectedBotIds.every((botId) => group.botIds.includes(botId))
+    );
+    if (matching.length === 0) return null;
+    // Prefer mutable user groups before Favorites so "Ungroup" usually targets
+    // explicit user-created groupings first.
+    const mutable = matching.find((group) => !group.builtIn);
+    const target = mutable ?? matching[0];
+    if (!target) return null;
+    return {
+      ...target,
+      botIds: target.botIds.filter((botId) => selectedSet.has(botId)),
+    };
+  }
+
+  function createDefaultBotGroupName(): string {
+    const used = new Set(botLibraryGroups.map((group) => group.name.trim().toLowerCase()));
+    if (!used.has("bot group")) return "Bot Group";
+    let index = 2;
+    while (used.has(`bot group ${index}`)) {
+      index += 1;
+    }
+    return `Bot Group ${index}`;
+  }
+
+  function groupSelectedBots(selectedBotIds: string[]): void {
+    if (selectedBotIds.length < 2) return;
+    const suggestedName = createDefaultBotGroupName();
+    const chosenNameRaw = window.prompt("Name this bot group:", suggestedName);
+    if (chosenNameRaw == null) return;
+    const chosenName = chosenNameRaw.trim();
+    if (!chosenName) {
+      setPanelError("Group name cannot be empty.");
+      return;
+    }
+    setPanelError(null);
+    setPanelNotice(null);
+    const uniqueSelected = Array.from(new Set(selectedBotIds));
+    setBotLibraryGroups((current) => {
+      const normalized = normalizeBotLibraryGroups(current);
+      const existingIndex = normalized.findIndex(
+        (group) => group.name.trim().toLowerCase() === chosenName.toLowerCase()
+      );
+      if (existingIndex >= 0) {
+        const next = [...normalized];
+        const existing = next[existingIndex];
+        next[existingIndex] = {
+          ...existing,
+          botIds: Array.from(new Set([...existing.botIds, ...uniqueSelected])),
+          updatedAt: new Date().toISOString(),
+        };
+        return normalizeBotLibraryGroups(next);
+      }
+      return normalizeBotLibraryGroups([
+        ...normalized,
+        {
+          id:
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+              ? `group:${crypto.randomUUID()}`
+              : `group:${Date.now().toString(36)}`,
+          name: chosenName,
+          description: "",
+          botIds: uniqueSelected,
+          builtIn: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ]);
+    });
+    setPanelNotice(
+      uniqueSelected.length === 2
+        ? `Grouped 2 bots in "${chosenName}".`
+        : `Grouped ${uniqueSelected.length} bots in "${chosenName}".`
+    );
+  }
+
+  function ungroupSelectedBots(groupId: string, selectedBotIds: string[]): void {
+    if (selectedBotIds.length < 2) return;
+    const selectedSet = new Set(selectedBotIds);
+    setPanelError(null);
+    setPanelNotice(null);
+    setBotLibraryGroups((current) =>
+      normalizeBotLibraryGroups(
+        current.map((group) =>
+          group.id === groupId
+            ? {
+              ...group,
+              botIds: group.botIds.filter((botId) => !selectedSet.has(botId)),
+              updatedAt: new Date().toISOString(),
+            }
+            : group
+        )
+      )
+    );
+  }
+
   // User-facing bulk wipe reached via press-and-hold on any bot card ×.
   // Mirrors `deleteAllConversations` exactly: optimistic clear, best-effort
   // server sync, snapshot rollback on failure. This belongs to the normal
@@ -25163,11 +26503,12 @@ function HomeContent(): React.JSX.Element {
       const spotlightBotId =
         chatBotOverride !== undefined
           ? chatBotOverride
-          : (detail.botId ?? selectedBotId ?? null);
+          : (detail.lastBotId ?? detail.botId ?? selectedBotId ?? null);
       setConversationStarterPrompts(null);
       setSelectedId(null);
       setDetail(null);
       setSelectedBotId(spotlightBotId);
+      setSandboxGridSelectedBotId(spotlightBotId);
       setChatBotOverride(undefined);
       closeEmptyStateBotSearch();
       if (hueFilterCenter !== null) {
@@ -25193,7 +26534,8 @@ function HomeContent(): React.JSX.Element {
 
   function renderProfileCard(): React.JSX.Element {
     if (!user) return <div className={styles.profile} />;
-    const initial = (user.displayName || user.email).charAt(0).toUpperCase();
+    const accountName = user.username ?? user.email ?? user.displayName;
+    const initial = (user.displayName || accountName).charAt(0).toUpperCase();
     return (
       <div className={styles.profile}>
         <div className={styles.profileAvatar} aria-hidden="true">
@@ -25201,7 +26543,7 @@ function HomeContent(): React.JSX.Element {
         </div>
         <div className={styles.profileInfo}>
           <strong>{user.displayName}</strong>
-          <span>{user.email}</span>
+          <span>{accountName}</span>
         </div>
       </div>
     );
@@ -26923,6 +28265,8 @@ function HomeContent(): React.JSX.Element {
           : comfyUiUiStatus === "error"
               ? "Not reachable"
               : "Optional";
+  const shouldShowPreAuthChecklist = !user && !hasAnyAccounts && !preAuthChecklistComplete;
+  const shouldShowAuthForm = !user && (hasAnyAccounts || preAuthChecklistComplete);
 
   if (clientAccessState !== "allowed") {
     const isChecking = clientAccessState === "checking";
@@ -26933,8 +28277,7 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.brandIconShell} aria-hidden="true">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/icon.jpg" alt="" aria-hidden="true" className={styles.brandIcon} />
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/icon-triangle.svg" alt="" aria-hidden="true" className={styles.brandIconLight} />
+              <PrismTriangleMark className={styles.brandIconLight} />
             </div>
             <PrismWordmarkWithVersion className={styles.brandWordmark} />
           </div>
@@ -26944,12 +28287,92 @@ function HomeContent(): React.JSX.Element {
           </h2>
           <p className={styles.muted}>
             {isChecking
-              ? "Checking native client access..."
-              : "This web surface is available after pairing through the Prism iOS or Mac client."}
+              ? "Checking app access..."
+              : "Prism Desktop opens directly without pairing codes."}
           </p>
         </div>
         <GlyphTooltipLayer />
       </main>
+    );
+  }
+
+  function renderDesktopFirstRunChecklist(): React.JSX.Element | null {
+    if (!desktopFirstRunChecklistOpen) return null;
+    const qdrantState = desktopFirstRunHealth?.services?.qdrant ?? "unknown";
+    const ollamaState = desktopFirstRunHealth?.services?.ollama ?? "unknown";
+    const qdrantReady = qdrantState === "ready" || qdrantState === "configured";
+    const ollamaReady = ollamaState === "ready" || ollamaState === "configured";
+    const openAiConfigured = Boolean(settings?.hasOpenAiApiKey);
+    const backupConfigured = Boolean(
+      settings?.secondaryOllamaHost?.trim() || settings?.comfyUiHost?.trim()
+    );
+    return (
+      <div className={styles.desktopChecklistOverlay} role="dialog" aria-modal="true">
+        <div className={styles.desktopChecklistCard}>
+          <h3>First-time setup checklist</h3>
+          <p className={styles.muted}>
+            Prism Desktop is ready to configure. Follow these steps, then continue.
+          </p>
+          <ol className={styles.desktopChecklistList}>
+            <li className={styles.desktopChecklistItem}>
+              <span>Create or sign in to your Prism account</span>
+              <strong data-state={user ? "done" : "pending"}>{user ? "Done" : "Pending"}</strong>
+            </li>
+            <li className={styles.desktopChecklistItem}>
+              <span>Confirm local AI engine (Ollama) is reachable</span>
+              <strong data-state={ollamaReady ? "done" : "pending"}>
+                {ollamaReady ? "Ready" : "Needs setup"}
+              </strong>
+            </li>
+            <li className={styles.desktopChecklistItem}>
+              <span>Confirm memory engine (Qdrant) is reachable</span>
+              <strong data-state={qdrantReady ? "done" : "pending"}>
+                {qdrantReady ? "Ready" : "Needs setup"}
+              </strong>
+            </li>
+            <li className={styles.desktopChecklistItem}>
+              <span>(Optional) Add OpenAI API key</span>
+              <strong data-state={openAiConfigured ? "done" : "pending"}>
+                {openAiConfigured ? "Configured" : "Optional"}
+              </strong>
+            </li>
+            <li className={styles.desktopChecklistItem}>
+              <span>(Optional) Configure backup/secondary hosts</span>
+              <strong data-state={backupConfigured ? "done" : "pending"}>
+                {backupConfigured ? "Configured" : "Optional"}
+              </strong>
+            </li>
+          </ol>
+          <div className={styles.desktopChecklistActions}>
+            <button type="button" className={styles.linkButton} onClick={() => openRightPanel("settings")}>
+              Open Settings
+            </button>
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() => void runDesktopFirstRunAutoSetup()}
+              disabled={desktopFirstRunAutoSetupBusy}
+            >
+              {desktopFirstRunAutoSetupBusy ? "Running auto-setup..." : "Run automatic setup"}
+            </button>
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() => void refreshDesktopFirstRunHealth()}
+              disabled={desktopFirstRunChecklistBusy}
+            >
+              {desktopFirstRunChecklistBusy ? "Checking..." : "Refresh checks"}
+            </button>
+            <button
+              type="button"
+              className={styles.accountLogoutButton}
+              onClick={completeDesktopFirstRunChecklist}
+            >
+              Continue to Prism
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -27039,6 +28462,21 @@ function HomeContent(): React.JSX.Element {
     if (!botContextMenu) return null;
     const bot = bots.find((candidate) => candidate.id === botContextMenu.botId);
     if (!bot) return null;
+    const selectedBotIds =
+      botContextMenu.selectedBotIds.length > 1 &&
+      botContextMenu.selectedBotIds.includes(bot.id)
+        ? botContextMenu.selectedBotIds.filter((id) => bots.some((candidate) => candidate.id === id))
+        : [];
+    const multiSelectedBots =
+      selectedBotIds.length > 1
+        ? selectedBotIds
+            .map((id) => bots.find((candidate) => candidate.id === id) ?? null)
+            .filter((candidate): candidate is Bot => Boolean(candidate))
+        : [];
+    const isMultiSelectionMenu = multiSelectedBots.length > 1;
+    const commonGroup = isMultiSelectionMenu
+      ? resolveCommonBotGroupForSelection(multiSelectedBots.map((candidate) => candidate.id))
+      : null;
     const menuStyle = {
       left: `${botContextMenu.x}px`,
       top: `${botContextMenu.y}px`,
@@ -27050,48 +28488,85 @@ function HomeContent(): React.JSX.Element {
         className={`${styles.messageContextMenu} ${styles.botContextMenu}`}
         style={menuStyle}
         role="menu"
-        aria-label={`${bot.name} actions`}
+        aria-label={isMultiSelectionMenu ? "Selected bot actions" : `${bot.name} actions`}
       >
-        <button
-          type="button"
-          role="menuitem"
-          onClick={() => void cloneBot(bot)}
-        >
-          Clone bot
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          onClick={() => {
-            closeBotContextMenu();
-            openBotCustomizer(bot);
-          }}
-        >
-          Edit bot
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          onClick={() => {
-            closeBotContextMenu();
-            void openMemoriesPanelForBot(bot);
-          }}
-        >
-          View memories
-        </button>
-        {bot.delete_protected !== 1 ? (
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              closeBotContextMenu();
-              const confirmed = window.confirm(`Delete ${bot.name}? This cannot be undone.`);
-              if (confirmed) void deleteBot(bot.id);
-            }}
-          >
-            Delete bot
-          </button>
-        ) : null}
+        {isMultiSelectionMenu ? (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                void exportBotsAsZip(multiSelectedBots);
+              }}
+            >
+              Export bots
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                const ids = multiSelectedBots.map((candidate) => candidate.id);
+                if (commonGroup) {
+                  ungroupSelectedBots(commonGroup.id, ids);
+                  setPanelNotice(
+                    ids.length === 2
+                      ? `Ungrouped 2 bots from "${commonGroup.name}".`
+                      : `Ungrouped ${ids.length} bots from "${commonGroup.name}".`
+                  );
+                } else {
+                  groupSelectedBots(ids);
+                }
+              }}
+            >
+              {commonGroup ? `Ungroup (${commonGroup.name})` : "Group"}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => void cloneBot(bot)}
+            >
+              Clone bot
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                openBotCustomizer(bot);
+              }}
+            >
+              Edit bot
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                void openMemoriesPanelForBot(bot);
+              }}
+            >
+              View memories
+            </button>
+            {bot.delete_protected !== 1 ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeBotContextMenu();
+                  const confirmed = window.confirm(`Delete ${bot.name}? This cannot be undone.`);
+                  if (confirmed) void deleteBot(bot.id);
+                }}
+              >
+                Delete bot
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
     );
   }
@@ -27136,99 +28611,245 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  // ── Auth screen ──
-  if (!user) return (
-    <main className={`${styles.authLayout} ${themeClass}`}>
-      <div className={`${styles.card} ${styles.authCard}`}>
-        <div className={`${styles.brandLockup} ${styles.authBrandLockup}`}>
-          {/* Static icon artwork wrapped in a dedicated halo shell. The shell's
-              pseudo-elements own the animated prismatic glows so the icon
-              itself stays crisp while the color motion happens behind it.
-              Two icon variants live here; CSS picks which one is visible
-              based on the current theme:
-                - .brandIcon (dark): the black-tile JPG + animated halos
-                - .brandIconLight (light): a clean rainbow-stroke triangle,
-                  no tile, no halos, just a soft drop-shadow. */}
-          <div className={styles.brandIconShell} aria-hidden="true">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/icon.jpg"
-              alt=""
-              aria-hidden="true"
-              className={styles.brandIcon}
-            />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/icon-triangle.svg"
-              alt=""
-              aria-hidden="true"
-              className={styles.brandIconLight}
-            />
+  // ── Pre-auth onboarding checklist gate ──
+  if (shouldShowPreAuthChecklist) {
+    const qdrantState = desktopFirstRunHealth?.services?.qdrant ?? "unknown";
+    const ollamaState = desktopFirstRunHealth?.services?.ollama ?? "unknown";
+    const qdrantReady = qdrantState === "ready" || qdrantState === "configured";
+    const ollamaReady = ollamaState === "ready" || ollamaState === "configured";
+    const setupChecksReady = qdrantReady && ollamaReady;
+    const completedChecks = Number(ollamaReady) + Number(qdrantReady);
+    const totalChecks = 2;
+    const progressPercent = (completedChecks / totalChecks) * 100;
+    const progressLabel = setupChecksReady
+      ? "System checks complete"
+      : desktopFirstRunChecklistBusy
+        ? "Checking local services..."
+        : `${completedChecks} of ${totalChecks} services ready`;
+    return (
+      <main className={`${styles.authLayout} ${themeClass}`}>
+        <div className={`${styles.card} ${styles.authCard}`}>
+          <div className={`${styles.brandLockup} ${styles.authBrandLockup}`}>
+            <div className={styles.brandIconShell} aria-hidden="true">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/icon.jpg"
+                alt=""
+                aria-hidden="true"
+                className={styles.brandIcon}
+              />
+              <PrismTriangleMark className={styles.brandIconLight} />
+            </div>
+            <div className={styles.authBrandTextBlock}>
+              <PrismWordmarkWithVersion
+                className={styles.brandWordmark}
+                pillTestId="auth-app-version"
+              />
+              <p className={`${styles.muted} ${styles.authTagline}`}>
+                Private by default. Creative by design.
+              </p>
+            </div>
           </div>
-          <div className={styles.authBrandTextBlock}>
-            <PrismWordmarkWithVersion
-              className={styles.brandWordmark}
-              pillTestId="auth-app-version"
-            />
-            <p className={`${styles.muted} ${styles.authTagline}`}>
-              Private by default. Creative by design.
+          <div className={styles.authFormHeader}>
+            <h2 className={styles.authHeading}>Let&apos;s get Prism ready</h2>
+            <p className={`${styles.muted} ${styles.desktopChecklistIntro}`}>
+              Quick local checks first, then account creation.
             </p>
           </div>
-        </div>
-        <div className={styles.authFormHeader}>
-          <h2 className={styles.authHeading}>{authMode === "register" ? "Create your account" : "Welcome back"}</h2>
-          <div className={styles.authControls}>
-            <div className={styles.authToggle}>
-              <a
-                href="?mode=register"
-                className={authMode === "register" ? styles.selected : ""}
-                onClick={() => setError(null)}
-              >
-                Register
-              </a>
-              <a
-                href="?mode=login"
-                className={authMode === "login" ? styles.selected : ""}
-                onClick={() => setError(null)}
-              >
-                Login
-              </a>
+          <div className={styles.desktopChecklistProgressRow} aria-live="polite">
+            <p className={styles.desktopChecklistProgressLabel}>{progressLabel}</p>
+            <div className={styles.desktopChecklistProgressBar} aria-hidden="true">
+              <span
+                className={styles.desktopChecklistProgressFill}
+                style={{ width: `${progressPercent}%` }}
+              />
             </div>
+          </div>
+          <ol className={styles.desktopChecklistList}>
+            <li className={styles.desktopChecklistItem}>
+              <div className={styles.desktopChecklistItemBody}>
+                <span className={styles.desktopChecklistItemTitle}>Local AI engine</span>
+                <span className={styles.desktopChecklistItemHint}>Ollama connection</span>
+              </div>
+              <strong
+                className={styles.desktopChecklistStatus}
+                data-state={ollamaReady ? "done" : desktopFirstRunChecklistBusy ? "checking" : "pending"}
+              >
+                {ollamaReady ? "Ready" : desktopFirstRunChecklistBusy ? "Checking..." : "Needs setup"}
+              </strong>
+            </li>
+            <li className={styles.desktopChecklistItem}>
+              <div className={styles.desktopChecklistItemBody}>
+                <span className={styles.desktopChecklistItemTitle}>Memory engine</span>
+                <span className={styles.desktopChecklistItemHint}>Qdrant connection</span>
+              </div>
+              <strong
+                className={styles.desktopChecklistStatus}
+                data-state={qdrantReady ? "done" : desktopFirstRunChecklistBusy ? "checking" : "pending"}
+              >
+                {qdrantReady ? "Ready" : desktopFirstRunChecklistBusy ? "Checking..." : "Needs setup"}
+              </strong>
+            </li>
+            <li className={styles.desktopChecklistItem}>
+              <div className={styles.desktopChecklistItemBody}>
+                <span className={styles.desktopChecklistItemTitle}>Create your account</span>
+                <span className={styles.desktopChecklistItemHint}>Unlocked after local checks</span>
+              </div>
+              <strong
+                className={styles.desktopChecklistStatus}
+                data-state={setupChecksReady ? "done" : "next"}
+              >
+                {setupChecksReady ? "Ready" : "Up next"}
+              </strong>
+            </li>
+          </ol>
+          <div className={styles.desktopChecklistMeta}>
+            <p className={styles.muted}>
+              Auto-checks every {DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS / 1000} seconds.
+            </p>
+            {desktopFirstRunAutoSetupSteps.length > 0 && (
+              <p className={styles.muted}>
+                Automation: {desktopFirstRunAutoSetupSteps[desktopFirstRunAutoSetupSteps.length - 1]}
+              </p>
+            )}
+          </div>
+          <div className={styles.desktopChecklistActions}>
             <button
               type="button"
-              className={styles.themeToggleButton}
-              onClick={() => void cycleThemeMode()}
-              aria-label={
-                effectiveThemeMode === "system"
-                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-              }
-              data-title={
-                effectiveThemeMode === "system"
-                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-              }
-              data-glyph-tooltip={
-                effectiveThemeMode === "system"
-                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-              }
+              className={styles.desktopChecklistPrimaryAction}
+              onClick={continueFromPreAuthChecklist}
+              disabled={!setupChecksReady}
             >
-              <ThemeGlyph mode={effectiveThemeMode} />
+              Continue to account creation
             </button>
+            <div className={styles.desktopChecklistSecondaryActions}>
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={() => void runDesktopFirstRunAutoSetup()}
+                disabled={desktopFirstRunAutoSetupBusy}
+              >
+                {desktopFirstRunAutoSetupBusy ? "Running auto-setup..." : "Run automatic setup"}
+              </button>
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={() => void refreshDesktopFirstRunHealth()}
+                disabled={desktopFirstRunChecklistBusy}
+              >
+                {desktopFirstRunChecklistBusy ? "Checking..." : "Refresh now"}
+              </button>
+              {!setupChecksReady && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={continueFromPreAuthChecklist}
+                >
+                  Continue anyway
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-        <form onSubmit={submitAuth} className={styles.form}>
-          {authMode === "register" && <input required value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Display name" />}
-          <input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" />
-          <input required type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" />
-          <button disabled={busy} type="submit">{busy ? "Working..." : authMode === "register" ? "Create account" : "Log in"}</button>
           {error && <p className={styles.error}>{error}</p>}
-        </form>
-      </div>
-      <GlyphTooltipLayer />
-    </main>
-  );
+        </div>
+        <GlyphTooltipLayer />
+      </main>
+    );
+  }
+
+  // ── Auth screen ──
+  if (shouldShowAuthForm) {
+    return (
+      <main className={`${styles.authLayout} ${themeClass}`}>
+        <div className={`${styles.card} ${styles.authCard}`}>
+          <div className={`${styles.brandLockup} ${styles.authBrandLockup}`}>
+            {/* Auth lockup keeps the boxed Prism icon in dark mode and swaps to
+                the hollow triangle in light mode for high-contrast parity. */}
+            <div className={styles.brandIconShell} aria-hidden="true">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/icon.jpg"
+                alt=""
+                aria-hidden="true"
+                className={styles.brandIcon}
+              />
+              <PrismTriangleMark className={styles.brandIconLight} />
+            </div>
+            <div className={styles.authBrandTextBlock}>
+              <PrismWordmarkWithVersion
+                className={styles.brandWordmark}
+                pillTestId="auth-app-version"
+              />
+              <p className={`${styles.muted} ${styles.authTagline}`}>
+                Private by default. Creative by design.
+              </p>
+            </div>
+          </div>
+          <div className={styles.authFormHeader}>
+            <h2 className={styles.authHeading}>{authMode === "register" ? "Create your account" : "Welcome back"}</h2>
+            <div className={styles.authControls}>
+              {hasAnyAccounts && (
+                <div className={styles.authToggle}>
+                  <a
+                    href="?mode=register"
+                    className={authMode === "register" ? styles.selected : ""}
+                    onClick={() => setError(null)}
+                  >
+                    Register
+                  </a>
+                  <a
+                    href="?mode=login"
+                    className={authMode === "login" ? styles.selected : ""}
+                    onClick={() => setError(null)}
+                  >
+                    Login
+                  </a>
+                </div>
+              )}
+              <button
+                type="button"
+                className={styles.themeToggleButton}
+                onClick={() => void cycleThemeMode()}
+                aria-label={
+                  effectiveThemeMode === "system"
+                    ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                }
+                data-title={
+                  effectiveThemeMode === "system"
+                    ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+                }
+                data-glyph-tooltip={
+                  effectiveThemeMode === "system"
+                    ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+                }
+              >
+                <ThemeGlyph mode={effectiveThemeMode} />
+              </button>
+            </div>
+          </div>
+          <form onSubmit={submitAuth} className={styles.form}>
+            <input required value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" />
+            <input required type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" />
+            {authMode === "register" && (
+              <input
+                required
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Confirm password"
+              />
+            )}
+            <button disabled={busy} type="submit">{busy ? "Working..." : authMode === "register" ? "Create account" : "Log in"}</button>
+            {error && <p className={styles.error}>{error}</p>}
+          </form>
+        </div>
+        <GlyphTooltipLayer />
+      </main>
+    );
+  }
 
   // ── Sidebar row delete button ───────────────────────────────────────
   const renderChatDeleteButton = (c: ConversationSummary) => {
@@ -28048,12 +29669,14 @@ function HomeContent(): React.JSX.Element {
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
     const canBotActions = Boolean(activeBot);
     const canMemoryActions = true;
+    const canFavoriteActions = Boolean(activeBot);
     const canExport = Boolean(detail && selectedId);
     const selectedBotCanDelete = Boolean(activeBot && activeBot.delete_protected !== 1);
     const canDelete = Boolean((detail && selectedId) || selectedBotCanDelete);
     /** Always allow header tools (Sandbox non-zen was the only case that disabled during first reply / pending). */
     const headerActionsDisabled = false;
-    const isMobileGear = viewportWidth <= PHONE_MENU_BREAKPOINT;
+    const isMobileGear =
+      FLOATING_SHELL_APPLETS_ENABLED && viewportWidth <= PHONE_MENU_BREAKPOINT;
     const privateDefaultHeaderMode = privateChatActive && !privateCustomBotActive;
     const privateFocusedBotHeaderMode = privateChatActive && privateCustomBotActive;
     const privateFocusedBotBase =
@@ -28149,6 +29772,47 @@ function HomeContent(): React.JSX.Element {
       }
       void openAllMemoriesPanel();
     };
+    const activeBotIsFavorite = Boolean(
+      activeBot &&
+      botLibraryGroups
+        .find((group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID)
+        ?.botIds.includes(activeBot.id)
+    );
+    const handleToggleFavorite = () => {
+      if (!activeBot) return;
+      closeMenu();
+      const targetBotId = activeBot.id;
+      setBotLibraryGroups((current) => {
+        const normalized = normalizeBotLibraryGroups(current);
+        const now = new Date().toISOString();
+        let found = false;
+        const next = normalized.map((group) => {
+          if (group.id !== BOT_LIBRARY_FAVORITES_GROUP_ID) return group;
+          found = true;
+          const hasBot = group.botIds.includes(targetBotId);
+          return {
+            ...group,
+            botIds: hasBot
+              ? group.botIds.filter((id) => id !== targetBotId)
+              : [...group.botIds, targetBotId],
+            updatedAt: now,
+          };
+        });
+        if (!found) {
+          const favorites = createFavoritesBotGroup();
+          next.push({
+            ...favorites,
+            botIds: [targetBotId],
+            updatedAt: now,
+          });
+        }
+        return normalizeBotLibraryGroups(next);
+      });
+    };
+    const handleOpenCommandCenter = () => {
+      closeMenu();
+      openRightPanel("command-center");
+    };
     const handleEditBot = () => {
       closeMenu();
       openActiveBotCustomizer();
@@ -28235,6 +29899,39 @@ function HomeContent(): React.JSX.Element {
           aria-disabled={headerActionsDisabled}
         >
           {renderMemoryToasts()}
+          <button
+            type="button"
+            className={styles.headerIconButton}
+            onClick={handleToggleFavorite}
+            aria-label={
+              activeBot
+                ? activeBotIsFavorite
+                  ? `Remove ${activeBot.name} from favorites`
+                  : `Add ${activeBot.name} to favorites`
+                : "Favorites unavailable until a bot is selected"
+            }
+            aria-pressed={activeBot ? activeBotIsFavorite : undefined}
+            data-glyph-tooltip={
+              activeBot
+                ? activeBotIsFavorite
+                  ? "Remove from Favorites"
+                  : "Add to Favorites"
+                : "Select a bot to favorite"
+            }
+            disabled={headerActionsDisabled || !canFavoriteActions}
+          >
+            <StarGlyph />
+          </button>
+          <button
+            type="button"
+            className={styles.headerIconButton}
+            onClick={handleOpenCommandCenter}
+            aria-label="Open Command Center"
+            data-glyph-tooltip="Command Center"
+            disabled={headerActionsDisabled}
+          >
+            <SlashCommandGlyph />
+          </button>
           <div className={styles.chatHeaderGearAnchor}>
             <button
               ref={chatOverflowGearButtonRef}
@@ -28409,6 +30106,34 @@ function HomeContent(): React.JSX.Element {
             >
               Settings
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.chatOverflowMenuItem}
+              disabled={headerActionsDisabled || !canFavoriteActions}
+              onClick={(event) => {
+                swallowMenuEvent(event);
+                handleToggleFavorite();
+              }}
+            >
+              {activeBot
+                ? activeBotIsFavorite
+                  ? `Remove ${activeBot.name} from Favorites`
+                  : `Add ${activeBot.name} to Favorites`
+                : "Select a bot to favorite"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.chatOverflowMenuItem}
+              disabled={headerActionsDisabled}
+              onClick={(event) => {
+                swallowMenuEvent(event);
+                handleOpenCommandCenter();
+              }}
+            >
+              Command Center
+            </button>
             {showToolbarMemoriesButton && view === "sandbox" ? (
               <button
                 type="button"
@@ -28579,6 +30304,13 @@ function HomeContent(): React.JSX.Element {
     const showToolbarMemoriesButton = view === "chat" || view === "sandbox";
     const showChatThemeButton = view === "chat" || view === "sandbox";
     const showSandboxHubButton = view === "chat" || view === "sandbox";
+    const canFavoriteActions = Boolean(activeBot);
+    const activeBotIsFavorite = Boolean(
+      activeBot &&
+      botLibraryGroups
+        .find((group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID)
+        ?.botIds.includes(activeBot.id)
+    );
     const canMemoryActions = true;
     /** Keep in sync with `renderChatOverflowGear` — header tools stay enabled during pending / first reply. */
     const headerActionsDisabled = false;
@@ -28619,6 +30351,56 @@ function HomeContent(): React.JSX.Element {
           onClick={() => runAndClose(() => openRightPanel("settings"))}
         >
           Settings
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!canFavoriteActions}
+          onClick={() =>
+            runAndClose(() => {
+              if (!activeBot) return;
+              const targetBotId = activeBot.id;
+              setBotLibraryGroups((current) => {
+                const normalized = normalizeBotLibraryGroups(current);
+                const now = new Date().toISOString();
+                let found = false;
+                const next = normalized.map((group) => {
+                  if (group.id !== BOT_LIBRARY_FAVORITES_GROUP_ID) return group;
+                  found = true;
+                  const hasBot = group.botIds.includes(targetBotId);
+                  return {
+                    ...group,
+                    botIds: hasBot
+                      ? group.botIds.filter((id) => id !== targetBotId)
+                      : [...group.botIds, targetBotId],
+                    updatedAt: now,
+                  };
+                });
+                if (!found) {
+                  const favorites = createFavoritesBotGroup();
+                  next.push({
+                    ...favorites,
+                    botIds: [targetBotId],
+                    updatedAt: now,
+                  });
+                }
+                return normalizeBotLibraryGroups(next);
+              });
+            })
+          }
+        >
+          {activeBot
+            ? activeBotIsFavorite
+              ? `Remove ${activeBot.name} from Favorites`
+              : `Add ${activeBot.name} to Favorites`
+            : "Select a bot to favorite"}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runAndClose(() => openRightPanel("command-center"))}
+        >
+          Command Center
         </button>
         {showToolbarMemoriesButton ? (
           <button
@@ -28856,7 +30638,7 @@ function HomeContent(): React.JSX.Element {
           role="menuitem"
           onClick={() => runAndClose(() => void openMemoriesPanelForBot(bot))}
         >
-          {bot.name}'s memories
+          {bot.name}&apos;s memories
         </button>
       </div>
     );
@@ -30322,14 +32104,14 @@ function HomeContent(): React.JSX.Element {
         </div>
       )}
 
-      {/* ── Settings panel ── */}
-      {panel === "settings" && (
+      {/* ── Command Center panel ── */}
+      {panel === "command-center" && (
         <div
           className={`${styles.panel} ${styles.panelSettings}`}
           data-closing={panelClosing ? "true" : undefined}
         >
           <div className={styles.panelHeader}>
-            <h3>Settings</h3>
+            <h3>Command Center</h3>
             <button
               type="button"
               className={styles.panelClose}
@@ -30339,6 +32121,151 @@ function HomeContent(): React.JSX.Element {
             >
               ×
             </button>
+          </div>
+          <div style={{ display: "grid", gap: "0.9rem" }}>
+            <section>
+              <h4 style={{ margin: 0, fontSize: "0.92rem" }}>LLM Selection</h4>
+              {(() => {
+                const localModelOptions = modelCatalog?.local ?? [];
+                const onlineModelOptions = modelCatalog?.online ?? [];
+                return (
+              <label style={{ display: "grid", gap: "0.35rem", marginTop: "0.45rem" }}>
+                <span style={{ fontSize: "0.8rem", opacity: 0.85 }}>
+                  Preferred model for command work
+                </span>
+                <select
+                  value={commandCenterPreferredModel}
+                  onChange={(event) =>
+                    setCommandCenterPreferredModel(normalizeModelChoice(event.currentTarget.value))
+                  }
+                >
+                  <option value={AUTO_MODEL_CHOICE}>Auto</option>
+                  {localModelOptions.map((model) => (
+                    <option key={`local:${model.id}`} value={`local:${model.id}`}>
+                      {`LOCAL - ${model.label}`}
+                    </option>
+                  ))}
+                  {onlineModelOptions.map((model) => (
+                    <option key={`openai:${model.id}`} value={`openai:${model.id}`}>
+                      {`ONLINE - ${model.label}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+                );
+              })()}
+            </section>
+            <section>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "0.6rem",
+                }}
+              >
+                <h4 style={{ margin: 0, fontSize: "0.92rem" }}>Commands</h4>
+                <button
+                  type="button"
+                  className={styles.headerIconButton}
+                  aria-label="Add command"
+                  data-glyph-tooltip="Add command"
+                  onClick={() =>
+                    setCommandCenterCommands((current) =>
+                      normalizeCommandCenterState({
+                        schema: "prism-command-center-v1",
+                        preferredModel: commandCenterPreferredModel,
+                        commands: [...current, createUserCommandDraft(current)],
+                      }).commands
+                    )
+                  }
+                >
+                  +
+                </button>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
+                  marginTop: "0.6rem",
+                }}
+              >
+                {commandCenterCommands.map((command) => (
+                  <button
+                    key={command.id}
+                    type="button"
+                    className={styles.chatOverflowMenuItem}
+                    data-active={
+                      command.id === commandCenterSelectedCommandId ? "true" : undefined
+                    }
+                    onClick={() => setCommandCenterSelectedCommandId(command.id)}
+                  >
+                    /{command.name}
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
+
+      {/* ── Settings panel ── */}
+      {panel === "settings" && (
+        <div
+          className={`${styles.panel} ${styles.panelSettings}`}
+          data-closing={panelClosing ? "true" : undefined}
+        >
+          <div className={styles.panelHeader}>
+            <div className={styles.panelHeaderTitle}>
+              <h3>Settings</h3>
+            </div>
+            <div className={styles.panelHeaderActions}>
+              <input
+                ref={accountImportInputRef}
+                type="file"
+                accept=".prism"
+                className={styles.panelHiddenFileInput}
+                onChange={(event) => {
+                  void handleAccountImportFileSelection(event);
+                }}
+              />
+              <button
+                type="button"
+                className={`${styles.panelHeaderIconButton} ${styles.panelHeaderSaveButton}`}
+                onClick={() => {
+                  void exportAccountAsPrismArchive();
+                }}
+                disabled={busy || accountBackupBusy || accountRestoreBusy}
+                aria-label="Export account backup as .prism file"
+                data-glyph-tooltip="Export account backup as .prism"
+              >
+                <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
+                  <IconSave />
+                </span>
+              </button>
+              <button
+                type="button"
+                className={`${styles.panelHeaderIconButton} ${styles.panelHeaderImportButton}`}
+                onClick={openAccountImportPicker}
+                disabled={busy || accountBackupBusy || accountRestoreBusy}
+                aria-label="Import account backup from .prism file"
+                data-glyph-tooltip="Import account backup from .prism"
+              >
+                <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
+                  <IconUpload />
+                </span>
+              </button>
+              <button
+                type="button"
+                className={styles.panelClose}
+                onClick={closePanel}
+                aria-label="Close panel"
+                data-glyph-tooltip="Close panel"
+              >
+                ×
+              </button>
+            </div>
           </div>
           {settings && (
             <form className={styles.form} onSubmit={saveSettings}>
@@ -30911,38 +32838,18 @@ function HomeContent(): React.JSX.Element {
             </div>
           )}
           <div className={styles.pairingActions}>
-            <h4>Pair a device</h4>
+            <h4>Legacy pairing (disabled)</h4>
             <p className={styles.muted}>
-              Generate a short-lived code to connect the future Prism iOS/Mac app
-              to this server.
+              Pairing codes are no longer required in the standalone desktop app.
             </p>
-            {pairingCode && (
-              <div className={styles.pairingCodeCard} aria-live="polite">
-                <strong className={styles.pairingCodeValue}>{pairingCode.code}</strong>
-                <small className={styles.pairingCodeMeta}>
-                  {formatPairingExpiry(pairingCode.expiresAt)}
-                </small>
-              </div>
-            )}
             <div className={styles.pairingButtonRow}>
               <button
                 type="button"
                 className={styles.accountLogoutButton}
-                onClick={() => void generatePairingCode()}
-                disabled={busy || pairingBusy}
+                disabled={true}
               >
-                {pairingBusy ? "Generating..." : pairingCode ? "Generate new code" : "Generate code"}
+                Pairing disabled
               </button>
-              {pairingCode && (
-                <button
-                  type="button"
-                  className={styles.linkButton}
-                  onClick={() => void copyPairingCode()}
-                  disabled={pairingBusy}
-                >
-                  {pairingCopyStatus ?? "Copy code"}
-                </button>
-              )}
             </div>
           </div>
           <div className={styles.accountActions}>
@@ -30972,11 +32879,19 @@ function HomeContent(): React.JSX.Element {
               </button>
               <button
                 type="button"
-                className={styles.dangerButton}
-                onClick={() => void deleteAccount()}
+                className={[
+                  styles.dangerButton,
+                  deleteAccountArmed ? styles.dangerButtonArmed : "",
+                ].filter(Boolean).join(" ")}
+                onClick={deleteAccount}
                 disabled={busy}
+                title={
+                  deleteAccountArmed
+                    ? "Click again to confirm permanent account deletion."
+                    : "Click once to arm account deletion."
+                }
               >
-                Delete account
+                {deleteAccountArmed ? "Confirm delete account" : "Delete account"}
               </button>
             </div>
           </div>
@@ -31271,7 +33186,7 @@ function HomeContent(): React.JSX.Element {
                 <input
                   ref={botImportInputRef}
                   type="file"
-                  accept=".bot"
+                  accept=".bot,.zip"
                   className={styles.panelHiddenFileInput}
                   onChange={(event) => {
                     void handleBotImportFileSelection(event);
@@ -31316,14 +33231,14 @@ function HomeContent(): React.JSX.Element {
                       ? "Wait for the current action to finish"
                       : editorMode && editingBotId
                         ? "Import disabled while editing a bot"
-                        : "Import bot from .bot file"
+                        : "Import bot from .bot or .zip file"
                   }
                   data-glyph-tooltip={
                     busy
                       ? "Wait for the current action to finish"
                       : editorMode && editingBotId
                         ? "Finish editing or go back to the list to import a .bot file"
-                        : "Import a Prism .bot export"
+                        : "Import Prism .bot files or a .zip bundle"
                   }
                 >
                   <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
@@ -36579,9 +38494,9 @@ function HomeContent(): React.JSX.Element {
     >
       <div className={styles.hubCard}>
         <div className={`${styles.brandLockup} ${styles.hubBrandLockup}`}>
-          {/* See note on the auth-screen lockup: dark theme uses the boxed
-              JPG with animated halos, light theme uses the bare triangle. */}
-          <div className={`${styles.brandIconShell} ${styles.userHeroAvatar}`}>
+          {/* Keep lockup behavior aligned with auth: boxed icon in dark mode,
+              hollow triangle in light mode. */}
+          <div className={styles.brandIconShell}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/icon.jpg"
@@ -36589,13 +38504,7 @@ function HomeContent(): React.JSX.Element {
               aria-hidden="true"
               className={styles.brandIcon}
             />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/icon-triangle.svg"
-              alt=""
-              aria-hidden="true"
-              className={styles.brandIconLight}
-            />
+            <PrismTriangleMark className={styles.brandIconLight} />
           </div>
           <PrismWordmarkWithVersion className={styles.brandWordmark} />
           <div className={styles.hubFooter}>
@@ -36659,7 +38568,7 @@ function HomeContent(): React.JSX.Element {
           </div>
         </div>
         <p className={styles.hubGreeting}>
-          Welcome back, <span className={styles.hubGreetingName}>{user.displayName}</span>.
+          Welcome back, <span className={styles.hubGreetingName}>{user?.displayName ?? "there"}</span>.
         </p>
         <div className={styles.hubTiles}>
           <button
@@ -36847,12 +38756,10 @@ function HomeContent(): React.JSX.Element {
   );
 
   // ── Chat mode ──
-  // Stripped-down "personal Prism" surface. Shares the sandbox layout
-  // primitives (sidebar, chat pane, messages, composer, Settings panel)
-  // but hides every knob that makes the composer feel technical — no bot
-  // picker, no Local/Online toggle, no fork/export, no Incognito, no
-  // Bots/Images panels. Default persona is silent; provider routing is
-  // whatever the user saved in Settings.
+  // Personal Prism surface sharing the sandbox layout primitives
+  // (chat pane/messages/composer + shared panels), with the chat-specific
+  // controls row exposed so users can pick bot, provider mode, and model
+  // directly from Chat.
   if (view === "chat") return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
@@ -37063,10 +38970,29 @@ function HomeContent(): React.JSX.Element {
             data-chat-ephemeral={chatLikeSurface ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
+            data-drag-selecting={
+              canvasBotMarqueeRect !== null ? "true" : undefined
+            }
             onScroll={handleMessagesPaneScroll}
+            onPointerDown={handleCanvasBotMarqueePointerDown}
+            onPointerMove={handleCanvasBotMarqueePointerMove}
+            onPointerUp={handleCanvasBotMarqueePointerEnd}
+            onPointerCancel={handleCanvasBotMarqueePointerEnd}
             onWheelCapture={preventChatModeThreadScroll}
             onTouchMoveCapture={preventChatModeThreadScroll}
           >
+          {canvasBotMarqueeRect ? (
+            <div
+              className={styles.chatBotSelectionMarquee}
+              aria-hidden="true"
+              style={{
+                left: `${canvasBotMarqueeRect.left}px`,
+                top: `${canvasBotMarqueeRect.top}px`,
+                width: `${canvasBotMarqueeRect.width}px`,
+                height: `${canvasBotMarqueeRect.height}px`,
+              }}
+            />
+          ) : null}
           {chatStartupSummaryVisible ? (
             <div className={styles.chatCanvasSummaryContainer}>
               <div className={styles.chatSessionSummaryBubble} role="status" aria-live="polite">
@@ -37080,7 +39006,7 @@ function HomeContent(): React.JSX.Element {
                       previewBot={null}
                       previewAsBotGlyph={false}
                       privateHero={privateChatActive}
-                      forceTrianglePreview={lensInteracting || (messagesFrameMode !== "home" && !activeBot)}
+                      forceTrianglePreview={lensInteracting}
                       resolvedTheme={resolvedTheme}
                     />
                   </div>
@@ -37159,10 +39085,7 @@ function HomeContent(): React.JSX.Element {
                    interface is currently tinted to (lens hue while
                    engaged, theme fg in private). Drag-mode keeps its
                    override regardless. */
-                forceTrianglePreview={
-                  lensInteracting ||
-                  (messagesFrameMode !== "home" && !heroBot)
-                }
+                forceTrianglePreview={lensInteracting}
                 resolvedTheme={resolvedTheme}
               />
             );
@@ -37521,7 +39444,7 @@ function HomeContent(): React.JSX.Element {
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
-                  mentionRenderBots={composeMentionBotPicks}
+                  mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                 />
                 {copied && (
@@ -37685,7 +39608,7 @@ function HomeContent(): React.JSX.Element {
                     onValueChange={updateComposerDraft}
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
-                    mentionBots={composeMentionBotPicks}
+                    mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   />
                 </div>
               </div>
@@ -37705,7 +39628,7 @@ function HomeContent(): React.JSX.Element {
                 onValueChange={updateComposerDraft}
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
-                mentionBots={composeMentionBotPicks}
+                mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
               />
             )
           ) : null}
@@ -37766,31 +39689,35 @@ function HomeContent(): React.JSX.Element {
           (sidebar on the left, Settings/Bots/Images panel on the right)
           so the fixed hamburger doesn't overlap the profile avatar or
           poke through the panel overlay dimmer. */}
-      <button
-        type="button"
-        className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
-        onClick={() => {
-          setSidebarOpen(o => !o);
-        }}
-        aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
-        data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
-        aria-hidden={sidebarOpen || panel !== null}
-        tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
-      >☰</button>
-      <button
-        type="button"
-        className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
-          panel !== null ? styles.sidebarHandleHidden : ""
-        }`}
-        onClick={() => {
-          setSidebarOpen(o => !o);
-        }}
-        aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
-        aria-pressed={sidebarOpen}
-        data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
-      >
-        <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
-      </button>
+      {FLOATING_SHELL_APPLETS_ENABLED ? (
+        <>
+          <button
+            type="button"
+            className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
+            onClick={() => {
+              setSidebarOpen(o => !o);
+            }}
+            aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
+            data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
+            aria-hidden={sidebarOpen || panel !== null}
+            tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
+          >☰</button>
+          <button
+            type="button"
+            className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
+              panel !== null ? styles.sidebarHandleHidden : ""
+            }`}
+            onClick={() => {
+              setSidebarOpen(o => !o);
+            }}
+            aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
+            aria-pressed={sidebarOpen}
+            data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
+          >
+            <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
+          </button>
+        </>
+      ) : null}
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
@@ -37811,10 +39738,9 @@ function HomeContent(): React.JSX.Element {
           </button>
           <button
             type="button"
-            className={`${styles.privateChatButton} ${appWidePrivateMode ? styles.privateChatButtonActive : ""}`}
+            className={styles.privateChatButton}
             style={privateChatButtonStyle}
-            onClick={() => setAppWidePrivateMode(!appWidePrivateMode)}
-            aria-pressed={appWidePrivateMode}
+            onClick={() => startFreshConversation(true)}
             title="Private chat — no saved history or memory"
           >
             <span className={styles.privateChatButtonIcon} aria-hidden="true">
@@ -38003,10 +39929,29 @@ function HomeContent(): React.JSX.Element {
             data-chat-ephemeral={chatLikeSurface ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
+            data-drag-selecting={
+              canvasBotMarqueeRect !== null ? "true" : undefined
+            }
             onScroll={handleMessagesPaneScroll}
+            onPointerDown={handleCanvasBotMarqueePointerDown}
+            onPointerMove={handleCanvasBotMarqueePointerMove}
+            onPointerUp={handleCanvasBotMarqueePointerEnd}
+            onPointerCancel={handleCanvasBotMarqueePointerEnd}
             onWheelCapture={preventChatModeThreadScroll}
             onTouchMoveCapture={preventChatModeThreadScroll}
           >
+            {canvasBotMarqueeRect ? (
+              <div
+                className={styles.chatBotSelectionMarquee}
+                aria-hidden="true"
+                style={{
+                  left: `${canvasBotMarqueeRect.left}px`,
+                  top: `${canvasBotMarqueeRect.top}px`,
+                  width: `${canvasBotMarqueeRect.width}px`,
+                  height: `${canvasBotMarqueeRect.height}px`,
+                }}
+              />
+            ) : null}
             {!detail && !pendingReplyVisible && (() => {
             // Sandbox empty state — same narrative hero + hints as relaxed
             // Chat surfaces, plus the Sandbox-only tile picker + hue lens
@@ -38097,17 +40042,10 @@ function HomeContent(): React.JSX.Element {
                 previewBot={isPreviewing ? heroBot : null}
                 previewAsBotGlyph={isPreviewing}
                 privateHero={privateChatActive}
-                /* Triangle hero replaces the rainbow brand mark whenever
-                   the surface isn't in home mode and there's no bot
-                   armed — its currentColor follows --accent, which
-                   means the triangle matches whatever the rest of the
-                   interface is currently tinted to (lens hue while
-                   engaged, theme fg in private). Drag-mode keeps its
-                   override regardless. */
-                forceTrianglePreview={
-                  lensInteracting ||
-                  (messagesFrameMode !== "home" && !heroBot)
-                }
+                /* Keep the hero icon aligned with Prism's canonical boxed
+                   app mark. Only swap to the bare triangle while actively
+                   dragging the hue lens preview. */
+                forceTrianglePreview={lensInteracting}
                 resolvedTheme={resolvedTheme}
               />
             );
@@ -38166,7 +40104,10 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 ) : null}
                 {emptyStateSearchActive ? renderEmptyStateBotSearch() : null}
-                {!emptyStateSearchActive && (!suppressHeroCopy || heroRecentConversations.length > 0) ? (
+                {!emptyStateSearchActive &&
+                (!suppressHeroCopy ||
+                  heroRecentConversations.length > 0 ||
+                  heroBotMiniLibraryImages.length > 0) ? (
                   <div
                     key={`empty-state-band-${heroBot?.id ?? "default"}-${canvasBotSwitchUnfoldSeed}`}
                     className={styles.emptyStateInfoBand}
@@ -38206,6 +40147,80 @@ function HomeContent(): React.JSX.Element {
                               hint
                             )}
                           </p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {!pendingIncognito &&
+                    heroBot?.id &&
+                    heroBotMiniLibraryImages.length > 0 ? (
+                      <div
+                        className={styles.emptyStateMiniLibraryWrap}
+                        data-unfold={
+                          shouldAnimateBotSwitchUnfold ? "true" : undefined
+                        }
+                      >
+                        <p className={styles.emptyStateMiniLibraryLabel}>
+                          Generated images
+                        </p>
+                        <div
+                          className={styles.emptyStateMiniLibraryRail}
+                          role="list"
+                          aria-label={`Saved images for ${heroBot.name?.trim() ?? "this bot"}`}
+                        >
+                          {heroBotMiniLibraryImages.map((img) => {
+                            const privateBlurred =
+                              imagePrivateGeneratedIds.includes(img.id) &&
+                              !imagePrivateRevealedIds.has(img.id) &&
+                              !appWidePrivateMode;
+                            return (
+                              <div
+                                key={img.id}
+                                role="listitem"
+                                className={`${styles.emptyStateMiniLibraryTile} ${
+                                  privateBlurred
+                                    ? styles.emptyStateMiniLibraryTilePrivateBlurred
+                                    : ""
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  className={styles.emptyStateMiniLibraryThumbButton}
+                                  onClick={() => {
+                                    if (privateBlurred) {
+                                      setImagePrivateRevealedIds((current) => {
+                                        if (current.has(img.id)) return current;
+                                        const next = new Set(current);
+                                        next.add(img.id);
+                                        return next;
+                                      });
+                                      return;
+                                    }
+                                    setImageLightbox(img);
+                                  }}
+                                  aria-label={
+                                    privateBlurred
+                                      ? "Private image hidden. Click to reveal image."
+                                      : "View image larger"
+                                  }
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={galleryTileImageSrc(img)}
+                                    alt={img.prompt}
+                                    className={styles.emptyStateMiniLibraryThumbImg}
+                                  />
+                                  {privateBlurred ? (
+                                    <span
+                                      className={styles.emptyStateMiniLibraryPrivateOverlay}
+                                      aria-hidden="true"
+                                    >
+                                      Private
+                                    </span>
+                                  ) : null}
+                                </button>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     ) : null}
@@ -38303,10 +40318,18 @@ function HomeContent(): React.JSX.Element {
                           }
                         }
                       }}
-                      onPointerDown={e => handleTouchPickerDown(e, geom)}
-                      onPointerMove={handleTouchPickerMove}
-                      onPointerUp={e => handleTouchPickerUp(e, geom)}
-                      onPointerCancel={handleTouchPickerCancel}
+                      onPointerDown={e => {
+                        handleTouchPickerDown(e, geom);
+                      }}
+                      onPointerMove={e => {
+                        handleTouchPickerMove(e);
+                      }}
+                      onPointerUp={e => {
+                        handleTouchPickerUp(e, geom);
+                      }}
+                      onPointerCancel={e => {
+                        handleTouchPickerCancel(e);
+                      }}
                     >
                       <div
                         className={pickerClassName}
@@ -38331,6 +40354,7 @@ function HomeContent(): React.JSX.Element {
                           );
                         }
                         const isSelected = sandboxGridSelectedBotId === b.id;
+                        const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
                         const rawColor = b.color?.trim();
                         const accent = rawColor
                           ? normalizeAccentForTheme(rawColor, resolvedTheme)
@@ -38344,6 +40368,9 @@ function HomeContent(): React.JSX.Element {
                         let tileClassName = styles.chatBotTile;
                         if (isSelected) {
                           tileClassName += ` ${styles.chatBotTileSelected}`;
+                        }
+                        if (isMarqueeSelected) {
+                          tileClassName += ` ${styles.chatBotTileMarqueeSelected}`;
                         }
                         if (geom.namedFlatTile || geom.flattenTile) {
                           tileClassName += ` ${styles.chatBotTileFlat}`;
@@ -38407,7 +40434,11 @@ function HomeContent(): React.JSX.Element {
                             onContextMenu={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
-                              openBotContextMenu(b, event.clientX, event.clientY);
+                              const multiSelectionIds =
+                                canvasSelectedBotIds.size > 1 && canvasSelectedBotIds.has(b.id)
+                                  ? Array.from(canvasSelectedBotIds)
+                                  : [];
+                              openBotContextMenu(b, event.clientX, event.clientY, multiSelectionIds);
                             }}
                             onClick={(e) => {
                               if (botContextSuppressClickRef.current) {
@@ -38771,7 +40802,7 @@ function HomeContent(): React.JSX.Element {
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
-                  mentionRenderBots={composeMentionBotPicks}
+                  mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                 />
                 {copied && (
@@ -38926,7 +40957,7 @@ function HomeContent(): React.JSX.Element {
                     onValueChange={updateComposerDraft}
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
-                    mentionBots={composeMentionBotPicks}
+                    mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   />
                 </div>
               </div>
@@ -38946,7 +40977,7 @@ function HomeContent(): React.JSX.Element {
                 onValueChange={updateComposerDraft}
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
-                mentionBots={composeMentionBotPicks}
+                mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
               />
             )
           ) : null}
@@ -38978,6 +41009,7 @@ function HomeContent(): React.JSX.Element {
         />
       )}
       {renderViewSwitchOverlay()}
+      {renderDesktopFirstRunChecklist()}
       <GlyphTooltipLayer />
     </main>
   );

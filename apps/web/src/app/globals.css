@@ -15,10 +15,13 @@ html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
+  overflow-y: hidden;
   overscroll-behavior: none;
 }
 
 body {
+  height: 100vh;
+  overflow: hidden;
   min-height: 100%;
   display: flex;
   flex-direction: column;
@@ -45,21 +48,12 @@ a {
   color: inherit;
 }
 
-/* Subtle scrollbars that match the command-center aesthetic. */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* Keep scroll behavior but hide visual scrollbar rails/pills globally. */
+* {
+  scrollbar-width: none;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.22);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(128, 128, 128, 0.36);
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }

@@ -85,10 +85,7 @@ export function ComposerBotMentionPopover({
   }, [portalStyle, viewportNudge]);
 
   useLayoutEffect(() => {
-    if (!open || !caretRect || !portalStyle) {
-      setViewportNudge({ x: 0, y: 0 });
-      return;
-    }
+    if (!open || !caretRect || !portalStyle) return;
     const menu = menuRef.current;
     if (!menu) return;
     const r = menu.getBoundingClientRect();
@@ -101,7 +98,12 @@ export function ComposerBotMentionPopover({
     if (r.left + x < pad) x = pad - r.left;
     if (r.bottom > vh - pad) y += vh - pad - r.bottom;
     if (r.top + y < pad) y = pad - r.top;
-    setViewportNudge((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
+    const frame = window.requestAnimationFrame(() => {
+      setViewportNudge((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
   }, [open, caretRect, portalStyle, bots.length]);
 
   const safeHighlight = Math.max(0, Math.min(highlightIndex, Math.max(0, bots.length - 1)));

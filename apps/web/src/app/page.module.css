@@ -482,6 +482,162 @@
   box-shadow: var(--shadow-lg);
 }
 
+.desktopChecklistOverlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 50%, #000 50%);
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.desktopChecklistCard {
+  width: min(720px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.desktopChecklistList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 9px;
+}
+
+.desktopChecklistItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  background: color-mix(in srgb, var(--bg) 64%, var(--bg-surface));
+}
+
+.desktopChecklistIntro {
+  margin: 0;
+  max-width: 34ch;
+}
+
+.desktopChecklistProgressRow {
+  display: grid;
+  gap: 7px;
+}
+
+.desktopChecklistProgressLabel {
+  margin: 0;
+  color: color-mix(in srgb, var(--fg) 90%, var(--fg-muted));
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.desktopChecklistProgressBar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--line) 64%, transparent);
+}
+
+.desktopChecklistProgressFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #8c8bff 72%, var(--accent)) 0%,
+      color-mix(in srgb, #47d8ff 70%, var(--accent)) 100%
+    );
+  transition: width 220ms ease;
+}
+
+.desktopChecklistItemBody {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.desktopChecklistItemTitle {
+  color: var(--fg);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.desktopChecklistItemHint {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.desktopChecklistStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  min-height: 24px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.desktopChecklistStatus[data-state="done"] {
+  color: color-mix(in srgb, var(--ok) 92%, #8effd3 8%);
+  border-color: color-mix(in srgb, var(--ok) 48%, var(--line));
+  background: color-mix(in srgb, var(--ok) 12%, var(--bg));
+}
+
+.desktopChecklistStatus[data-state="checking"] {
+  color: #f2c94c;
+  border-color: color-mix(in srgb, #f2c94c 46%, var(--line));
+  background: color-mix(in srgb, #f2c94c 9%, var(--bg));
+}
+
+.desktopChecklistStatus[data-state="pending"],
+.desktopChecklistStatus[data-state="next"] {
+  color: var(--fg-muted);
+}
+
+.desktopChecklistMeta {
+  display: grid;
+  gap: 3px;
+}
+
+.desktopChecklistMeta p {
+  margin: 0;
+}
+
+.desktopChecklistActions {
+  display: grid;
+  gap: 8px;
+}
+
+.desktopChecklistPrimaryAction {
+  width: 100%;
+}
+
+.desktopChecklistSecondaryActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .viewSwitchOverlaySpinner {
   width: 15px;
   height: 15px;
@@ -622,52 +778,10 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, #ffffff 40%, transparent);
 }
 
-/* Two blurred rainbow halos behind the icon — phase-locked to prevent
-   "desaturation flash" that happens when complementary hues overlap
-   under mix-blend-mode: screen, plus a gentle organic wobble on top.
-
-   THE MATH
-     screen(A, B) = 1 − (1 − A)(1 − B) per channel.
-     Screen of complementary hues (e.g. red + cyan) produces pure white
-     = zero saturation. If ring A and ring B rotate at DIFFERENT speeds
-     or in OPPOSITE directions, their relative phase drifts through all
-     values — including 180° — so every few seconds the whole halo
-     flashes pale grey. To keep saturation constant, the relative hue
-     at every spatial overlap must stay inside the analogous window
-     (≲ 90° apart).
-
-   THE FIX (saturation)
-     Both rings share a steady linear spin (`brandPrismSpin`, 6s). They
-     use the same palette; the outer ring's color map is pre-rotated
-     45° via `from 45deg` on its conic-gradient. Rotating in lockstep
-     preserves that 45° hue offset at every spatial point, forever.
-
-   THE WOBBLE (organic motion)
-     On top of the shared spin, each ring gets its own gentle wobble
-     via `--brand-wobble` — inner ±12°/4.3s, outer ±18°/5.7s. Their
-     relative wobble therefore lives in ±30°, so the live hue distance
-     stays in the 15°–75° range (still analogous, still saturated).
-     Periods 4.3s, 5.7s, 5s (breathe), 6s (spin) are mutually
-     non-commensurate, so the whole pattern never visibly repeats.
-
-   COMPOSITION TRICK
-     Two `transform: rotate()` keyframes on the same element clobber
-     each other — so we animate `--brand-spin` and `--brand-wobble` as
-     typed angles (registered via @property) and compose them in a
-     single `transform: rotate(calc(...))`. That's the only way to
-     stack two independent rotations on one pseudo-element. */
-
-@property --brand-spin {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@property --brand-wobble {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
+/* Icon glow treatment mirrors the web icon art itself: static tri-color
+   ambient light (magenta + amber + cyan) behind the boxed tile. Keeping
+   this non-animated avoids hue drift so the lockup always matches the
+   canonical icon in screenshots and native shells. */
 
 /* Drives the light-mode triangle's continuous hue-rotate drift. Must be
    registered as <angle> so the keyframe animation can interpolate it
@@ -688,98 +802,26 @@
   pointer-events: none;
   z-index: 0;
   mix-blend-mode: screen;
-  transform-origin: center;
-  transform: rotate(calc(var(--brand-spin) + var(--brand-wobble)));
 }
 
 .brandIconShell::before {
-  /* Inner ring — full rainbow anchored at 0°, with a small wobble. */
-  inset: -8px;
-  background: conic-gradient(
-    from 0deg,
-    #ff5f6d 0deg,
-    #ffb703 55deg,
-    #80ffdb 120deg,
-    #38bdf8 190deg,
-    #8b5cf6 260deg,
-    #ec4899 320deg,
-    #ff5f6d 360deg
-  );
-  filter: blur(10px) saturate(1.45);
-  opacity: 0.45;
-  animation:
-    brandPrismSpin 6s linear infinite,
-    brandPrismWobbleInner 4.3s ease-in-out infinite;
+  inset: -9px;
+  background:
+    radial-gradient(circle at 18% 56%, rgba(255, 79, 133, 0.66) 0 30%, transparent 66%),
+    radial-gradient(circle at 82% 16%, rgba(255, 189, 58, 0.52) 0 28%, transparent 62%),
+    radial-gradient(circle at 80% 86%, rgba(50, 220, 255, 0.58) 0 30%, transparent 64%);
+  filter: blur(12px) saturate(1.22);
+  opacity: 0.76;
 }
 
 .brandIconShell::after {
-  /* Outer ring — same palette, anchored at 45°. That 45° offset is the
-     fixed analogous-hue gap that the screen blend will see at every
-     spatial point once the rings are rotating in lockstep. Its wobble
-     is a touch wider than the inner ring's so the outer halo "breathes"
-     a bit more visibly. */
-  inset: -14px;
-  background: conic-gradient(
-    from 45deg,
-    #ff5f6d 0deg,
-    #ffb703 55deg,
-    #80ffdb 120deg,
-    #38bdf8 190deg,
-    #8b5cf6 260deg,
-    #ec4899 320deg,
-    #ff5f6d 360deg
-  );
-  filter: blur(14px) saturate(1.4);
-  opacity: 0.32;
-  animation:
-    brandPrismSpin 6s linear infinite,
-    brandPrismWobbleOuter 5.7s ease-in-out infinite,
-    brandPrismBreathe 5s ease-in-out infinite;
-}
-
-@keyframes brandPrismSpin {
-  from {
-    --brand-spin: 0deg;
-  }
-  to {
-    --brand-spin: 360deg;
-  }
-}
-
-/* Wobble amplitudes must satisfy: amp_inner + amp_outer ≤ 45°, so the
-   relative hue distance at any overlap stays within the analogous
-   window (baseline 45° ± 30° = 15°–75°). */
-@keyframes brandPrismWobbleInner {
-  0%,
-  100% {
-    --brand-wobble: -12deg;
-  }
-  50% {
-    --brand-wobble: 12deg;
-  }
-}
-
-@keyframes brandPrismWobbleOuter {
-  0%,
-  100% {
-    --brand-wobble: -18deg;
-  }
-  50% {
-    --brand-wobble: 18deg;
-  }
-}
-
-/* Shimmer that doesn't touch hue — just opacity. Targets only the outer
-   ring. Period is intentionally not a factor of the spin period so the
-   two never phase-lock into a repeating loop. */
-@keyframes brandPrismBreathe {
-  0%,
-  100% {
-    opacity: 0.32;
-  }
-  50% {
-    opacity: 0.2;
-  }
+  inset: -16px;
+  background:
+    radial-gradient(circle at 22% 58%, rgba(255, 79, 133, 0.4) 0 32%, transparent 70%),
+    radial-gradient(circle at 84% 14%, rgba(255, 189, 58, 0.34) 0 28%, transparent 66%),
+    radial-gradient(circle at 82% 88%, rgba(50, 220, 255, 0.38) 0 30%, transparent 68%);
+  filter: blur(20px) saturate(1.16);
+  opacity: 0.58;
 }
 
 /* Light-mode sibling of the dark-mode halo spin: rather than physically
@@ -932,6 +974,38 @@
 
 .themeLight .brandWordmark {
   filter: brightness(0);
+}
+
+/* Auth lockup defaults to the boxed mark. Light theme swaps this to the
+   static hollow triangle so auth matches the expected black Prism glyph. */
+.authBrandLockup .brandIcon {
+  display: block;
+}
+
+.authBrandLockup .brandIconLight {
+  display: none;
+}
+
+.themeLight .authBrandLockup .brandIcon {
+  display: none;
+}
+
+.themeLight .authBrandLockup .brandIconLight {
+  display: block;
+  color: #0f0f0f;
+  filter: none;
+  animation: none;
+}
+
+.themeLight .hubBrandLockup .brandIcon {
+  display: none;
+}
+
+.themeLight .hubBrandLockup .brandIconLight {
+  display: block;
+  color: #0f0f0f;
+  filter: none;
+  animation: none;
 }
 
 /* Respect reduced-motion: keep the layered halos and light-mode
@@ -2163,20 +2237,6 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--private-chat-color, var(--fg)) 28%, transparent);
 }
 
-/* "Armed" state — user clicked Private chat and the next send will
-   create an incognito conversation. Subtle accent fill, still secondary. */
-.privateChatButtonActive {
-  border-color: var(--private-chat-color, var(--fg));
-  color: var(--private-chat-color, var(--fg));
-  background: color-mix(in srgb, var(--private-chat-color, var(--fg)) 14%, transparent);
-}
-
-.privateChatButtonActive:hover {
-  border-color: var(--private-chat-color, var(--fg));
-  background: color-mix(in srgb, var(--private-chat-color, var(--fg)) 18%, transparent);
-  color: var(--private-chat-color, var(--fg));
-}
-
 /* Light mode: clamp private-chat chroma to a darker ink so pale accents
    (e.g. cyan) remain readable on ivory surfaces. */
 .themeLight .privateChatButton {
@@ -2194,18 +2254,6 @@
 .themeLight .privateChatButton:focus-visible {
   border-color: var(--private-chat-ink);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--private-chat-ink) 24%, transparent);
-}
-
-.themeLight .privateChatButtonActive {
-  border-color: var(--private-chat-ink);
-  color: var(--private-chat-ink);
-  background: color-mix(in srgb, var(--private-chat-ink) 15%, transparent);
-}
-
-.themeLight .privateChatButtonActive:hover {
-  border-color: var(--private-chat-ink);
-  color: var(--private-chat-ink);
-  background: color-mix(in srgb, var(--private-chat-ink) 19%, transparent);
 }
 
 .privateChatButtonIcon {
@@ -4920,6 +4968,7 @@
   overflow-y: auto;
   overflow-x: clip;
   overscroll-behavior-y: none;
+  position: relative;
   /* Keep thread scrolling, but hide browser chrome so no floating rail cuts
      through the scene on desktop/mobile. */
   scrollbar-width: none;
@@ -5256,7 +5305,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .themeLight .emptyStatePrivateHero .brandIcon {
+  display: none;
+}
+
+.themeLight .emptyStatePrivateHero .brandIconLight {
   display: block;
+  color: #0f0f0f;
+  transform: rotate(180deg);
+  filter: none;
+  animation: none;
 }
 
 .emptyStatePrivateHero .brandIcon {
@@ -5376,15 +5433,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font: inherit;
   transition:
     transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 0.18s ease,
-    filter 0.18s ease;
+    box-shadow 0.18s ease;
 }
 
 .emptyStateIconButton:hover,
 .emptyStateIconButton:focus-visible {
   outline: none;
   transform: scale(1.065);
-  filter: brightness(1.12);
   box-shadow: 0 0 0 1px
     color-mix(in srgb, var(--accent-ink, var(--fg)) 22%, transparent);
 }
@@ -5689,6 +5744,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     justify-content: center;
     justify-content: safe center;
   }
+
+  .emptyStateMiniLibraryRail {
+    justify-content: center;
+    justify-content: safe center;
+  }
 }
 
 .emptyStateInfoBand {
@@ -5919,6 +5979,25 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     padding-bottom: 2px;
   }
 
+  .emptyStateMiniLibraryWrap {
+    width: 100%;
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .emptyStateMiniLibraryRail {
+    width: 100%;
+    min-width: 0;
+    padding-bottom: 2px;
+  }
+
+  .emptyStateMiniLibraryThumbButton {
+    width: 52px;
+    height: 52px;
+    border-radius: 11px;
+  }
+
   .emptyStateRecentChip {
     max-width: min(300px, 30vw);
     padding: 8px 14px;
@@ -6007,6 +6086,142 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: none;
   width: 0;
   height: 0;
+}
+
+/* Sandbox hero: compact horizontal strip of saved generated images (separate from recent chat chips). */
+.emptyStateMiniLibraryWrap {
+  width: min(680px, calc(100% - 48px));
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.emptyStateMiniLibraryWrap[data-unfold="true"] {
+  animation: emptyStateRecentRailUnfold 380ms cubic-bezier(0.22, 0.82, 0.2, 1) both;
+  animation-delay: 50ms;
+}
+
+.emptyStateMiniLibraryLabel {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg-muted) 78%, var(--accent-ink, var(--fg)) 22%);
+}
+
+.emptyStateMiniLibraryRail {
+  --mini-lib-edge-fade: min(28px, 18%);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 4px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--mini-lib-edge-fade),
+    #000 calc(100% - var(--mini-lib-edge-fade)),
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--mini-lib-edge-fade),
+    #000 calc(100% - var(--mini-lib-edge-fade)),
+    transparent
+  );
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-size: 100% 100%;
+  -webkit-mask-size: 100% 100%;
+}
+
+.emptyStateMiniLibraryRail::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.emptyStateMiniLibraryTile {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+.emptyStateMiniLibraryThumbButton {
+  position: relative;
+  display: block;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--line) 68%, var(--accent-ink, var(--fg)) 32%);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    0 2px 8px color-mix(in srgb, #000000 12%, transparent);
+  transition:
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 90ms ease-out;
+}
+
+.emptyStateMiniLibraryThumbButton:hover,
+.emptyStateMiniLibraryThumbButton:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-ink, var(--fg)) 52%, var(--line));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 26%, transparent),
+    0 8px 16px color-mix(in srgb, #000000 18%, transparent);
+  transform: translateY(-1px);
+}
+
+.emptyStateMiniLibraryThumbButton:active {
+  transform: translateY(0);
+}
+
+.emptyStateMiniLibraryThumbImg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+}
+
+.emptyStateMiniLibraryTilePrivateBlurred .emptyStateMiniLibraryThumbButton {
+  cursor: pointer;
+}
+
+.emptyStateMiniLibraryTilePrivateBlurred .emptyStateMiniLibraryThumbImg {
+  filter: blur(14px) saturate(0.72);
+  transform: scale(1.05);
+}
+
+.emptyStateMiniLibraryPrivateOverlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 92%, transparent);
+  background: linear-gradient(
+    color-mix(in srgb, #000 48%, transparent),
+    color-mix(in srgb, #000 58%, transparent)
+  );
+  pointer-events: none;
 }
 
 .emptyStateRecentChip {
@@ -6104,6 +6319,25 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     width: 100%;
     min-width: 0;
     padding-bottom: 2px;
+  }
+
+  .emptyStateMiniLibraryWrap {
+    width: 100%;
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .emptyStateMiniLibraryRail {
+    width: 100%;
+    min-width: 0;
+    padding-bottom: 2px;
+  }
+
+  .emptyStateMiniLibraryThumbButton {
+    width: 52px;
+    height: 52px;
+    border-radius: 11px;
   }
 
   .emptyStateRecentChip {
@@ -6221,6 +6455,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
    non-touch sessions and idle states keep their default touch-action. */
 .chatBotPickerFrame[data-touch-active="true"] {
   touch-action: none;
+}
+
+.messages[data-drag-selecting="true"] {
+  cursor: crosshair;
+  user-select: none;
+}
+
+.chatBotSelectionMarquee {
+  position: absolute;
+  pointer-events: none;
+  z-index: 12;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 78%, #ffffff 22%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-ink) 18%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 24%, transparent),
+    0 0 18px color-mix(in srgb, var(--accent-ink) 20%, transparent);
 }
 
 @keyframes botPickerReturnToAll {
@@ -6560,6 +6812,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       var(--bot-color, var(--accent-glow)) 38%,
       transparent
     );
+}
+
+.chatBotTileMarqueeSelected::after {
+  content: "";
+  position: absolute;
+  inset: max(2px, calc(var(--tile-size, 40px) * 0.055));
+  pointer-events: none;
+  z-index: 5;
+  border: 2px solid color-mix(in srgb, var(--accent-ink) 72%, #ffffff 28%);
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--bg) 68%, transparent),
+    0 0 14px color-mix(in srgb, var(--accent-ink) 28%, transparent);
+}
+
+.chatBotPickerPixelGrid .chatBotTileMarqueeSelected::after,
+.chatBotTileSolidSwatch.chatBotTileMarqueeSelected::after {
+  inset: 0;
+  border-width: 1px;
+  border-radius: 0;
 }
 
 /* Sibling shrink — the "inverted Apple Watch" half of the effect.
@@ -14424,22 +14696,49 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .botProfileBirthdayRow {
-  display: flex;
+  display: grid;
   align-items: flex-end;
+  grid-template-columns: minmax(0, 1.35fr) minmax(4.75rem, 0.7fr) minmax(4.25rem, 0.5fr) minmax(4.25rem, 0.5fr);
   gap: 10px;
   min-width: 0;
 }
 
-.botProfileBirthdayDateInput {
-  flex: 1;
+.botProfileBirthdayControl {
+  display: grid;
+  gap: 5px;
   min-width: 0;
+}
+
+.botProfileBirthdayControl span {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.botProfileBirthdayDateInput {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.botProfileBirthdayDateInput:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.botProfileBirthdayYearInput,
+.botProfileBirthdayEraSelect {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.botProfileBirthdayYearInput {
+  text-align: center;
 }
 
 .botProfileBirthdayAgeWrap {
   display: grid;
   gap: 5px;
-  flex-shrink: 0;
-  width: min(5.5rem, 22%);
   min-width: 4.25rem;
 }
 
@@ -16157,6 +16456,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .dangerButton:hover:not(:disabled) {
   background: var(--danger-soft);
+}
+
+.dangerButtonArmed:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 88%, #ffffff 12%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
 .dangerButton:disabled {
@@ -22033,10 +22338,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .privateChatButton:hover:not(:active):not(:focus-visible) {
     border-color: var(--private-chat-color, var(--fg)) !important;
     color: var(--private-chat-color, var(--fg)) !important;
-  }
-
-  .privateChatButtonActive:hover:not(:active):not(:focus-visible) {
-    background: color-mix(in srgb, var(--private-chat-color, var(--fg)) 14%, transparent) !important;
   }
 
   .sidebarSelect:hover:not(:focus) {
