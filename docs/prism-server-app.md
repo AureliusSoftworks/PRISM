@@ -84,6 +84,7 @@ launches the server API plus a hidden web surface for paired clients:
 The first-run window also exposes user-approved setup actions:
 
 - **Start Memory Engine** starts the managed Qdrant sidecar when Prism owns it.
+- **Install Ollama** runs `brew install --cask ollama` when Homebrew is available and Ollama is missing.
 - **Download Model** runs `ollama pull <configured-model>` only after the user
   clicks the button and Ollama is reachable.
 
@@ -126,10 +127,10 @@ acceleration path.
 First-run behavior:
 
 - If Ollama is already installed and reachable, use it.
-- If Ollama is missing, offer a clear "Install Ollama" action that opens or runs
-  the official install path with user consent.
-- If the default model is missing, offer a "Download default model" action with
-  visible progress and disk-size expectations.
+- If Ollama is missing and Homebrew is available, Prism can install Ollama from
+  the launcher.
+- If the default model is missing, Prism can pull required models during setup
+  (or from the "Download default model" action).
 
 Future Settings behavior:
 

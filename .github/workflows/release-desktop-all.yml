@@ -1,0 +1,218 @@
+name: Release Prism Desktop (all platforms)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Desktop release version without leading v (example: 0.2.0)"
+        required: true
+        type: string
+      release_channel:
+        description: "Release channel note (example: github, steam-beta)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-desktop-all-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate desktop release gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce main-only releases
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Desktop release workflow is allowed only from main."
+            exit 1
+          fi
+
+      - name: Validate release inputs
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must follow SemVer core format (example: 0.2.0)."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck workspace
+        run: npm run typecheck
+
+      - name: Lint workspace
+        run: npm run lint
+
+      - name: Ensure changelog contains target version section
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          escaped_version="${RELEASE_VERSION//./\\.}"
+          if ! grep -Eq "^## \\[${escaped_version}\\]( - .+)?$" CHANGELOG.md; then
+            echo "CHANGELOG.md must include a ## [${RELEASE_VERSION}] section before release."
+            exit 1
+          fi
+
+  create-release:
+    name: Create desktop draft release
+    runs-on: ubuntu-latest
+    needs: preflight
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_CHANNEL: ${{ inputs.release_channel }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create or update desktop draft release
+        run: |
+          set -euo pipefail
+          tag="desktop/v${RELEASE_VERSION}"
+          notes_file="/tmp/desktop-notes.md"
+          cat <<EOF > "${notes_file}"
+          ## Prism Desktop Draft Release
+
+          - Branch source: \`main\`
+          - Shared version: \`v${RELEASE_VERSION}\`
+          - Channel note: \`${RELEASE_CHANNEL:-github}\`
+
+          ### Expected assets
+          - \`Prism-Desktop-v${RELEASE_VERSION}.dmg\`
+          - \`Prism-Desktop-Setup-v${RELEASE_VERSION}-win-x64.exe\`
+          - \`Prism-Desktop-Setup-v${RELEASE_VERSION}-win-x64.msi\` (optional)
+          - \`Prism-Desktop-v${RELEASE_VERSION}-linux-x64.AppImage\`
+          EOF
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release edit "${tag}" \
+              --draft=true \
+              --title "Prism Desktop v${RELEASE_VERSION}" \
+              --notes-file "${notes_file}" \
+              --target "${GITHUB_SHA}"
+          else
+            gh release create "${tag}" \
+              --draft \
+              --target "${GITHUB_SHA}" \
+              --title "Prism Desktop v${RELEASE_VERSION}" \
+              --notes-file "${notes_file}"
+          fi
+
+  package-macos:
+    name: Package macOS desktop
+    runs-on: macos-latest
+    needs: create-release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package macOS artifact
+        run: |
+          chmod +x scripts/package-desktop-macos.sh
+          scripts/package-desktop-macos.sh "${RELEASE_VERSION}"
+
+      - name: Upload macOS asset to desktop release
+        run: |
+          gh release upload "desktop/v${RELEASE_VERSION}" \
+            "dist-desktop/Prism-Desktop-v${RELEASE_VERSION}.dmg" \
+            --clobber
+
+  package-linux:
+    name: Package Linux desktop
+    runs-on: ubuntu-latest
+    needs: create-release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package Linux artifact
+        run: |
+          chmod +x scripts/package-desktop-linux.sh
+          scripts/package-desktop-linux.sh "${RELEASE_VERSION}"
+
+      - name: Upload Linux asset to desktop release
+        run: |
+          gh release upload "desktop/v${RELEASE_VERSION}" \
+            "dist-desktop/Prism-Desktop-v${RELEASE_VERSION}-linux-x64.AppImage" \
+            --clobber
+
+  package-windows:
+    name: Package Windows desktop
+    runs-on: windows-latest
+    needs: create-release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package Windows artifact
+        shell: pwsh
+        run: |
+          pwsh scripts/package-desktop-windows.ps1 -Version $env:RELEASE_VERSION
+
+      - name: Upload Windows assets to desktop release
+        shell: pwsh
+        run: |
+          if (Test-Path "dist-desktop/Prism-Desktop-Setup-v$env:RELEASE_VERSION-win-x64.exe") {
+            gh release upload "desktop/v$env:RELEASE_VERSION" "dist-desktop/Prism-Desktop-Setup-v$env:RELEASE_VERSION-win-x64.exe" --clobber
+          }
+          if (Test-Path "dist-desktop/Prism-Desktop-Setup-v$env:RELEASE_VERSION-win-x64.msi") {
+            gh release upload "desktop/v$env:RELEASE_VERSION" "dist-desktop/Prism-Desktop-Setup-v$env:RELEASE_VERSION-win-x64.msi" --clobber
+          }

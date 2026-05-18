@@ -7,9 +7,9 @@ on:
         description: "Shared release version without leading v (example: 0.2.0)"
         required: true
         type: string
-      client_testflight_build:
-        description: "Required App Store Connect/TestFlight build reference"
-        required: true
+      desktop_release_channel:
+        description: "Optional desktop release channel note (example: github, steam-beta)"
+        required: false
         type: string
 
 permissions:
@@ -34,15 +34,11 @@ jobs:
       - name: Validate release inputs
         env:
           RELEASE_VERSION: ${{ inputs.version }}
-          CLIENT_TESTFLIGHT_BUILD: ${{ inputs.client_testflight_build }}
+          DESKTOP_RELEASE_CHANNEL: ${{ inputs.desktop_release_channel }}
         run: |
           set -euo pipefail
           if ! [[ "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "version must follow SemVer core format (example: 0.2.0)."
-            exit 1
-          fi
-          if [ -z "$(printf '%s' "${CLIENT_TESTFLIGHT_BUILD}" | tr -d '[:space:]')" ]; then
-            echo "client_testflight_build is required for private-lane traceability."
             exit 1
           fi
 
@@ -82,7 +78,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ inputs.version }}
-      CLIENT_TESTFLIGHT_BUILD: ${{ inputs.client_testflight_build }}
+      DESKTOP_RELEASE_CHANNEL: ${{ inputs.desktop_release_channel }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,20 +95,18 @@ jobs:
             -czf "release-artifacts/server/prism-server-v${RELEASE_VERSION}-bundle.tar.gz" \
             .
 
-      - name: Build private client lane manifest
+      - name: Build desktop lane manifest
         run: |
           mkdir -p release-artifacts/client
-          cat <<EOF > "release-artifacts/client/prism-client-v${RELEASE_VERSION}-private-lane.txt"
-          Prism Client private distribution lane
-          =====================================
+          cat <<EOF > "release-artifacts/client/prism-desktop-v${RELEASE_VERSION}-lane.txt"
+          Prism Desktop release lane
+          ==========================
           Version: v${RELEASE_VERSION}
-          Channel: Private TestFlight (invite-only)
-          Discoverability: Not publicly listed
-          Build reference: ${CLIENT_TESTFLIGHT_BUILD:-not-provided}
+          Channel: ${DESKTOP_RELEASE_CHANNEL:-github}
 
           Note:
-          - This repository publishes server release artifacts.
-          - Native iOS/macOS binaries are distributed through private TestFlight.
+          - Transitional workflow that still creates split server/client tags.
+          - Customer-facing positioning should use Prism Desktop naming.
           EOF
 
       - name: Create or update draft releases
@@ -161,16 +155,16 @@ jobs:
           EOF
 
           cat <<EOF > /tmp/client-notes.md
-          ## Prism Client Private Lane
+          ## Prism Client Draft Release (Transitional)
 
           - Branch source: \`main\`
           - Shared version: \`v${RELEASE_VERSION}\`
-          - Distribution: Private TestFlight lane (not public App Store listing)
-          - Build reference: \`${CLIENT_TESTFLIGHT_BUILD:-not-provided}\`
+          - Desktop release channel note: \`${DESKTOP_RELEASE_CHANNEL:-github}\`
+          - This split client tag is transitional while Prism Desktop lanes are being unified.
           EOF
 
           ensure_release "$server_tag" "Prism Server v${RELEASE_VERSION}" /tmp/server-notes.md
-          ensure_release "$client_tag" "Prism Client v${RELEASE_VERSION} (Private Lane)" /tmp/client-notes.md
+          ensure_release "$client_tag" "Prism Client v${RELEASE_VERSION} (Transitional)" /tmp/client-notes.md
 
       - name: Upload release assets
         run: |
@@ -179,5 +173,5 @@ jobs:
             "release-artifacts/server/prism-server-v${RELEASE_VERSION}-bundle.tar.gz" \
             --clobber
           gh release upload "client/v${RELEASE_VERSION}" \
-            "release-artifacts/client/prism-client-v${RELEASE_VERSION}-private-lane.txt" \
+            "release-artifacts/client/prism-desktop-v${RELEASE_VERSION}-lane.txt" \
             --clobber

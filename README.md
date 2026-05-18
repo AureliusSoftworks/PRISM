@@ -71,10 +71,22 @@ The repo today implements the API, web hub, memory engine, and provider wiring o
 
 Tiles or ideas such as **Feed**, **Games**, **Polling**, **Story**, **Surf**, and **Arena** may appear in the UI as disabled previews or docs-only concepts. Treat them as **exploratory**, not shipped product, unless explicitly called out in release notes.
 
-## Get Prism Server (GitHub Releases)
+## Get Prism Desktop (GitHub Releases)
 
-The **`server/v<version>`** draft or published release lists **primary** server
-artifacts for end users (replace `<version>` with the semver, e.g. `0.1.0`):
+Prism is moving to a **single desktop app** distribution model (one install
+that includes the full local stack). During migration, some release assets are
+still emitted through transitional `server/v*` and `client/v*` lanes.
+
+Primary target desktop artifacts:
+
+| Platform | Target file on release |
+|----------|------------------------|
+| macOS | `Prism-Desktop-v<version>.dmg` |
+| Windows (installer) | `Prism-Desktop-Setup-v<version>-win-x64.exe` |
+| Windows (portable folder) | `Prism-Desktop-v<version>-win-x64-portable.zip` |
+| Linux x86_64 | `Prism-Desktop-v<version>-linux-x64.tar.gz` |
+
+Transitional server-lane artifacts currently still in use in automation:
 
 | Platform | File on the release |
 |----------|----------------------|
@@ -92,12 +104,11 @@ Workflows: draft + bundle asset from **Release Pipeline (dev -> main)**; platfor
 builds from **Release Prism Server (all platforms)** (one run) or individual
 `release-server-*.yml` workflows. See [docs/release-process.md](docs/release-process.md).
 
-## Get Prism Client (paid)
+## Legacy Prism Client Lane (transitional)
 
-The **`client/v<version>`** GitHub Release is the paid client download lane.
-Today only the macOS client is wired up; Windows and Linux desktop clients
-are future scaffolds, and the iPhone experience is a PWA (no download — see
-[Prism on iPhone (PWA)](#prism-on-iphone-pwa) below).
+The old **`client/v<version>`** release lane exists as migration scaffolding
+while desktop packaging is being unified. It should not be treated as the
+long-term product split.
 
 | Platform | File on the release | Notes |
 |----------|----------------------|-------|
@@ -143,15 +154,13 @@ python3 scripts/render-app-icons.py
 
 Prism is an indie product. Distribution is direct, not via app stores:
 
-- **Prism Server** — open-source local runtime for Mac, Windows, or Linux,
-  free download from GitHub Releases.
-- **Prism Client** — paid frontend, also distributed from GitHub Releases.
-  Today: macOS DMG (Developer ID signed and notarized). Future: Windows
-  installer + portable ZIP, Linux tarball.
-- **Prism on iPhone** — delivered as a Progressive Web App served by Prism
-  Server. Open the server URL in Safari and "Add to Home Screen" for a
-  springboard shortcut that launches in kiosk mode. **No App Store, no
+- **Prism Desktop** — paid desktop app for macOS/Windows/Linux that includes
+  the local stack in one install.
+- **Prism on iPhone** — delivered as a Progressive Web App (PWA). Open the
+  server URL in Safari and "Add to Home Screen." **No App Store, no
   TestFlight, no native iOS binary.**
+- **Legacy split artifacts** (`Prism Server` + `Prism Client`) remain
+  transitional while release automation is being migrated.
 
 Purchases happen through **Patreon** (monthly subscription, ongoing updates
 included) or a separate one-time purchase store (Gumroad / Lemonsqueezy /
@@ -172,6 +181,9 @@ Planning and operator docs:
 - [Distribution model](docs/distribution-model.md) — positioning + licensing
 - [Technical design](DESIGN.md) — implemented stack, memory pipeline, provider contracts, privacy invariants
 - [Release process (dev -> main)](docs/release-process.md) — operator runbook
+- [Prism Desktop app build and packaging](docs/prism-desktop-app.md)
+- [Desktop runtime layout](docs/desktop-runtime-layout.md) — staged API/web runtime shape and data/log paths
+- [Steam desktop release lane](docs/steam-desktop-release.md)
 - [Prism Server.app build and release](docs/prism-server-app.md)
 - [Prism.app client build and pairing](docs/prism-client-app.md)
 - [Prism iPhone client (PWA + archived native)](docs/prism-ios-client.md)
@@ -210,8 +222,9 @@ apps/server-mac/DerivedData/Build/Products/Debug/Prism Server.app
 ```
 
 The user-facing target is plug-and-play: Prism Server.app can run a managed
-Qdrant sidecar (or use an external Qdrant URL), detect existing Ollama/model
-installs, and guide any missing setup from a clear first-run screen. See
+Qdrant sidecar (or use an external Qdrant URL), auto-install Ollama via
+Homebrew when available, pull missing required models, and guide any remaining
+setup from a clear first-run screen. See
 [docs/prism-server-app.md](docs/prism-server-app.md) for setup, signing,
 notarization, and release steps.
 
@@ -224,8 +237,9 @@ runtime, bundled `node.exe`, and bundled `qdrant.exe` under
 `%LOCALAPPDATA%\Prism`.
 
 The tray app mirrors the Mac server flow: Setup, readiness checks, managed
-Memory Engine startup, local Ollama/model detection, logs, start/stop/restart,
-and pairing-code generation for native clients. It also adds a default-on
+Memory Engine startup, one-click Ollama install via winget (when available),
+missing-model downloads, logs, start/stop/restart, and pairing-code generation
+for native clients. It also adds a default-on
 "Start Prism Server when I sign in" installer option and a normal Apps &
 Features uninstaller. See [docs/prism-server-app-windows.md](docs/prism-server-app-windows.md).
 
@@ -470,6 +484,35 @@ docker compose restart api
 # Qdrant data lives in the `qdrant_data` Docker volume
 docker run --rm -v localai-local_qdrant_data:/data -v $(pwd):/backup alpine tar czf /backup/qdrant-backup.tar.gz /data
 ```
+
+## Factory reset (local)
+
+Prism includes a terminal factory reset command for a clean local slate.
+
+macOS / Linux shell:
+
+```bash
+prism reset
+prism reset --force
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\prism.ps1 reset
+.\scripts\prism.ps1 reset --force
+```
+
+What the reset removes:
+- local account/chat SQLite data (`localai.db`, `localai.db-wal`, `localai.db-shm`)
+- generated image files
+- local Qdrant storage folders
+- local runtime logs/cache folders
+
+What it intentionally keeps:
+- launcher configuration files (for example `.env`)
+
+By default, `prism reset` asks you to type `RESET` before deleting anything. Use `--force` only for non-interactive scripts.
 
 ## Privacy posture
 

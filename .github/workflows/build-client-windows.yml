@@ -1,7 +1,7 @@
 name: Build Prism Client Windows (artifact only)
 
 # Placeholder until `apps/client-windows` is scaffolded. Does not upload to
-# GitHub Releases; retail distribution will follow the Windows store path.
+# GitHub Releases; unified Prism Desktop workflow supersedes this lane.
 
 on:
   workflow_dispatch:

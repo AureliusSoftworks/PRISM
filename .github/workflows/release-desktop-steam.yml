@@ -1,0 +1,118 @@
+name: Release Prism Desktop to Steam (gated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Desktop release version without leading v (example: 0.2.0)"
+        required: true
+        type: string
+      steam_app_id:
+        description: "Steam App ID"
+        required: true
+        type: string
+      windows_depot_id:
+        description: "Steam Windows depot ID"
+        required: true
+        type: string
+      macos_depot_id:
+        description: "Steam macOS depot ID"
+        required: true
+        type: string
+      linux_depot_id:
+        description: "Steam Linux depot ID"
+        required: true
+        type: string
+      steam_branch:
+        description: "Steam branch to set live (example: prerelease)"
+        required: false
+        type: string
+      smoke_test_confirmation:
+        description: "Type YES if all desktop artifacts were manually smoke-tested"
+        required: true
+        type: string
+      publish_to_steam:
+        description: "If true, upload with steamcmd after export"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-desktop-steam-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  export-and-optional-upload:
+    name: Export desktop depots and optional upload
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      STEAM_BRANCH: ${{ inputs.steam_branch }}
+      STEAM_APP_ID: ${{ inputs.steam_app_id }}
+      WINDOWS_DEPOT_ID: ${{ inputs.windows_depot_id }}
+      MACOS_DEPOT_ID: ${{ inputs.macos_depot_id }}
+      LINUX_DEPOT_ID: ${{ inputs.linux_depot_id }}
+      STEAM_BUILDER_USERNAME: ${{ secrets.STEAM_BUILDER_USERNAME }}
+      STEAM_BUILDER_PASSWORD: ${{ secrets.STEAM_BUILDER_PASSWORD }}
+    steps:
+      - name: Validate smoke-test gate
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.smoke_test_confirmation }}" != "YES" ]; then
+            echo "Smoke-test gate not satisfied. Provide smoke_test_confirmation=YES."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Download desktop release assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist-desktop
+          gh release download "desktop/v${RELEASE_VERSION}" \
+            --dir dist-desktop \
+            --pattern "Prism-Desktop-*"
+
+      - name: Export Steam depot content and VDF files
+        run: |
+          set -euo pipefail
+          node scripts/steam/export-desktop-depots.mjs \
+            --version "${RELEASE_VERSION}" \
+            --app-id "${STEAM_APP_ID}" \
+            --windows-depot-id "${WINDOWS_DEPOT_ID}" \
+            --mac-depot-id "${MACOS_DEPOT_ID}" \
+            --linux-depot-id "${LINUX_DEPOT_ID}" \
+            --branch "${STEAM_BRANCH:-prerelease}" \
+            --artifacts-dir "dist-desktop" \
+            --output-dir "steam-build"
+
+      - name: Install steamcmd
+        if: ${{ inputs.publish_to_steam }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y steamcmd
+
+      - name: Upload to Steam
+        if: ${{ inputs.publish_to_steam }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/steam/run-steam-build.sh
+          STEAMCMD_BIN="/usr/games/steamcmd" scripts/steam/run-steam-build.sh "${STEAM_APP_ID}" "steam-build"
+
+      - name: Upload exported Steam build bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-desktop-steam-build-v${{ inputs.version }}
+          path: steam-build
