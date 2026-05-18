@@ -10,6 +10,9 @@ apps/web/.next/
 apps/web/out/
 apps/api/data/
 *.log
+.qdrant-initialized
+apps/api/.qdrant-initialized
+runtime/
 
 # Local Overseer operational artifacts
 .cursor/agents/
