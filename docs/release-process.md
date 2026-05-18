@@ -1,9 +1,8 @@
 # Prism Release Process
 
-This runbook defines Prism's release operator flow while we migrate from split
-server/client artifacts to a unified desktop app.
+This runbook defines the desktop-only release flow.
 
-Core branch policy remains unchanged:
+Core branch policy:
 - `dev` is the integration branch.
 - `main` is release-only.
 
@@ -13,7 +12,7 @@ wins.
 
 ## Release Channel Semantics
 
-- GitHub **draft** releases are staging slots for upload + verification.
+- GitHub **draft** releases are staging slots for upload and verification.
 - Drafts are published manually after smoke checks.
 - No App Store/TestFlight review step exists in this model.
 
@@ -27,71 +26,57 @@ Before promoting to `main`, complete:
 4. Normal reviewed merge from `dev` into `main`
 
 Automation support:
-- `.github/workflows/promote-dev-to-main.yml` enforces `head_ref == dev`.
-- The same workflow reruns workspace `typecheck` + `lint`.
+- `.github/workflows/promote-dev-to-main.yml` enforces `head_ref == dev`
+- The same workflow reruns workspace `typecheck` + `lint`
 
-## Transitional Workflow State
+## Release Workflows (Canonical)
 
-Today, release workflows still produce split lanes (`server/v*`, `client/v*`).
-Treat these as **transitional packaging plumbing**, not final customer-facing
-product language.
+- `.github/workflows/release-main.yml` — top-level release entrypoint
+- `.github/workflows/release-desktop-all.yml` — builds and uploads desktop artifacts
 
-Current workflow files:
-- `.github/workflows/release-main.yml`
-- `.github/workflows/release-server-all.yml`
-- `.github/workflows/release-desktop-all.yml` (new unified desktop matrix)
-- `.github/workflows/release-server-mac.yml`
-- `.github/workflows/release-server-windows.yml`
-- `.github/workflows/release-server-linux.yml`
-- `.github/workflows/build-client-mac.yml`
+`release-main.yml` dispatches the desktop matrix workflow and should be treated
+as the canonical operator trigger.
 
-Migration target:
-- A single Prism Desktop release lane that emits macOS/Windows/Linux artifacts
-  from one product vocabulary.
+## Inputs and Guards
 
-## Current Inputs and Guards
-
-Current release dispatch uses:
+Release dispatch inputs:
 - `version` (`x.y.z`)
-- `client_testflight_build` (legacy placeholder input; transitional only)
+- `desktop_release_channel` (optional note in draft release)
 
 Validation guards:
-- `version` must match semver core format.
-- `CHANGELOG.md` must include `## [<version>]`.
-- workflow dispatch must run from `main`.
+- `version` must match semver core format
+- `CHANGELOG.md` must include `## [<version>]`
+- workflow dispatch must run from `main`
 
-## Unified Desktop Target Artifacts
+## Desktop Artifacts
 
-Target customer-facing outputs:
+Customer-facing outputs:
 - `Prism-Desktop-v<version>.dmg` (macOS)
-- `Prism-Desktop-Setup-v<version>-win-x64.exe` (+ optional portable ZIP)
-- `Prism-Desktop-v<version>-linux-x64.tar.gz` (AppImage follow-up)
+- `Prism-Desktop-Setup-v<version>-win-x64.exe` (+ optional MSI)
+- `Prism-Desktop-v<version>-linux-x64.AppImage`
 
-During migration, existing server/client filenames may still be emitted by
-legacy workflows. Operator release notes should map them to "Prism Desktop
-transitional packaging" until naming is fully switched.
+Release tag:
+- `desktop/v<version>`
 
 ## Verification and Publish Gates
 
 Before publishing any draft:
 - install and launch each desktop artifact on a clean environment
-- verify internal API/web startup and first-run dependency checks
+- verify local API/web startup and first-run dependency checks
 - verify release notes
-- verify entitlement/licensing flow for paid desktop use path
+- verify entitlement/licensing flow for paid desktop path
 
 Publish is an explicit human decision after these checks.
 
-## /🏗️ build Operator Checklist
+## Operator Checklist
 
 Use this order on `main` after merging `dev`:
 
-1. Run preflight quality gates (`npm run typecheck`, `npm run lint`, plus
-   release-candidate tests).
-2. Dispatch release draft workflow(s) with target `version`.
-3. Build/upload platform artifacts.
-4. Smoke-test each platform artifact.
-5. Publish draft when validated.
-6. Post release links to distribution channels (Patreon and/or storefront).
+1. Run preflight quality gates (`npm run typecheck`, `npm run lint`, plus release-candidate tests)
+2. Dispatch **Release Pipeline (desktop-only)** with target `version`
+3. Wait for matrix packaging and artifact uploads to finish
+4. Smoke-test each platform artifact
+5. Publish draft when validated
+6. Post release links to distribution channels (Patreon/storefront)
 
-Do not merge, tag, publish, or trigger store upload without explicit human
-confirmation in chat.
+Do not merge, tag, publish, or trigger store upload without explicit human confirmation in chat.

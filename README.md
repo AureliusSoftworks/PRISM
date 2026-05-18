@@ -73,48 +73,26 @@ Tiles or ideas such as **Feed**, **Games**, **Polling**, **Story**, **Surf**, an
 
 ## Get Prism Desktop (GitHub Releases)
 
-Prism is moving to a **single desktop app** distribution model (one install
-that includes the full local stack). During migration, some release assets are
-still emitted through transitional `server/v*` and `client/v*` lanes.
+Prism now ships as a **single standalone desktop app** per OS (one install
+that includes the full local stack). The canonical release tag is:
 
-Primary target desktop artifacts:
+`desktop/v<version>`
+
+Desktop artifacts:
 
 | Platform | Target file on release |
 |----------|------------------------|
 | macOS | `Prism-Desktop-v<version>.dmg` |
 | Windows (installer) | `Prism-Desktop-Setup-v<version>-win-x64.exe` |
-| Windows (portable folder) | `Prism-Desktop-v<version>-win-x64-portable.zip` |
-| Linux x86_64 | `Prism-Desktop-v<version>-linux-x64.tar.gz` |
+| Windows (optional) | `Prism-Desktop-Setup-v<version>-win-x64.msi` |
+| Linux x86_64 | `Prism-Desktop-v<version>-linux-x64.AppImage` |
 
-Transitional server-lane artifacts currently still in use in automation:
+Workflow path:
+- Run **Release Pipeline (desktop-only)** from `main`.
+- It dispatches **Release Prism Desktop (all platforms)**.
+- Publish the draft manually after smoke checks.
 
-| Platform | File on the release |
-|----------|----------------------|
-| macOS | `Prism-Server-v<version>.dmg` |
-| Windows (installer) | `Prism-Server-Setup-v<version>-win-x64.exe` |
-| Windows (portable folder) | `Prism-Server-v<version>-win-x64-portable.zip` |
-| Linux x86_64 | `Prism-Server-v<version>-linux-x64.tar.gz` |
-
-**Developers / audit:** `prism-server-v<version>-bundle.tar.gz` is a **trimmed
-source tree export** (not a turnkey runtime). Use it for inspection, custom
-builds, or advanced Linux-from-source workflows — not as the default Linux
-download (use the Linux row above).
-
-Workflows: draft + bundle asset from **Release Pipeline (dev -> main)**; platform
-builds from **Release Prism Server (all platforms)** (one run) or individual
-`release-server-*.yml` workflows. See [docs/release-process.md](docs/release-process.md).
-
-## Legacy Prism Client Lane (transitional)
-
-The old **`client/v<version>`** release lane exists as migration scaffolding
-while desktop packaging is being unified. It should not be treated as the
-long-term product split.
-
-| Platform | File on the release | Notes |
-|----------|----------------------|-------|
-| macOS | `Prism-v<version>.dmg` | Developer ID signed and notarized; signing pipeline is a follow-up. |
-| iPhone | (none) | Add to Home Screen from Safari pointed at your Prism Server. |
-| Windows / Linux | (none yet) | Future scaffolds; see [docs/distribution-model.md](docs/distribution-model.md). |
+See [docs/release-process.md](docs/release-process.md).
 
 Pairing requires a **license code** issued through Patreon (subscription) or
 the one-time purchase store. See
@@ -157,10 +135,8 @@ Prism is an indie product. Distribution is direct, not via app stores:
 - **Prism Desktop** — paid desktop app for macOS/Windows/Linux that includes
   the local stack in one install.
 - **Prism on iPhone** — delivered as a Progressive Web App (PWA). Open the
-  server URL in Safari and "Add to Home Screen." **No App Store, no
+  local Prism URL in Safari and "Add to Home Screen." **No App Store, no
   TestFlight, no native iOS binary.**
-- **Legacy split artifacts** (`Prism Server` + `Prism Client`) remain
-  transitional while release automation is being migrated.
 
 Purchases happen through **Patreon** (monthly subscription, ongoing updates
 included) or a separate one-time purchase store (Gumroad / Lemonsqueezy /
@@ -184,8 +160,6 @@ Planning and operator docs:
 - [Prism Desktop app build and packaging](docs/prism-desktop-app.md)
 - [Desktop runtime layout](docs/desktop-runtime-layout.md) — staged API/web runtime shape and data/log paths
 - [Steam desktop release lane](docs/steam-desktop-release.md)
-- [Prism Server.app build and release](docs/prism-server-app.md)
-- [Prism.app client build and pairing](docs/prism-client-app.md)
 - [Prism iPhone client (PWA + archived native)](docs/prism-ios-client.md)
 - [Mobile API contract](docs/mobile-api-contract.md)
 - [Licensing and brand model](docs/licensing-and-brand.md)
@@ -197,12 +171,10 @@ Historical (App Store path, no longer the active plan):
 - [App Store review checklist](docs/app-store-review.md) — retained for archive
 - [Native client MVP](docs/native-client-mvp.md) — original native iOS scope, now superseded by the PWA approach
 
-## Prism Server.app (macOS)
+## Archived: Prism Server.app (macOS)
 
-Prism Server.app is the native macOS Dock app for the server runtime. It
-packages the Node API, managed Memory Engine, and local setup flow into a
-signed/notarized desktop app distributed as a DMG from GitHub Releases. It
-does not expose the web dashboard as the user-facing product path.
+This section is retained for migration history only. The active shipping path
+is Prism Desktop (`desktop/v*`) and not the legacy server wrapper.
 
 Local build:
 
@@ -228,13 +200,10 @@ setup from a clear first-run screen. See
 [docs/prism-server-app.md](docs/prism-server-app.md) for setup, signing,
 notarization, and release steps.
 
-## Prism Server for Windows
+## Archived: Prism Server for Windows
 
-Prism Server for Windows is the native tray-app server runtime distributed as a
-per-user Inno Setup wizard. It installs `Prism Server.exe`, the staged Node
-runtime, bundled `node.exe`, and bundled `qdrant.exe` under
-`%LOCALAPPDATA%\Programs\Prism Server`, while config/data/logs live under
-`%LOCALAPPDATA%\Prism`.
+This section is retained for migration history only. The active shipping path
+is Prism Desktop (`desktop/v*`) and not the legacy server wrapper.
 
 The tray app mirrors the Mac server flow: Setup, readiness checks, managed
 Memory Engine startup, one-click Ollama install via winget (when available),
@@ -245,25 +214,18 @@ Features uninstaller. See [docs/prism-server-app-windows.md](docs/prism-server-a
 
 **On a Mac:** you cannot compile the WPF app locally; run **Actions → Build Windows server portable (artifact)** (or `scripts/trigger-windows-portable-build.sh`) to get the same portable ZIP the release pipeline uses, then copy it to the PC.
 
-Release builds use `.github/workflows/release-server-windows.yml`
-and upload to the same `server/v<version>` GitHub Release as the Mac DMG.
 The existing `start.bat` remains as a legacy/dev fallback for headless Windows
 startup, not the primary user-facing Windows distribution path.
 
-## Prism Server for Linux
+## Archived: Prism Server for Linux
 
-Headless **x86_64** bundle with vendored Node and Qdrant: download
-`Prism-Server-v<version>-linux-x64.tar.gz` from the `server/v<version>` release,
-extract, optionally run `./qdrant` in a second terminal, then `./start.sh`.
-Produced by `.github/workflows/release-server-linux.yml` (after the draft
-`server/v*` release exists). Local packaging: `scripts/package-linux-server-release.sh 0.1.0`.
+This section is retained for migration history only. The active shipping path
+is Prism Desktop (`desktop/v*`) and not the legacy server wrapper.
 
-## Prism.app (macOS Client)
+## Archived: Prism.app (macOS Client)
 
-Prism.app is the native client shell for the paid app experience. The current
-Debug build pairs with a running Prism Server.app by accepting a short code from
-the server window, storing the returned session locally, and loading the paired
-server's `/prism` interface in a WebKit kiosk window.
+This section is retained for migration history only. The active shipping path
+is Prism Desktop (`desktop/v*`) and not the legacy split client shell.
 
 Local build:
 
@@ -284,7 +246,8 @@ apps/client-mac/DerivedData/Build/Products/Debug/Prism.app
 
 ## Prism on iPhone (PWA)
 
-The iPhone shipping path is a Progressive Web App served by Prism Server.
+The iPhone shipping path is a Progressive Web App served by the local Prism
+runtime.
 Users open the server URL in **Safari**, complete the standard pairing flow
 (server URL + pairing code + license code), then tap **Share -> Add to Home
 Screen** to install a springboard launcher that opens Prism in a chromeless,

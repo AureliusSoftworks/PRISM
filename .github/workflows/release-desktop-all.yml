@@ -11,6 +11,16 @@ on:
         description: "Release channel note (example: github, steam-beta)"
         required: false
         type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Desktop release version without leading v (example: 0.2.0)"
+        required: true
+        type: string
+      release_channel:
+        description: "Release channel note (example: github, steam-beta)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -50,8 +60,19 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Rust tools
+        run: |
+          rustc --version
+          cargo --version
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Enforce desktop-only release vocabulary
+        run: node scripts/check-desktop-only-release.mjs
 
       - name: Typecheck workspace
         run: npm run typecheck

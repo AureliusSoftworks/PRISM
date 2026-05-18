@@ -1,5 +1,8 @@
 # Prism Server for Windows
 
+> Archived reference only: Prism now ships as standalone Prism Desktop. This
+> runbook is non-canonical and retained only for historical migration context.
+
 Prism Server for Windows is the native tray-app wrapper for the Prism server runtime. It mirrors the macOS Prism Server.app experience while using a normal Windows installer wizard and per-user install location.
 
 ## Product Experience Target

@@ -1,5 +1,8 @@
 # Prism Server.app
 
+> Archived reference only: Prism now ships as standalone Prism Desktop. This
+> runbook is non-canonical and retained only for historical migration context.
+
 Prism Server.app is the native macOS Dock app for the Prism server runtime. It
 wraps the existing Node API into a desktop app that can be signed, notarized,
 and distributed as a DMG.
