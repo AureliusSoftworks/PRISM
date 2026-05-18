@@ -18,6 +18,18 @@ npm run desktop:dev
 
 This stages runtime artifacts into `runtime/` and starts Tauri in dev mode.
 
+## Windows Packaging Requirements
+
+Windows desktop packaging requires:
+
+- Node 22
+- Rust toolchain (`rustc`, `cargo`)
+- MSVC build tools available on the host
+- `qdrant.exe` available from either:
+  - `PRISM_QDRANT_WINDOWS_PATH`, or
+  - `apps/server-windows/src/Resources/qdrant/qdrant.exe`, or
+  - `apps/server-windows/Resources/qdrant.exe`
+
 ## Packaging Commands
 
 From repo root:
@@ -33,6 +45,18 @@ Output directory:
 ```text
 dist-desktop/
 ```
+
+Expected Windows artifact names:
+
+- `Prism-Desktop-Setup-v<version>-win-x64.exe`
+- `Prism-Desktop-Setup-v<version>-win-x64.msi` (optional)
+
+## CI Release Entry
+
+Desktop release automation is:
+
+- `.github/workflows/release-main.yml` (entrypoint)
+- `.github/workflows/release-desktop-all.yml` (desktop matrix)
 
 ## Optional Signing/Notarization Hooks
 

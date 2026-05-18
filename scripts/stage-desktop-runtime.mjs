@@ -61,6 +61,10 @@ async function copyFile(source, destination) {
   await fs.copyFile(source, destination);
 }
 
+async function fileExists(target) {
+  return fs.stat(target).then(() => true).catch(() => false);
+}
+
 async function main() {
   const { outputDir, skipBuild } = parseArgs(process.argv.slice(2));
   if (!outputDir) {
@@ -83,14 +87,14 @@ async function main() {
   await ensureDir(path.join(resolvedOutputDir, "qdrant"));
 
   const nestedApiEntry = path.join(repoRoot, "apps", "api", "dist", "apps", "api", "src", "server.js");
-  const apiDistSource = (await fs.stat(nestedApiEntry).then(() => true).catch(() => false))
+  const apiDistSource = (await fileExists(nestedApiEntry))
     ? path.join(repoRoot, "apps", "api", "dist", "apps", "api", "src")
     : path.join(repoRoot, "apps", "api", "dist");
 
   console.log("Staging API runtime...");
   await copyDir(apiDistSource, path.join(resolvedOutputDir, "apps", "api", "dist"));
   const stagedApiEntry = path.join(resolvedOutputDir, "apps", "api", "dist", "server.js");
-  const apiEntryExists = await fs.stat(stagedApiEntry).then(() => true).catch(() => false);
+  const apiEntryExists = await fileExists(stagedApiEntry);
   if (!apiEntryExists) {
     throw new Error(`Missing staged API entrypoint: ${stagedApiEntry}`);
   }
@@ -125,16 +129,32 @@ async function main() {
   }
 
   console.log("Staging Qdrant runtime...");
+  let stagedQdrantEntrypoint = "qdrant/qdrant";
   if (process.platform === "win32") {
-    const source = path.join(repoRoot, "apps", "server-windows", "Resources", "qdrant.exe");
-    const exists = await fs.stat(source).then(() => true).catch(() => false);
-    if (!exists) {
-      throw new Error("Missing qdrant.exe. Build Windows server resources first.");
+    const windowsCandidates = [
+      process.env.PRISM_QDRANT_WINDOWS_PATH ?? "",
+      path.join(repoRoot, "apps", "server-windows", "src", "Resources", "qdrant", "qdrant.exe"),
+      path.join(repoRoot, "apps", "server-windows", "Resources", "qdrant.exe")
+    ].filter(Boolean);
+
+    let source = "";
+    for (const candidate of windowsCandidates) {
+      if (await fileExists(candidate)) {
+        source = candidate;
+        break;
+      }
+    }
+
+    if (!source) {
+      throw new Error(
+        "Missing qdrant.exe for Windows runtime staging. Set PRISM_QDRANT_WINDOWS_PATH or provide apps/server-windows/src/Resources/qdrant/qdrant.exe."
+      );
     }
     await copyFile(source, path.join(resolvedOutputDir, "qdrant", "qdrant.exe"));
+    stagedQdrantEntrypoint = "qdrant/qdrant.exe";
   } else {
     const source = path.join(repoRoot, "apps", "server-mac", "Resources", "qdrant");
-    const exists = await fs.stat(source).then(() => true).catch(() => false);
+    const exists = await fileExists(source);
     if (!exists) {
       throw new Error("Missing qdrant binary. Build server-mac resources first.");
     }
@@ -167,7 +187,7 @@ async function main() {
   );
 
   const publicDir = path.join(repoRoot, "apps", "web", "public");
-  const publicExists = await fs.stat(publicDir).then(() => true).catch(() => false);
+  const publicExists = await fileExists(publicDir);
   if (publicExists) {
     await copyDir(
       publicDir,
@@ -182,7 +202,7 @@ async function main() {
     runtimeEntrypoints: {
       api: "apps/api/dist/server.js",
       web: "apps/web/.next/standalone/apps/web/server.js",
-      qdrant: "qdrant/qdrant"
+      qdrant: stagedQdrantEntrypoint
     },
     dataAndLogPaths: {
       macOS: {
