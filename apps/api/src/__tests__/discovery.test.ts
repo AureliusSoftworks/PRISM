@@ -6,6 +6,7 @@ import {
   buildDiscoveryTxt,
   startPrismDiscovery,
 } from "../discovery.ts";
+import { PRISM_API_VERSION, PRISM_SERVER_VERSION } from "../health.ts";
 
 function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -26,8 +27,8 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 describe("buildDiscoveryTxt", () => {
   it("matches the mobile discovery contract", () => {
     assert.deepEqual(buildDiscoveryTxt(), {
-      api: "1",
-      version: "0.1.0",
+      api: String(PRISM_API_VERSION),
+      version: PRISM_SERVER_VERSION,
       pairing: "required",
       tls: "optional",
     });

@@ -26,7 +26,7 @@ Usage:
   prism mac-server
   prism web
   prism standalone
-  prism standalone-win <version> [release-channel]
+  prism standalone-win [version] [release-channel]
   prism standalone-installer
   prism reset [--force]
 
@@ -42,7 +42,8 @@ Notes:
   prism standalone builds the desktop app and opens the folder containing
   the latest macOS DMG.
   prism standalone-win dispatches the desktop release workflow for Windows
-  packaging and opens the desktop/v<version> release page on GitHub.
+  packaging and opens the desktop/v<version> release page on GitHub. If
+  version is omitted, package.json version is used.
   prism standalone-installer opens the latest macOS Prism Desktop installer
   DMG (and builds one first if missing).
   prism reset removes local Prism account/data state (factory reset) while
@@ -420,8 +421,13 @@ run_standalone_win() {
   local include_legacy_testflight=0
 
   if [[ -z "$version" ]]; then
-    echo "Usage: prism standalone-win <version> [release-channel]" >&2
-    exit 64
+    version="$(node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));process.stdout.write(p.version||'');")"
+    if [[ -z "$version" ]]; then
+      echo "Could not resolve version from package.json. Provide one explicitly." >&2
+      echo "Usage: prism standalone-win [version] [release-channel]" >&2
+      exit 64
+    fi
+    echo "No version provided; using package.json version $version."
   fi
   if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Version must follow SemVer core format (example: 0.2.0)." >&2

@@ -31,7 +31,7 @@ PHONE_DEVICE_ID="Device UDID" prism phone
 `prism web` and `prism standalone-dev` are the long-lived commands in this set:
 - `prism web` runs the browser dev server flow.
 - `prism standalone` opens the latest macOS desktop installer DMG (building one if needed).
-- `prism standalone-win <version> [channel]` dispatches the desktop release workflow (`release-main.yml`) for Windows packaging and opens the `desktop/v<version>` release page.
+- `prism standalone-win [version] [channel]` dispatches the desktop release workflow (`release-main.yml`) for Windows packaging and opens the `desktop/v<version>` release page. If `version` is omitted, the root `package.json` version is used.
 - `prism standalone-dev` runs the desktop standalone dev flow.
 - `prism reset` performs a local factory reset (prompts unless `--force`).
 
@@ -243,6 +243,21 @@ prism standalone-dev
 ```
 
 Equivalent to `npm run desktop` from the repo root.
+
+## Shared Version Source
+
+Use this command to update the release version in one shot:
+
+```bash
+npm run version:set -- --version 0.2.0 --build 11
+```
+
+What this updates automatically:
+- root/workspace package versions
+- web version label (`PRISM_APP_VERSION`)
+- API/discovery server version (`PRISM_SERVER_VERSION`)
+- iOS `MARKETING_VERSION` (and `CURRENT_PROJECT_VERSION` when `--build` is provided)
+- desktop Cargo version and Windows server installer version
 
 ## Factory Reset
 

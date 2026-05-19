@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import type { AppConfig } from "@localai/config";
-import { buildHealthResponse } from "../health.ts";
+import { PRISM_API_VERSION, PRISM_SERVER_VERSION, buildHealthResponse } from "../health.ts";
 
 const config: AppConfig = {
   apiPort: 18787,
@@ -26,8 +26,8 @@ describe("buildHealthResponse", () => {
     assert.equal(health.ok, true);
     assert.equal(health.uptime, 12.5);
     assert.equal(health.appName, "Prism Server");
-    assert.equal(health.serverVersion, "0.1.0");
-    assert.equal(health.apiVersion, 1);
+    assert.equal(health.serverVersion, PRISM_SERVER_VERSION);
+    assert.equal(health.apiVersion, PRISM_API_VERSION);
     assert.equal(health.pairingEnabled, false);
     assert.equal(health.serverName, "Test Prism");
     assert.deepEqual(health.services, {
