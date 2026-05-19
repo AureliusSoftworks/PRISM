@@ -52,6 +52,11 @@
         }
       }
     },
-    "targets": "all"
+    "targets": "all",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }

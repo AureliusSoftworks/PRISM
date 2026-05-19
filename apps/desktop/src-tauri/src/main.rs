@@ -10,7 +10,7 @@ use url::Url;
 
 const DEFAULT_API_PORT: u16 = 18787;
 const DEFAULT_WEB_PORT: u16 = 18788;
-const STARTUP_TIMEOUT_SECS: u64 = 45;
+const STARTUP_TIMEOUT_SECS: u64 = 90;
 
 struct RuntimeState {
     qdrant_child: Mutex<Option<Child>>,
@@ -233,6 +233,8 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
             "QDRANT__STORAGE__STORAGE_PATH",
             qdrant_storage_dir.to_string_lossy().to_string(),
         )
+        // Bind to localhost only so Windows Firewall never prompts the user.
+        .env("QDRANT__SERVICE__HOST", "127.0.0.1")
         .stdin(Stdio::null())
         .stdout(Stdio::from(qdrant_stdout))
         .stderr(Stdio::from(qdrant_stderr))
@@ -289,16 +291,28 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     Ok((api_port, web_port))
 }
 
-fn wait_for_web(web_port: u16) -> std::io::Result<()> {
+fn wait_for_web(web_port: u16, state: &RuntimeState) -> std::io::Result<()> {
     let timeout_at = Instant::now() + Duration::from_secs(STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{web_port}");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
             return Ok(());
         }
-        thread::sleep(Duration::from_millis(300));
+        // Fail fast if the web process exited instead of waiting the full timeout.
+        if let Ok(mut guard) = state.web_child.lock() {
+            if let Some(ref mut child) = *guard {
+                if let Ok(Some(exit_status)) = child.try_wait() {
+                    return Err(io_error(format!(
+                        "Prism web runtime exited early with status {exit_status}. Check logs in the app data directory."
+                    )));
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(500));
     }
-    Err(io_error("Prism web runtime did not start in time."))
+    Err(io_error(
+        "Prism web runtime did not start in time (90s timeout). Check web.log in the app data directory.",
+    ))
 }
 
 fn stop_runtime(state: &RuntimeState) {
@@ -325,7 +339,7 @@ fn main() {
         .setup(|app| {
             let state: State<'_, RuntimeState> = app.state();
             let (_api_port, web_port) = start_runtime(&app.handle(), &state)?;
-            wait_for_web(web_port)?;
+            wait_for_web(web_port, &state)?;
             let web_url = Url::parse(&format!("http://127.0.0.1:{web_port}"))
                 .map_err(|error| io_error(format!("Invalid Prism web URL: {error}")))?;
 
