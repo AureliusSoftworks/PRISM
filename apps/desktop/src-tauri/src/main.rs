@@ -319,7 +319,36 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     Ok((api_port, web_port))
 }
 
-fn wait_for_web(web_port: u16, state: &RuntimeState) -> std::io::Result<()> {
+fn wait_for_api(api_port: u16, state: &RuntimeState) -> std::io::Result<()> {
+    let start = Instant::now();
+    let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
+    let target = format!("127.0.0.1:{api_port}");
+    eprintln!("[PRISM] Waiting for API runtime on {target} (timeout {STARTUP_TIMEOUT_SECS}s)...");
+    while Instant::now() < timeout_at {
+        if std::net::TcpStream::connect(&target).is_ok() {
+            eprintln!("[PRISM] API runtime ready after {:.1}s", start.elapsed().as_secs_f64());
+            return Ok(());
+        }
+        // Fail fast if the API process exited instead of letting the UI load
+        // into a misleading "Prism API unreachable" state.
+        if let Ok(mut guard) = state.api_child.lock() {
+            if let Some(ref mut child) = *guard {
+                if let Ok(Some(exit_status)) = child.try_wait() {
+                    let elapsed = start.elapsed().as_secs_f64();
+                    return Err(io_error(format!(
+                        "Prism API exited after {elapsed:.1}s with status {exit_status}. Check api.log in the app data directory."
+                    )));
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+    Err(io_error(
+        "Prism API did not start in time (90s timeout). Check api.log in the app data directory.",
+    ))
+}
+
+fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState) -> std::io::Result<()> {
     let start = Instant::now();
     let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{web_port}");
@@ -343,7 +372,7 @@ fn wait_for_web(web_port: u16, state: &RuntimeState) -> std::io::Result<()> {
         thread::sleep(Duration::from_millis(500));
     }
     // Check if API is also down — that would indicate a broader issue.
-    let api_alive = std::net::TcpStream::connect(format!("127.0.0.1:{}", DEFAULT_API_PORT)).is_ok();
+    let api_alive = std::net::TcpStream::connect(format!("127.0.0.1:{api_port}")).is_ok();
     eprintln!("[PRISM] Timeout reached. API alive: {api_alive}");
     Err(io_error(
         "Prism web runtime did not start in time (90s timeout). Check web.log in the app data directory.",
@@ -373,8 +402,9 @@ fn main() {
         .manage(RuntimeState::new())
         .setup(|app| {
             let state: State<'_, RuntimeState> = app.state();
-            let (_api_port, web_port) = start_runtime(&app.handle(), &state)?;
-            wait_for_web(web_port, &state)?;
+            let (api_port, web_port) = start_runtime(&app.handle(), &state)?;
+            wait_for_api(api_port, &state)?;
+            wait_for_web(web_port, api_port, &state)?;
             let web_url = Url::parse(&format!("http://127.0.0.1:{web_port}"))
                 .map_err(|error| io_error(format!("Invalid Prism web URL: {error}")))?;
 

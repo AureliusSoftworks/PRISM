@@ -15,6 +15,8 @@ npm run desktop:stage-runtime
 echo "Pruning musl-only optional sharp binaries from staged runtime..."
 rm -rf runtime/apps/web/.next/standalone/node_modules/@img/sharp-libvips-linuxmusl-x64
 rm -rf runtime/apps/web/.next/standalone/node_modules/@img/sharp-linuxmusl-x64
+rm -rf runtime/node_modules/@img/sharp-libvips-linuxmusl-x64
+rm -rf runtime/node_modules/@img/sharp-linuxmusl-x64
 
 echo "Building Tauri Linux bundle..."
 # Keep AppImage packaging resilient in CI and emit detailed linuxdeploy diagnostics.

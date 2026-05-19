@@ -65,6 +65,16 @@ async function fileExists(target) {
   return fs.stat(target).then(() => true).catch(() => false);
 }
 
+async function copyNodePackage(packageName, destinationNodeModules) {
+  const parts = packageName.split("/");
+  const source = path.join(repoRoot, "node_modules", ...parts);
+  if (!(await fileExists(source))) {
+    console.log(`Skipping unavailable runtime package: ${packageName}`);
+    return;
+  }
+  await copyDir(source, path.join(destinationNodeModules, ...parts));
+}
+
 async function main() {
   const { outputDir, skipBuild } = parseArgs(process.argv.slice(2));
   if (!outputDir) {
@@ -106,18 +116,55 @@ async function main() {
   await copyFile(path.join(repoRoot, "package-lock.json"), path.join(resolvedOutputDir, "package-lock.json"));
 
   console.log("Staging runtime dependencies...");
+  const runtimeNodeModules = path.join(resolvedOutputDir, "node_modules");
   await copyDir(
     path.join(repoRoot, "packages", "config"),
-    path.join(resolvedOutputDir, "node_modules", "@localai", "config")
+    path.join(runtimeNodeModules, "@localai", "config")
   );
   await copyDir(
     path.join(repoRoot, "packages", "shared"),
-    path.join(resolvedOutputDir, "node_modules", "@localai", "shared")
+    path.join(runtimeNodeModules, "@localai", "shared")
   );
-  await copyDir(
-    path.join(repoRoot, "node_modules", "dnssd-advertise"),
-    path.join(resolvedOutputDir, "node_modules", "dnssd-advertise")
-  );
+  await copyNodePackage("dnssd-advertise", runtimeNodeModules);
+
+  // The API imports sharp at startup for generated-image thumbnails. Copy the
+  // package plus whichever platform-specific @img binaries npm installed on
+  // this runner; without these, packaged desktop builds can start the web UI
+  // while the API process crashes immediately.
+  await copyNodePackage("sharp", runtimeNodeModules);
+  await copyNodePackage("detect-libc", runtimeNodeModules);
+  await copyNodePackage("@img/colour", runtimeNodeModules);
+  for (const packageName of [
+    "@img/sharp-darwin-arm64",
+    "@img/sharp-darwin-x64",
+    "@img/sharp-libvips-darwin-arm64",
+    "@img/sharp-libvips-darwin-x64",
+    "@img/sharp-libvips-linux-arm",
+    "@img/sharp-libvips-linux-arm64",
+    "@img/sharp-libvips-linux-ppc64",
+    "@img/sharp-libvips-linux-riscv64",
+    "@img/sharp-libvips-linux-s390x",
+    "@img/sharp-libvips-linux-x64",
+    "@img/sharp-libvips-linuxmusl-arm64",
+    "@img/sharp-libvips-linuxmusl-x64",
+    "@img/sharp-libvips-win32-arm64",
+    "@img/sharp-libvips-win32-ia32",
+    "@img/sharp-libvips-win32-x64",
+    "@img/sharp-linux-arm",
+    "@img/sharp-linux-arm64",
+    "@img/sharp-linux-ppc64",
+    "@img/sharp-linux-riscv64",
+    "@img/sharp-linux-s390x",
+    "@img/sharp-linux-x64",
+    "@img/sharp-linuxmusl-arm64",
+    "@img/sharp-linuxmusl-x64",
+    "@img/sharp-wasm32",
+    "@img/sharp-win32-arm64",
+    "@img/sharp-win32-ia32",
+    "@img/sharp-win32-x64"
+  ]) {
+    await copyNodePackage(packageName, runtimeNodeModules);
+  }
 
   console.log("Staging Node runtime...");
   if (process.platform === "win32") {

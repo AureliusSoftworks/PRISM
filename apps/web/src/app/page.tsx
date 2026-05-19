@@ -19068,7 +19068,10 @@ function HomeContent(): React.JSX.Element {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
     try {
-      const d = await api<{ user: SessionUser | null; hasAnyAccounts?: boolean }>("/api/auth/me", { signal: controller.signal });
+      const d = await requestApiWithLoopbackFallback<{
+        user: SessionUser | null;
+        hasAnyAccounts?: boolean;
+      }>("/api/auth/me", { signal: controller.signal });
       setHasAnyAccounts(d.hasAnyAccounts !== false);
       let checklistCompleted = false;
       try {
@@ -19092,7 +19095,7 @@ function HomeContent(): React.JSX.Element {
     } finally {
       clearTimeout(timeout);
     }
-  }, []);
+  }, [requestApiWithLoopbackFallback]);
 
   useEffect(() => {
     if (!CLIENT_ACCESS_REQUIRED) {
