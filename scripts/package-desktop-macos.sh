@@ -10,12 +10,36 @@ cd "${REPO_ROOT}"
 echo "Staging desktop runtime..."
 npm run desktop:stage-runtime
 
-echo "Building Tauri macOS bundle..."
-npm run build -w apps/desktop
+echo "Building Tauri macOS universal bundle (arm64 + x86_64)..."
+npm run tauri -w apps/desktop -- build --target universal-apple-darwin
 
-DMG_SOURCE="$(ls -1 apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null | head -1)"
+APP_BUNDLE="$(ls -1 apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app 2>/dev/null | head -1)"
+if [ -z "${APP_BUNDLE}" ]; then
+  echo "Could not find generated .app in apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos" >&2
+  exit 1
+fi
+
+APP_NAME="$(basename "${APP_BUNDLE}" .app)"
+APP_BINARY="${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+if [ ! -f "${APP_BINARY}" ]; then
+  echo "Could not find app binary at ${APP_BINARY}" >&2
+  exit 1
+fi
+
+LIPO_OUTPUT="$(lipo -info "${APP_BINARY}")"
+echo "Universal binary check: ${LIPO_OUTPUT}"
+if [[ "${LIPO_OUTPUT}" != *"x86_64"* || "${LIPO_OUTPUT}" != *"arm64"* ]]; then
+  echo "Universal macOS bundle is missing one architecture slice (expected x86_64 and arm64)." >&2
+  exit 1
+fi
+
+DMG_SOURCE="$(ls -1 apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1)"
 if [ -z "${DMG_SOURCE}" ]; then
-  echo "Could not find generated DMG in apps/desktop/src-tauri/target/release/bundle/dmg" >&2
+  # Fallback keeps local/manual builds working if a different target path is used.
+  DMG_SOURCE="$(ls -1 apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null | head -1)"
+fi
+if [ -z "${DMG_SOURCE}" ]; then
+  echo "Could not find generated DMG in Tauri target bundle directories" >&2
   exit 1
 fi
 
