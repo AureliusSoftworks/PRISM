@@ -21,7 +21,10 @@ fi
 echo "Building Tauri macOS universal bundle (arm64 + x86_64)..."
 npm run tauri -w apps/desktop -- build --target universal-apple-darwin
 
-APP_BUNDLE="$(ls -1 apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app 2>/dev/null | head -1)"
+shopt -s nullglob
+app_bundles=(apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app)
+shopt -u nullglob
+APP_BUNDLE="${app_bundles[0]:-}"
 if [ -z "${APP_BUNDLE}" ]; then
   echo "Could not find generated .app in apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos" >&2
   exit 1
@@ -30,8 +33,12 @@ fi
 APP_NAME="$(basename "${APP_BUNDLE}" .app)"
 APP_BINARY="${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 if [ ! -f "${APP_BINARY}" ]; then
-  echo "Could not find app binary at ${APP_BINARY}" >&2
-  exit 1
+  # Fallback for cases where Tauri's app executable name differs from the app bundle name.
+  APP_BINARY="$(ls -1 "${APP_BUNDLE}/Contents/MacOS/"* 2>/dev/null | head -1 || true)"
+  if [ -z "${APP_BINARY}" ] || [ ! -f "${APP_BINARY}" ]; then
+    echo "Could not find app binary at ${APP_BUNDLE}/Contents/MacOS/" >&2
+    exit 1
+  fi
 fi
 
 LIPO_OUTPUT="$(lipo -info "${APP_BINARY}")"

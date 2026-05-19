@@ -11,7 +11,17 @@ echo "Staging desktop runtime..."
 npm run desktop:stage-runtime
 
 echo "Building Tauri Linux bundle..."
-npm run build -w apps/desktop
+# Keep AppImage packaging resilient in CI and emit detailed linuxdeploy diagnostics.
+export APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"
+export NO_STRIP="${NO_STRIP:-1}"
+export TAURI_DEBUG="${TAURI_DEBUG:-1}"
+export RUST_LOG="${RUST_LOG:-debug}"
+export DEBUG="${DEBUG:-1}"
+
+if ! npm run tauri -w apps/desktop -- build --verbose; then
+  echo "First Linux bundle attempt failed; retrying once..."
+  npm run tauri -w apps/desktop -- build --verbose
+fi
 
 APPIMAGE_SOURCE="$(ls -1 apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage 2>/dev/null | head -1)"
 if [ -z "${APPIMAGE_SOURCE}" ]; then
