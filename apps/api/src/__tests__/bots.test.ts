@@ -11,6 +11,7 @@ import {
   deleteAllBots,
   deleteBot,
   deleteBots,
+  deleteSelectedBots,
   normalizeBotExportHash,
   resolveBotExportHashForCreate,
 } from "../bots.ts";
@@ -609,6 +610,51 @@ describe("deleteAllBots", () => {
     assert.deepEqual(
       (db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{ id: string }>)
         .map((memory) => memory.id),
+      ["memory-protected"]
+    );
+  });
+});
+
+describe("deleteSelectedBots", () => {
+  it("deletes only selected unprotected bots and reports protected skips", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "protected", "2026-01-03T00:00:00.000Z", true);
+    seedBot(db, "user-1", "delete-a");
+    seedBot(db, "user-1", "delete-b");
+    seedHistoryReferencingBot(db, "user-1", "delete-a", "delete-a");
+    seedHistoryReferencingBot(db, "user-1", "protected", "protected");
+    seedMemory(db, "user-1", "delete-a", "memory-delete-a");
+    seedMemory(db, "user-1", "protected", "memory-protected");
+
+    const result = deleteSelectedBots(db, "user-1", [
+      "delete-a",
+      "delete-b",
+      "protected",
+    ]);
+
+    assert.deepEqual(result, { deleted: 2, protectedSkipped: 1 });
+    assert.deepEqual(
+      (db.prepare("SELECT id FROM bots ORDER BY id").all() as Array<{ id: string }>).map(
+        (row) => row.id
+      ),
+      ["protected"]
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?").get("msg-delete-a") as {
+        bot_id: string | null;
+      }).bot_id,
+      null
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?").get("msg-protected") as {
+        bot_id: string | null;
+      }).bot_id,
+      "protected"
+    );
+    assert.deepEqual(
+      (db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{ id: string }>).map(
+        (row) => row.id
+      ),
       ["memory-protected"]
     );
   });

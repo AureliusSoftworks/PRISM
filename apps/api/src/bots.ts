@@ -261,3 +261,64 @@ export function deleteAllBots(db: DatabaseSync, userId: string): number {
     throw error;
   }
 }
+
+export function deleteSelectedBots(
+  db: DatabaseSync,
+  userId: string,
+  selectedBotIds: string[]
+): { deleted: number; protectedSkipped: number } {
+  const uniqueIds = Array.from(
+    new Set(
+      selectedBotIds
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0)
+    )
+  );
+  if (!uniqueIds.length) {
+    return { deleted: 0, protectedSkipped: 0 };
+  }
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `SELECT id, delete_protected
+         FROM bots
+         WHERE user_id = ? AND id IN (${placeholders})`
+      )
+      .all(userId, ...uniqueIds) as Array<{ id: string; delete_protected: number }>;
+    const deletableIds = rows
+      .filter((row) => row.delete_protected !== 1)
+      .map((row) => row.id);
+    const protectedSkipped = rows.length - deletableIds.length;
+
+    if (!deletableIds.length) {
+      db.exec("COMMIT");
+      return { deleted: 0, protectedSkipped };
+    }
+
+    const deletablePlaceholders = deletableIds.map(() => "?").join(", ");
+    db.prepare(
+      `UPDATE messages SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${deletablePlaceholders})`
+    ).run(userId, ...deletableIds);
+    db.prepare(
+      `UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${deletablePlaceholders})`
+    ).run(userId, ...deletableIds);
+    db.prepare(
+      `DELETE FROM memories
+       WHERE user_id = ?
+         AND bot_id IN (${deletablePlaceholders})
+         AND COALESCE(source, 'direct') != 'about_you'`
+    ).run(userId, ...deletableIds);
+    db.prepare(
+      `DELETE FROM bots WHERE user_id = ? AND id IN (${deletablePlaceholders})`
+    ).run(userId, ...deletableIds);
+    db.exec("COMMIT");
+    return { deleted: deletableIds.length, protectedSkipped };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}

@@ -59,6 +59,7 @@ import {
   deleteAllBots,
   deleteBot,
   deleteBots,
+  deleteSelectedBots,
   normalizeBotExportHash,
   resolveBotExportHashForCreate,
 } from "./bots.ts";
@@ -3264,6 +3265,17 @@ function buildRoutes(): RouteDefinition[] {
         db.prepare(`UPDATE bots SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).run(...values);
       }
       json(ctx.res, 200, { ok: true });
+    }),
+    route("DELETE", "/api/bots/selected", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const idsRaw = body.ids;
+      if (!Array.isArray(idsRaw)) {
+        throw new Error("Selected bot ids are required.");
+      }
+      const ids = idsRaw.filter((id): id is string => typeof id === "string");
+      const result = deleteSelectedBots(db, userId, ids);
+      json(ctx.res, 200, { ok: true, ...result });
     }),
     route("DELETE", "/api/bots/:id", async (ctx) => {
       const userId = requireAuth(ctx);
