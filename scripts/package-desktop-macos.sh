@@ -10,6 +10,14 @@ cd "${REPO_ROOT}"
 echo "Staging desktop runtime..."
 npm run desktop:stage-runtime
 
+echo "Ensuring Rust targets for macOS universal build..."
+if ! rustup target list --installed | grep -qx "aarch64-apple-darwin"; then
+  rustup target add aarch64-apple-darwin
+fi
+if ! rustup target list --installed | grep -qx "x86_64-apple-darwin"; then
+  rustup target add x86_64-apple-darwin
+fi
+
 echo "Building Tauri macOS universal bundle (arm64 + x86_64)..."
 npm run tauri -w apps/desktop -- build --target universal-apple-darwin
 
