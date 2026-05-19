@@ -10,6 +10,12 @@ cd "${REPO_ROOT}"
 echo "Staging desktop runtime..."
 npm run desktop:stage-runtime
 
+# AppImage bundling on glibc runners can fail if Next standalone includes
+# optional musl-only sharp binaries; they are not needed on this target.
+echo "Pruning musl-only optional sharp binaries from staged runtime..."
+rm -rf runtime/apps/web/.next/standalone/node_modules/@img/sharp-libvips-linuxmusl-x64
+rm -rf runtime/apps/web/.next/standalone/node_modules/@img/sharp-linuxmusl-x64
+
 echo "Building Tauri Linux bundle..."
 # Keep AppImage packaging resilient in CI and emit detailed linuxdeploy diagnostics.
 export APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"
