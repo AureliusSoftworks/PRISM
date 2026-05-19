@@ -242,9 +242,10 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .map_err(|error| io_error(format!("Failed to start bundled Qdrant: {error}")))?;
 
     let mut api_child = Command::new(&node)
-        .arg(api)
+        .arg(&api)
         .current_dir(&root)
         .env("API_PORT", api_port.to_string())
+        .env("API_HOST", "127.0.0.1")
         .env("WEB_PORT", web_port.to_string())
         .env("LOCALAI_DATA_DIR", localai_data_dir_value.clone())
         .env("QDRANT_URL", qdrant_url)
@@ -258,10 +259,13 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
             io_error(format!("Failed to start Prism API: {error}"))
         })?;
 
+    // Next.js standalone must bind to a specific host; default 0.0.0.0 can
+    // trigger firewall prompts on Windows.  HOSTNAME=127.0.0.1 keeps it local.
     let web_child = Command::new(&node)
-        .arg(web)
-        .current_dir(web_cwd)
+        .arg(&web)
+        .current_dir(&web_cwd)
         .env("PORT", web_port.to_string())
+        .env("HOSTNAME", "127.0.0.1")
         .env("API_PORT", api_port.to_string())
         .env("LOCALAI_API_ORIGIN", localai_api_origin)
         .env("PRISM_DESKTOP_MODE", "1")
@@ -274,6 +278,14 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
             let _ = qdrant_child.kill();
             io_error(format!("Failed to start Prism web runtime: {error}"))
         })?;
+
+    eprintln!("[PRISM] Runtime root: {}", root.display());
+    eprintln!("[PRISM] Node binary:  {node}");
+    eprintln!("[PRISM] API entry:    {}", api.display());
+    eprintln!("[PRISM] Web entry:    {}", web.display());
+    eprintln!("[PRISM] Web cwd:      {}", web_cwd.display());
+    eprintln!("[PRISM] Qdrant:       {}", qdrant.display());
+    eprintln!("[PRISM] Ports:        API={api_port}  Web={web_port}");
 
     *state
         .qdrant_child
@@ -292,24 +304,31 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
 }
 
 fn wait_for_web(web_port: u16, state: &RuntimeState) -> std::io::Result<()> {
-    let timeout_at = Instant::now() + Duration::from_secs(STARTUP_TIMEOUT_SECS);
+    let start = Instant::now();
+    let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{web_port}");
+    eprintln!("[PRISM] Waiting for web runtime on {target} (timeout {STARTUP_TIMEOUT_SECS}s)...");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
+            eprintln!("[PRISM] Web runtime ready after {:.1}s", start.elapsed().as_secs_f64());
             return Ok(());
         }
         // Fail fast if the web process exited instead of waiting the full timeout.
         if let Ok(mut guard) = state.web_child.lock() {
             if let Some(ref mut child) = *guard {
                 if let Ok(Some(exit_status)) = child.try_wait() {
+                    let elapsed = start.elapsed().as_secs_f64();
                     return Err(io_error(format!(
-                        "Prism web runtime exited early with status {exit_status}. Check logs in the app data directory."
+                        "Prism web runtime exited after {elapsed:.1}s with status {exit_status}. Check web.log in the app data directory."
                     )));
                 }
             }
         }
         thread::sleep(Duration::from_millis(500));
     }
+    // Check if API is also down — that would indicate a broader issue.
+    let api_alive = std::net::TcpStream::connect(format!("127.0.0.1:{}", DEFAULT_API_PORT)).is_ok();
+    eprintln!("[PRISM] Timeout reached. API alive: {api_alive}");
     Err(io_error(
         "Prism web runtime did not start in time (90s timeout). Check web.log in the app data directory.",
     ))

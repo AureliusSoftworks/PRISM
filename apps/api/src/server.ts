@@ -3569,7 +3569,8 @@ process.on("SIGTERM", () => {
   void shutdown("SIGTERM").then(() => process.exit(0));
 });
 
-server.listen(config.apiPort, () => {
-  console.log(`API ready at http://localhost:${config.apiPort}`);
+const apiHost = process.env.API_HOST || "0.0.0.0";
+server.listen(config.apiPort, apiHost, () => {
+  console.log(`API ready at http://${apiHost}:${config.apiPort}`);
   stopDiscovery = startPrismDiscovery(config);
 });
