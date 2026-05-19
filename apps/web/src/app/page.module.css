@@ -522,6 +522,11 @@
   background: color-mix(in srgb, var(--bg) 64%, var(--bg-surface));
 }
 
+.desktopChecklistItem[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent-ink) 45%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 16%, transparent);
+}
+
 .desktopChecklistIntro {
   margin: 0;
   max-width: 34ch;
@@ -623,6 +628,35 @@
 
 .desktopChecklistActions {
   display: grid;
+  gap: 8px;
+}
+
+.desktopChecklistStepCard {
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--bg) 74%, var(--bg-surface));
+  display: grid;
+  gap: 8px;
+}
+
+.desktopChecklistStepCard h4,
+.desktopChecklistStepCard p {
+  margin: 0;
+}
+
+.desktopChecklistStepEyebrow {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.desktopChecklistStepActions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1198,6 +1232,54 @@
   outline: none;
   border-color: var(--accent-ink);
   box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.authSelectField {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.authSelectField > span {
+  color: var(--fg-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settingsTutorialCard {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--bg) 78%, var(--bg-surface));
+  display: grid;
+  gap: 6px;
+}
+
+.settingsTutorialCard strong {
+  font-size: 14px;
+}
+
+.settingsTutorialCard > span {
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.settingsTutorialActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settingsHostsLead {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.settingsHostHint {
+  color: var(--fg-muted);
+  font-size: 12px;
 }
 
 .settingsHostField {
@@ -8833,6 +8915,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-align: left;
 }
 
+.contextMenuItemLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.contextMenuGlyph {
+  width: 16px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 88%, var(--fg));
+}
+
 .botContextMenu button {
   padding-left: 18px;
 }
@@ -8851,6 +8947,67 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .messageContextMenu button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.modeTutorialOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 860;
+  background: color-mix(in srgb, var(--bg) 44%, #000 56%);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.modeTutorialCard {
+  width: min(560px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+}
+
+.modeTutorialCard h3,
+.modeTutorialCard p {
+  margin: 0;
+}
+
+.modeTutorialEyebrow {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.modeTutorialTimeline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.modeTutorialTimeline span {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 80%, transparent);
+}
+
+.modeTutorialTimeline span[data-state="active"] {
+  background: color-mix(in srgb, var(--accent-ink) 72%, var(--line));
+}
+
+.modeTutorialTimeline span[data-state="done"] {
+  background: color-mix(in srgb, var(--ok) 72%, var(--line));
+}
+
+.modeTutorialActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .message[data-msg-context-root="true"] {

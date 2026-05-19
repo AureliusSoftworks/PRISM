@@ -227,6 +227,39 @@ function memoryCardDeleteKey(memoryId: string): string {
   return `${MEMORY_CARD_DELETE_PREFIX}${memoryId}`;
 }
 
+function normalizeAuthUsername(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+function dedupeRecentAuthUsernames(usernames: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const candidate of usernames) {
+    const normalized = normalizeAuthUsername(candidate);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    next.push(normalized);
+    if (next.length >= MAX_RECENT_AUTH_USERNAMES) break;
+  }
+  return next;
+}
+
+function tutorialStorageKeyForUser(userId: string): string {
+  return `${MODE_TUTORIAL_STORAGE_PREFIX}:${userId}`;
+}
+
+function normalizeTutorialProgress(value: unknown): TutorialProgress {
+  if (!value || typeof value !== "object") {
+    return { ...DEFAULT_TUTORIAL_PROGRESS };
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    chat: record.chat === true,
+    sandbox: record.sandbox === true,
+    coffee: record.coffee === true,
+  };
+}
+
 // Developer tools stay off for production/release builds unless explicitly enabled.
 // Local/dev remains on by default, and can still be forced off with NEXT_PUBLIC_DEV_TOOLS=0.
 const DEV_TOOLS_ENABLED =
@@ -242,6 +275,19 @@ const FLOATING_SHELL_APPLETS_ENABLED =
 const CLIENT_ACCESS_REQUIRED = process.env.NEXT_PUBLIC_PRISM_LEGACY_PAIRING_REQUIRED === "1";
 const DESKTOP_FIRST_RUN_CHECKLIST_KEY = "prism_desktop_first_run_complete_v2";
 const DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS = 5000;
+const RECENT_AUTH_USERNAMES_KEY = "prism_recent_auth_usernames_v1";
+const MAX_RECENT_AUTH_USERNAMES = 12;
+const MODE_TUTORIAL_STORAGE_PREFIX = "prism_mode_tutorials_v1";
+
+type TutorialMode = "chat" | "sandbox" | "coffee";
+
+type TutorialProgress = Record<TutorialMode, boolean>;
+
+const DEFAULT_TUTORIAL_PROGRESS: TutorialProgress = {
+  chat: false,
+  sandbox: false,
+  coffee: false,
+};
 
 const DEV_TOOLS_BOT_QUANTITY_MIN = 0;
 const DEV_TOOLS_BOT_QUANTITY_DEFAULT = 10;
@@ -14131,6 +14177,7 @@ function HomeContent(): React.JSX.Element {
       </div>
     ) : null;
   const [username, setUsername] = useState("");
+  const [recentAuthUsernames, setRecentAuthUsernames] = useState<string[]>([]);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -14192,6 +14239,7 @@ function HomeContent(): React.JSX.Element {
   const [comfyUiStatusChecking, setComfyUiStatusChecking] = useState(false);
   const [openAiKey, setOpenAiKey] = useState("");
   const [desktopFirstRunChecklistOpen, setDesktopFirstRunChecklistOpen] = useState(false);
+  const [desktopFirstRunChecklistStepIndex, setDesktopFirstRunChecklistStepIndex] = useState(0);
   const [desktopFirstRunChecklistBusy, setDesktopFirstRunChecklistBusy] = useState(false);
   const [desktopFirstRunAutoSetupBusy, setDesktopFirstRunAutoSetupBusy] = useState(false);
   const [desktopFirstRunAutoSetupSteps, setDesktopFirstRunAutoSetupSteps] = useState<string[]>([]);
@@ -14792,6 +14840,11 @@ function HomeContent(): React.JSX.Element {
   const [settingsAboutModalOpen, setSettingsAboutModalOpen] = useState(false);
   const [settingsHostsModalOpen, setSettingsHostsModalOpen] = useState(false);
   const [settingsDefaultsModalOpen, setSettingsDefaultsModalOpen] = useState(false);
+  const [tutorialProgress, setTutorialProgress] = useState<TutorialProgress>(
+    DEFAULT_TUTORIAL_PROGRESS
+  );
+  const [activeTutorialMode, setActiveTutorialMode] = useState<TutorialMode | null>(null);
+  const [activeTutorialStepIndex, setActiveTutorialStepIndex] = useState(0);
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
   const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
   const [changePasswordNew, setChangePasswordNew] = useState("");
@@ -15059,6 +15112,10 @@ function HomeContent(): React.JSX.Element {
     id: string;
     name: string;
     hadUnsavedChanges: boolean;
+  } | null>(null);
+  const [selectedBotDeleteConfirm, setSelectedBotDeleteConfirm] = useState<{
+    ids: string[];
+    protectedCount: number;
   } | null>(null);
   const prePanelBotDeleteModalFocusRef = useRef<HTMLElement | null>(null);
   const [sweepConfirmOpen, setSweepConfirmOpen] = useState(false);
@@ -15398,6 +15455,7 @@ function HomeContent(): React.JSX.Element {
     setBotLibraryExpanded(false);
     setBotPanelLibraryEnabled(true);
     setPanelBotDeleteConfirm(null);
+    setSelectedBotDeleteConfirm(null);
     setMemoryPanelLoading(false);
   }, [closeImportBotModal]);
 
@@ -15543,6 +15601,7 @@ function HomeContent(): React.JSX.Element {
       // Ignore storage failures; checklist still closes for this session.
     }
     setDesktopFirstRunChecklistOpen(false);
+    setDesktopFirstRunChecklistStepIndex(0);
     if (user) {
       setPanelNotice("Setup checklist completed. You can reopen Settings any time.");
     }
@@ -15599,6 +15658,7 @@ function HomeContent(): React.JSX.Element {
       completed = false;
     }
     if (completed) return;
+    setDesktopFirstRunChecklistStepIndex(0);
     setDesktopFirstRunChecklistOpen(true);
     openRightPanel("settings");
     void refreshDesktopFirstRunHealth();
@@ -19073,22 +19133,6 @@ function HomeContent(): React.JSX.Element {
         hasAnyAccounts?: boolean;
       }>("/api/auth/me", { signal: controller.signal });
       setHasAnyAccounts(d.hasAnyAccounts !== false);
-      let checklistCompleted = false;
-      try {
-        checklistCompleted = localStorage.getItem(DESKTOP_FIRST_RUN_CHECKLIST_KEY) === "done";
-      } catch {
-        checklistCompleted = false;
-      }
-      if (!checklistCompleted) {
-        try {
-          await api("/api/auth/logout", { method: "POST", body: "{}" });
-        } catch {
-          // Best effort: continue with local sign-out even if server logout fails.
-        }
-        clearNativeSessionToken();
-        setUser(null);
-        return;
-      }
       setUser(d.user);
     } catch {
       setUser(null);
@@ -19096,6 +19140,28 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(timeout);
     }
   }, [requestApiWithLoopbackFallback]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RECENT_AUTH_USERNAMES_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return;
+      const normalized = dedupeRecentAuthUsernames(
+        parsed.filter((value): value is string => typeof value === "string")
+      );
+      setRecentAuthUsernames(normalized);
+    } catch {
+      // Ignore malformed local cache and start with empty recent usernames.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authMode !== "login") return;
+    if (!recentAuthUsernames.length) return;
+    if (username.trim().length > 0) return;
+    setUsername(recentAuthUsernames[0]);
+  }, [authMode, recentAuthUsernames, username]);
 
   useEffect(() => {
     if (!CLIENT_ACCESS_REQUIRED) {
@@ -19129,6 +19195,55 @@ function HomeContent(): React.JSX.Element {
   // This effect should run on auth transitions, not on every render identity churn.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (!user) return; void refreshAll(); }, [user]);
+  useEffect(() => {
+    if (!user?.id) {
+      setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
+      setActiveTutorialMode(null);
+      setActiveTutorialStepIndex(0);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(tutorialStorageKeyForUser(user.id));
+      if (!raw) {
+        setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
+        return;
+      }
+      setTutorialProgress(normalizeTutorialProgress(JSON.parse(raw) as unknown));
+    } catch {
+      setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
+    }
+  }, [user?.id]);
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      localStorage.setItem(
+        tutorialStorageKeyForUser(user.id),
+        JSON.stringify(tutorialProgress)
+      );
+    } catch {
+      // Ignore storage write failures; tutorials still work for this session.
+    }
+  }, [tutorialProgress, user?.id]);
+  useEffect(() => {
+    if (!user) return;
+    if (view === "hub") {
+      setActiveTutorialMode(null);
+      return;
+    }
+    const mode = view as TutorialMode;
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_TUTORIAL_PROGRESS, mode)) {
+      return;
+    }
+    if (tutorialProgress[mode]) {
+      if (activeTutorialMode === mode) {
+        setActiveTutorialMode(null);
+        setActiveTutorialStepIndex(0);
+      }
+      return;
+    }
+    setActiveTutorialMode(mode);
+    setActiveTutorialStepIndex(0);
+  }, [activeTutorialMode, tutorialProgress, user, view]);
   useEffect(() => {
     if (!devToolsOpen) return;
     void refreshSummaryDebug(view === "chat" ? "chat" : "sandbox");
@@ -20691,22 +20806,37 @@ function HomeContent(): React.JSX.Element {
   async function submitAuth(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setError(null);
     try {
+      const normalizedUsername = normalizeAuthUsername(username);
+      if (!normalizedUsername) {
+        throw new Error("Username is required.");
+      }
       if (authMode === "register") {
         if (password !== confirmPassword) {
           throw new Error("Passwords do not match.");
         }
         await api("/api/auth/register", {
           method: "POST",
-          body: JSON.stringify({ username, password, theme: preAuthTheme }),
+          body: JSON.stringify({ username: normalizedUsername, password, theme: preAuthTheme }),
         });
       } else {
         await api("/api/auth/login", {
           method: "POST",
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify({ username: normalizedUsername, password }),
         });
+      }
+      const updatedRecent = dedupeRecentAuthUsernames([
+        normalizedUsername,
+        ...recentAuthUsernames,
+      ]);
+      setRecentAuthUsernames(updatedRecent);
+      try {
+        localStorage.setItem(RECENT_AUTH_USERNAMES_KEY, JSON.stringify(updatedRecent));
+      } catch {
+        // Ignore local cache persistence failures.
       }
       clearNativeSessionToken();
       await bootstrap();
+      setUsername(normalizedUsername);
       setPassword("");
       setConfirmPassword("");
     } catch (err) { setError(err instanceof Error ? err.message : "Auth failed."); }
@@ -20731,6 +20861,28 @@ function HomeContent(): React.JSX.Element {
     // Drop any ?view= param so the next login lands on the Hub instead
     // of whichever mode the user was last browsing.
     navigateToView("hub");
+  }
+
+  function markTutorialComplete(mode: TutorialMode): void {
+    setTutorialProgress((current) => ({ ...current, [mode]: true }));
+    setActiveTutorialMode(null);
+    setActiveTutorialStepIndex(0);
+  }
+
+  function resetAllModeTutorials(): void {
+    setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
+    setActiveTutorialMode(null);
+    setActiveTutorialStepIndex(0);
+    setPanelNotice("Mode tutorials reset. They will reappear when you enter each mode.");
+  }
+
+  function resetSingleModeTutorial(mode: TutorialMode): void {
+    setTutorialProgress((current) => ({ ...current, [mode]: false }));
+    if (view === mode) {
+      setActiveTutorialMode(mode);
+      setActiveTutorialStepIndex(0);
+    }
+    setPanelNotice(`${mode[0].toUpperCase()}${mode.slice(1)} tutorial reset.`);
   }
 
   function deleteAccount() {
@@ -24157,7 +24309,7 @@ function HomeContent(): React.JSX.Element {
     const isBotFile = lower.endsWith(".bot");
     const isZipFile = lower.endsWith(".zip");
     if (!isBotFile && !isZipFile) {
-      setPanelError("Only .bot and .zip files can be imported from disk.");
+      setPanelError("Only .bot files can be imported from disk.");
       return;
     }
     setImportBotFileBusy(true);
@@ -25033,6 +25185,7 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!pendingDeleteKey) return;
     setPanelBotDeleteConfirm(null);
+    setSelectedBotDeleteConfirm(null);
   }, [pendingDeleteKey]);
 
   const isPanelBotDeleteModalOpen = panelBotDeleteConfirm !== null;
@@ -25782,6 +25935,54 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function deleteSelectedBots(selectedIds: string[]): Promise<void> {
+    const uniqueIds = Array.from(new Set(selectedIds.filter((id) => typeof id === "string")));
+    if (uniqueIds.length === 0) return;
+    setPanelError(null);
+    setPanelNotice(null);
+    const previousBots = bots;
+    const previousSelectedBotId = selectedBotId;
+    const previousMarqueeSelection = new Set(canvasSelectedBotIds);
+    try {
+      const result = await api<{ deleted?: number; protectedSkipped?: number }>(
+        "/api/bots/selected",
+        {
+          method: "DELETE",
+          body: JSON.stringify({ ids: uniqueIds }),
+        }
+      );
+      const selectedIdSet = new Set(uniqueIds);
+      const deletableIds = previousBots
+        .filter((bot) => selectedIdSet.has(bot.id) && bot.delete_protected !== 1)
+        .map((bot) => bot.id);
+      const deletedIdSet = new Set(deletableIds);
+      setBots(previousBots.filter((bot) => !deletedIdSet.has(bot.id)));
+      if (previousSelectedBotId && deletedIdSet.has(previousSelectedBotId)) {
+        setSelectedBotId(null);
+      }
+      setCanvasSelectedBotIds(
+        new Set(
+          Array.from(previousMarqueeSelection).filter((id) => !deletedIdSet.has(id))
+        )
+      );
+      setSelectedBotDeleteConfirm(null);
+      const deletedCount =
+        typeof result.deleted === "number" ? result.deleted : deletedIdSet.size;
+      const protectedCount =
+        typeof result.protectedSkipped === "number" ? result.protectedSkipped : 0;
+      setPanelNotice(
+        protectedCount > 0
+          ? `Deleted ${deletedCount} bot${deletedCount === 1 ? "" : "s"}; kept ${protectedCount} protected.`
+          : `Deleted ${deletedCount} bot${deletedCount === 1 ? "" : "s"}.`
+      );
+    } catch (err) {
+      setBots(previousBots);
+      setSelectedBotId(previousSelectedBotId);
+      setCanvasSelectedBotIds(previousMarqueeSelection);
+      setPanelError(err instanceof Error ? err.message : "Delete selected bots failed.");
+    }
+  }
+
   async function devToolsDeleteAllBots() {
     setDevToolsMessage(null);
     setDevToolsBusy(true);
@@ -26369,6 +26570,7 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     setPanelBotDeleteConfirm(null);
+    setSelectedBotDeleteConfirm(null);
     setEditingBotId(null);
     resetBotForm();
     setBotPanelLibraryEnabled(true);
@@ -28299,6 +28501,125 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
+  function renderModeTutorialOverlay(): React.JSX.Element | null {
+    if (!activeTutorialMode) return null;
+    const tutorialContent: Record<
+      TutorialMode,
+      { title: string; steps: Array<{ heading: string; body: string }> }
+    > = {
+      chat: {
+        title: "Chat mode walkthrough",
+        steps: [
+          {
+            heading: "Start with a bot",
+            body: "Pick a bot from the panel, then send your first message to start the conversation.",
+          },
+          {
+            heading: "Use quick tools",
+            body: "Right-click in the canvas for shortcuts to settings, memories, images, and bot actions.",
+          },
+          {
+            heading: "Fix and refine",
+            body: "Use message actions like Edit and Resend to tune replies without losing your flow.",
+          },
+        ],
+      },
+      sandbox: {
+        title: "Sandbox mode walkthrough",
+        steps: [
+          {
+            heading: "Explore freely",
+            body: "Sandbox lets you test bots and prompts without affecting your main Chat rhythm.",
+          },
+          {
+            heading: "Use selection tools",
+            body: "Drag to select multiple bots, then right-click to group, export, or manage them together.",
+          },
+          {
+            heading: "Enter focus layout",
+            body: "Toggle focus layout when you want a cleaner surface for long creative sessions.",
+          },
+        ],
+      },
+      coffee: {
+        title: "Coffee mode walkthrough",
+        steps: [
+          {
+            heading: "Pick your table",
+            body: "Choose a Coffee Group and seat bots to set the conversation vibe before starting.",
+          },
+          {
+            heading: "Guide the session",
+            body: "Use settings and transcript controls to steer pacing, topic flow, and recap visibility.",
+          },
+          {
+            heading: "Return anytime",
+            body: "You can reset Coffee tutorials from Settings if you want another guided pass later.",
+          },
+        ],
+      },
+    };
+    const content = tutorialContent[activeTutorialMode];
+    const safeStepIndex = Math.min(activeTutorialStepIndex, content.steps.length - 1);
+    const step = content.steps[safeStepIndex];
+    const isLastStep = safeStepIndex >= content.steps.length - 1;
+    return (
+      <div className={styles.modeTutorialOverlay} role="dialog" aria-modal="true">
+        <div className={styles.modeTutorialCard}>
+          <p className={styles.modeTutorialEyebrow}>
+            {content.title} · Step {safeStepIndex + 1} of {content.steps.length}
+          </p>
+          <h3>{step.heading}</h3>
+          <p>{step.body}</p>
+          <div className={styles.modeTutorialTimeline} aria-hidden="true">
+            {content.steps.map((_, index) => (
+              <span
+                key={`${activeTutorialMode}-step-${index}`}
+                data-state={
+                  index < safeStepIndex ? "done" : index === safeStepIndex ? "active" : "pending"
+                }
+              />
+            ))}
+          </div>
+          <div className={styles.modeTutorialActions}>
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() =>
+                setActiveTutorialStepIndex((current) => Math.max(0, current - 1))
+              }
+              disabled={safeStepIndex === 0}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() => markTutorialComplete(activeTutorialMode)}
+            >
+              Skip tutorial
+            </button>
+            <button
+              type="button"
+              className={styles.accountLogoutButton}
+              onClick={() => {
+                if (isLastStep) {
+                  markTutorialComplete(activeTutorialMode);
+                  return;
+                }
+                setActiveTutorialStepIndex((current) =>
+                  Math.min(content.steps.length - 1, current + 1)
+                );
+              }}
+            >
+              {isLastStep ? "Finish" : "Next"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderDesktopFirstRunChecklist(): React.JSX.Element | null {
     if (!desktopFirstRunChecklistOpen) return null;
     const qdrantState = desktopFirstRunHealth?.services?.qdrant ?? "unknown";
@@ -28309,46 +28630,130 @@ function HomeContent(): React.JSX.Element {
     const backupConfigured = Boolean(
       settings?.secondaryOllamaHost?.trim() || settings?.comfyUiHost?.trim()
     );
+    const steps = [
+      {
+        id: "account",
+        title: "Account",
+        subtitle: "Create or sign in to your Prism account.",
+        state: user ? "done" : "pending",
+      },
+      {
+        id: "ollama",
+        title: "Local AI engine",
+        subtitle: "Confirm Ollama is reachable.",
+        state: ollamaReady ? "done" : "pending",
+      },
+      {
+        id: "qdrant",
+        title: "Memory engine",
+        subtitle: "Confirm Qdrant is reachable.",
+        state: qdrantReady ? "done" : "pending",
+      },
+      {
+        id: "openai",
+        title: "OpenAI key (optional)",
+        subtitle: "Add your key for online models if you want them.",
+        state: openAiConfigured ? "done" : "optional",
+      },
+      {
+        id: "extras",
+        title: "Extra servers (optional)",
+        subtitle: "Set secondary Ollama or ComfyUI for local image workflows.",
+        state: backupConfigured ? "done" : "optional",
+      },
+    ] as const;
+    const activeStepIndex = Math.min(
+      desktopFirstRunChecklistStepIndex,
+      steps.length - 1
+    );
+    const activeStep = steps[activeStepIndex];
+    const completedCount = steps.filter((step) => step.state === "done").length;
+    const progressPercent = (completedCount / steps.length) * 100;
+    const canCompleteChecklist = user !== null && qdrantReady && ollamaReady;
     return (
       <div className={styles.desktopChecklistOverlay} role="dialog" aria-modal="true">
         <div className={styles.desktopChecklistCard}>
           <h3>First-time setup checklist</h3>
           <p className={styles.muted}>
-            Prism Desktop is ready to configure. Follow these steps, then continue.
+            Walk through each setup step. Completed steps get checkmarks in the timeline.
           </p>
+          <div className={styles.desktopChecklistProgressRow} aria-live="polite">
+            <p className={styles.desktopChecklistProgressLabel}>
+              {completedCount} of {steps.length} completed
+            </p>
+            <div className={styles.desktopChecklistProgressBar} aria-hidden="true">
+              <span
+                className={styles.desktopChecklistProgressFill}
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
           <ol className={styles.desktopChecklistList}>
-            <li className={styles.desktopChecklistItem}>
-              <span>Create or sign in to your Prism account</span>
-              <strong data-state={user ? "done" : "pending"}>{user ? "Done" : "Pending"}</strong>
-            </li>
-            <li className={styles.desktopChecklistItem}>
-              <span>Confirm local AI engine (Ollama) is reachable</span>
-              <strong data-state={ollamaReady ? "done" : "pending"}>
-                {ollamaReady ? "Ready" : "Needs setup"}
-              </strong>
-            </li>
-            <li className={styles.desktopChecklistItem}>
-              <span>Confirm memory engine (Qdrant) is reachable</span>
-              <strong data-state={qdrantReady ? "done" : "pending"}>
-                {qdrantReady ? "Ready" : "Needs setup"}
-              </strong>
-            </li>
-            <li className={styles.desktopChecklistItem}>
-              <span>(Optional) Add OpenAI API key</span>
-              <strong data-state={openAiConfigured ? "done" : "pending"}>
-                {openAiConfigured ? "Configured" : "Optional"}
-              </strong>
-            </li>
-            <li className={styles.desktopChecklistItem}>
-              <span>(Optional) Configure backup/secondary hosts</span>
-              <strong data-state={backupConfigured ? "done" : "pending"}>
-                {backupConfigured ? "Configured" : "Optional"}
-              </strong>
-            </li>
+            {steps.map((step, index) => (
+              <li
+                key={step.id}
+                className={styles.desktopChecklistItem}
+                data-active={index === activeStepIndex ? "true" : undefined}
+              >
+                <div className={styles.desktopChecklistItemBody}>
+                  <span className={styles.desktopChecklistItemTitle}>{step.title}</span>
+                  <span className={styles.desktopChecklistItemHint}>{step.subtitle}</span>
+                </div>
+                <strong className={styles.desktopChecklistStatus} data-state={step.state}>
+                  {step.state === "done" ? "✓ Done" : step.state === "optional" ? "Optional" : "Pending"}
+                </strong>
+              </li>
+            ))}
           </ol>
+          <section className={styles.desktopChecklistStepCard}>
+            <p className={styles.desktopChecklistStepEyebrow}>
+              Step {activeStepIndex + 1} of {steps.length}
+            </p>
+            <h4>{activeStep.title}</h4>
+            <p>{activeStep.subtitle}</p>
+            <div className={styles.desktopChecklistStepActions}>
+              {activeStep.id === "openai" || activeStep.id === "extras" ? (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={() => openRightPanel("settings")}
+                >
+                  Open Settings
+                </button>
+              ) : null}
+              {(activeStep.id === "ollama" || activeStep.id === "qdrant") && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={() => void refreshDesktopFirstRunHealth()}
+                  disabled={desktopFirstRunChecklistBusy}
+                >
+                  {desktopFirstRunChecklistBusy ? "Checking..." : "Refresh checks"}
+                </button>
+              )}
+              {activeStep.id === "account" && !user && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={completeDesktopFirstRunChecklist}
+                >
+                  Continue to login
+                </button>
+              )}
+            </div>
+          </section>
           <div className={styles.desktopChecklistActions}>
-            <button type="button" className={styles.linkButton} onClick={() => openRightPanel("settings")}>
-              Open Settings
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() =>
+                setDesktopFirstRunChecklistStepIndex((current) =>
+                  Math.max(0, current - 1)
+                )
+              }
+              disabled={activeStepIndex === 0}
+            >
+              Previous step
             </button>
             <button
               type="button"
@@ -28361,15 +28766,20 @@ function HomeContent(): React.JSX.Element {
             <button
               type="button"
               className={styles.linkButton}
-              onClick={() => void refreshDesktopFirstRunHealth()}
-              disabled={desktopFirstRunChecklistBusy}
+              onClick={() =>
+                setDesktopFirstRunChecklistStepIndex((current) =>
+                  Math.min(steps.length - 1, current + 1)
+                )
+              }
+              disabled={activeStepIndex >= steps.length - 1}
             >
-              {desktopFirstRunChecklistBusy ? "Checking..." : "Refresh checks"}
+              Next step
             </button>
             <button
               type="button"
               className={styles.accountLogoutButton}
               onClick={completeDesktopFirstRunChecklist}
+              disabled={!canCompleteChecklist}
             >
               Continue to Prism
             </button>
@@ -28414,7 +28824,10 @@ function HomeContent(): React.JSX.Element {
               void copyMessageToClipboard(msg);
             }}
           >
-            Copy
+            <span className={styles.contextMenuItemLabel}>
+              <span className={styles.contextMenuGlyph} aria-hidden="true">⧉</span>
+              <span>Copy</span>
+            </span>
           </button>
           {isUser && (
             <>
@@ -28424,14 +28837,20 @@ function HomeContent(): React.JSX.Element {
                 role="menuitem"
                 onClick={() => beginEditMessage(msg)}
               >
-                Edit
+                <span className={styles.contextMenuItemLabel}>
+                  <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
+                  <span>Edit</span>
+                </span>
               </button>
               <button
                 type="button"
                 role="menuitem"
                 onClick={() => resendUserMessage(msg)}
               >
-                Resend
+                <span className={styles.contextMenuItemLabel}>
+                  <span className={styles.contextMenuGlyph} aria-hidden="true">↻</span>
+                  <span>Resend</span>
+                </span>
               </button>
             </>
           )}
@@ -28444,7 +28863,10 @@ function HomeContent(): React.JSX.Element {
                 void forkChat(msg.id);
               }}
             >
-              Fork
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⑂</span>
+                <span>Fork</span>
+              </span>
             </button>
           )}
           <button
@@ -28454,7 +28876,10 @@ function HomeContent(): React.JSX.Element {
               void deleteMessageFromHistory(msg);
             }}
           >
-            Delete
+            <span className={styles.contextMenuItemLabel}>
+              <span className={styles.contextMenuGlyph} aria-hidden="true">⌫</span>
+              <span>Delete</span>
+            </span>
           </button>
         </div>
       </>
@@ -28503,7 +28928,10 @@ function HomeContent(): React.JSX.Element {
                 void exportBotsAsZip(multiSelectedBots);
               }}
             >
-              Export bots
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⇪</span>
+                <span>Export bots</span>
+              </span>
             </button>
             <button
               type="button"
@@ -28523,7 +28951,31 @@ function HomeContent(): React.JSX.Element {
                 }
               }}
             >
-              {commonGroup ? `Ungroup (${commonGroup.name})` : "Group"}
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">
+                  {commonGroup ? "⊖" : "⊕"}
+                </span>
+                <span>{commonGroup ? `Ungroup (${commonGroup.name})` : "Group"}</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                const protectedCount = multiSelectedBots.filter(
+                  (candidate) => candidate.delete_protected === 1
+                ).length;
+                setSelectedBotDeleteConfirm({
+                  ids: multiSelectedBots.map((candidate) => candidate.id),
+                  protectedCount,
+                });
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⌫</span>
+                <span>Delete selected bots</span>
+              </span>
             </button>
           </>
         ) : (
@@ -28533,7 +28985,10 @@ function HomeContent(): React.JSX.Element {
               role="menuitem"
               onClick={() => void cloneBot(bot)}
             >
-              Clone bot
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⧉</span>
+                <span>Clone bot</span>
+              </span>
             </button>
             <button
               type="button"
@@ -28543,7 +28998,10 @@ function HomeContent(): React.JSX.Element {
                 openBotCustomizer(bot);
               }}
             >
-              Edit bot
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
+                <span>Edit bot</span>
+              </span>
             </button>
             <button
               type="button"
@@ -28553,7 +29011,10 @@ function HomeContent(): React.JSX.Element {
                 void openMemoriesPanelForBot(bot);
               }}
             >
-              View memories
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">◉</span>
+                <span>View memories</span>
+              </span>
             </button>
             {bot.delete_protected !== 1 ? (
               <button
@@ -28561,11 +29022,17 @@ function HomeContent(): React.JSX.Element {
                 role="menuitem"
                 onClick={() => {
                   closeBotContextMenu();
-                  const confirmed = window.confirm(`Delete ${bot.name}? This cannot be undone.`);
-                  if (confirmed) void deleteBot(bot.id);
+                  setPanelBotDeleteConfirm({
+                    id: bot.id,
+                    name: bot.name,
+                    hadUnsavedChanges: false,
+                  });
                 }}
               >
-                Delete bot
+                <span className={styles.contextMenuItemLabel}>
+                  <span className={styles.contextMenuGlyph} aria-hidden="true">⌫</span>
+                  <span>Delete bot</span>
+                </span>
               </button>
             ) : null}
           </>
@@ -28608,7 +29075,10 @@ function HomeContent(): React.JSX.Element {
             if (confirmed) void deleteConversationGroup(group);
           }}
         >
-          {deleteLabel}
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">⌫</span>
+            <span>{deleteLabel}</span>
+          </span>
         </button>
       </div>
     );
@@ -28834,7 +29304,30 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
           <form onSubmit={submitAuth} className={styles.form}>
-            <input required value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" />
+            {authMode === "login" && recentAuthUsernames.length > 0 ? (
+              <label className={styles.authSelectField}>
+                <span>Username</span>
+                <select
+                  required
+                  value={username}
+                  onChange={(event) => {
+                    setUsername(event.target.value);
+                    setError(null);
+                  }}
+                >
+                  <option value="" disabled>
+                    Choose username
+                  </option>
+                  {recentAuthUsernames.map((candidate) => (
+                    <option key={candidate} value={candidate}>
+                      {candidate}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <input required value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" />
+            )}
             <input required type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" />
             {authMode === "register" && (
               <input
@@ -29459,6 +29952,61 @@ function HomeContent(): React.JSX.Element {
               }}
             >
               Delete bot
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSelectedBotDeleteModal = () => {
+    if (!selectedBotDeleteConfirm) return null;
+    const count = selectedBotDeleteConfirm.ids.length;
+    return (
+      <div
+        className={styles.deleteAllModalBackdrop}
+        data-delete-affordance="true"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setSelectedBotDeleteConfirm(null);
+        }}
+      >
+        <div
+          className={styles.deleteAllModalPanel}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="delete-selected-bots-title"
+          aria-describedby="delete-selected-bots-desc"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <h2 id="delete-selected-bots-title" className={styles.deleteAllModalTitle}>
+            Delete selected bots?
+          </h2>
+          <p id="delete-selected-bots-desc" className={styles.deleteAllModalBody}>
+            {count === 1
+              ? "This will permanently remove the selected bot."
+              : `This will permanently remove ${count} selected bots.`}
+            {selectedBotDeleteConfirm.protectedCount > 0
+              ? ` ${selectedBotDeleteConfirm.protectedCount} protected bot${selectedBotDeleteConfirm.protectedCount === 1 ? "" : "s"} will be kept.`
+              : ""}
+            {" "}Chats that used deleted bots stay and fall back to Default.
+          </p>
+          <div className={styles.deleteAllModalActions}>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              onClick={() => setSelectedBotDeleteConfirm(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={styles.deleteAllModalConfirm}
+              disabled={busy}
+              onClick={() => {
+                void deleteSelectedBots(selectedBotDeleteConfirm.ids);
+              }}
+            >
+              Delete selected
             </button>
           </div>
         </div>
@@ -30353,7 +30901,10 @@ function HomeContent(): React.JSX.Element {
           role="menuitem"
           onClick={() => runAndClose(() => openRightPanel("settings"))}
         >
-          Settings
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">⚙</span>
+            <span>Settings</span>
+          </span>
         </button>
         <button
           type="button"
@@ -30403,7 +30954,10 @@ function HomeContent(): React.JSX.Element {
           role="menuitem"
           onClick={() => runAndClose(() => openRightPanel("command-center"))}
         >
-          Command Center
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">⌘</span>
+            <span>Command Center</span>
+          </span>
         </button>
         {showToolbarMemoriesButton ? (
           <button
@@ -30503,7 +31057,10 @@ function HomeContent(): React.JSX.Element {
             role="menuitem"
             onClick={() => runAndClose(handleHeaderHubClick)}
           >
-            Back to Hub
+            <span className={styles.contextMenuItemLabel}>
+              <span className={styles.contextMenuGlyph} aria-hidden="true">⌂</span>
+              <span>Back to Hub</span>
+            </span>
           </button>
         ) : null}
       </div>
@@ -30552,7 +31109,10 @@ function HomeContent(): React.JSX.Element {
           role="menuitem"
           onClick={() => runAndClose(() => openRightPanel("settings"))}
         >
-          Settings
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">⚙</span>
+            <span>Settings</span>
+          </span>
         </button>
         <button
           type="button"
@@ -30581,7 +31141,10 @@ function HomeContent(): React.JSX.Element {
           role="menuitem"
           onClick={() => runAndClose(exitCoffeeToHub)}
         >
-          Back to Hub
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">⌂</span>
+            <span>Back to Hub</span>
+          </span>
         </button>
         <button
           type="button"
@@ -30634,14 +31197,20 @@ function HomeContent(): React.JSX.Element {
           role="menuitem"
           onClick={() => runAndClose(() => openBotCustomizer(bot))}
         >
-          Edit {bot.name}
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
+            <span>Edit {bot.name}</span>
+          </span>
         </button>
         <button
           type="button"
           role="menuitem"
           onClick={() => runAndClose(() => void openMemoriesPanelForBot(bot))}
         >
-          {bot.name}&apos;s memories
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">◉</span>
+            <span>{bot.name}&apos;s memories</span>
+          </span>
         </button>
       </div>
     );
@@ -32296,6 +32865,40 @@ function HomeContent(): React.JSX.Element {
                   Preferred offline/online chat models, copyright text fallback, and image defaults.
                 </span>
               </button>
+              <section className={styles.settingsTutorialCard}>
+                <strong>Mode tutorials</strong>
+                <span>Reset guided walkthroughs for Chat, Sandbox, and Coffee.</span>
+                <div className={styles.settingsTutorialActions}>
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={resetAllModeTutorials}
+                  >
+                    Reset all tutorials
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={() => resetSingleModeTutorial("chat")}
+                  >
+                    Reset Chat
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={() => resetSingleModeTutorial("sandbox")}
+                  >
+                    Reset Sandbox
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={() => resetSingleModeTutorial("coffee")}
+                  >
+                    Reset Coffee
+                  </button>
+                </div>
+              </section>
               {settings.hasOpenAiApiKey && (
                 <button
                   type="button"
@@ -32387,9 +32990,9 @@ function HomeContent(): React.JSX.Element {
               >
                 <header className={styles.settingsAboutModalHeader}>
                   <div>
-                    <span>Connectivity</span>
+                    <span>Connection setup</span>
                     <h4>Extra servers</h4>
-                    <p>Optional second Ollama endpoint and ComfyUI for local image generation.</p>
+                    <p>Add optional backup compute hosts for local responses and image workflows.</p>
                   </div>
                   <button
                     type="button"
@@ -32402,6 +33005,10 @@ function HomeContent(): React.JSX.Element {
                 <div className={styles.settingsAboutModalBody}>
                   {settings && (
                     <div className={`${styles.form} ${styles.formInModal}`}>
+                      <p className={styles.settingsHostsLead}>
+                        Prism works without these fields. Add them only when you want a fallback Ollama
+                        endpoint or an external ComfyUI image server.
+                      </p>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>Second Ollama host</span>
                         <span
@@ -32420,6 +33027,9 @@ function HomeContent(): React.JSX.Element {
                             {secondaryOllamaStatusText}
                           </span>
                         </span>
+                        <small className={styles.settingsHostHint}>
+                          Use host:port only, for example <code>192.168.1.50:11434</code>.
+                        </small>
                       </label>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>ComfyUI server</span>
@@ -32439,6 +33049,9 @@ function HomeContent(): React.JSX.Element {
                             {comfyUiStatusText}
                           </span>
                         </span>
+                        <small className={styles.settingsHostHint}>
+                          Prism checks this address live and lists detected checkpoints in Images.
+                        </small>
                       </label>
                       <p className={styles.muted} style={{ margin: "10px 0 0", maxWidth: 520 }}>
                         When Prism can reach this address, each workflow <code>.json</code> under ComfyUI’s user
@@ -32449,7 +33062,7 @@ function HomeContent(): React.JSX.Element {
                         <code>8188</code>.
                       </p>
                       <p className={styles.muted} style={{ margin: 0 }}>
-                        Use Save in Settings when you are done — values stay in sync with the main form.
+                        Save behavior: use the main <strong>Save</strong> button in Settings when you are done.
                       </p>
                     </div>
                   )}
@@ -33189,7 +33802,7 @@ function HomeContent(): React.JSX.Element {
                 <input
                   ref={botImportInputRef}
                   type="file"
-                  accept=".bot,.zip"
+                  accept=".bot"
                   className={styles.panelHiddenFileInput}
                   onChange={(event) => {
                     void handleBotImportFileSelection(event);
@@ -33234,14 +33847,14 @@ function HomeContent(): React.JSX.Element {
                       ? "Wait for the current action to finish"
                       : editorMode && editingBotId
                         ? "Import disabled while editing a bot"
-                        : "Import bot from .bot or .zip file"
+                        : "Import bot from .bot file"
                   }
                   data-glyph-tooltip={
                     busy
                       ? "Wait for the current action to finish"
                       : editorMode && editingBotId
                         ? "Finish editing or go back to the list to import a .bot file"
-                        : "Import Prism .bot files or a .zip bundle"
+                        : "Import Prism .bot file"
                   }
                 >
                   <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
@@ -34223,7 +34836,7 @@ function HomeContent(): React.JSX.Element {
                           onClick={() => handleImportBotChooseUpload()}
                         >
                           <strong>Upload from file</strong>
-                          <small>.bot export from disk</small>
+                          <small>.bot file from disk</small>
                         </button>
                         {devToolsBotImportPasteEnabled ? (
                           <button
@@ -38474,6 +39087,7 @@ function HomeContent(): React.JSX.Element {
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}
         {renderDeleteAllModal()}
+        {renderSelectedBotDeleteModal()}
       {renderImagesDeleteAllModal()}
         {renderDevToolsPanel()}
         {renderCoffeeShellContextMenu()}
@@ -39646,6 +40260,7 @@ function HomeContent(): React.JSX.Element {
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
+      {renderSelectedBotDeleteModal()}
       {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
@@ -40995,6 +41610,7 @@ function HomeContent(): React.JSX.Element {
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
+      {renderSelectedBotDeleteModal()}
       {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
@@ -41012,6 +41628,7 @@ function HomeContent(): React.JSX.Element {
         />
       )}
       {renderViewSwitchOverlay()}
+      {renderModeTutorialOverlay()}
       {renderDesktopFirstRunChecklist()}
       <GlyphTooltipLayer />
     </main>

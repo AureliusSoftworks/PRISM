@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "icons": "node scripts/run-tauri.mjs icon ../../design/app-icons/prism-client-app-icon.svg --output src-tauri/icons",
     "dev": "node scripts/run-tauri.mjs dev",
-    "build": "node scripts/run-tauri.mjs build",
+    "build": "npm run icons && node scripts/run-tauri.mjs build",
     "tauri": "node scripts/run-tauri.mjs"
   },
   "devDependencies": {
