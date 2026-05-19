@@ -12,6 +12,19 @@ const DEFAULT_API_PORT: u16 = 18787;
 const DEFAULT_WEB_PORT: u16 = 18788;
 const STARTUP_TIMEOUT_SECS: u64 = 90;
 
+/// Strip the `\\?\` extended-length path prefix that Rust's `canonicalize()`
+/// adds on Windows.  Node.js / Next.js choke on these prefixed paths.
+fn clean_path(path: PathBuf) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let s = path.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path
+}
+
 struct RuntimeState {
     qdrant_child: Mutex<Option<Child>>,
     api_child: Mutex<Option<Child>>,
@@ -29,12 +42,14 @@ impl RuntimeState {
 }
 
 fn repo_root_from_manifest() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("..")
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+    clean_path(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("..")
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+    )
 }
 
 fn has_local_node_binary(root: &Path) -> bool {
@@ -54,7 +69,7 @@ fn has_runtime_artifacts(root: &Path) -> bool {
 }
 
 fn bundled_runtime_root(app: &AppHandle) -> Option<PathBuf> {
-    let resource_dir = app.path().resource_dir().ok()?;
+    let resource_dir = clean_path(app.path().resource_dir().ok()?);
     let direct = resource_dir.join("runtime");
     if has_runtime_artifacts(&direct) {
         return Some(direct);
@@ -175,10 +190,11 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     let qdrant = qdrant_binary(&root).ok_or_else(|| {
         io_error("PRISM could not find bundled qdrant binary in runtime/qdrant.")
     })?;
-    let localai_data_dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| root.join("user-data"));
+    let localai_data_dir = clean_path(
+        app.path()
+            .app_data_dir()
+            .unwrap_or_else(|_| root.join("user-data")),
+    );
     let localai_data_dir_value = localai_data_dir.to_string_lossy().to_string();
     let logs_dir = localai_data_dir.join("logs");
     fs::create_dir_all(&logs_dir)
