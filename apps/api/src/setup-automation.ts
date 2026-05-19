@@ -24,10 +24,21 @@ export interface SetupAutomationReport {
   };
 }
 
+export interface OllamaSetupStatus {
+  cliInstalled: boolean;
+  appInstalled: boolean;
+  serviceReachable: boolean;
+  llama31Installed: boolean;
+  canAutoInstallCli: boolean;
+  installerUrl: string;
+}
+
 const WAIT_SLICE_MS = 1_000;
 const OLLAMA_WAIT_TIMEOUT_MS = 20_000;
 const QDRANT_WAIT_TIMEOUT_MS = 15_000;
 const QDRANT_FALLBACK_VERSION = process.env.QDRANT_VERSION?.trim() || "1.17.1";
+const OLLAMA_INSTALLER_URL = "https://ollama.com/download";
+const OLLAMA_REQUIRED_MODEL = "llama3.1";
 
 function safeTrim(value: string | null | undefined): string {
   return typeof value === "string" ? value.trim() : "";
@@ -254,6 +265,97 @@ function localHostLike(baseUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+function ollamaAppInstalled(): boolean {
+  if (process.platform !== "darwin") return false;
+  return (
+    existsSync("/Applications/Ollama.app") ||
+    existsSync(join(homedir(), "Applications", "Ollama.app"))
+  );
+}
+
+export async function getOllamaSetupStatus(config: AppConfig): Promise<OllamaSetupStatus> {
+  const cliInstalled = commandExists("ollama");
+  const appInstalled = ollamaAppInstalled();
+  const serviceReachable = await checkUrlOk(ollamaTagsUrl(config.ollamaHost));
+  const tags = serviceReachable ? await fetchOllamaModelNames(config.ollamaHost) : [];
+  return {
+    cliInstalled,
+    appInstalled,
+    serviceReachable,
+    llama31Installed: modelPresent(tags, OLLAMA_REQUIRED_MODEL),
+    canAutoInstallCli: process.platform === "darwin" && commandExists("brew"),
+    installerUrl: OLLAMA_INSTALLER_URL,
+  };
+}
+
+export async function installOllamaCliAndRequiredModel(
+  config: AppConfig
+): Promise<{ status: OllamaSetupStatus; steps: string[] }> {
+  const steps: string[] = [];
+  let cliInstalled = commandExists("ollama");
+
+  if (!cliInstalled) {
+    const canAutoInstallCli = process.platform === "darwin" && commandExists("brew");
+    if (canAutoInstallCli) {
+      steps.push("Installing Ollama CLI with Homebrew...");
+      try {
+        await runCommand("brew", ["install", "--cask", "ollama"]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown install error";
+        steps.push(`Ollama install failed: ${message}`);
+      }
+      cliInstalled = commandExists("ollama");
+    } else {
+      steps.push("Automatic Ollama CLI install is unavailable on this platform.");
+    }
+  }
+
+  if (process.platform === "darwin" && ollamaAppInstalled()) {
+    try {
+      await runCommand("open", ["-a", "Ollama"]);
+      steps.push("Requested Ollama app launch.");
+    } catch {
+      // Non-fatal; CLI service start below can still work.
+    }
+  }
+
+  if (cliInstalled) {
+    startDetached("ollama", ["serve"]);
+    steps.push("Requested Ollama local service start.");
+  }
+
+  const serviceReachable = await waitUntil(
+    () => checkUrlOk(ollamaTagsUrl(config.ollamaHost)),
+    OLLAMA_WAIT_TIMEOUT_MS
+  );
+  if (!serviceReachable) {
+    steps.push("Ollama service is still unreachable.");
+    return {
+      status: await getOllamaSetupStatus(config),
+      steps,
+    };
+  }
+
+  const tags = await fetchOllamaModelNames(config.ollamaHost);
+  if (!modelPresent(tags, OLLAMA_REQUIRED_MODEL) && cliInstalled) {
+    steps.push(`Pulling required model: ${OLLAMA_REQUIRED_MODEL}`);
+    try {
+      await runCommand("ollama", ["pull", OLLAMA_REQUIRED_MODEL]);
+      steps.push(`Model downloaded: ${OLLAMA_REQUIRED_MODEL}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown pull error";
+      steps.push(`Model download failed (${OLLAMA_REQUIRED_MODEL}): ${message}`);
+    }
+  } else if (modelPresent(tags, OLLAMA_REQUIRED_MODEL)) {
+    steps.push(`Model ready: ${OLLAMA_REQUIRED_MODEL}`);
+  }
+
+  return {
+    status: await getOllamaSetupStatus(config),
+    steps,
+  };
 }
 
 async function ensureOllamaReady(config: AppConfig, steps: string[]): Promise<boolean> {

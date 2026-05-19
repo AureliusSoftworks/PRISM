@@ -248,6 +248,10 @@ function tutorialStorageKeyForUser(userId: string): string {
   return `${MODE_TUTORIAL_STORAGE_PREFIX}:${userId}`;
 }
 
+function tutorialResetOnNextLaunchKeyForUser(userId: string): string {
+  return `${MODE_TUTORIAL_RESET_ON_NEXT_LAUNCH_PREFIX}:${userId}`;
+}
+
 function normalizeTutorialProgress(value: unknown): TutorialProgress {
   if (!value || typeof value !== "object") {
     return { ...DEFAULT_TUTORIAL_PROGRESS };
@@ -278,6 +282,7 @@ const DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS = 5000;
 const RECENT_AUTH_USERNAMES_KEY = "prism_recent_auth_usernames_v1";
 const MAX_RECENT_AUTH_USERNAMES = 12;
 const MODE_TUTORIAL_STORAGE_PREFIX = "prism_mode_tutorials_v1";
+const MODE_TUTORIAL_RESET_ON_NEXT_LAUNCH_PREFIX = "prism_mode_tutorials_reset_on_next_launch_v1";
 
 type TutorialMode = "chat" | "sandbox" | "coffee";
 
@@ -1075,6 +1080,41 @@ function PrismTriangleMark({ className }: PrismTriangleMarkProps): React.JSX.Ele
         strokeLinejoin="miter"
         strokeMiterlimit="10"
         strokeWidth="7"
+      />
+    </svg>
+  );
+}
+
+interface PrismHeroMarkProps {
+  className?: string;
+}
+
+function PrismHeroMark({ className }: PrismHeroMarkProps): React.JSX.Element {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 56 56"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <linearGradient id="prismHeroRingGradient" gradientUnits="userSpaceOnUse" x1="8" y1="43" x2="48" y2="6">
+          <stop offset="0" stopColor="#e11d48" />
+          <stop offset="0.18" stopColor="#d97706" />
+          <stop offset="0.36" stopColor="#0d9488" />
+          <stop offset="0.54" stopColor="#0284c7" />
+          <stop offset="0.72" stopColor="#7c3aed" />
+          <stop offset="0.9" stopColor="#db2777" />
+          <stop offset="1" stopColor="#e11d48" />
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width="56" height="56" rx="14" fill="#111827" />
+      <path
+        fill="url(#prismHeroRingGradient)"
+        fillRule="evenodd"
+        d="M28 6L48 43H8L28 6Z M28 20.31L19.6 35.85H36.4L28 20.31Z"
       />
     </svg>
   );
@@ -9109,14 +9149,7 @@ function EmptyStateIcon({
         className={`${styles.brandIconShell} ${styles.userHeroAvatar} ${styles.emptyStatePrivateHero}`}
         aria-hidden="true"
       >
-        {/* Decorative shell art; keeping native img avoids layout shifts in this icon stack. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/icon.jpg"
-          alt=""
-          aria-hidden="true"
-          className={styles.brandIcon}
-        />
+        <PrismHeroMark className={styles.brandIcon} />
         <PrismTriangleMark className={styles.brandIconLight} />
       </div>
     );
@@ -9155,13 +9188,7 @@ function EmptyStateIcon({
   }
   return (
     <div className={styles.brandIconShell} aria-hidden="true">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/icon.jpg"
-        alt=""
-        aria-hidden="true"
-        className={styles.brandIcon}
-      />
+      <PrismHeroMark className={styles.brandIcon} />
       <PrismTriangleMark className={styles.brandIconLight} />
     </div>
   );
@@ -14243,6 +14270,16 @@ function HomeContent(): React.JSX.Element {
   const [desktopFirstRunChecklistBusy, setDesktopFirstRunChecklistBusy] = useState(false);
   const [desktopFirstRunAutoSetupBusy, setDesktopFirstRunAutoSetupBusy] = useState(false);
   const [desktopFirstRunAutoSetupSteps, setDesktopFirstRunAutoSetupSteps] = useState<string[]>([]);
+  const [desktopOllamaSetupStatus, setDesktopOllamaSetupStatus] = useState<{
+    cliInstalled: boolean;
+    appInstalled: boolean;
+    serviceReachable: boolean;
+    llama31Installed: boolean;
+    canAutoInstallCli: boolean;
+    installerUrl: string;
+  } | null>(null);
+  const [desktopOllamaInstallBusy, setDesktopOllamaInstallBusy] = useState(false);
+  const [preAuthChecklistStepIndex, setPreAuthChecklistStepIndex] = useState(0);
   const desktopFirstRunAutoSetupAttemptedRef = useRef(false);
   const [preAuthChecklistComplete, setPreAuthChecklistComplete] = useState(false);
   const [desktopFirstRunHealth, setDesktopFirstRunHealth] = useState<{
@@ -14843,6 +14880,7 @@ function HomeContent(): React.JSX.Element {
   const [tutorialProgress, setTutorialProgress] = useState<TutorialProgress>(
     DEFAULT_TUTORIAL_PROGRESS
   );
+  const [resetTutorialsOnNextLaunch, setResetTutorialsOnNextLaunch] = useState(false);
   const [activeTutorialMode, setActiveTutorialMode] = useState<TutorialMode | null>(null);
   const [activeTutorialStepIndex, setActiveTutorialStepIndex] = useState(0);
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
@@ -15554,15 +15592,43 @@ function HomeContent(): React.JSX.Element {
   const refreshDesktopFirstRunHealth = useCallback(async () => {
     setDesktopFirstRunChecklistBusy(true);
     try {
-      const health = await requestApiWithLoopbackFallback<{
-        services?: {
-          qdrant?: string;
-          ollama?: string;
-        };
-      }>("/api/health");
+      const [health, ollamaStatusPayload] = await Promise.all([
+        requestApiWithLoopbackFallback<{
+          services?: {
+            qdrant?: string;
+            ollama?: string;
+          };
+        }>("/api/health"),
+        requestApiWithLoopbackFallback<{
+          status?: {
+            cliInstalled?: boolean;
+            appInstalled?: boolean;
+            serviceReachable?: boolean;
+            llama31Installed?: boolean;
+            canAutoInstallCli?: boolean;
+            installerUrl?: string;
+          };
+        }>("/api/setup/ollama-status"),
+      ]);
       setDesktopFirstRunHealth(health);
+      if (ollamaStatusPayload?.status) {
+        setDesktopOllamaSetupStatus({
+          cliInstalled: ollamaStatusPayload.status.cliInstalled === true,
+          appInstalled: ollamaStatusPayload.status.appInstalled === true,
+          serviceReachable: ollamaStatusPayload.status.serviceReachable === true,
+          llama31Installed: ollamaStatusPayload.status.llama31Installed === true,
+          canAutoInstallCli: ollamaStatusPayload.status.canAutoInstallCli === true,
+          installerUrl:
+            typeof ollamaStatusPayload.status.installerUrl === "string"
+              ? ollamaStatusPayload.status.installerUrl
+              : "https://ollama.com/download",
+        });
+      } else {
+        setDesktopOllamaSetupStatus(null);
+      }
     } catch {
       setDesktopFirstRunHealth(null);
+      setDesktopOllamaSetupStatus(null);
     } finally {
       setDesktopFirstRunChecklistBusy(false);
     }
@@ -15594,6 +15660,55 @@ function HomeContent(): React.JSX.Element {
     }
   }, [refreshDesktopFirstRunHealth, requestApiWithLoopbackFallback]);
 
+  const installDesktopOllamaCliAndModel = useCallback(async () => {
+    setDesktopOllamaInstallBusy(true);
+    setError(null);
+    try {
+      const result = await requestApiWithLoopbackFallback<{
+        steps?: string[];
+        status?: {
+          cliInstalled?: boolean;
+          appInstalled?: boolean;
+          serviceReachable?: boolean;
+          llama31Installed?: boolean;
+          canAutoInstallCli?: boolean;
+          installerUrl?: string;
+        };
+        health?: {
+          services?: {
+            qdrant?: string;
+            ollama?: string;
+          };
+        };
+      }>("/api/setup/ollama-install", { method: "POST" });
+      if (result.steps && result.steps.length > 0) {
+        setDesktopFirstRunAutoSetupSteps(result.steps);
+      }
+      if (result.health) {
+        setDesktopFirstRunHealth(result.health);
+      }
+      if (result.status) {
+        setDesktopOllamaSetupStatus({
+          cliInstalled: result.status.cliInstalled === true,
+          appInstalled: result.status.appInstalled === true,
+          serviceReachable: result.status.serviceReachable === true,
+          llama31Installed: result.status.llama31Installed === true,
+          canAutoInstallCli: result.status.canAutoInstallCli === true,
+          installerUrl:
+            typeof result.status.installerUrl === "string"
+              ? result.status.installerUrl
+              : "https://ollama.com/download",
+        });
+      } else {
+        await refreshDesktopFirstRunHealth();
+      }
+    } catch (installError) {
+      setError(installError instanceof Error ? installError.message : "Ollama install failed.");
+    } finally {
+      setDesktopOllamaInstallBusy(false);
+    }
+  }, [refreshDesktopFirstRunHealth, requestApiWithLoopbackFallback]);
+
   const completeDesktopFirstRunChecklist = useCallback(() => {
     try {
       localStorage.setItem(DESKTOP_FIRST_RUN_CHECKLIST_KEY, "done");
@@ -15610,6 +15725,7 @@ function HomeContent(): React.JSX.Element {
   const continueFromPreAuthChecklist = useCallback(() => {
     completeDesktopFirstRunChecklist();
     setPreAuthChecklistComplete(true);
+    setPreAuthChecklistStepIndex(0);
     setError(null);
   }, [completeDesktopFirstRunChecklist]);
 
@@ -19198,11 +19314,20 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!user?.id) {
       setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
+      setResetTutorialsOnNextLaunch(false);
       setActiveTutorialMode(null);
       setActiveTutorialStepIndex(0);
       return;
     }
     try {
+      const resetKey = tutorialResetOnNextLaunchKeyForUser(user.id);
+      const shouldResetOnLaunch = localStorage.getItem(resetKey) === "1";
+      setResetTutorialsOnNextLaunch(shouldResetOnLaunch);
+      if (shouldResetOnLaunch) {
+        localStorage.removeItem(resetKey);
+        setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
+        return;
+      }
       const raw = localStorage.getItem(tutorialStorageKeyForUser(user.id));
       if (!raw) {
         setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
@@ -19213,6 +19338,19 @@ function HomeContent(): React.JSX.Element {
       setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
     }
   }, [user?.id]);
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const key = tutorialResetOnNextLaunchKeyForUser(user.id);
+      if (resetTutorialsOnNextLaunch) {
+        localStorage.setItem(key, "1");
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // Ignore storage write failures; current-session behavior still works.
+    }
+  }, [resetTutorialsOnNextLaunch, user?.id]);
   useEffect(() => {
     if (!user?.id) return;
     try {
@@ -20869,20 +21007,13 @@ function HomeContent(): React.JSX.Element {
     setActiveTutorialStepIndex(0);
   }
 
-  function resetAllModeTutorials(): void {
-    setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
-    setActiveTutorialMode(null);
-    setActiveTutorialStepIndex(0);
-    setPanelNotice("Mode tutorials reset. They will reappear when you enter each mode.");
-  }
-
-  function resetSingleModeTutorial(mode: TutorialMode): void {
-    setTutorialProgress((current) => ({ ...current, [mode]: false }));
-    if (view === mode) {
-      setActiveTutorialMode(mode);
-      setActiveTutorialStepIndex(0);
-    }
-    setPanelNotice(`${mode[0].toUpperCase()}${mode.slice(1)} tutorial reset.`);
+  function setTutorialResetOnNextLaunchEnabled(nextValue: boolean): void {
+    setResetTutorialsOnNextLaunch(nextValue);
+    setPanelNotice(
+      nextValue
+        ? "Tutorials will restart next time you launch Prism."
+        : "Tutorial restart on launch disabled."
+    );
   }
 
   function deleteAccount() {
@@ -28480,8 +28611,7 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.card}>
           <div className={styles.brandLockup}>
             <div className={styles.brandIconShell} aria-hidden="true">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/icon.jpg" alt="" aria-hidden="true" className={styles.brandIcon} />
+              <PrismHeroMark className={styles.brandIcon} />
               <PrismTriangleMark className={styles.brandIconLight} />
             </div>
             <PrismWordmarkWithVersion className={styles.brandWordmark} />
@@ -29090,27 +29220,45 @@ function HomeContent(): React.JSX.Element {
     const ollamaState = desktopFirstRunHealth?.services?.ollama ?? "unknown";
     const qdrantReady = qdrantState === "ready" || qdrantState === "configured";
     const ollamaReady = ollamaState === "ready" || ollamaState === "configured";
-    const setupChecksReady = qdrantReady && ollamaReady;
-    const completedChecks = Number(ollamaReady) + Number(qdrantReady);
-    const totalChecks = 2;
-    const progressPercent = (completedChecks / totalChecks) * 100;
+    const ollamaCliInstalled = desktopOllamaSetupStatus?.cliInstalled === true;
+    const llama31Installed = desktopOllamaSetupStatus?.llama31Installed === true;
+    const ollamaStepReady = ollamaReady && ollamaCliInstalled && llama31Installed;
+    const setupChecksReady = qdrantReady && ollamaStepReady;
+    const steps = [
+      {
+        id: "ollama",
+        title: "Install and verify Ollama",
+        subtitle: "CLI + service + llama3.1",
+        ready: ollamaStepReady,
+      },
+      {
+        id: "qdrant",
+        title: "Verify memory engine",
+        subtitle: "Qdrant connection check",
+        ready: qdrantReady,
+      },
+      {
+        id: "account",
+        title: "Create your account",
+        subtitle: "Unlock Prism after local checks",
+        ready: setupChecksReady,
+      },
+    ] as const;
+    const activeStepIndex = Math.min(preAuthChecklistStepIndex, steps.length - 1);
+    const activeStep = steps[activeStepIndex];
+    const completedChecks = steps.filter((step) => step.ready).length;
+    const progressPercent = (completedChecks / steps.length) * 100;
     const progressLabel = setupChecksReady
-      ? "System checks complete"
+      ? "All onboarding checks complete"
       : desktopFirstRunChecklistBusy
         ? "Checking local services..."
-        : `${completedChecks} of ${totalChecks} services ready`;
+        : `${completedChecks} of ${steps.length} onboarding steps ready`;
     return (
       <main className={`${styles.authLayout} ${themeClass}`}>
         <div className={`${styles.card} ${styles.authCard}`}>
           <div className={`${styles.brandLockup} ${styles.authBrandLockup}`}>
             <div className={styles.brandIconShell} aria-hidden="true">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/icon.jpg"
-                alt=""
-                aria-hidden="true"
-                className={styles.brandIcon}
-              />
+              <PrismHeroMark className={styles.brandIcon} />
               <PrismTriangleMark className={styles.brandIconLight} />
             </div>
             <div className={styles.authBrandTextBlock}>
@@ -29126,7 +29274,7 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.authFormHeader}>
             <h2 className={styles.authHeading}>Let&apos;s get Prism ready</h2>
             <p className={`${styles.muted} ${styles.desktopChecklistIntro}`}>
-              Quick local checks first, then account creation.
+              Step-by-step onboarding with progress tracking, like a guided tax flow.
             </p>
           </div>
           <div className={styles.desktopChecklistProgressRow} aria-live="polite">
@@ -29139,63 +29287,98 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
           <ol className={styles.desktopChecklistList}>
-            <li className={styles.desktopChecklistItem}>
-              <div className={styles.desktopChecklistItemBody}>
-                <span className={styles.desktopChecklistItemTitle}>Local AI engine</span>
-                <span className={styles.desktopChecklistItemHint}>Ollama connection</span>
-              </div>
-              <strong
-                className={styles.desktopChecklistStatus}
-                data-state={ollamaReady ? "done" : desktopFirstRunChecklistBusy ? "checking" : "pending"}
+            {steps.map((step, index) => (
+              <li
+                key={step.id}
+                className={styles.desktopChecklistItem}
+                data-active={index === activeStepIndex ? "true" : undefined}
               >
-                {ollamaReady ? "Ready" : desktopFirstRunChecklistBusy ? "Checking..." : "Needs setup"}
-              </strong>
-            </li>
-            <li className={styles.desktopChecklistItem}>
-              <div className={styles.desktopChecklistItemBody}>
-                <span className={styles.desktopChecklistItemTitle}>Memory engine</span>
-                <span className={styles.desktopChecklistItemHint}>Qdrant connection</span>
-              </div>
-              <strong
-                className={styles.desktopChecklistStatus}
-                data-state={qdrantReady ? "done" : desktopFirstRunChecklistBusy ? "checking" : "pending"}
-              >
-                {qdrantReady ? "Ready" : desktopFirstRunChecklistBusy ? "Checking..." : "Needs setup"}
-              </strong>
-            </li>
-            <li className={styles.desktopChecklistItem}>
-              <div className={styles.desktopChecklistItemBody}>
-                <span className={styles.desktopChecklistItemTitle}>Create your account</span>
-                <span className={styles.desktopChecklistItemHint}>Unlocked after local checks</span>
-              </div>
-              <strong
-                className={styles.desktopChecklistStatus}
-                data-state={setupChecksReady ? "done" : "next"}
-              >
-                {setupChecksReady ? "Ready" : "Up next"}
-              </strong>
-            </li>
+                <div className={styles.desktopChecklistItemBody}>
+                  <span className={styles.desktopChecklistItemTitle}>
+                    {step.ready ? "✓ " : ""}
+                    {step.title}
+                  </span>
+                  <span className={styles.desktopChecklistItemHint}>{step.subtitle}</span>
+                </div>
+                <strong
+                  className={styles.desktopChecklistStatus}
+                  data-state={
+                    step.ready
+                      ? "done"
+                      : index === activeStepIndex
+                        ? (desktopFirstRunChecklistBusy ? "checking" : "pending")
+                        : "next"
+                  }
+                >
+                  {step.ready
+                    ? "Done"
+                    : index === activeStepIndex
+                      ? (desktopFirstRunChecklistBusy ? "Checking..." : "In progress")
+                      : "Up next"}
+                </strong>
+              </li>
+            ))}
           </ol>
-          <div className={styles.desktopChecklistMeta}>
-            <p className={styles.muted}>
-              Auto-checks every {DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS / 1000} seconds.
+          <section className={styles.desktopChecklistStepCard}>
+            <p className={styles.desktopChecklistStepEyebrow}>
+              Step {activeStepIndex + 1} of {steps.length}
             </p>
-            {desktopFirstRunAutoSetupSteps.length > 0 && (
-              <p className={styles.muted}>
-                Automation: {desktopFirstRunAutoSetupSteps[desktopFirstRunAutoSetupSteps.length - 1]}
-              </p>
+            <h4>{activeStep.title}</h4>
+            {activeStep.id === "ollama" ? (
+              <>
+                <p>We need Ollama CLI installed, the Ollama service reachable, and `llama3.1` available.</p>
+                <div className={styles.desktopChecklistStepActions}>
+                  <strong className={styles.desktopChecklistStatus} data-state={ollamaCliInstalled ? "done" : "pending"}>
+                    CLI: {ollamaCliInstalled ? "Installed" : "Missing"}
+                  </strong>
+                  <strong className={styles.desktopChecklistStatus} data-state={ollamaReady ? "done" : "pending"}>
+                    Service: {ollamaReady ? "Reachable" : "Not reachable"}
+                  </strong>
+                  <strong className={styles.desktopChecklistStatus} data-state={llama31Installed ? "done" : "pending"}>
+                    llama3.1: {llama31Installed ? "Installed" : "Missing"}
+                  </strong>
+                </div>
+                <div className={styles.desktopChecklistStepActions}>
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={() =>
+                      window.open(
+                        desktopOllamaSetupStatus?.installerUrl ?? "https://ollama.com/download",
+                        "_blank",
+                        "noopener,noreferrer"
+                      )
+                    }
+                  >
+                    Download Ollama installer
+                  </button>
+                  {desktopOllamaSetupStatus?.canAutoInstallCli ? (
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={() => void installDesktopOllamaCliAndModel()}
+                      disabled={desktopOllamaInstallBusy}
+                    >
+                      {desktopOllamaInstallBusy
+                        ? "Installing Ollama + llama3.1..."
+                        : "Install Ollama CLI + llama3.1 for me"}
+                    </button>
+                  ) : null}
+                </div>
+              </>
+            ) : activeStep.id === "qdrant" ? (
+              <>
+                <p>Prism memory requires Qdrant. Refresh checks or run automatic setup.</p>
+                <div className={styles.desktopChecklistStepActions}>
+                  <strong className={styles.desktopChecklistStatus} data-state={qdrantReady ? "done" : "pending"}>
+                    Qdrant: {qdrantReady ? "Ready" : "Needs setup"}
+                  </strong>
+                </div>
+              </>
+            ) : (
+              <p>Once Ollama and Qdrant are both ready, continue to account creation.</p>
             )}
-          </div>
-          <div className={styles.desktopChecklistActions}>
-            <button
-              type="button"
-              className={styles.desktopChecklistPrimaryAction}
-              onClick={continueFromPreAuthChecklist}
-              disabled={!setupChecksReady}
-            >
-              Continue to account creation
-            </button>
-            <div className={styles.desktopChecklistSecondaryActions}>
+            <div className={styles.desktopChecklistStepActions}>
               <button
                 type="button"
                 className={styles.linkButton}
@@ -29210,18 +29393,58 @@ function HomeContent(): React.JSX.Element {
                 onClick={() => void refreshDesktopFirstRunHealth()}
                 disabled={desktopFirstRunChecklistBusy}
               >
-                {desktopFirstRunChecklistBusy ? "Checking..." : "Refresh now"}
+                {desktopFirstRunChecklistBusy ? "Checking..." : "Refresh checks"}
               </button>
-              {!setupChecksReady && (
-                <button
-                  type="button"
-                  className={styles.linkButton}
-                  onClick={continueFromPreAuthChecklist}
-                >
-                  Continue anyway
-                </button>
-              )}
             </div>
+          </section>
+          <div className={styles.desktopChecklistMeta}>
+            <p className={styles.muted}>
+              Auto-checks every {DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS / 1000} seconds.
+            </p>
+            {desktopFirstRunAutoSetupSteps.length > 0 && (
+              <p className={styles.muted}>
+                Automation: {desktopFirstRunAutoSetupSteps[desktopFirstRunAutoSetupSteps.length - 1]}
+              </p>
+            )}
+          </div>
+          <div className={styles.desktopChecklistActions}>
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() =>
+                setPreAuthChecklistStepIndex((current) => Math.max(0, current - 1))
+              }
+              disabled={activeStepIndex === 0}
+            >
+              Previous step
+            </button>
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() =>
+                setPreAuthChecklistStepIndex((current) => Math.min(steps.length - 1, current + 1))
+              }
+              disabled={activeStepIndex >= steps.length - 1}
+            >
+              Next step
+            </button>
+            <button
+              type="button"
+              className={styles.desktopChecklistPrimaryAction}
+              onClick={continueFromPreAuthChecklist}
+              disabled={!setupChecksReady}
+            >
+              Continue to account creation
+            </button>
+            {!setupChecksReady && (
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={continueFromPreAuthChecklist}
+              >
+                Continue anyway
+              </button>
+            )}
           </div>
           {error && <p className={styles.error}>{error}</p>}
         </div>
@@ -29239,13 +29462,7 @@ function HomeContent(): React.JSX.Element {
             {/* Auth lockup keeps the boxed Prism icon in dark mode and swaps to
                 the hollow triangle in light mode for high-contrast parity. */}
             <div className={styles.brandIconShell} aria-hidden="true">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/icon.jpg"
-                alt=""
-                aria-hidden="true"
-                className={styles.brandIcon}
-              />
+              <PrismHeroMark className={styles.brandIcon} />
               <PrismTriangleMark className={styles.brandIconLight} />
             </div>
             <div className={styles.authBrandTextBlock}>
@@ -32867,36 +33084,18 @@ function HomeContent(): React.JSX.Element {
               </button>
               <section className={styles.settingsTutorialCard}>
                 <strong>Mode tutorials</strong>
-                <span>Reset guided walkthroughs for Chat, Sandbox, and Coffee.</span>
+                <span>Restart all guided walkthroughs the next time Prism launches.</span>
                 <div className={styles.settingsTutorialActions}>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={resetAllModeTutorials}
-                  >
-                    Reset all tutorials
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => resetSingleModeTutorial("chat")}
-                  >
-                    Reset Chat
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => resetSingleModeTutorial("sandbox")}
-                  >
-                    Reset Sandbox
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => resetSingleModeTutorial("coffee")}
-                  >
-                    Reset Coffee
-                  </button>
+                  <label className={styles.checkbox}>
+                    <input
+                      type="checkbox"
+                      checked={resetTutorialsOnNextLaunch}
+                      onChange={(event) =>
+                        setTutorialResetOnNextLaunchEnabled(event.currentTarget.checked)
+                      }
+                    />
+                    Restart tutorials on next launch
+                  </label>
                 </div>
               </section>
               {settings.hasOpenAiApiKey && (
@@ -39114,13 +39313,7 @@ function HomeContent(): React.JSX.Element {
           {/* Keep lockup behavior aligned with auth: boxed icon in dark mode,
               hollow triangle in light mode. */}
           <div className={styles.brandIconShell}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/icon.jpg"
-              alt=""
-              aria-hidden="true"
-              className={styles.brandIcon}
-            />
+            <PrismHeroMark className={styles.brandIcon} />
             <PrismTriangleMark className={styles.brandIconLight} />
           </div>
           <PrismWordmarkWithVersion className={styles.brandWordmark} />

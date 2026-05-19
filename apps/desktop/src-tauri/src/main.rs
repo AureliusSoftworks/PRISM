@@ -418,7 +418,7 @@ fn main() {
                 )
                 .title("PRISM")
                 .inner_size(1400.0, 948.0)
-                .min_inner_size(948.0, 948.0)
+                .min_inner_size(948.0, 760.0)
                 .resizable(true)
                 .maximizable(true)
                 .build()

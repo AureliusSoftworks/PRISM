@@ -11,7 +11,11 @@ import {
   resolveSessionToken,
 } from "./auth.ts";
 import { buildHealthResponse } from "./health.ts";
-import { runAutoSetup } from "./setup-automation.ts";
+import {
+  getOllamaSetupStatus,
+  installOllamaCliAndRequiredModel,
+  runAutoSetup,
+} from "./setup-automation.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
 import { pollImageJobForUser, releaseImageSlot, tryAcquireImageSlot } from "./image-job-slot.ts";
@@ -648,6 +652,25 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
 
 function buildRoutes(): RouteDefinition[] {
   return [
+    route("GET", "/api/setup/ollama-status", async (ctx) => {
+      requireLoopback(ctx);
+      const status = await getOllamaSetupStatus(config);
+      json(ctx.res, 200, {
+        ok: true,
+        status,
+      });
+    }),
+    route("POST", "/api/setup/ollama-install", async (ctx) => {
+      requireLoopback(ctx);
+      const result = await installOllamaCliAndRequiredModel(config);
+      const health = await buildHealthResponse(db, config, process.uptime());
+      json(ctx.res, 200, {
+        ok: true,
+        steps: result.steps,
+        status: result.status,
+        health,
+      });
+    }),
     route("POST", "/api/setup/auto", async (ctx) => {
       requireLoopback(ctx);
       const report = await runAutoSetup(config);
