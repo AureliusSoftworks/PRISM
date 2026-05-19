@@ -5,7 +5,9 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::MenuBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use url::Url;
 
 const DEFAULT_API_PORT: u16 = 18787;
@@ -37,6 +39,18 @@ impl RuntimeState {
             qdrant_child: Mutex::new(None),
             api_child: Mutex::new(None),
             web_child: Mutex::new(None),
+        }
+    }
+}
+
+struct AppLifecycleState {
+    is_quitting: Mutex<bool>,
+}
+
+impl AppLifecycleState {
+    fn new() -> Self {
+        Self {
+            is_quitting: Mutex::new(false),
         }
     }
 }
@@ -397,9 +411,83 @@ fn stop_runtime(state: &RuntimeState) {
     }
 }
 
+fn is_app_quitting(app_handle: &AppHandle) -> bool {
+    let lifecycle: State<'_, AppLifecycleState> = app_handle.state();
+    lifecycle
+        .is_quitting
+        .lock()
+        .map(|guard| *guard)
+        .unwrap_or(false)
+}
+
+fn mark_app_quitting(app_handle: &AppHandle) {
+    let lifecycle: State<'_, AppLifecycleState> = app_handle.state();
+    let lock_result = lifecycle.is_quitting.lock();
+    if let Ok(mut guard) = lock_result {
+        *guard = true;
+    }
+}
+
+fn show_main_window(app_handle: &AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    let tray_menu = MenuBuilder::new(app)
+        .text("restore", "Restore Prism")
+        .separator()
+        .text("exit", "Exit Prism")
+        .build()?;
+    let mut tray_builder = TrayIconBuilder::with_id("prism-tray")
+        .menu(&tray_menu)
+        .show_menu_on_left_click(false)
+        .tooltip("Prism")
+        .on_menu_event(|app_handle, event| match event.id().as_ref() {
+            "restore" => show_main_window(app_handle),
+            "exit" => {
+                mark_app_quitting(app_handle);
+                app_handle.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray_builder = tray_builder.icon(icon);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tray_builder = tray_builder.icon_as_template(true);
+    }
+    tray_builder.build(app)?;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(RuntimeState::new())
+        .manage(AppLifecycleState::new())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if is_app_quitting(&window.app_handle()) {
+                    return;
+                }
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             let state: State<'_, RuntimeState> = app.state();
             let (api_port, web_port) = start_runtime(&app.handle(), &state)?;
@@ -424,13 +512,25 @@ fn main() {
                 .build()
                 .map_err(tauri::Error::from)?;
             }
+            setup_tray(app)?;
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building PRISM")
         .run(|app_handle, event| match event {
-            RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+            RunEvent::ExitRequested { api, .. } => {
+                if is_app_quitting(&app_handle) {
+                    let state: State<'_, RuntimeState> = app_handle.state();
+                    stop_runtime(&state);
+                    return;
+                }
+                api.prevent_exit();
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+            RunEvent::Exit => {
                 let state: State<'_, RuntimeState> = app_handle.state();
                 stop_runtime(&state);
             }

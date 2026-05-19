@@ -14,15 +14,17 @@ function Show-Usage {
     Write-Host @"
 Usage:
   .\scripts\prism.ps1 windows-server
-  .\scripts\prism.ps1 web
+  .\scripts\prism.ps1 up
+  .\scripts\prism.ps1 down
   .\scripts\prism.ps1 standalone
   .\scripts\prism.ps1 standalone-win <version> [release-channel]
   .\scripts\prism.ps1 reset [--force]
 
 Notes:
   windows-server is Windows-only and runs the WPF tray app from source.
-  web runs the combined dev launcher and starts both API
+  up runs the combined dev launcher and starts both API
   (http://localhost:18787) and web (http://localhost:18788).
+  down stops local dev processes listening on ports 18787 and 18788.
   standalone runs the desktop standalone launcher (npm run desktop).
   standalone-win dispatches the desktop release workflow and opens the
   desktop/v<version> release page in the browser.
@@ -230,8 +232,23 @@ switch ($Command.ToLowerInvariant()) {
         dotnet run --project apps/server-windows/src/PrismServer.csproj -c Debug
         break
     }
-    "web" {
+    { $_ -in @("up", "web") } {
         npm run dev
+        break
+    }
+    "down" {
+        foreach ($port in @(18787, 18788)) {
+            try {
+                Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+                    Select-Object -ExpandProperty OwningProcess -Unique |
+                    ForEach-Object {
+                        Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
+                    }
+            } catch {
+                # Some environments do not expose Get-NetTCPConnection state details.
+            }
+        }
+        Write-Host "Prism web stack stopped (ports 18787 and 18788 are now free)."
         break
     }
     { $_ -in @("standalone", "desktop") } {
