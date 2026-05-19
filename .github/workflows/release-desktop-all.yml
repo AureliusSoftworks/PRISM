@@ -62,6 +62,8 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Verify Rust tools
         run: |
@@ -217,6 +219,8 @@ jobs:
           # linuxdeploy and plugin AppImages require FUSE runtime support.
           # Ubuntu 24.04 uses libfuse2t64; keep a fallback for older images.
           sudo apt-get install -y libfuse2t64 || sudo apt-get install -y libfuse2
+          # AppImage creation relies on these tools at linuxdeploy/appimagetool time.
+          sudo apt-get install -y desktop-file-utils squashfs-tools file zsync
 
       - name: Install dependencies
         run: npm ci
@@ -225,6 +229,8 @@ jobs:
         env:
           # Force AppImage tools to run without kernel FUSE mounts in CI.
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          ARCH: "x86_64"
+          RUST_BACKTRACE: "1"
         run: |
           chmod +x scripts/package-desktop-linux.sh
           scripts/package-desktop-linux.sh "${RELEASE_VERSION}"
