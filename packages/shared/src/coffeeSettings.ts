@@ -28,10 +28,10 @@ export interface CoffeeSessionSettings {
 /** Defaults match the pre-settings Coffee pipeline and the UI mock defaults. */
 export const DEFAULT_COFFEE_SESSION_SETTINGS: CoffeeSessionSettings = {
   responseLength: "balanced",
-  responseDelayBias: 50,
+  responseDelayBias: 38,
   tableEnergy: "relaxed",
   crossTalk: "normal",
-  breathingRoom: 35,
+  breathingRoom: 48,
   stayOnThread: true,
   givePlayerLastWord: true,
   memoryCallbacks: "this-session",

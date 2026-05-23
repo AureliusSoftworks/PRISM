@@ -103,6 +103,32 @@ function createTestDb(): DatabaseSync {
       undo_expires_at TEXT NOT NULL,
       undone_at TEXT
     );
+    CREATE TABLE coffee_polls (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      question TEXT NOT NULL,
+      options_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      closed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE coffee_poll_votes (
+      user_id TEXT NOT NULL,
+      poll_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      vote_kind TEXT NOT NULL,
+      option_index INTEGER,
+      explanation TEXT,
+      suggested_option TEXT,
+      confidence REAL,
+      deliberation_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -282,6 +308,42 @@ describe("deleteConversation", () => {
     );
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS n FROM conversation_exports").get() as { n: number }).n,
+      0
+    );
+  });
+
+  it("removes Coffee polls and votes with the deleted session", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "coffee-1");
+    const now = new Date().toISOString();
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'coffee' WHERE id = ? AND user_id = ?"
+    ).run("coffee-1", "user-1");
+    db.prepare(
+      "INSERT INTO coffee_polls (id, user_id, conversation_id, question, options_json, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "poll-1",
+      "user-1",
+      "coffee-1",
+      "Where should we go?",
+      JSON.stringify(["Beach", "Diner"]),
+      "open",
+      "user",
+      now,
+      now
+    );
+    db.prepare(
+      "INSERT INTO coffee_poll_votes (user_id, poll_id, conversation_id, bot_id, vote_kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run("user-1", "poll-1", "coffee-1", "bot-1", "pending", now, now);
+
+    deleteConversation(db, "user-1", "coffee-1");
+
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM coffee_polls").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM coffee_poll_votes").get() as { n: number }).n,
       0
     );
   });

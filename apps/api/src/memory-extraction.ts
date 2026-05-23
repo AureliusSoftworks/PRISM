@@ -18,6 +18,10 @@ interface CoffeeObserverMemoryRule {
   textFactory: (speakerName: string, peerName: string) => string;
 }
 
+interface BotPreferredAddressRule {
+  pattern: RegExp;
+}
+
 export interface MemoryRetractionCue {
   cuePhrase: string;
 }
@@ -184,6 +188,25 @@ const COFFEE_OBSERVER_NAME_CONFIDENCE = 0.62;
 const COFFEE_OBSERVER_BOT_RELATION_CONFIDENCE = 0.56;
 const COFFEE_OBSERVER_USER_FACT_DURABILITY = 0.74;
 const COFFEE_OBSERVER_BOT_RELATION_DURABILITY = 0.68;
+const BOT_PREFERRED_ADDRESS_CONFIDENCE = 0.71;
+const BOT_PREFERRED_ADDRESS_DURABILITY = 0.82;
+
+const BOT_PREFERRED_ADDRESS_RULES: BotPreferredAddressRule[] = [
+  {
+    pattern:
+      /^(?:(?:please|kindly)\s+)?(?:can|could|would)?\s*(?:you\s+)?(?:call|refer\s+to|address)\s+me(?:\s+(?:as|by))?\s+(.+)$/i,
+  },
+  {
+    pattern:
+      /^(?:i(?:'d| would)\s+prefer(?:\s+that)?\s+(?:you\s+)?(?:call|refer\s+to|address)\s+me(?:\s+(?:as|by))?\s+(.+))$/i,
+  },
+  {
+    pattern: /^i(?:'d| would)?\s+prefer\s+to\s+be\s+called\s+(.+)$/i,
+  },
+];
+
+const BOT_PREFERRED_ADDRESS_DISALLOWED_PATTERN =
+  /\b(?:worthless|pathetic|disgusting|subhuman|idiot|moron|stupid|deranged|crazy|insane|psycho|hate\s+you|kill|harm|punish)\b/i;
 
 const COFFEE_OBSERVER_USER_VERB_REWRITES = new Map<string, string>([
   ["likes", "like"],
@@ -540,6 +563,33 @@ function sanitizeCoffeeObserverDetail(rawDetail: string): string | null {
   return detail;
 }
 
+function cleanBotPreferredAddress(rawName: string): string | null {
+  const cleaned = rawName
+    .replace(/[.!?]+$/, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned || cleaned.length > 80) return null;
+  if (/^(?:not|none|nothing|n\/a|unknown)\b/i.test(cleaned)) return null;
+  if (BOT_PREFERRED_ADDRESS_DISALLOWED_PATTERN.test(cleaned)) return null;
+  return cleaned;
+}
+
+function extractBotPreferredAddressValue(message: string): string | null {
+  const normalized = stripCoffeeBotMentionMarkdown(message)
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return null;
+  for (const rule of BOT_PREFERRED_ADDRESS_RULES) {
+    const match = normalized.match(rule.pattern);
+    const rawName = match?.[1];
+    if (!rawName) continue;
+    const preferred = cleanBotPreferredAddress(rawName);
+    if (preferred) return preferred;
+  }
+  return null;
+}
+
 function subjectLooksLikeCoffeeUser(
   subject: string,
   botNameKeys: Set<string>
@@ -652,6 +702,26 @@ export function extractCoffeeObserverMemoryCandidates(args: {
       seatedBotNames,
     }),
   ]).slice(0, 3);
+}
+
+export function extractBotPreferredAddressMemoryCandidates(args: {
+  assistantMessage: string;
+  targetBotName: string;
+}): MemoryCandidate[] {
+  const targetBotName = normalizeCoffeeObserverName(args.targetBotName);
+  if (!targetBotName) return [];
+  const preferredAddress = extractBotPreferredAddressValue(args.assistantMessage);
+  if (!preferredAddress) return [];
+  if (preferredAddress.toLocaleLowerCase() === targetBotName.toLocaleLowerCase()) return [];
+  const text = `${targetBotName} prefers to be called ${preferredAddress}.`;
+  return [
+    {
+      text,
+      confidence: BOT_PREFERRED_ADDRESS_CONFIDENCE,
+      category: "bot_relation",
+      durability: BOT_PREFERRED_ADDRESS_DURABILITY,
+    },
+  ];
 }
 
 export function analyzeMemoryIntent(message: string): MemoryIntent {

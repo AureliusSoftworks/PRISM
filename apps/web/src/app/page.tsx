@@ -56,6 +56,10 @@ import {
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   resolveAutoModel,
   normalizeCoffeeSessionSettings,
+  COFFEE_POLL_FINALIZE_REMAINING_MS,
+  COFFEE_POLL_OPTION_COUNT_MAX,
+  COFFEE_POLL_OPTION_COUNT_MIN,
+  COFFEE_POLL_PLAYER_VOTER_ID,
   type BotCustomFact,
   type BotBirthEra,
   type CoffeeBotSocialSnapshot,
@@ -487,6 +491,8 @@ type CoffeePollPanelDragState = {
   pointerId: number;
   offsetX: number;
   offsetY: number;
+  startClientX: number;
+  startClientY: number;
 };
 type DevToolsButtonDragState = DevToolsPanelDragState & {
   startClientX: number;
@@ -2338,16 +2344,47 @@ const COFFEE_REPLY_DELAY_FAST_MIN_MS = 650;
 const COFFEE_REPLY_DELAY_FAST_MAX_MS = 2600;
 const COFFEE_ARRIVAL_STEP_MS = 850;
 const COFFEE_ARRIVAL_SETTLE_MS = 900;
+const COFFEE_POLL_REFRESH_MS = 4_000;
+const COFFEE_POLL_OPTION_PLACEHOLDERS = ["Choice A", "Choice B", "Choice C", "Choice D"] as const;
+
+function buildDefaultCoffeePollOptionDraft(): string[] {
+  return Array.from({ length: COFFEE_POLL_OPTION_COUNT_MIN }, () => "");
+}
+
+function formatCoffeePollBotVoteLabel(
+  vote: CoffeePollVoteState | undefined,
+  options: readonly string[]
+): string {
+  if (!vote) return "No vote";
+  if (vote.kind === "option" && typeof vote.optionIndex === "number") {
+    return options[vote.optionIndex] ?? "Voted";
+  }
+  const leaningIndex = vote.deliberation?.leaningOptionIndex;
+  const alternateIndex = vote.deliberation?.alternateOptionIndex;
+  const leaning = typeof leaningIndex === "number" ? options[leaningIndex] : null;
+  const alternate = typeof alternateIndex === "number" ? options[alternateIndex] : null;
+  if (vote.deliberation?.stage === "deciding" && leaning) {
+    return `Deciding: ${leaning}`;
+  }
+  if (vote.deliberation?.stage === "teetering" && leaning && alternate) {
+    return `Teetering: ${leaning} vs ${alternate}`;
+  }
+  if (leaning) {
+    return `Leaning: ${leaning}`;
+  }
+  if (vote.kind === "pending") return "Thinking...";
+  return "No vote";
+}
 const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
 const COFFEE_SEND_COOLDOWN_MS = 2200;
 const COFFEE_BOT_REVEAL_DELAY_MIN_MS = 280;
 const COFFEE_BOT_REVEAL_DELAY_MAX_MS = 12000;
 const COFFEE_MOOD_TYPEWRITER_CHARS_PER_SECOND: Record<BotMoodKey, number> = {
-  joyful: 26,
-  warm: 21,
-  neutral: 16,
-  guarded: 12,
-  strained: 9,
+  joyful: 20,
+  warm: 16,
+  neutral: 12,
+  guarded: 9,
+  strained: 7,
 };
 const COFFEE_INTERRUPTION_CUE_HIDE_MS = 3200;
 const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
@@ -2360,6 +2397,7 @@ const COFFEE_CUP_ROTATION_BIAS_DEGREES = 45;
 const COFFEE_SEAT_ACTION_BADGE_MAX_CHARS = 48;
 const COFFEE_SEAT_ACTION_BADGE_MIN_CLAUSE_CHARS = 14;
 const COFFEE_POLL_PANEL_DEFAULT_POSITION: CoffeePollPanelPosition = { x: 28, y: 96 };
+const COFFEE_POLL_BUBBLE_DRAG_SUPPRESS_CLICK_PX = 6;
 
 /** Browser default for Coffee table-tuning sliders before a live session loads from the API. */
 const PRISM_COFFEE_SESSION_SETTINGS_STORAGE_KEY = "prism_coffee_session_settings_v1";
@@ -2395,20 +2433,20 @@ function persistCoffeeSettingsToBrowser(settings: CoffeeSessionSettings): void {
 function loadCoffeePausedSessionIdsFromBrowser(): Set<string> {
   if (typeof window === "undefined") return new Set<string>();
   try {
-    const raw = window.localStorage.getItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
-    if (!raw) return new Set<string>();
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return new Set<string>();
-    const ids = parsed.filter((value): value is string => typeof value === "string" && value.length > 0);
-    return new Set<string>(ids);
+    window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
   } catch {
-    return new Set<string>();
+    // Private mode / quota — ignore; paused sessions are no longer resumed.
   }
+  return new Set<string>();
 }
 
 function persistCoffeePausedSessionIdsToBrowser(sessionIds: Set<string>): void {
   if (typeof window === "undefined") return;
   try {
+    if (sessionIds.size === 0) {
+      window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
+      return;
+    }
     window.localStorage.setItem(
       PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY,
       JSON.stringify(Array.from(sessionIds))
@@ -2421,26 +2459,11 @@ function persistCoffeePausedSessionIdsToBrowser(sessionIds: Set<string>): void {
 function loadCoffeePausedSessionRemainingMsByIdFromBrowser(): Record<string, number> {
   if (typeof window === "undefined") return {};
   try {
-    const raw = window.localStorage.getItem(PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const result: Record<string, number> = {};
-    for (const [conversationId, remainingMs] of Object.entries(parsed as Record<string, unknown>)) {
-      if (
-        conversationId.length === 0 ||
-        typeof remainingMs !== "number" ||
-        !Number.isFinite(remainingMs) ||
-        remainingMs <= 0
-      ) {
-        continue;
-      }
-      result[conversationId] = remainingMs;
-    }
-    return result;
+    window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY);
   } catch {
-    return {};
+    // Private mode / quota — ignore; paused sessions are no longer resumed.
   }
+  return {};
 }
 
 function persistCoffeePausedSessionRemainingMsByIdToBrowser(
@@ -2448,6 +2471,10 @@ function persistCoffeePausedSessionRemainingMsByIdToBrowser(
 ): void {
   if (typeof window === "undefined") return;
   try {
+    if (Object.keys(remainingById).length === 0) {
+      window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY);
+      return;
+    }
     window.localStorage.setItem(
       PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY,
       JSON.stringify(remainingById)
@@ -2457,7 +2484,7 @@ function persistCoffeePausedSessionRemainingMsByIdToBrowser(
   }
 }
 
-/** Treat sessions with a topic or any message as started, so preview can separate Resume vs Review states. */
+/** Treat sessions with a topic or any message as started, so preview can separate Join vs Review states. */
 function coffeeSessionHasStarted(conversation: CoffeeConversationState | null): boolean {
   if (!conversation) return false;
   if (typeof conversation.coffeeTopic === "string" && conversation.coffeeTopic.trim().length > 0) {
@@ -2646,14 +2673,34 @@ interface CoffeeInterruptionEvent {
 
 type CoffeePollStatus = "open" | "collecting" | "closed" | "cancelled";
 type CoffeePollVoteKind = "option" | "abstain" | "pending" | "error";
+type CoffeePollVoterKind = "bot" | "player";
+
+interface CoffeePollDeliberationState {
+  stage:
+    | "idle"
+    | "evaluating"
+    | "teetering"
+    | "blocked"
+    | "deciding"
+    | "finalized"
+    | "error";
+  leaningOptionIndex?: number | null;
+  alternateOptionIndex?: number | null;
+  confidence?: number | null;
+  blocker?: string | null;
+  note?: string | null;
+  updatedAt: string;
+}
 
 interface CoffeePollVoteState {
   botId: string;
+  voterKind?: CoffeePollVoterKind;
   kind: CoffeePollVoteKind;
   optionIndex?: number | null;
   explanation?: string | null;
   suggestedOption?: string | null;
   confidence?: number | null;
+  deliberation?: CoffeePollDeliberationState | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -2691,6 +2738,7 @@ interface CoffeeCenterFeedLine {
   speaker: string;
   text: string;
   botGlyph?: string;
+  botId?: string;
 }
 
 /** Local mirror of the Coffee conversation shape returned by `POST /api/coffee/turn`. */
@@ -2793,7 +2841,7 @@ function extractCoffeeUserLineFromTurnMessages(
     for (let i = messages.length - 2; i >= 0; i -= 1) {
       const m = messages[i];
       if (m.role === "user") {
-        return m.content.trim().length > 0 ? clampCoffeeTableText(m.content) : null;
+        return m.content.trim().length > 0 ? coffeeTableDisplayText(m.content) : null;
       }
     }
     return null;
@@ -2801,7 +2849,7 @@ function extractCoffeeUserLineFromTurnMessages(
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i];
     if (m.role === "user") {
-      return m.content.trim().length > 0 ? clampCoffeeTableText(m.content) : null;
+      return m.content.trim().length > 0 ? coffeeTableDisplayText(m.content) : null;
     }
   }
   return null;
@@ -2809,6 +2857,10 @@ function extractCoffeeUserLineFromTurnMessages(
 
 function clampCoffeeTableText(text: string): string {
   return text;
+}
+
+function coffeeTableDisplayText(text: string): string {
+  return extractStageDirections(clampCoffeeTableText(text)).mainText;
 }
 
 function normalizeCoffeeSeatActionBadgeText(raw: string): string {
@@ -2841,25 +2893,6 @@ function normalizeCoffeeSeatActionBadgeText(raw: string): string {
       : sliced;
   text = cut.length > 0 ? cut : sliced;
   return `${text}...`;
-}
-
-/**
- * True when the most recent assistant message in a conversation is composed
- * entirely of stage directions (`*…*`) with no spoken text after stripping.
- *
- * Used by the autoplay loop to recognise "silent gesture" turns and refrain
- * from auto-rotating to the next speaker — silent actions are presence
- * beats, not invitations to chime in.
- */
-function latestAssistantMessageIsActionOnly(
-  conversation: { messages?: readonly CoffeeConversationMessage[] } | null | undefined
-): boolean {
-  const messages = conversation?.messages;
-  if (!messages || messages.length === 0) return false;
-  const last = messages[messages.length - 1];
-  if (last.role !== "assistant") return false;
-  const { mainText, actions } = extractStageDirections(last.content);
-  return actions.length > 0 && mainText.trim().length === 0;
 }
 
 function coffeeMessageHasTableText(
@@ -15671,16 +15704,19 @@ function HomeContent(): React.JSX.Element {
       // Safe no-op for environments without pointer capture support.
     }
   }, []);
-  const startCoffeePollPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const startCoffeePollPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
-    const panel = coffeePollPanelRef.current;
+    const panel = coffeePollPanelRef.current ?? coffeePollBubbleRef.current;
     if (!panel) return;
     const rect = panel.getBoundingClientRect();
     coffeePollPanelDragRef.current = {
       pointerId: event.pointerId,
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
     };
+    coffeePollPanelSuppressClickRef.current = false;
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
@@ -15688,11 +15724,18 @@ function HomeContent(): React.JSX.Element {
     }
     event.preventDefault();
   }, []);
-  const dragCoffeePollPanel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const dragCoffeePollPanel = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = coffeePollPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
-    const panel = coffeePollPanelRef.current;
+    const panel = coffeePollPanelRef.current ?? coffeePollBubbleRef.current;
     if (!panel) return;
+    const dragDistance = Math.hypot(
+      event.clientX - dragState.startClientX,
+      event.clientY - dragState.startClientY
+    );
+    if (dragDistance >= COFFEE_POLL_BUBBLE_DRAG_SUPPRESS_CLICK_PX) {
+      coffeePollPanelSuppressClickRef.current = true;
+    }
     const rect = panel.getBoundingClientRect();
     const next = clampCoffeePollPanelPosition(
       event.clientX - dragState.offsetX,
@@ -15706,7 +15749,7 @@ function HomeContent(): React.JSX.Element {
     panel.style.top = `${next.y}px`;
     setCoffeePollPanelPosition(next);
   }, []);
-  const endCoffeePollPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const endCoffeePollPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = coffeePollPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
     coffeePollPanelDragRef.current = null;
@@ -18433,17 +18476,20 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSelectedPresetId, setCoffeeSelectedPresetId] = useState("");
   const [coffeeOpeningPollModalOpen, setCoffeeOpeningPollModalOpen] = useState(false);
   const [coffeeOpeningPollQuestion, setCoffeeOpeningPollQuestion] = useState("");
-  const [coffeeOpeningPollOptions, setCoffeeOpeningPollOptions] = useState<string[]>([
-    "",
-    "",
-    "",
-  ]);
+  const [coffeeOpeningPollOptions, setCoffeeOpeningPollOptions] = useState<string[]>(() =>
+    buildDefaultCoffeePollOptionDraft()
+  );
   const [coffeeActivePoll, setCoffeeActivePoll] = useState<CoffeePollState | null>(null);
+  const coffeeActivePollRef = useRef<CoffeePollState | null>(null);
   const [coffeePollResultsOpen, setCoffeePollResultsOpen] = useState(false);
+  const [coffeePollPanelMinimized, setCoffeePollPanelMinimized] = useState(false);
+  const [coffeePollVoteBusy, setCoffeePollVoteBusy] = useState(false);
   const [coffeePollPanelPosition, setCoffeePollPanelPosition] =
     useState<CoffeePollPanelPosition>(COFFEE_POLL_PANEL_DEFAULT_POSITION);
   const coffeePollPanelRef = useRef<HTMLDivElement | null>(null);
+  const coffeePollBubbleRef = useRef<HTMLButtonElement | null>(null);
   const coffeePollPanelDragRef = useRef<CoffeePollPanelDragState | null>(null);
+  const coffeePollPanelSuppressClickRef = useRef(false);
   const [coffeeSettingsModalOpen, setCoffeeSettingsModalOpen] = useState(false);
   const [coffeeSettingsDraft, setCoffeeSettingsDraft] = useState<CoffeeSessionSettings>(() =>
     loadCoffeeSettingsFromBrowser()
@@ -18578,6 +18624,76 @@ function HomeContent(): React.JSX.Element {
     coffeeConversationRef.current = coffeeConversation;
   }, [coffeeConversation]);
   useEffect(() => {
+    coffeeActivePollRef.current = coffeeActivePoll;
+  }, [coffeeActivePoll]);
+  useEffect(() => {
+    if (coffeeActivePoll === null) {
+      setCoffeePollPanelMinimized(false);
+    }
+  }, [coffeeActivePoll]);
+  useEffect(() => {
+    const conversation = coffeeConversation;
+    const poll = coffeeActivePoll;
+    if (!conversation || !poll) return;
+    if (poll.status === "closed" || poll.status === "cancelled") return;
+    if (coffeeSessionPhase !== "live" && coffeeSessionPhase !== "arriving") return;
+
+    const refreshPoll = async (): Promise<void> => {
+      try {
+        const response = await api<{ ok: true; poll: CoffeePollState | null }>(
+          `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/polls/active`
+        );
+        if (response.poll) {
+          setCoffeeActivePoll(response.poll);
+          if (!coffeePollPanelMinimized) {
+            setCoffeePollResultsOpen(true);
+          }
+        } else {
+          setCoffeeActivePoll(null);
+        }
+      } catch {
+        // Poll refresh should never block the table.
+      }
+    };
+
+    const tickPoll = async (): Promise<void> => {
+      const endsAt = coffeeSessionEndsAtRef.current ?? coffeeSessionEndsAtMs;
+      const sessionRemainingMs =
+        typeof endsAt === "number" && Number.isFinite(endsAt)
+          ? Math.max(0, endsAt - Date.now())
+          : null;
+      try {
+        const response = await api<{ ok: true; poll: CoffeePollState }>(
+          `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/polls/${encodeURIComponent(
+            poll.id
+          )}/collect`,
+          {
+            method: "POST",
+            body: JSON.stringify({ sessionRemainingMs }),
+          }
+        );
+        setCoffeeActivePoll(response.poll);
+        if (!coffeePollPanelMinimized) {
+          setCoffeePollResultsOpen(true);
+        }
+      } catch {
+        // Poll tick should never block the table.
+      }
+    };
+
+    void refreshPoll();
+    const id = window.setInterval(() => {
+      void tickPoll();
+    }, COFFEE_POLL_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [
+    coffeeConversation,
+    coffeeActivePoll,
+    coffeeSessionPhase,
+    coffeeSessionEndsAtMs,
+    coffeePollPanelMinimized,
+  ]);
+  useEffect(() => {
     coffeeSessionSettingsRef.current = coffeeSessionSettings;
   }, [coffeeSessionSettings]);
   useEffect(() => {
@@ -18604,19 +18720,6 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     persistCoffeePausedSessionRemainingMsByIdToBrowser(coffeePausedSessionRemainingMsById);
   }, [coffeePausedSessionRemainingMsById]);
-  const markCoffeeSessionPaused = useCallback((conversationId: string, remainingMs: number): void => {
-    const safeRemainingMs = Math.max(1000, Math.round(remainingMs));
-    setCoffeePausedSessionIds((current) => {
-      if (current.has(conversationId)) return current;
-      const next = new Set(current);
-      next.add(conversationId);
-      return next;
-    });
-    setCoffeePausedSessionRemainingMsById((current) => {
-      if (current[conversationId] === safeRemainingMs) return current;
-      return { ...current, [conversationId]: safeRemainingMs };
-    });
-  }, []);
   const markCoffeeSessionResumed = useCallback((conversationId: string): void => {
     setCoffeePausedSessionIds((current) => {
       if (!current.has(conversationId)) return current;
@@ -18889,6 +18992,9 @@ function HomeContent(): React.JSX.Element {
       setCoffeeUserRevealText("");
       setCoffeeInterruptedSnippet(null);
       setCoffeeLiveInterruptionCue(null);
+      setCoffeeActivePoll(null);
+      setCoffeePollResultsOpen(false);
+      setCoffeePollPanelMinimized(false);
       if (coffeeCooldownTimerRef.current) {
         clearTimeout(coffeeCooldownTimerRef.current);
         coffeeCooldownTimerRef.current = null;
@@ -37098,12 +37204,24 @@ function HomeContent(): React.JSX.Element {
   const resetCoffeeOpeningPollDraft = () => {
     setCoffeeOpeningPollModalOpen(false);
     setCoffeeOpeningPollQuestion("");
-    setCoffeeOpeningPollOptions(["", "", ""]);
+    setCoffeeOpeningPollOptions(buildDefaultCoffeePollOptionDraft());
   };
   const updateCoffeeOpeningPollOption = (index: number, value: string) => {
     setCoffeeOpeningPollOptions((current) =>
       current.map((option, optionIndex) => (optionIndex === index ? value : option))
     );
+  };
+  const addCoffeeOpeningPollOption = () => {
+    setCoffeeOpeningPollOptions((current) => {
+      if (current.length >= COFFEE_POLL_OPTION_COUNT_MAX) return current;
+      return [...current, ""];
+    });
+  };
+  const removeCoffeeOpeningPollOption = (index: number) => {
+    setCoffeeOpeningPollOptions((current) => {
+      if (current.length <= COFFEE_POLL_OPTION_COUNT_MIN) return current;
+      return current.filter((_, optionIndex) => optionIndex !== index);
+    });
   };
   const coffeeOpeningPollPayload = (): { question: string; options: string[] } | undefined => {
     const question = coffeeOpeningPollQuestion.replace(/\s+/g, " ").trim();
@@ -37144,6 +37262,7 @@ function HomeContent(): React.JSX.Element {
     resetCoffeeOpeningPollDraft();
     setCoffeeActivePoll(null);
     setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
   };
   const openCoffeeGroup = (group: CoffeeGroupState) => {
     clearCoffeeArrivalTimer();
@@ -37171,6 +37290,7 @@ function HomeContent(): React.JSX.Element {
     resetCoffeeOpeningPollDraft();
     setCoffeeActivePoll(null);
     setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
   };
   const scheduleCoffeeAutonomousTurn = (
     conversationId: string,
@@ -37262,7 +37382,9 @@ function HomeContent(): React.JSX.Element {
   ): Promise<boolean> => {
     const initialPoll = coffeeOpeningPollPayload();
     if (!initialPoll) {
-      setCoffeeError("Add a poll question and at least two options before starting.");
+      setCoffeeError(
+        `Add a question and at least ${COFFEE_POLL_OPTION_COUNT_MIN} filled choice chips before starting.`
+      );
       return false;
     }
     setCoffeeBusy(true);
@@ -37272,27 +37394,16 @@ function HomeContent(): React.JSX.Element {
         `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/polls`,
         { method: "POST", body: JSON.stringify(initialPoll) }
       );
-      setCoffeeActivePoll({
-        ...(created.poll as CoffeePollState),
-        status: "collecting",
-      });
+      setCoffeeActivePoll(created.poll);
+      setCoffeePollPanelMinimized(false);
       setCoffeePollResultsOpen(true);
-      const collected = await api<{ ok: true; poll: CoffeePollState }>(
-        `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/polls/${encodeURIComponent(
-          created.poll.id
-        )}/collect`,
-        {
-          method: "POST",
-          body: JSON.stringify({ sessionRemainingMs: currentCoffeeSessionRemainingMs() }),
-        }
-      );
-      setCoffeeActivePoll(collected.poll);
       const refreshed = await api<{ ok: true; conversation: CoffeeConversationState }>(
         `/api/conversations/${encodeURIComponent(conversation.id)}`
       );
       setCoffeeConversation(refreshed.conversation);
       setCoffeeStarterTopics([]);
       resetCoffeeOpeningPollDraft();
+      setCoffeeOpeningPollModalOpen(false);
       startCoffeeArrivalSequence(refreshed.conversation, scenario);
       void refreshConversations();
       return true;
@@ -37301,6 +37412,64 @@ function HomeContent(): React.JSX.Element {
       return false;
     } finally {
       setCoffeeBusy(false);
+    }
+  };
+  const castCoffeePlayerPollVote = async (
+    conversationId: string,
+    pollId: string,
+    optionIndex: number
+  ): Promise<CoffeePollState | null> => {
+    if (coffeePollVoteBusy) return null;
+    setCoffeePollVoteBusy(true);
+    setCoffeeError(null);
+    const sessionRemainingMs = (() => {
+      const endsAt = coffeeSessionEndsAtRef.current ?? coffeeSessionEndsAtMs;
+      if (typeof endsAt !== "number" || !Number.isFinite(endsAt)) return null;
+      return Math.max(0, endsAt - Date.now());
+    })();
+    const votePayload = { optionIndex, sessionRemainingMs };
+    try {
+      const response = await api<{ ok: true; poll: CoffeePollState }>(
+        `/api/coffee/sessions/${encodeURIComponent(conversationId)}/polls/${encodeURIComponent(
+          pollId
+        )}/vote`,
+        {
+          method: "POST",
+          body: JSON.stringify(votePayload),
+        }
+      );
+      setCoffeeActivePoll(response.poll);
+      setCoffeePollPanelMinimized(false);
+      setCoffeePollResultsOpen(true);
+      return response.poll;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (!/route not found/i.test(message)) {
+        setCoffeeError(message || "Failed to save your poll vote.");
+        return null;
+      }
+      try {
+        const fallback = await api<{ ok: true; poll: CoffeePollState }>(
+          `/api/coffee/sessions/${encodeURIComponent(conversationId)}/polls/${encodeURIComponent(
+            pollId
+          )}/collect`,
+          {
+            method: "POST",
+            body: JSON.stringify(votePayload),
+          }
+        );
+        setCoffeeActivePoll(fallback.poll);
+        setCoffeePollPanelMinimized(false);
+        setCoffeePollResultsOpen(true);
+        return fallback.poll;
+      } catch (fallbackErr) {
+        setCoffeeError(
+          fallbackErr instanceof Error ? fallbackErr.message : "Failed to save your poll vote."
+        );
+        return null;
+      }
+    } finally {
+      setCoffeePollVoteBusy(false);
     }
   };
   const createCoffeeSession = async (
@@ -37640,9 +37809,7 @@ function HomeContent(): React.JSX.Element {
   const joinPreviewedCoffeeSession = () => {
     if (!coffeeConversation || coffeeSessionPhase !== "preview") return;
     const conversationStarted = coffeeSessionHasStarted(coffeeConversation);
-    const isPaused = coffeePausedSessionIds.has(coffeeConversation.id);
-    const canResumeSession = isPaused || !conversationStarted;
-    if (!canResumeSession) return;
+    if (conversationStarted) return;
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
     abortCoffeeRequests();
@@ -37664,15 +37831,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeeAutoplayPausedValue(false);
       return;
     }
-    const pausedRemainingMs = coffeePausedSessionRemainingMsById[coffeeConversation.id];
-    if (isPaused && !(typeof pausedRemainingMs === "number" && Number.isFinite(pausedRemainingMs))) {
-      setCoffeeError("Could not restore the paused timer for this session.");
-      return;
-    }
-    const remainingMs = isPaused
-      ? Math.max(1000, pausedRemainingMs)
-      : coffeeSessionDurationMs(coffeeConversation);
-    const endsAt = Date.now() + remainingMs;
+    const endsAt = Date.now() + coffeeSessionDurationMs(coffeeConversation);
     markCoffeeSessionResumed(coffeeConversation.id);
     setCoffeeArrivedBotIds(groupIds);
     assignCoffeeSessionEndsAtMs(endsAt);
@@ -37736,11 +37895,9 @@ function HomeContent(): React.JSX.Element {
         includeCooldown: false,
         onReveal: () => {
           if (coffeeAutoplayPausedRef.current) return;
-          // Action-only replies (mainText empty after stripping `*…*`) are
-          // silent gestures, not spoken turns — don't auto-rotate to a
-          // follow-up speaker. The table waits for the user (or a manual
-          // director pick) to break the pause.
-          if (latestAssistantMessageIsActionOnly(response.conversation)) return;
+          // Never hard-stop autoplay on action-only turns; some models emit
+          // short `*gesture*` beats frequently, and pausing here can stall
+          // the whole table indefinitely.
           scheduleCoffeeAutonomousTurn(response.conversation.id, undefined, true);
         },
       });
@@ -38060,10 +38217,8 @@ function HomeContent(): React.JSX.Element {
           includeCooldown: true,
           onReveal: () => {
             if (coffeeAutoplayPausedRef.current) return;
-            // Action-only replies (`*shrugs*` with no spoken line) are
-            // silent gestures and shouldn't trigger another bot to respond
-            // — let the table breathe until the user speaks again.
-            if (latestAssistantMessageIsActionOnly(response.conversation)) return;
+            // Action-only beats should not freeze the room. Keep the loop
+            // alive so the next bot can respond and carry the discussion.
             const lastWordMul = coffeeSessionSettingsRef.current.givePlayerLastWord ? 1.42 : 1;
             scheduleCoffeeAutonomousTurn(response.conversation.id, undefined, true, lastWordMul);
           },
@@ -38102,6 +38257,9 @@ function HomeContent(): React.JSX.Element {
     setCoffeeAutoBusy(false);
     setCoffeeAutoplayPausedValue(false);
     assignCoffeeSessionEndsAtMs(null);
+    setCoffeeActivePoll(null);
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
   };
   const startCoffeeReplay = () => {
     if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
@@ -38131,7 +38289,12 @@ function HomeContent(): React.JSX.Element {
     resetCoffeeToPicker();
   };
   const exitCoffeeToHub = () => {
+    const sessionId = coffeeConversation?.id ?? null;
     stopActiveCoffeeSession();
+    if (sessionId) {
+      markCoffeeSessionResumed(sessionId);
+      void deleteConversation(sessionId);
+    }
     navigateToView("hub");
   };
   const exitCoffeeSessionToSelectedView = () => {
@@ -38140,19 +38303,8 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const groupIds = coffeeConversation.botGroupIds ?? [];
-    const shouldPauseSession =
-      coffeeSessionPhase !== "finished" &&
-      coffeeSessionPhase !== "preview" &&
-      coffeeSessionHasStarted(coffeeConversation);
-    if (shouldPauseSession) {
-      const fallbackRemainingMs = coffeeSessionDurationMs(coffeeConversation);
-      const remainingMs = coffeeSessionEndsAtRef.current
-        ? Math.max(1000, coffeeSessionEndsAtRef.current - Date.now())
-        : fallbackRemainingMs;
-      markCoffeeSessionPaused(coffeeConversation.id, remainingMs);
-    } else {
-      markCoffeeSessionResumed(coffeeConversation.id);
-    }
+    const sessionId = coffeeConversation.id;
+    markCoffeeSessionResumed(sessionId);
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
     resetCoffeeRhythm();
@@ -38161,19 +38313,26 @@ function HomeContent(): React.JSX.Element {
     setCoffeeAutoBusy(false);
     setCoffeeAutoplayPausedValue(false);
     setCoffeeError(null);
-    setCoffeeSelectedSessionId(coffeeConversation.id);
+    setCoffeeConversation(null);
+    setCoffeeSelectedSessionId(null);
+    setCoffeeSelectedGroupId(coffeeConversation.coffeeGroupId ?? null);
     setCoffeeSelectedSeatBotIds(
       coffeeConversation.coffeeSeatBotIds ?? coffeeSeatsFromBotIds(groupIds)
     );
     setCoffeeArrivedBotIds(groupIds);
     closeCoffeeTranscript();
     assignCoffeeSessionEndsAtMs(null);
-    setCoffeeSessionPhase("preview");
+    setCoffeeActivePoll(null);
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
+    setCoffeeSessionPhase("selecting");
+    void deleteConversation(sessionId);
   };
   const deleteCoffeeSession = async (sessionId: string) => {
     if (coffeeConversation?.id === sessionId || coffeeSelectedSessionId === sessionId) {
       resetCoffeeToPicker();
     }
+    markCoffeeSessionResumed(sessionId);
     await deleteConversation(sessionId);
   };
   const clearCoffeeGroupClickTimer = () => {
@@ -38909,13 +39068,9 @@ function HomeContent(): React.JSX.Element {
     const conversationActive = coffeeConversation !== null;
     const previewingSession = coffeeSessionPhase === "preview";
     const previewSessionStarted = coffeeSessionHasStarted(coffeeConversation);
-    const previewSessionPaused =
-      previewingSession && coffeeConversation
-        ? coffeePausedSessionIds.has(coffeeConversation.id)
-        : false;
     const previewCanResumeSession =
       previewingSession && coffeeConversation
-        ? previewSessionPaused || !previewSessionStarted
+        ? !previewSessionStarted
         : false;
     const arrivedBotIds = new Set(coffeeArrivedBotIds);
     const directorTapEnabled =
@@ -38966,12 +39121,13 @@ function HomeContent(): React.JSX.Element {
       (!userLineTyping && centerMessage?.role === "assistant"
         ? centerMessage.botGlyph
         : null);
-    const tableTypingAssistantFullText =
+    const tableTypingAssistantRawText =
       pendingLatestMessage?.role === "assistant"
         ? clampCoffeeTableText(pendingLatestMessage.content)
         : "";
-    const userTypingDisplayText = clampCoffeeTableText(coffeeUserRevealText);
-    const centerMessageDisplayText = centerMessage ? clampCoffeeTableText(centerMessage.content) : "";
+    const tableTypingAssistantDisplayText = coffeeTableDisplayText(tableTypingAssistantRawText);
+    const userTypingDisplayText = coffeeTableDisplayText(coffeeUserRevealText);
+    const centerMessageDisplayText = centerMessage ? coffeeTableDisplayText(centerMessage.content) : "";
     const centerFeedSourceMessages =
       coffeeReplayActive && messages.length > 0
         ? messages.slice(0, Math.min(coffeeReplayMessageIndex + 1, messages.length))
@@ -38979,14 +39135,35 @@ function HomeContent(): React.JSX.Element {
     const centerFeedLines: CoffeeCenterFeedLine[] = centerFeedSourceMessages
       .filter((message): message is CoffeeConversationMessage => coffeeMessageHasTableText(message))
       .slice(-COFFEE_CENTER_FEED_MAX_LINES)
-      .map((message) => ({
-        id: message.id,
-        role: message.role,
-        speaker:
-          message.role === "assistant" ? (message.botName ?? "Bot") : message.role === "user" ? "You" : "PRISM",
-        text: clampCoffeeTableText(message.content),
-        botGlyph: message.role === "assistant" ? message.botGlyph : undefined,
-      }));
+      .map((message) => {
+        const assistantBot =
+          message.role === "assistant" && message.botName
+            ? coffeeMentionBotPicks.find((bot) => bot.name === message.botName)
+            : undefined;
+        return {
+          id: message.id,
+          role: message.role,
+          speaker:
+            message.role === "assistant"
+              ? (message.botName ?? "Bot")
+              : message.role === "user"
+                ? "You"
+                : "PRISM",
+          text: coffeeTableDisplayText(message.content),
+          botGlyph: message.role === "assistant" ? message.botGlyph : undefined,
+          botId: assistantBot?.id,
+        };
+      });
+    const isLiveCenterTranscript =
+      coffeeSessionPhase === "live" || coffeeSessionPhase === "finished";
+    const hideCenterSpeakerChrome =
+      isLiveCenterTranscript &&
+      (centerFeedLines.length > 0 ||
+        tableTypingBot != null ||
+        userLineTyping ||
+        centerMessage != null);
+    const centerFeedSpeakerKey = (line: CoffeeCenterFeedLine): string =>
+      line.role === "assistant" ? (line.botId ?? line.speaker) : line.role;
     const centerFallbackText =
       coffeeSessionPhase === "arriving"
         ? "Bots will arrive one at a time."
@@ -38996,7 +39173,7 @@ function HomeContent(): React.JSX.Element {
             ? "The table is listening."
             : coffeeSessionPhase === "preview"
               ? previewCanResumeSession
-                ? "This session is paused. Resume when you are ready."
+                ? "Fresh table. Join when you are ready."
                 : "Reviewing a completed session."
               : coffeeSelectedGroup
                 ? "This group is ready."
@@ -39005,6 +39182,8 @@ function HomeContent(): React.JSX.Element {
       !userLineTyping &&
       coffeeTurnRhythmState === "botThinking";
     const thinkingBotId = showThinkingIndicator ? coffeePendingSpeakerBotId : null;
+    const activeTableSpeakerBotId =
+      tableTypingBot?.id ?? thinkingBotId;
     /**
      * Bots referenced by name in the most recently delivered message (or in the
      * line the user is mid-typing). Powers the small `!` "you've been called on"
@@ -39015,7 +39194,7 @@ function HomeContent(): React.JSX.Element {
       if (!conversationActive || coffeeSessionPhase === "finished") return out;
       const sources: string[] = [];
       if (userLineTyping && coffeeUserRevealText) sources.push(coffeeUserRevealText);
-      if (tableTypingBot && tableTypingAssistantFullText) sources.push(tableTypingAssistantFullText);
+      if (tableTypingBot && tableTypingAssistantRawText) sources.push(tableTypingAssistantRawText);
       if (centerMessageDisplayText) sources.push(centerMessageDisplayText);
       const re = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi");
       for (const source of sources) {
@@ -39077,8 +39256,8 @@ function HomeContent(): React.JSX.Element {
           previous: string | null;
         }
       >();
-      if (!tableTypingBot || !tableTypingAssistantFullText) return out;
-      const cues = extractStageDirectionCues(tableTypingAssistantFullText);
+      if (!tableTypingBot || !tableTypingAssistantRawText) return out;
+      const cues = extractStageDirectionCues(tableTypingAssistantRawText);
       if (cues.length === 0) return out;
       let activeCueIndex = -1;
       for (let index = 0; index < cues.length; index += 1) {
@@ -39145,8 +39324,41 @@ function HomeContent(): React.JSX.Element {
           .map((tally) => tally.option)
       : [];
     const coffeePollVoteByBotId = new Map(
-      (coffeeActivePoll?.votes ?? []).map((vote) => [vote.botId, vote])
+      (coffeeActivePoll?.votes ?? [])
+        .filter(
+          (vote) =>
+            vote.botId !== COFFEE_POLL_PLAYER_VOTER_ID && vote.voterKind !== "player"
+        )
+        .map((vote) => [vote.botId, vote])
     );
+    const coffeePollPlayerVote = coffeeActivePoll?.votes.find(
+      (vote) => vote.voterKind === "player" || vote.botId === COFFEE_POLL_PLAYER_VOTER_ID
+    );
+    const coffeePollPlayerLabel = user?.displayName?.trim() || "You";
+    const coffeePollSessionRemainingMs =
+      coffeeSessionEndsAtMs != null ? Math.max(0, coffeeSessionEndsAtMs - coffeeSessionClockMs) : null;
+    const coffeePollInFinalizeWindow =
+      typeof coffeePollSessionRemainingMs === "number" &&
+      coffeePollSessionRemainingMs <= COFFEE_POLL_FINALIZE_REMAINING_MS;
+    const coffeePollIsBinary =
+      coffeeActivePoll != null && coffeeActivePoll.options.length === COFFEE_POLL_OPTION_COUNT_MIN;
+    const coffeePollInSession =
+      coffeeSessionPhase === "arriving" || coffeeSessionPhase === "live";
+    const coffeePollBubbleVisible =
+      coffeeActivePoll !== null &&
+      coffeePollPanelMinimized &&
+      !coffeePollResultsOpen &&
+      conversationActive &&
+      coffeePollInSession;
+    const minimizeCoffeePollPanel = (): void => {
+      if (!coffeePollInSession) {
+        setCoffeePollPanelMinimized(false);
+        setCoffeePollResultsOpen(false);
+        return;
+      }
+      setCoffeePollPanelMinimized(true);
+      setCoffeePollResultsOpen(false);
+    };
     return (
       <section
         className={styles.coffeeStage}
@@ -39177,41 +39389,75 @@ function HomeContent(): React.JSX.Element {
                     : undefined
                 }
                 data-start-ready={coffeeGroupReadyToStart ? "true" : undefined}
+                data-live-transcript={isLiveCenterTranscript ? "true" : undefined}
               >
-                <span className={styles.coffeeCenterIcon} aria-hidden="true">
-                  {centerBotGlyph ? (
-                    <BotGlyph name={centerBotGlyph} size={16} strokeWidth={2} />
-                  ) : (
-                    "☕"
-                  )}
-                </span>
-                <strong>
-                  {tableTypingBot || userLineTyping || centerMessage
-                    ? centerSpeaker
-                    : "The table is waiting"}
-                </strong>
+                {!hideCenterSpeakerChrome ? (
+                  <>
+                    <span className={styles.coffeeCenterIcon} aria-hidden="true">
+                      {centerBotGlyph ? (
+                        <BotGlyph name={centerBotGlyph} size={16} strokeWidth={2} />
+                      ) : (
+                        "☕"
+                      )}
+                    </span>
+                    <strong>
+                      {tableTypingBot || userLineTyping || centerMessage
+                        ? centerSpeaker
+                        : "The table is waiting"}
+                    </strong>
+                  </>
+                ) : null}
                 <div className={styles.coffeeCenterMessageScroll} ref={coffeeCenterMessageScrollRef}>
                   <div className={styles.coffeeCenterFeed}>
-                    {centerFeedLines.map((line) => (
-                      <p key={line.id} className={styles.coffeeCenterFeedLine}>
-                        <span className={styles.coffeeCenterFeedSpeaker}>{line.speaker}: </span>
-                        {renderPlainTextWithBotMentions(line.text, {
-                          keyPrefix: line.id,
-                          botsById: chatEnabledBotMentionMap,
-                          resolvedTheme,
-                          normalizeAccentForTheme,
-                          // Keep mention rendering neutral for transcript lines.
-                          speakerBotId: undefined,
-                        })}
-                      </p>
-                    ))}
+                    {centerFeedLines.map((line, lineIndex) => {
+                      const previousLine =
+                        lineIndex > 0 ? centerFeedLines[lineIndex - 1] : undefined;
+                      const speakerChanged =
+                        previousLine != null &&
+                        centerFeedSpeakerKey(previousLine) !== centerFeedSpeakerKey(line);
+                      return (
+                        <p
+                          key={line.id}
+                          className={styles.coffeeCenterFeedLine}
+                          data-role={line.role}
+                          data-speaker-break={speakerChanged ? "true" : undefined}
+                        >
+                          {!isLiveCenterTranscript ? (
+                            <span className={styles.coffeeCenterFeedSpeaker}>
+                              {line.speaker}:{" "}
+                            </span>
+                          ) : null}
+                          {renderPlainTextWithBotMentions(line.text, {
+                            keyPrefix: line.id,
+                            botsById: chatEnabledBotMentionMap,
+                            resolvedTheme,
+                            normalizeAccentForTheme,
+                            speakerBotId: line.botId,
+                          })}
+                        </p>
+                      );
+                    })}
                     {tableTypingBot ? (
-                      <p className={`${styles.coffeeCenterFeedLine} ${styles.coffeeCenterFeedLineTyping}`}>
-                        <span className={styles.coffeeCenterFeedSpeaker}>{tableTypingBot.name}: </span>
+                      <p
+                        className={`${styles.coffeeCenterFeedLine} ${styles.coffeeCenterFeedLineTyping}`}
+                        data-role="assistant"
+                        data-speaker-break={
+                          centerFeedLines.length > 0 &&
+                          centerFeedSpeakerKey(centerFeedLines[centerFeedLines.length - 1]!) !==
+                            tableTypingBot.id
+                            ? "true"
+                            : undefined
+                        }
+                      >
+                        {!isLiveCenterTranscript ? (
+                          <span className={styles.coffeeCenterFeedSpeaker}>
+                            {tableTypingBot.name}:{" "}
+                          </span>
+                        ) : null}
                         <span className={styles.coffeeTableTypingLine}>
                           <span className={styles.coffeeTypewriter} aria-hidden="true">
                             {revealPlainTextWithBotMentions(
-                              tableTypingAssistantFullText,
+                              tableTypingAssistantDisplayText,
                               coffeeTypewriterLength,
                               {
                                 keyPrefix: `bot-typing-${tableTypingBot.id}`,
@@ -39222,9 +39468,7 @@ function HomeContent(): React.JSX.Element {
                               }
                             )}
                             {coffeeTypewriterLength <
-                            getBotMentionDisplayLength(
-                              extractStageDirections(tableTypingAssistantFullText).mainText
-                            ) ? (
+                            getBotMentionDisplayLength(tableTypingAssistantDisplayText) ? (
                               <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
                                 │
                               </span>
@@ -39234,8 +39478,20 @@ function HomeContent(): React.JSX.Element {
                         </span>
                       </p>
                     ) : userLineTyping ? (
-                      <p className={`${styles.coffeeCenterFeedLine} ${styles.coffeeCenterFeedLineTyping}`}>
-                        <span className={styles.coffeeCenterFeedSpeaker}>You: </span>
+                      <p
+                        className={`${styles.coffeeCenterFeedLine} ${styles.coffeeCenterFeedLineTyping}`}
+                        data-role="user"
+                        data-speaker-break={
+                          centerFeedLines.length > 0 &&
+                          centerFeedSpeakerKey(centerFeedLines[centerFeedLines.length - 1]!) !==
+                            "user"
+                            ? "true"
+                            : undefined
+                        }
+                      >
+                        {!isLiveCenterTranscript ? (
+                          <span className={styles.coffeeCenterFeedSpeaker}>You: </span>
+                        ) : null}
                         <span className={styles.coffeeTableTypingLine}>
                           <span className={styles.coffeeTypewriter} aria-hidden="true">
                             {revealPlainTextWithBotMentions(
@@ -39306,9 +39562,7 @@ function HomeContent(): React.JSX.Element {
                       onClick={joinPreviewedCoffeeSession}
                     >
                       {previewCanResumeSession
-                        ? previewSessionPaused
-                          ? "Resume Coffee Session →"
-                          : "Join Coffee Session →"
+                        ? "Join Coffee Session →"
                         : "Review Coffee Session"}
                     </button>
                   </div>
@@ -39317,7 +39571,7 @@ function HomeContent(): React.JSX.Element {
                   <div className={styles.coffeeFinishedRecap}>
                     <p className={styles.coffeeFinishedRecapCaption}>
                       {coffeeReplayActive
-                        ? "Replay mode — watching the saved session back."
+                        ? "Replay mode — watching this session back."
                         : "Session ended. Export it, replay it, or open Table talk."}
                     </p>
                     <div
@@ -39488,6 +39742,12 @@ function HomeContent(): React.JSX.Element {
                 data-seat-count={visibleCoffeeSeats.length}
                 data-prism-mood={prismSeatMood}
                 data-director-enabled={directorTapEnabled ? "true" : undefined}
+                data-table-speaking={activeTableSpeakerBotId === bot.id ? "true" : undefined}
+                data-table-dimmed={
+                  activeTableSpeakerBotId != null && activeTableSpeakerBotId !== bot.id
+                    ? "true"
+                    : undefined
+                }
                 style={coffeeSeatVisualStyle(bot, seatIndex, layoutIndex, visibleCoffeeSeats.length)}
                 disabled={!directorTapEnabled}
                 onClick={() => void triggerDirectedCoffeeTurn(bot.id)}
@@ -39669,7 +39929,8 @@ function HomeContent(): React.JSX.Element {
               <button
                 type="button"
                 aria-label="Hide Coffee poll results"
-                onClick={() => setCoffeePollResultsOpen(false)}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={minimizeCoffeePollPanel}
               >
                 ×
               </button>
@@ -39680,9 +39941,60 @@ function HomeContent(): React.JSX.Element {
                   ? coffeePollWinningOptions.length > 0
                     ? `Result: ${coffeePollWinningOptions.join(" / ")}`
                     : "Poll closed with no votes."
-                  : "Collecting votes..."}
+                  : coffeeActivePoll.status === "collecting" || coffeePollInFinalizeWindow
+                    ? "Last call — any bot still thinking must vote, but minds can still change."
+                    : "Vote anytime — your pick can sway the table. Bots lean while discussing; votes lock in the final 30 seconds."}
               </p>
-              <div className={styles.coffeePollResultsTallyList}>
+              {coffeeActivePoll.status !== "closed" && coffeeActivePoll.status !== "cancelled" ? (
+                <div className={styles.coffeePollPlayerVoteBlock}>
+                  <div className={styles.coffeePollPlayerVoteHeader}>
+                    <strong>{coffeePollPlayerLabel}</strong>
+                    <small>
+                      {coffeePollPlayerVote?.kind === "option" &&
+                      typeof coffeePollPlayerVote.optionIndex === "number"
+                        ? `Voted: ${coffeeActivePoll.options[coffeePollPlayerVote.optionIndex]}`
+                        : "Pick an option whenever you are ready"}
+                    </small>
+                  </div>
+                  <div
+                    className={styles.coffeePollPlayerOptionRow}
+                    data-binary={coffeePollIsBinary ? "true" : undefined}
+                  >
+                    {coffeeActivePoll.options.map((option, optionIndex) => {
+                      const selected =
+                        coffeePollPlayerVote?.kind === "option" &&
+                        coffeePollPlayerVote.optionIndex === optionIndex;
+                      return (
+                        <button
+                          key={optionIndex}
+                          type="button"
+                          className={styles.coffeePollPlayerOption}
+                          data-selected={selected ? "true" : undefined}
+                          disabled={
+                            coffeePollVoteBusy ||
+                            !coffeeConversation ||
+                            coffeeActivePoll.status === "cancelled"
+                          }
+                          onClick={() => {
+                            if (!coffeeConversation) return;
+                            void castCoffeePlayerPollVote(
+                              coffeeConversation.id,
+                              coffeeActivePoll.id,
+                              optionIndex
+                            );
+                          }}
+                        >
+                          {option}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              <div
+                className={styles.coffeePollResultsTallyList}
+                data-binary={coffeePollIsBinary ? "true" : undefined}
+              >
                 {coffeeActivePoll.tallies.map((tally) => {
                   const pct =
                     coffeePollTotalVotes > 0
@@ -39702,6 +40014,18 @@ function HomeContent(): React.JSX.Element {
                 })}
               </div>
               <div className={styles.coffeePollResultsVoteGrid}>
+                <div className={styles.coffeePollResultsVote}>
+                  <span className={styles.coffeePollPlayerDot} aria-hidden="true" />
+                  <div>
+                    <strong>{coffeePollPlayerLabel}</strong>
+                    <small>
+                      {coffeePollPlayerVote?.kind === "option" &&
+                      typeof coffeePollPlayerVote.optionIndex === "number"
+                        ? coffeeActivePoll.options[coffeePollPlayerVote.optionIndex]
+                        : "No vote yet"}
+                    </small>
+                  </div>
+                </div>
                 {(coffeeConversation?.botGroupIds ?? []).map((botId) => {
                   const bot = coffeeBotsById.get(botId);
                   const vote = coffeePollVoteByBotId.get(botId);
@@ -39714,7 +40038,7 @@ function HomeContent(): React.JSX.Element {
                       <span className={styles.coffeeSessionDot} style={bot ? coffeeBotVisualStyle(bot) : undefined} />
                       <div>
                         <strong>{bot?.name ?? "Bot"}</strong>
-                        <small>{picked ?? (vote?.kind === "pending" ? "Thinking..." : "No vote")}</small>
+                        <small>{picked ?? formatCoffeePollBotVoteLabel(vote, coffeeActivePoll.options)}</small>
                       </div>
                     </div>
                   );
@@ -39722,6 +40046,33 @@ function HomeContent(): React.JSX.Element {
               </div>
             </div>
           </div>
+        ) : null}
+        {coffeePollBubbleVisible ? (
+          <button
+            ref={coffeePollBubbleRef}
+            type="button"
+            className={styles.coffeePollBubble}
+            aria-label="Open Coffee poll"
+            title="Open Coffee poll"
+            style={{
+              left: `${coffeePollPanelPosition.x}px`,
+              top: `${coffeePollPanelPosition.y}px`,
+            }}
+            onPointerDown={startCoffeePollPanelDrag}
+            onPointerMove={dragCoffeePollPanel}
+            onPointerUp={endCoffeePollPanelDrag}
+            onPointerCancel={endCoffeePollPanelDrag}
+            onClick={() => {
+              if (coffeePollPanelSuppressClickRef.current) {
+                coffeePollPanelSuppressClickRef.current = false;
+                return;
+              }
+              setCoffeePollPanelMinimized(false);
+              setCoffeePollResultsOpen(true);
+            }}
+          >
+            ?
+          </button>
         ) : null}
         {coffeeOpeningPollModalOpen && coffeeSessionPhase === "topic" && coffeeConversation ? (
           <div
@@ -39747,7 +40098,7 @@ function HomeContent(): React.JSX.Element {
                 <div>
                   <span>Poll topic</span>
                   <h4>Ask the table first</h4>
-                  <p>Bots vote, then the result becomes the shared Coffee topic.</p>
+                  <p>Bots discuss and lean first; their votes lock in the final 30 seconds.</p>
                 </div>
                 <button
                   type="button"
@@ -39769,27 +40120,56 @@ function HomeContent(): React.JSX.Element {
                     autoFocus
                   />
                 </label>
-                <div className={styles.coffeePollModalOptionList}>
-                  {coffeeOpeningPollOptions.map((option, index) => (
-                    <label key={index}>
-                      <span>Option {index + 1}</span>
-                      <input
-                        type="text"
-                        value={option}
-                        onChange={(event) =>
-                          updateCoffeeOpeningPollOption(index, event.target.value)
-                        }
-                        placeholder={
-                          index === 0 ? "Courage" : index === 1 ? "Temperance" : "Wisdom"
-                        }
-                        maxLength={80}
-                      />
-                    </label>
-                  ))}
+                <div className={styles.coffeePollModalOptionSection}>
+                  <span className={styles.coffeePollModalOptionLabel}>Choices</span>
+                  <div className={styles.coffeePollOptionChipList}>
+                    {coffeeOpeningPollOptions.map((option, index) => (
+                      <span
+                        key={index}
+                        className={styles.coffeePollOptionChip}
+                        data-filled={option.trim().length > 0 ? "true" : undefined}
+                      >
+                        <input
+                          type="text"
+                          value={option}
+                          onChange={(event) =>
+                            updateCoffeeOpeningPollOption(index, event.target.value)
+                          }
+                          placeholder={COFFEE_POLL_OPTION_PLACEHOLDERS[index] ?? "Choice"}
+                          maxLength={80}
+                          aria-label={`Poll choice ${index + 1}`}
+                        />
+                        {coffeeOpeningPollOptions.length > COFFEE_POLL_OPTION_COUNT_MIN ? (
+                          <button
+                            type="button"
+                            className={styles.coffeePollOptionChipRemove}
+                            aria-label={`Remove ${COFFEE_POLL_OPTION_PLACEHOLDERS[index] ?? "choice"}`}
+                            onClick={() => removeCoffeeOpeningPollOption(index)}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </span>
+                    ))}
+                    {coffeeOpeningPollOptions.length < COFFEE_POLL_OPTION_COUNT_MAX ? (
+                      <button
+                        type="button"
+                        className={styles.coffeePollOptionAddChip}
+                        aria-label="Add poll choice"
+                        onClick={addCoffeeOpeningPollOption}
+                      >
+                        +
+                      </button>
+                    ) : null}
+                  </div>
+                  <small className={styles.coffeePollModalOptionHint}>
+                    Tap + for up to {COFFEE_POLL_OPTION_COUNT_MAX} choices. Only filled chips become
+                    poll options — two choices reads as a binary 50/50 table question.
+                  </small>
                 </div>
                 {!coffeeOpeningPollPayload() ? (
                   <p className={styles.coffeePollModalHint}>
-                    Add a question and at least two options.
+                    Add a question and at least {COFFEE_POLL_OPTION_COUNT_MIN} filled choice chips.
                   </p>
                 ) : null}
               </div>
@@ -39802,7 +40182,7 @@ function HomeContent(): React.JSX.Element {
                   Cancel
                 </button>
                 <button type="submit" disabled={coffeeBusy || !coffeeOpeningPollPayload()}>
-                  {coffeeBusy ? "Polling..." : "Start poll topic"}
+                  {coffeeBusy ? "Starting..." : "Start poll topic"}
                 </button>
               </footer>
             </form>
@@ -40010,14 +40390,10 @@ function HomeContent(): React.JSX.Element {
     const conversationActive = coffeeConversation !== null;
     /** Live at the table (not merely previewing a saved session from the sidebar). */
     const coffeeSessionJoined = conversationActive && coffeeSessionPhase !== "preview";
-    const coffeePreviewPaused =
-      coffeeSessionPhase === "preview" &&
-      coffeeConversation != null &&
-      coffeePausedSessionIds.has(coffeeConversation.id);
     const coffeePreviewCanResume =
       coffeeSessionPhase === "preview" &&
       coffeeConversation != null &&
-      (coffeePreviewPaused || !coffeeSessionHasStarted(coffeeConversation));
+      !coffeeSessionHasStarted(coffeeConversation);
     /** Picker ("new session") or any loaded conversation — transcript affordance is available. */
     const coffeeTranscriptToggleEnabled =
       conversationActive || coffeeSessionPhase === "selecting";
@@ -40030,7 +40406,7 @@ function HomeContent(): React.JSX.Element {
           ? "Choose 2-5 bots to invite to the PRISM coffee table."
           : coffeeSessionPhase === "preview"
             ? coffeePreviewCanResume
-              ? "Session paused. Resume when you are ready."
+              ? "Fresh table. Join when you are ready."
               : "Reviewing a completed session."
             : coffeeSessionPhase === "topic"
               ? "Pick a shared topic — the session timer starts after you choose."
@@ -40058,7 +40434,7 @@ function HomeContent(): React.JSX.Element {
         ? "This Coffee Session has ended."
         : coffeeSessionPhase === "preview"
           ? coffeePreviewCanResume
-            ? "Send a message to resume this table..."
+            ? "Send a message to join this table..."
             : "Review mode — this completed session is read-only."
           : coffeeSessionPhase === "topic"
             ? "Pick a chip above, or type a topic and send…"
@@ -40235,9 +40611,9 @@ function HomeContent(): React.JSX.Element {
                   className={styles.coffeeExitSessionButton}
                   disabled={coffeeBusy}
                   onClick={joinPreviewedCoffeeSession}
-                  title={coffeePreviewPaused ? "Resume this Coffee Session" : "Join this Coffee Session"}
+                  title="Join this Coffee Session"
                 >
-                  {coffeePreviewPaused ? "Resume session" : "Join session"}
+                  Join session
                 </button>
               ) : null}
               <button

@@ -6,6 +6,7 @@ import { classifyMemoryCategoryFromText } from "@localai/shared";
 import type { MemoryCandidate } from "./memory-extraction.ts";
 import {
   analyzeMemoryIntent,
+  extractBotPreferredAddressMemoryCandidates,
   estimateMemoryDurability,
   extractBotJudgmentMemoryCandidates,
   extractCoffeeObserverMemoryCandidates,
@@ -14,6 +15,7 @@ import {
 
 export {
   analyzeMemoryIntent,
+  extractBotPreferredAddressMemoryCandidates,
   extractCoffeeObserverMemoryCandidates,
   extractBotJudgmentMemoryCandidates,
   extractMemoryCandidates,
@@ -340,10 +342,14 @@ function getSingleValueMemoryKey(text: string): string | null {
     /^you\s+(?:prefer|want)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+(.+)$/
   );
   const preferredNameWithLeadMatch = normalized.match(
-    /^[a-z0-9][a-z0-9'\-]*(?:\s+[a-z0-9][a-z0-9'\-]*){0,2}\s+(?:prefers|wants)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+(.+)$/
+    /^([a-z0-9][a-z0-9'\-]*(?:\s+[a-z0-9][a-z0-9'\-]*){0,2})\s+(?:prefers|wants)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+(.+)$/
   );
-  if (preferredNameMatch?.[1] || preferredNameWithLeadMatch?.[1]) {
-    return "single-value:preferred-name";
+  if (preferredNameMatch?.[1]) {
+    return "single-value:preferred-name:self";
+  }
+  const thirdPersonSubject = preferredNameWithLeadMatch?.[1]?.trim();
+  if (thirdPersonSubject) {
+    return `single-value:preferred-name:${thirdPersonSubject}`;
   }
   const match = normalized.match(
     /^(?:my|your|the user's)\s+(.+?)\s+(?:is|are|was|were)\s+.+$/

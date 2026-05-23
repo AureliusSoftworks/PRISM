@@ -31,6 +31,7 @@ import {
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
   setCoffeeConversationTopic,
+  setCoffeePollPlayerVote,
   updateCoffeePreset,
   updateCoffeeGroup,
   updateCoffeeConversationSettings,
@@ -1848,6 +1849,16 @@ function buildRoutes(): RouteDefinition[] {
         Number.isFinite(body.sessionRemainingMs)
           ? Math.max(0, body.sessionRemainingMs)
           : null;
+      if (typeof body.optionIndex === "number" && Number.isFinite(body.optionIndex)) {
+        setCoffeePollPlayerVote(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.pollId,
+          body.optionIndex,
+          sessionRemainingMs
+        );
+      }
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
@@ -1881,6 +1892,27 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         ...result,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/polls/:pollId/vote", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const sessionRemainingMs =
+        typeof body.sessionRemainingMs === "number" &&
+        Number.isFinite(body.sessionRemainingMs)
+          ? Math.max(0, body.sessionRemainingMs)
+          : null;
+      const poll = setCoffeePollPlayerVote(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.pollId,
+        body.optionIndex,
+        sessionRemainingMs
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        poll,
       });
     }),
     route("POST", "/api/coffee/sessions/:id/continue", async (ctx) => {

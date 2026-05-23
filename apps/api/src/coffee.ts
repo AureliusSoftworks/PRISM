@@ -34,9 +34,13 @@ import {
 } from "./providers.ts";
 import {
   buildInitialAboutYouMemoryText,
+  extractBotPreferredAddressMemoryCandidates,
   hasAboutYouMemoryForBot,
+  persistMemoryCandidates,
+  retrieveRecentMemoriesForStarter,
   restoreMemory,
 } from "./memory.ts";
+import { validateMemoryCandidates } from "./memory-validation.ts";
 import { composeBotSystemPrompt } from "./bots.ts";
 import {
   loadCoffeeBotSocialState,
@@ -58,6 +62,7 @@ import type {
   CoffeePollStatus,
   CoffeePollVote,
   CoffeePollVoteKind,
+  CoffeePollVoterKind,
   CoffeePreset,
   CoffeePresetMode,
   CoffeeSessionDurationMinutes,
@@ -65,8 +70,13 @@ import type {
   CoffeeSessionSettings,
   CoffeeTopicSelectionMode,
   CoffeeTurnResponse,
+  BotVoicePreset,
 } from "@localai/shared";
 import {
+  COFFEE_POLL_FINALIZE_REMAINING_MS,
+  COFFEE_POLL_OPTION_COUNT_MAX,
+  COFFEE_POLL_OPTION_COUNT_MIN,
+  COFFEE_POLL_PLAYER_VOTER_ID,
   coffeeEffectiveHistoryLimit,
   coffeeReplyLengthCaps,
   coffeeRouterTailMessageCount,
@@ -95,14 +105,23 @@ export const COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS = 110;
 /** When the timer is this close to done, bots should naturally wind down. */
 export const COFFEE_WRAP_UP_REMAINING_MS = 20_000;
 
+/** Re-export for callers/tests that read the finalize window from the API module. */
+export { COFFEE_POLL_FINALIZE_REMAINING_MS };
+
 /** Default for new group-owned Coffee Sessions until the player chooses otherwise. */
 const DEFAULT_COFFEE_SESSION_DURATION_MINUTES = 5;
 
 /** Router LLM call budget — keep low so latency stays acceptable. */
 const ROUTER_MAX_TOKENS = 80;
+const COFFEE_ROUTER_DIRECTIVE_MAX_CHARS = 180;
 
 /** Fallback when router output cannot be parsed. */
 const ROUTER_FALLBACK_REASON = "Router fallback (unparseable response)";
+const COFFEE_MEETING_SUMMARY_REFRESH_EVERY_ASSISTANT_MESSAGES = 4;
+const COFFEE_MEETING_SUMMARY_MIN_ASSISTANT_MESSAGES = 4;
+const COFFEE_MEETING_SUMMARY_MAX_CHARS = 420;
+const COFFEE_MEETING_SUMMARY_MAX_TRANSCRIPT_LINES = 16;
+const COFFEE_MEETING_SUMMARY_MAX_TOKENS = 120;
 
 type CoffeeTurnKind = "user" | "autonomous";
 
@@ -446,7 +465,9 @@ export function stripCoffeeSpeakerPrefix(raw: string, speakerName: string | null
 const COFFEE_PROMPT_LEAK_PREFIX_PATTERNS = [
   /** Matches meta lines models emit ("need/must/should/have to respond as …"). */
   /^(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?respond\s+as\b/i,
+  /^(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?reply\s+as\b/i,
   /^(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?(?:produce|write|return|provide|create)\b/i,
+  /^(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?(?:reply|answer)\b/i,
   /^write only\b/i,
   /^return only\b/i,
   /^length\s*:/i,
@@ -456,6 +477,7 @@ const COFFEE_PROMPT_LEAK_PREFIX_PATTERNS = [
   /^the user says\b/i,
   /^the user wants\b/i,
   /^the user needs\b/i,
+  /^the user requests\b/i,
   /^current autonomous table moment\b/i,
   /^latest table moment\b/i,
   /^reply naturally as part of the table conversation\b/i,
@@ -468,15 +490,21 @@ const COFFEE_PROMPT_LEAK_PREFIX_PATTERNS = [
 
 const COFFEE_PROMPT_LEAK_FRAGMENT_PATTERNS = [
   /\brespond as\b/i,
+  /\breply as\b/i,
   /\bone line\b/i,
   /\bone clause\b/i,
   /\bsingle clause\b/i,
   /\bsingle line\b/i,
+  /\bshort table line\b/i,
   /\bno line breaks\b/i,
   /\bhard tabletop cap\b/i,
   /\bdo not include a speaker label\b/i,
+  /\bsay your next short table line now\b/i,
+  /\banswer with your next short table line now\b/i,
   /\brecent table transcript\b/i,
   /\bthe user says\b/i,
+  /\bthe user requests\b/i,
+  /\bthe user is prompting me\b/i,
   /\bcurrent autonomous table moment\b/i,
   /\byou are sitting at coffee mode\b/i,
   /\breply naturally as part of the table conversation\b/i,
@@ -491,8 +519,11 @@ const COFFEE_PROMPT_LEAK_FRAGMENT_PATTERNS = [
 
 const COFFEE_PROMPT_LEAK_ANYWHERE_PATTERNS = [
   /\b(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?respond\s+as\b/i,
+  /\b(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?reply\s+as\b/i,
   /\b(?:we|i)\s+(?:must|need|should|have\s+to)\s+(?:to\s+)?(?:produce|write|return|provide|create)\s+(?:a\s+)?(?:single\s+)?(?:line|clause|reply|response|utterance)\b/i,
   /\bthe user (?:wants|needs|asked for|requested)\s+(?:a\s+)?(?:single\s+)?(?:line|clause|reply|response|utterance)\b/i,
+  /\bthe user (?:says|specifically says|is prompting me to)\s+["“]?[A-Z][^"”]{0,80}\b(?:say|answer with)\s+your\s+next\s+short\s+table\s+line\s+now/i,
+  /\bthe topic is still\b.+\bthe user (?:is prompting me|specifically says|wants)\b/i,
 ] as const;
 
 const COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS = 48;
@@ -736,7 +767,7 @@ async function repairCoffeeRepeatedReply(args: {
     : "";
 }
 
-function buildCoffeeEmergencyFallbackReply(args: {
+export function buildCoffeeEmergencyFallbackReply(args: {
   tableFocus: string;
   speaker: Pick<CoffeeBotProfile, "id" | "name">;
   conversationId: string;
@@ -744,8 +775,18 @@ function buildCoffeeEmergencyFallbackReply(args: {
   seedExtra?: string;
   avoidTexts?: readonly string[];
   maxChars: number;
+  activePoll?: Pick<CoffeePoll, "options"> | null;
 }): string {
-  const options = /\?\s*$/.test(args.tableFocus.trim())
+  const pollOptions = args.activePoll?.options ?? [];
+  const options = pollOptions.length >= 2
+    ? buildCoffeePollEmergencyFallbackOptions({
+        pollOptions,
+        conversationId: args.conversationId,
+        speakerId: args.speaker.id,
+        historyLength: args.historyLength,
+        seedExtra: args.seedExtra,
+      })
+    : /\?\s*$/.test(args.tableFocus.trim())
     ? [
         "Could be.",
         "I hear the angle.",
@@ -774,6 +815,29 @@ function buildCoffeeEmergencyFallbackReply(args: {
     }
   }
   return clampCoffeeTableReplyText(fallback, args.maxChars);
+}
+
+function buildCoffeePollEmergencyFallbackOptions(args: {
+  pollOptions: readonly string[];
+  conversationId: string;
+  speakerId: string;
+  historyLength: number;
+  seedExtra?: string;
+}): string[] {
+  const optionCount = args.pollOptions.length;
+  const seed = stableUnitValue(
+    `${args.conversationId}:${args.speakerId}:${args.historyLength}:${args.seedExtra ?? ""}:poll-fallback`
+  );
+  const firstIndex = Math.floor(seed * optionCount) % optionCount;
+  const secondIndex = (firstIndex + 1) % optionCount;
+  const first = args.pollOptions[firstIndex] ?? args.pollOptions[0] ?? "that one";
+  const second = args.pollOptions[secondIndex] ?? args.pollOptions[0] ?? "the other side";
+  return [
+    `I'm leaning ${first}, but ${second} still has a case.`,
+    `${first} has my vote for now; give me one real reason for ${second}.`,
+    `If I have to pick, ${first}; the stronger story beats ${second} for me.`,
+    `${second} is close, but ${first} feels cooler right now.`,
+  ];
 }
 
 function sanitizeLoadedCoffeeAssistantContent(
@@ -834,6 +898,178 @@ function formatCoffeeTranscriptLine(message: ChatMessage): string {
     return `User: ${message.content.trim()}`;
   }
   return `System: ${message.content.trim()}`;
+}
+
+function normalizeCoffeeMeetingSummary(raw: string): string | null {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  const withoutFence = collapsed.replace(/^["'`]+|["'`]+$/g, "").trim();
+  if (!withoutFence) return null;
+  if (coffeeReplyLooksLikePromptLeak(withoutFence)) return null;
+  if (coffeeReplyBreaksCharacterImmersion(withoutFence)) return null;
+  if (withoutFence.length < 24) return null;
+  if (withoutFence.length <= COFFEE_MEETING_SUMMARY_MAX_CHARS) return withoutFence;
+  return `${withoutFence.slice(0, COFFEE_MEETING_SUMMARY_MAX_CHARS - 3).trimEnd()}...`;
+}
+
+export function coffeeMeetingSummarySourceMessages(
+  history: readonly ChatMessage[]
+): ChatMessage[] {
+  return history.filter((message) => {
+    if (message.role === "system") return false;
+    if (message.role !== "assistant") return true;
+    return coffeePollLineIsScorable(message);
+  });
+}
+
+export function shouldRefreshCoffeeMeetingSummary(args: {
+  assistantMessageCount: number;
+  lastSummarizedAssistantCount: number | null;
+  refreshEvery?: number;
+  minMessages?: number;
+}): boolean {
+  const refreshEvery =
+    args.refreshEvery ?? COFFEE_MEETING_SUMMARY_REFRESH_EVERY_ASSISTANT_MESSAGES;
+  const minMessages = args.minMessages ?? COFFEE_MEETING_SUMMARY_MIN_ASSISTANT_MESSAGES;
+  if (args.assistantMessageCount < minMessages) return false;
+  const lastCount = Math.max(0, args.lastSummarizedAssistantCount ?? 0);
+  return args.assistantMessageCount - lastCount >= refreshEvery;
+}
+
+function buildCoffeeMeetingSummaryMessages(args: {
+  group: readonly Pick<CoffeeBotProfile, "name">[];
+  previousSummary: string | null;
+  transcriptLines: readonly string[];
+  activePollContext: string | null;
+}): ProviderMessage[] {
+  const participantNames = args.group.map((bot) => bot.name).join(", ");
+  const previousSummary = args.previousSummary?.trim() ?? "";
+  const pollLine = args.activePollContext?.trim() ?? "";
+  return [
+    {
+      role: "system",
+      content:
+        "Summarize this Coffee table for the next bot turn. Keep it concrete and social, not meta.",
+    },
+    {
+      role: "user",
+      content: [
+        `Participants: ${participantNames}`,
+        previousSummary ? `Previous meeting summary: ${previousSummary}` : "Previous meeting summary: none yet.",
+        pollLine ? `Active poll context: ${pollLine}` : "",
+        "Latest transcript slice:",
+        ...args.transcriptLines,
+        "",
+        "Write one compact paragraph (max 420 chars) capturing:",
+        "- the current point of disagreement or momentum",
+        "- what the next bot should react to immediately",
+        "- one unresolved thread worth advancing",
+        "Do not mention prompts, instructions, token limits, or hidden rules.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+  ];
+}
+
+export function persistCoffeeMeetingSummaryIfNewer(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  summary: string;
+  assistantMessageCount: number;
+  nowIso: string;
+}): boolean {
+  const result = args.db
+    .prepare(
+      `UPDATE conversations
+          SET coffee_meeting_summary = ?,
+              coffee_meeting_summary_message_count = ?,
+              coffee_meeting_summary_updated_at = ?
+        WHERE id = ? AND user_id = ?
+          AND (coffee_meeting_summary_message_count IS NULL OR coffee_meeting_summary_message_count < ?)`
+    )
+    .run(
+      args.summary,
+      args.assistantMessageCount,
+      args.nowIso,
+      args.conversationId,
+      args.userId,
+      args.assistantMessageCount
+    );
+  return Number(result.changes ?? 0) > 0;
+}
+
+async function refreshCoffeeMeetingSummary(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  group: readonly CoffeeBotProfile[];
+  history: readonly ChatMessage[];
+  previousSummary: string | null;
+  previousSummaryAssistantCount: number | null;
+  activePollContext: string | null;
+  prismDefaultLlmModel?: string | null;
+  summaryProvider?: LlmProvider;
+}): Promise<void> {
+  const sourceMessages = coffeeMeetingSummarySourceMessages(args.history);
+  const assistantMessageCount = sourceMessages.filter((message) => message.role === "assistant").length;
+  if (
+    !shouldRefreshCoffeeMeetingSummary({
+      assistantMessageCount,
+      lastSummarizedAssistantCount: args.previousSummaryAssistantCount,
+    })
+  ) {
+    return;
+  }
+  const transcriptLines = sourceMessages
+    .slice(-COFFEE_MEETING_SUMMARY_MAX_TRANSCRIPT_LINES)
+    .map(formatCoffeeTranscriptLine);
+  if (transcriptLines.length === 0) return;
+  const provider =
+    args.summaryProvider ?? getAuxiliaryProvider(args.prismDefaultLlmModel ?? undefined);
+  const rawSummary = await provider.generateResponse(
+    buildCoffeeMeetingSummaryMessages({
+      group: args.group,
+      previousSummary: args.previousSummary,
+      transcriptLines,
+      activePollContext: args.activePollContext,
+    }),
+    {
+      maxTokens: COFFEE_MEETING_SUMMARY_MAX_TOKENS,
+      temperature: 0.15,
+    }
+  );
+  if (typeof rawSummary !== "string") return;
+  const normalized = normalizeCoffeeMeetingSummary(rawSummary);
+  if (!normalized) return;
+  persistCoffeeMeetingSummaryIfNewer({
+    db: args.db,
+    userId: args.userId,
+    conversationId: args.conversationId,
+    summary: normalized,
+    assistantMessageCount,
+    nowIso: new Date().toISOString(),
+  });
+}
+
+export async function kickoffCoffeeMeetingSummaryRefresh(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  group: readonly CoffeeBotProfile[];
+  history: readonly ChatMessage[];
+  previousSummary: string | null;
+  previousSummaryAssistantCount: number | null;
+  activePollContext: string | null;
+  prismDefaultLlmModel?: string | null;
+  summaryProvider?: LlmProvider;
+}): Promise<void> {
+  try {
+    await refreshCoffeeMeetingSummary(args);
+  } catch {
+    // Summary refresh is best-effort and must never block Coffee turns.
+  }
 }
 
 /** Settings forwarded from the HTTP route. */
@@ -2452,14 +2688,130 @@ const PRISM_BOT_MARKDOWN_LINK_RE =
 const PRISM_BOT_MENTION_COFFEE_APPENDIX =
   "The user may @-mention bots with markdown like [Label](prism-bot://botId) (botId may be URL-encoded). Prefer the mentioned bot as the next speaker when that fits the table.";
 
-const COFFEE_ORGANIC_SEED_LINES = [
-  "I know, right?",
-  "Wait, what was that you just said? Sorry, it went over my head.",
-  "No offense, but this is boring.",
-  "Honestly, that tracks.",
-  "Okay, that's actually kind of wild.",
-  "Huh. Didn't see that coming.",
-] as const;
+const COFFEE_ORGANIC_SEED_LINES_BY_STYLE: Record<BotVoicePreset, readonly string[]> = {
+  neutral: [
+    "Fair point.",
+    "Hmm. That gives me pause.",
+    "I hadn't considered it quite that way.",
+  ],
+  warm: [
+    "I hear you on that.",
+    "That's a thoughtful way to put it.",
+    "Yeah — that lands for me.",
+  ],
+  concise: ["Noted.", "True enough.", "Fair."],
+  playful: [
+    "I know, right?",
+    "Wait, what was that you just said? Sorry, it went over my head.",
+    "No offense, but this is boring.",
+    "Honestly, that tracks.",
+    "Okay, that's actually kind of wild.",
+    "Huh. Didn't see that coming.",
+  ],
+  formal: [],
+};
+
+type CoffeeOrganicSeedProfile = {
+  communicationStyle: BotVoicePreset;
+  birthEra: "ad" | "bc";
+  deceased: boolean;
+  basedOnRealPersonOrCharacter: boolean;
+};
+
+function readCoffeeOrganicSeedProfile(
+  speaker: Pick<CoffeeBotProfile, "systemPrompt">
+): CoffeeOrganicSeedProfile {
+  const { fields } = parseStoredBotPrompt(speaker.systemPrompt);
+  return {
+    communicationStyle: fields.core.communicationStyle,
+    birthEra: fields.facts.birthEra === "bc" ? "bc" : "ad",
+    deceased: fields.facts.deceased === true,
+    basedOnRealPersonOrCharacter: fields.facts.basedOnRealPersonOrCharacter === true,
+  };
+}
+
+/** True when post-processing may append a short transitional beat without breaking voice. */
+export function coffeeSpeakerUsesOrganicSeeds(
+  speaker: Pick<CoffeeBotProfile, "systemPrompt">
+): boolean {
+  const profile = readCoffeeOrganicSeedProfile(speaker);
+  if (profile.communicationStyle === "formal") return false;
+  if (profile.birthEra === "bc" || profile.deceased) return false;
+  if (profile.basedOnRealPersonOrCharacter) return false;
+  return true;
+}
+
+function coffeeOrganicSeedLinesForSpeaker(
+  speaker: Pick<CoffeeBotProfile, "systemPrompt">
+): readonly string[] {
+  if (!coffeeSpeakerUsesOrganicSeeds(speaker)) return [];
+  const profile = readCoffeeOrganicSeedProfile(speaker);
+  return COFFEE_ORGANIC_SEED_LINES_BY_STYLE[profile.communicationStyle] ?? [];
+}
+
+function buildCoffeeTransitionalBeatPromptLine(speaker: CoffeeBotProfile): string {
+  const profile = readCoffeeOrganicSeedProfile(speaker);
+  if (!coffeeSpeakerUsesOrganicSeeds(speaker)) {
+    return "Keep any transitional beats in your own voice and era. Do not slip into modern internet slang or casual asides that break your character.";
+  }
+  switch (profile.communicationStyle) {
+    case "playful":
+      return 'Occasionally use a short playful beat when natural for you (for example: "I know, right?" or "Okay, that\'s actually kind of wild."). Use sparingly.';
+    case "warm":
+      return 'Occasionally use a brief warm acknowledgment when natural (for example: "I hear you on that."). Use sparingly.';
+    case "concise":
+      return 'Occasionally use a very short acknowledgment when natural (for example: "Fair." or "Noted."). Use sparingly.';
+    default:
+      return "Occasionally use a brief natural reaction when it fits your voice. Use sparingly — never break character.";
+  }
+}
+
+/** @internal Exported for unit tests — appends a persona-filtered transitional beat when eligible. */
+export function applyCoffeeOrganicSeedToReply(args: {
+  replyText: string;
+  conversationId: string;
+  speaker: Pick<CoffeeBotProfile, "id" | "name" | "systemPrompt">;
+  historyLength: number;
+  turnKind: CoffeeTurnKind;
+  avoidTexts: readonly string[];
+}): string {
+  const { replyText, conversationId, speaker, historyLength, turnKind, avoidTexts } = args;
+  if (!replyText) return replyText;
+  const pool = coffeeOrganicSeedLinesForSpeaker(speaker);
+  if (pool.length === 0) return replyText;
+  const seed = stableUnitValue(
+    `${conversationId}:${speaker.id}:${historyLength}:${turnKind}:organic-seed`
+  );
+  if (seed > 0.3) return replyText;
+  const startIndex =
+    Math.floor(
+      stableUnitValue(`${conversationId}:${speaker.id}:${historyLength}:organic-line`) *
+        pool.length
+    ) % pool.length;
+  const avoid = new Set(avoidTexts.map(coffeeReplyRepeatKey).filter(Boolean));
+  let picked = pool[startIndex] ?? pool[0]!;
+  for (let offset = 0; offset < pool.length; offset += 1) {
+    const candidate = pool[(startIndex + offset) % pool.length] ?? picked;
+    if (!avoid.has(coffeeReplyRepeatKey(candidate))) {
+      picked = candidate;
+      break;
+    }
+  }
+  if (seed <= 0.1) return picked;
+  if (seed <= 0.2) return `${picked} ${replyText}`.trim();
+  return `${replyText} ${picked}`.trim();
+}
+
+function maybeApplyCoffeeOrganicSeed(args: {
+  replyText: string;
+  conversationId: string;
+  speaker: Pick<CoffeeBotProfile, "id" | "name" | "systemPrompt">;
+  historyLength: number;
+  turnKind: CoffeeTurnKind;
+  avoidTexts: readonly string[];
+}): string {
+  return applyCoffeeOrganicSeedToReply(args);
+}
 
 function decodeCoffeeMentionBotId(rawId: string): string | null {
   if (!rawId) return null;
@@ -2491,39 +2843,51 @@ function extractLastAddressedBotId(args: {
   return lastMentionedBotId;
 }
 
-function maybeApplyCoffeeOrganicSeed(args: {
-  replyText: string;
-  conversationId: string;
-  speaker: Pick<CoffeeBotProfile, "id" | "name">;
-  historyLength: number;
-  turnKind: CoffeeTurnKind;
-  avoidTexts: readonly string[];
-}): string {
-  const { replyText, conversationId, speaker, historyLength, turnKind, avoidTexts } = args;
-  if (!replyText) return replyText;
-  const seed = stableUnitValue(
-    `${conversationId}:${speaker.id}:${historyLength}:${turnKind}:organic-seed`
+function parseBotPreferredAddressMemory(text: string): {
+  targetName: string;
+  preferredAddress: string;
+} | null {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  const match = normalized.match(
+    /^([A-Z][\p{L}'-]*(?:\s+[A-Z][\p{L}'-]*){0,3})\s+(?:prefers|wants)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+(.+?)\.?$/u
   );
-  if (seed > 0.3) return replyText;
-  const startIndex =
-    Math.floor(
-      stableUnitValue(`${conversationId}:${speaker.id}:${historyLength}:organic-line`) *
-        COFFEE_ORGANIC_SEED_LINES.length
-    ) % COFFEE_ORGANIC_SEED_LINES.length;
-  const avoid = new Set(avoidTexts.map(coffeeReplyRepeatKey).filter(Boolean));
-  let picked = COFFEE_ORGANIC_SEED_LINES[startIndex] ?? COFFEE_ORGANIC_SEED_LINES[0]!;
-  for (let offset = 0; offset < COFFEE_ORGANIC_SEED_LINES.length; offset += 1) {
-    const candidate =
-      COFFEE_ORGANIC_SEED_LINES[(startIndex + offset) % COFFEE_ORGANIC_SEED_LINES.length] ?? picked;
-    if (!avoid.has(coffeeReplyRepeatKey(candidate))) {
-      picked = candidate;
-      break;
-    }
+  if (!match?.[1] || !match[2]) return null;
+  const targetName = match[1].trim();
+  const preferredAddress = match[2].replace(/[.!?]+$/, "").trim();
+  if (!targetName || !preferredAddress) return null;
+  return { targetName, preferredAddress };
+}
+
+async function loadCoffeePeerAddressPreferences(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey: Buffer | undefined;
+  speakerBotId: string;
+  peers: readonly { id: string; name: string }[];
+}): Promise<Map<string, string>> {
+  const { db, userId, userKey, speakerBotId, peers } = args;
+  const byTargetName = new Map(
+    peers.map((peer) => [peer.name.trim().toLocaleLowerCase(), peer.id] as const)
+  );
+  if (!userKey || byTargetName.size === 0) return new Map();
+  const recent = retrieveRecentMemoriesForStarter(
+    db,
+    userId,
+    userKey,
+    speakerBotId,
+    80
+  );
+  const byTargetBotId = new Map<string, string>();
+  for (const memory of recent) {
+    if (memory.category !== "bot_relation") continue;
+    const parsed = parseBotPreferredAddressMemory(memory.text);
+    if (!parsed) continue;
+    const targetBotId = byTargetName.get(parsed.targetName.toLocaleLowerCase());
+    if (!targetBotId || byTargetBotId.has(targetBotId)) continue;
+    byTargetBotId.set(targetBotId, parsed.preferredAddress);
   }
-  // Keep the "seeded" line infrequent and varied in shape.
-  if (seed <= 0.1) return picked;
-  if (seed <= 0.2) return `${picked} ${replyText}`.trim();
-  return `${replyText} ${picked}`.trim();
+  return byTargetBotId;
 }
 
 function maybeInjectAutonomousPeerAddress(args: {
@@ -2532,9 +2896,18 @@ function maybeInjectAutonomousPeerAddress(args: {
   speaker: CoffeeBotProfile;
   latestAssistantBeforeTurn: ChatMessage | null;
   group: readonly CoffeeBotProfile[];
+  peerAddressByBotId?: ReadonlyMap<string, string>;
 }): string {
-  const { replyText, turnKind, speaker, latestAssistantBeforeTurn, group } = args;
+  const {
+    replyText,
+    turnKind,
+    speaker,
+    latestAssistantBeforeTurn,
+    group,
+    peerAddressByBotId,
+  } = args;
   if (turnKind !== "autonomous") return replyText;
+  if (group.length <= 2) return replyText;
   if (!latestAssistantBeforeTurn || latestAssistantBeforeTurn.role !== "assistant") return replyText;
   const priorSpeakerId = resolveAssistantSpeakerBotId(latestAssistantBeforeTurn, group);
   if (!priorSpeakerId || priorSpeakerId === speaker.id) return replyText;
@@ -2546,7 +2919,7 @@ function maybeInjectAutonomousPeerAddress(args: {
   if (alreadyAddressesPeer) return replyText;
   // Encourage direct bot-to-bot texture on most autonomous turns.
   if (Math.random() > 0.65) return replyText;
-  const mention = formatBotMentionMarkdownInline(priorSpeaker);
+  const mention = formatBotMentionMarkdownInline(priorSpeaker, peerAddressByBotId);
   return `${mention}, ${replyText}`.trim();
 }
 
@@ -2571,7 +2944,8 @@ function resolveAssistantSpeakerBotId(
 export function autoTagPeerMentionsInCoffeeReply(
   reply: string,
   speaker: { id: string; name: string },
-  group: readonly { id: string; name: string }[]
+  group: readonly { id: string; name: string }[],
+  peerAddressByBotId?: ReadonlyMap<string, string>
 ): string {
   if (!reply || reply.length === 0) return reply;
   const peers = group.filter((bot) => bot.id !== speaker.id && bot.name.trim().length > 0);
@@ -2591,41 +2965,65 @@ export function autoTagPeerMentionsInCoffeeReply(
 
   let out = reply;
   for (const peer of sorted) {
-    const escaped = peer.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // Explicit @, then exact name as a whole word.
-    const pattern = new RegExp(`(?<![\\w\\-])@${escaped}(?![\\w\\-])`, "g");
-    let cursor = 0;
-    let assembled = "";
-    let m: RegExpExecArray | null;
-    while ((m = pattern.exec(out)) !== null) {
-      const start = m.index;
-      const end = start + m[0].length;
-      if (inLockedRange(start) || inLockedRange(end - 1)) {
-        continue;
+    const aliases = [
+      peerAddressByBotId?.get(peer.id)?.trim() ?? "",
+      peer.name.trim(),
+    ].filter((name, index, all) => name.length > 0 && all.indexOf(name) === index);
+    for (const alias of aliases) {
+      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // Explicit @, then exact name as a whole word.
+      const pattern = new RegExp(`(?<![\\w\\-])@${escaped}(?![\\w\\-])`, "g");
+      let cursor = 0;
+      let assembled = "";
+      let m: RegExpExecArray | null;
+      while ((m = pattern.exec(out)) !== null) {
+        const start = m.index;
+        const end = start + m[0].length;
+        if (inLockedRange(start) || inLockedRange(end - 1)) {
+          continue;
+        }
+        const replacement = formatBotMentionMarkdownInline(peer, peerAddressByBotId);
+        assembled += out.slice(cursor, start) + replacement;
+        cursor = end;
+        // Re-tag this region as locked so subsequent peers don't re-process it.
+        const newStart = assembled.length - replacement.length;
+        lockedRanges.push([newStart, newStart + replacement.length]);
       }
-      const replacement = formatBotMentionMarkdownInline(peer);
-      assembled += out.slice(cursor, start) + replacement;
-      cursor = end;
-      // Re-tag this region as locked so subsequent peers don't re-process it.
-      const newStart = assembled.length - replacement.length;
-      lockedRanges.push([newStart, newStart + replacement.length]);
-    }
-    if (cursor > 0) {
-      assembled += out.slice(cursor);
-      out = assembled;
+      if (cursor > 0) {
+        assembled += out.slice(cursor);
+        out = assembled;
+      }
     }
   }
   return out;
 }
 
-function formatBotMentionMarkdownInline(bot: { id: string; name: string }): string {
-  const safeName = bot.name.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+function preferredPeerLabel(
+  bot: { id: string; name: string },
+  peerAddressByBotId?: ReadonlyMap<string, string>
+): string {
+  const preferred = peerAddressByBotId?.get(bot.id)?.trim();
+  return preferred && preferred.length > 0 ? preferred : bot.name;
+}
+
+function formatBotMentionMarkdownInline(
+  bot: { id: string; name: string },
+  peerAddressByBotId?: ReadonlyMap<string, string>
+): string {
+  const safeName = preferredPeerLabel(bot, peerAddressByBotId)
+    .replace(/\\/g, "\\\\")
+    .replace(/\]/g, "\\]");
   return `[${safeName}](prism-bot://${encodeURIComponent(bot.id)})`;
 }
 
 /** Mirrors `formatBotMentionMarkdown` in apps/web — kept in sync by hand. */
-function coffeeFormatBotMentionMarkdown(bot: { id: string; name: string }): string {
-  const label = bot.name.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+function coffeeFormatBotMentionMarkdown(
+  bot: { id: string; name: string },
+  peerAddressByBotId?: ReadonlyMap<string, string>
+): string {
+  const label = preferredPeerLabel(bot, peerAddressByBotId)
+    .replace(/\\/g, "\\\\")
+    .replace(/\]/g, "\\]");
   return `[${label}](prism-bot://${encodeURIComponent(bot.id)})`;
 }
 
@@ -2674,11 +3072,16 @@ export function repairBotMentionBrackets(
  *   on the table) and never an invented botId.
  */
 function buildCoffeeSpeakerMentionRosterAppendix(
-  peers: readonly { id: string; name: string }[]
+  peers: readonly { id: string; name: string }[],
+  peerAddressByBotId?: ReadonlyMap<string, string>
 ): string | null {
   const usable = peers.filter((p) => p.id.trim().length > 0 && p.name.trim().length > 0);
   if (usable.length === 0) return null;
-  const rosterLines = usable.map((p) => `- ${p.name} → ${coffeeFormatBotMentionMarkdown(p)}`);
+  const rosterLines = usable.map((p) => {
+    const preferred = preferredPeerLabel(p, peerAddressByBotId);
+    const hint = preferred !== p.name ? ` (prefer "${preferred}")` : "";
+    return `- ${p.name}${hint} → ${coffeeFormatBotMentionMarkdown(p, peerAddressByBotId)}`;
+  });
   return [
     "Direct-address chip format (use sparingly):",
     "Most of your lines should NOT call anyone out by name — react to the room, agree, disagree, pivot. Constant `[Name]`-style call-outs make the table feel like ping-pong and break the conversation flow.",
@@ -2710,7 +3113,8 @@ const COFFEE_STAGE_DIRECTION_APPENDIX = [
  * Build the router LLM prompt that picks the next speaker.
  *
  * The router is asked to emit a single-line JSON object with `botId`
- * (must match one of the group ids) and `reason` (a short rationale).
+ * (must match one of the group ids), `reason` (a short rationale), and
+ * `directive` (a brief next-move cue for the chosen speaker).
  * We keep the schema tiny so even small local models can comply.
  */
 export function buildRouterPrompt(args: {
@@ -2726,6 +3130,12 @@ export function buildRouterPrompt(args: {
   coffeeTopic?: string | null;
   /** Optional closed opening-poll result, used to pick a speaker who can analyze it. */
   pollSummary?: string | null;
+  /** Active in-session poll context while bots are still deliberating. */
+  activePollContext?: string | null;
+  /** Optional rolling background summary used to reduce local echo loops. */
+  meetingSummary?: string | null;
+  /** Optional router-provided per-turn direction to reduce local echo loops. */
+  directorCue?: string | null;
   /** Client-side timer snapshot for natural session wrap-up prompting. */
   sessionRemainingMs?: number | null;
 }): ProviderMessage[] {
@@ -2740,6 +3150,8 @@ export function buildRouterPrompt(args: {
     sessionSettings,
     coffeeTopic,
     pollSummary,
+    activePollContext,
+    meetingSummary,
     sessionRemainingMs,
   } = args;
   const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
@@ -2759,6 +3171,27 @@ export function buildRouterPrompt(args: {
           "",
           `Opening poll result: ${pollSummaryTrim}`,
           "Prefer a speaker who can react to the poll result in-character, then help the table discuss what it means.",
+        ]
+      : [];
+  const activePollContextTrim =
+    typeof activePollContext === "string" ? activePollContext.trim() : "";
+  const activePollLines =
+    activePollContextTrim.length > 0
+      ? [
+          "",
+          activePollContextTrim,
+          "Prefer a speaker who can argue for their poll preference, respond to others' cases, or try to persuade the table before votes lock.",
+          "Avoid routing to generic table-management beats during a poll; the next speaker should add a concrete reason, doubt, joke, or contrast tied to one option.",
+        ]
+      : [];
+  const meetingSummaryTrim =
+    typeof meetingSummary === "string" ? meetingSummary.trim() : "";
+  const meetingSummaryLines =
+    meetingSummaryTrim.length > 0
+      ? [
+          "",
+          `Meeting summary so far: ${meetingSummaryTrim}`,
+          "Use the summary to continue unresolved points, but prioritize the latest table line over stale summary wording.",
         ]
       : [];
 
@@ -2805,7 +3238,8 @@ export function buildRouterPrompt(args: {
     "Avoid picks that lead to generic echo replies (for example a bland 'I get that' after a strong worldview claim). Prefer speakers who would react in-character with concrete contrast, bridge, or extension.",
     "Output requirements:",
     "  - Reply with a single line of valid JSON only.",
-    `  - Schema: {"botId": "<one of the listed ids>", "reason": "<one short sentence>"}`,
+    `  - Schema: {"botId": "<one of the listed ids>", "reason": "<one short sentence>", "directive": "<one short next-move cue>"}`,
+    "  - `directive` should be concrete and anti-echo (for example: challenge the strongest claim with one specific counterexample).",
     "  - Do not include any prose, code fences, comments, or extra fields.",
     "",
     "Bots in this group:",
@@ -2816,6 +3250,8 @@ export function buildRouterPrompt(args: {
     ...(kickoffRouterHint ? [kickoffRouterHint] : []),
     ...topicAnchorLines,
     ...pollLines,
+    ...activePollLines,
+    ...meetingSummaryLines,
     ...buildCoffeeWrapUpRouterAppendix(sessionRemainingMs),
     "",
     buildCoffeeTableTuningAppendix(settings),
@@ -2866,14 +3302,14 @@ export function buildRouterPrompt(args: {
 }
 
 /**
- * Parse the router LLM response into a `{ botId, reason }` pair.
+ * Parse the router LLM response into a `{ botId, reason, directive }` record.
  * Validates that `botId` is one of the allowed group ids; otherwise
  * returns null so the caller can fall back to the next bot in rotation.
  */
 export function parseRouterResponse(
   raw: string,
   allowedBots: RouterAllowedBot[]
-): { botId: string; reason: string } | null {
+): { botId: string; reason: string; directive: string | null } | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
@@ -2900,7 +3336,14 @@ export function parseRouterResponse(
     try {
       const parsed = JSON.parse(candidate) as unknown;
       if (!parsed || typeof parsed !== "object") continue;
-      const obj = parsed as { botId?: unknown; botName?: unknown; name?: unknown; reason?: unknown };
+      const obj = parsed as {
+        botId?: unknown;
+        botName?: unknown;
+        name?: unknown;
+        reason?: unknown;
+        directive?: unknown;
+        nextMove?: unknown;
+      };
       const rawBotId = typeof obj.botId === "string" ? obj.botId.trim() : "";
       const rawBotName =
         typeof obj.botName === "string"
@@ -2917,12 +3360,27 @@ export function parseRouterResponse(
         typeof obj.reason === "string" && obj.reason.trim().length > 0
           ? obj.reason.trim()
           : "Router pick (no reason provided)";
-      return { botId, reason };
+      const rawDirective =
+        typeof obj.directive === "string"
+          ? obj.directive
+          : typeof obj.nextMove === "string"
+            ? obj.nextMove
+            : "";
+      const directive = normalizeCoffeeRouterDirective(rawDirective);
+      return { botId, reason, directive };
     } catch {
       // try the next candidate
     }
   }
   return null;
+}
+
+function normalizeCoffeeRouterDirective(raw: string): string | null {
+  if (typeof raw !== "string") return null;
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  if (coffeeReplyLooksLikePromptLeak(collapsed)) return null;
+  return normalizeCoffeePromptSnippet(collapsed, COFFEE_ROUTER_DIRECTIVE_MAX_CHARS);
 }
 
 /**
@@ -2983,8 +3441,16 @@ export function buildSpeakerPrompt(args: {
   sessionSettings?: CoffeeSessionSettings;
   coffeeTopic?: string | null;
   pollSummary?: string | null;
+  /** Active in-session poll context while bots are still deliberating. */
+  activePollContext?: string | null;
+  /** Optional rolling background summary used to reduce local echo loops. */
+  meetingSummary?: string | null;
+  /** Optional router-provided per-turn direction to reduce local echo loops. */
+  directorCue?: string | null;
   /** Client-side timer snapshot for natural session wrap-up prompting. */
   sessionRemainingMs?: number | null;
+  /** Speaker-scoped preferred display labels for peers, keyed by peer bot id. */
+  peerAddressByBotId?: ReadonlyMap<string, string>;
 }): ProviderMessage[] {
   const {
     speaker,
@@ -2999,7 +3465,11 @@ export function buildSpeakerPrompt(args: {
     sessionSettings,
     coffeeTopic,
     pollSummary,
+    activePollContext,
+    meetingSummary,
+    directorCue,
     sessionRemainingMs,
+    peerAddressByBotId,
   } = args;
   const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
   const { tableReplyMaxChars } = coffeeReplyLengthCaps(settings);
@@ -3013,7 +3483,21 @@ export function buildSpeakerPrompt(args: {
   const speakerSocial = socialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL;
 
   const prismBotMentionHint = coffeeTranscriptContainsPrismBotMention(userMessage, history);
-  const speakerMentionRosterAppendix = buildCoffeeSpeakerMentionRosterAppendix(peers);
+  const speakerMentionRosterAppendix = buildCoffeeSpeakerMentionRosterAppendix(
+    peers,
+    peerAddressByBotId
+  );
+  const peerAddressPreferenceBullets = peers
+    .map((peer) => {
+      const preferred = peerAddressByBotId?.get(peer.id)?.trim();
+      if (!preferred || preferred === peer.name) return null;
+      return `- ${peer.name} prefers "${preferred}" when you address them directly.`;
+    })
+    .filter((line): line is string => line !== null);
+  const peerAddressPreferenceLines =
+    peerAddressPreferenceBullets.length > 0
+      ? ["", "Peer addressing preferences you have learned:", ...peerAddressPreferenceBullets]
+      : [];
   const topicTrim = typeof coffeeTopic === "string" ? coffeeTopic.trim() : "";
   const topicLines: string[] =
     topicTrim.length > 0
@@ -3033,6 +3517,35 @@ export function buildSpeakerPrompt(args: {
           "For the first beats of the session, treat the poll as table context: react to the result in-character before expanding into the broader topic.",
         ]
       : [];
+  const activePollContextTrim =
+    typeof activePollContext === "string" ? activePollContext.trim() : "";
+  const activePollLines =
+    activePollContextTrim.length > 0
+      ? [
+          "",
+          activePollContextTrim,
+          "Discuss the poll in character first. Every active-poll line should contain one concrete reason, doubt, joke, or contrast tied to an option, not only table-management phrasing. Bots only lock a vote in the final 30 seconds; until then they may lean or teeter without committing. The player may vote at any time, and that choice can sway leanings. Uncommitted bots must lock a vote before the session ends.",
+        ]
+      : [];
+  const meetingSummaryTrim =
+    typeof meetingSummary === "string" ? meetingSummary.trim() : "";
+  const meetingSummaryLines =
+    meetingSummaryTrim.length > 0
+      ? [
+          "",
+          `Meeting summary so far: ${meetingSummaryTrim}`,
+          "Use this to continue the unresolved thread naturally. React to the latest line first, then advance the summary's open point in your own words.",
+        ]
+      : [];
+  const directorCueTrim = typeof directorCue === "string" ? directorCue.trim() : "";
+  const directorCueLines =
+    directorCueTrim.length > 0
+      ? [
+          "",
+          `Silent moderator cue for this turn: ${directorCueTrim}`,
+          "Use this as your turn-level objective while staying fully in character. Do not mention any moderator, system, or behind-the-scenes guidance.",
+        ]
+      : [];
 
   const groupContextLines = [
     "You are sitting at Coffee Mode: an ambiguous coffee shop table inside PRISM.",
@@ -3041,6 +3554,9 @@ export function buildSpeakerPrompt(args: {
       : "Use the current table transcript as your shared history with the user and the other bots.",
     ...topicLines,
     ...pollLines,
+    ...activePollLines,
+    ...meetingSummaryLines,
+    ...directorCueLines,
     ...buildCoffeeWrapUpSpeakerAppendix(sessionRemainingMs),
     "You are participating in a live group conversation with the user and the following other bots:",
     ...peerLines,
@@ -3055,7 +3571,7 @@ export function buildSpeakerPrompt(args: {
     "When another bot just spoke, often respond to that bot directly by name in second person before expanding your thought.",
     "Reply as one line of plain prose (no line breaks). Prefer one or two short sentences max, and vary your rhythm across turns so the table doesn't sound templated.",
     "Do not keep the same line length every turn. Mix very short reactions, medium lines, and occasional longer lines so the table breathes like a real conversation.",
-    "Occasionally use casual conversational beats when natural for your persona (for example: \"I know, right?\", \"Wait, what was that you just said? Sorry, it went over my head.\", or \"No offense, but this is boring.\"). Use sparingly.",
+    buildCoffeeTransitionalBeatPromptLine(speaker),
     `Aim for a soft target around ${tableReplyMaxChars} characters including spaces; brevity reads best on the table. The server no longer truncates, so a slightly longer line is fine, but please don't ramble — keep the table feeling like a single quick exchange.`,
     "Make the line concrete: pull one small image, opinion, object, motive, or emotional beat from your persona or the latest table moment.",
     "Never repeat a recent table line exactly; if the table keeps circling the same nouns or joke shape, change the concrete detail or social motion instead.",
@@ -3068,6 +3584,7 @@ export function buildSpeakerPrompt(args: {
     `- You (${speaker.name}): disposition=${speakerSocial.disposition.toFixed(2)}, valuesFriction=${speakerSocial.valuesFriction.toFixed(2)}, restraint=${speakerSocial.restraint.toFixed(2)}, engagement=${speakerSocial.engagement.toFixed(2)}, leavePressure=${speakerSocial.leavePressure.toFixed(2)}`,
     "- If your valuesFriction and restraint are both high, set calm boundaries, be brief, or politely step back. Avoid insults or hostile escalation.",
     "- If leavePressure is high, prefer short grounded replies and occasional gentle withdrawal language.",
+    ...peerAddressPreferenceLines,
     ...(prismBotMentionHint ? ["", PRISM_BOT_MENTION_COFFEE_APPENDIX] : []),
     ...(speakerMentionRosterAppendix ? ["", speakerMentionRosterAppendix] : []),
     "",
@@ -3168,6 +3685,9 @@ interface ConversationRow {
   coffee_duration_minutes: number | null;
   coffee_preset_id: string | null;
   coffee_topic: string | null;
+  coffee_meeting_summary: string | null;
+  coffee_meeting_summary_message_count: number | null;
+  coffee_meeting_summary_updated_at: string | null;
   incognito: number;
   created_at: string;
   updated_at: string;
@@ -3293,7 +3813,8 @@ function loadConversationRow(
     .prepare(
       `SELECT id, user_id, title, conversation_mode, bot_id, bot_group_ids,
               coffee_settings, coffee_group_id, coffee_duration_minutes, coffee_preset_id,
-              coffee_topic, incognito, created_at, updated_at
+              coffee_topic, coffee_meeting_summary, coffee_meeting_summary_message_count,
+              coffee_meeting_summary_updated_at, incognito, created_at, updated_at
          FROM conversations
         WHERE id = ? AND user_id = ?`
     )
@@ -3500,7 +4021,7 @@ function normalizeCoffeePollQuestion(raw: unknown): string {
 
 function normalizeCoffeePollOptions(raw: unknown): string[] {
   if (!Array.isArray(raw)) {
-    throw new Error("Coffee polls need at least two options.");
+    throw new Error(`Coffee polls need at least ${COFFEE_POLL_OPTION_COUNT_MIN} options.`);
   }
   const seen = new Set<string>();
   const options: string[] = [];
@@ -3511,10 +4032,12 @@ function normalizeCoffeePollOptions(raw: unknown): string[] {
     if (seen.has(key)) continue;
     seen.add(key);
     options.push(option.length > 80 ? `${option.slice(0, 77).trimEnd()}...` : option);
-    if (options.length >= 6) break;
   }
-  if (options.length < 2) {
-    throw new Error("Coffee polls need at least two options.");
+  if (options.length < COFFEE_POLL_OPTION_COUNT_MIN) {
+    throw new Error(`Coffee polls need at least ${COFFEE_POLL_OPTION_COUNT_MIN} options.`);
+  }
+  if (options.length > COFFEE_POLL_OPTION_COUNT_MAX) {
+    throw new Error(`Coffee polls allow at most ${COFFEE_POLL_OPTION_COUNT_MAX} options.`);
   }
   return options;
 }
@@ -3612,10 +4135,15 @@ function loadCoffeePollRows(
   return { poll, votes };
 }
 
+function coffeePollVoteVoterKind(botId: string): CoffeePollVoterKind {
+  return botId === COFFEE_POLL_PLAYER_VOTER_ID ? "player" : "bot";
+}
+
 function mapCoffeePoll(row: CoffeePollRow, voteRows: CoffeePollVoteRow[]): CoffeePoll {
   const options = parseCoffeePollOptions(row.options_json);
   const votes: CoffeePollVote[] = voteRows.map((vote): CoffeePollVote => ({
     botId: vote.bot_id,
+    voterKind: coffeePollVoteVoterKind(vote.bot_id),
     kind: normalizeCoffeePollVoteKind(vote.vote_kind),
     optionIndex: typeof vote.option_index === "number" ? vote.option_index : null,
     explanation: vote.explanation,
@@ -3730,69 +4258,363 @@ export function createCoffeePoll(
   return mapCoffeePoll(loaded.poll, loaded.votes);
 }
 
-function deterministicCoffeePollVote(args: {
+function escapeCoffeePollRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function coffeePollIsInFinalizeWindow(
+  remainingMs: number | null | undefined
+): boolean {
+  return (
+    typeof remainingMs === "number" &&
+    Number.isFinite(remainingMs) &&
+    remainingMs >= 0 &&
+    remainingMs <= COFFEE_POLL_FINALIZE_REMAINING_MS
+  );
+}
+
+function coffeePollAssistantLines(
+  history: readonly ChatMessage[],
+  group: readonly CoffeeBotProfile[]
+): Array<{ botId: string; botName: string; content: string }> {
+  return history
+    .filter((message): message is ChatMessage => message.role === "assistant")
+    .filter((message) => coffeePollLineIsScorable(message))
+    .map((message) => {
+      const bot =
+        group.find((candidate) => candidate.name === message.botName) ??
+        group.find((candidate) => message.content.startsWith(`${candidate.name}:`));
+      return {
+        botId: bot?.id ?? "",
+        botName: message.botName?.trim() || bot?.name || "Bot",
+        content: message.content,
+      };
+    });
+}
+
+function coffeePollLineIsScorable(message: ChatMessage): boolean {
+  if (message.role !== "assistant") return true;
+  return (
+    !coffeeReplyLooksLikePromptLeak(message.content) &&
+    !coffeeReplyBreaksCharacterImmersion(message.content)
+  );
+}
+
+function coffeePollScorableTranscript(history: readonly ChatMessage[]): string {
+  return history
+    .filter(coffeePollLineIsScorable)
+    .map(formatCoffeeTranscriptLine)
+    .join("\n");
+}
+
+function scoreCoffeePollOptionsForBot(args: {
+  pollId: string;
+  options: readonly string[];
+  bot: CoffeeBotProfile;
+  transcript: string;
+  assistantLines: readonly { botId: string; botName: string; content: string }[];
+  playerOptionIndex?: number | null;
+}): number[] {
+  const baseIndex =
+    Math.floor(stableUnitValue(`${args.pollId}:${args.bot.id}`) * args.options.length) %
+    args.options.length;
+  const scores: number[] = args.options.map((_, index) => (index === baseIndex ? 2.5 : 0.5));
+  const lowerTranscript = args.transcript.toLowerCase();
+  for (let index = 0; index < args.options.length; index += 1) {
+    const token = args.options[index]?.toLowerCase() ?? "";
+    if (token.length < 3) continue;
+    const matches = lowerTranscript.match(new RegExp(`\\b${escapeCoffeePollRegExp(token)}\\b`, "gi"));
+    if (matches) scores[index] += matches.length * 0.85;
+  }
+  const recentPeerLines = args.assistantLines
+    .filter((line) => line.botId !== args.bot.id)
+    .slice(-5);
+  for (const line of recentPeerLines) {
+    const lower = line.content.toLowerCase();
+    for (let index = 0; index < args.options.length; index += 1) {
+      const token = args.options[index]?.toLowerCase() ?? "";
+      if (token.length >= 3 && lower.includes(token)) {
+        scores[index] += 0.65;
+      }
+    }
+  }
+  for (const line of args.assistantLines.filter((entry) => entry.botId === args.bot.id)) {
+    const lower = line.content.toLowerCase();
+    for (let index = 0; index < args.options.length; index += 1) {
+      const token = args.options[index]?.toLowerCase() ?? "";
+      if (token.length >= 3 && lower.includes(token)) {
+        scores[index] += 0.4;
+      }
+    }
+  }
+  if (typeof args.playerOptionIndex === "number" && args.playerOptionIndex >= 0) {
+    scores[args.playerOptionIndex] =
+      (scores[args.playerOptionIndex] ?? 0) + 1.15;
+  }
+  const userTranscript = args.transcript
+    .split("\n")
+    .filter((line) => line.startsWith("User:"))
+    .join("\n")
+    .toLowerCase();
+  if (userTranscript.length > 0) {
+    for (let index = 0; index < args.options.length; index += 1) {
+      const token = args.options[index]?.toLowerCase() ?? "";
+      if (token.length >= 3 && userTranscript.includes(token)) {
+        scores[index] += 0.55;
+      }
+    }
+  }
+  return scores;
+}
+
+function resolveCoffeePollBotVote(args: {
+  forceClose: boolean;
+  inFinalizeWindow: boolean;
+  leaningOptionIndex: number;
+  existingVoteKind: CoffeePollVoteKind;
+  existingOptionIndex: number | null;
+}): { commit: boolean; optionIndex: number | null; revote: boolean } {
+  const hasLockedVote =
+    args.existingVoteKind === "option" && typeof args.existingOptionIndex === "number";
+
+  // Discussion phase: lean only — votes stay pending until the final window.
+  if (!args.forceClose && !args.inFinalizeWindow) {
+    return { commit: false, optionIndex: null, revote: false };
+  }
+
+  return {
+    commit: true,
+    optionIndex: args.leaningOptionIndex,
+    revote: hasLockedVote && args.existingOptionIndex !== args.leaningOptionIndex,
+  };
+}
+
+function computeCoffeePollDeliberationForBot(args: {
   pollId: string;
   question: string;
   options: readonly string[];
   bot: CoffeeBotProfile;
+  transcript: string;
+  assistantLines: readonly { botId: string; botName: string; content: string }[];
+  messageCount: number;
+  sessionRemainingMs: number | null | undefined;
   now: string;
+  inFinalizeWindow: boolean;
+  forceClose: boolean;
+  existingVoteKind?: CoffeePollVoteKind;
+  existingOptionIndex?: number | null;
+  playerOptionIndex?: number | null;
 }): {
-  optionIndex: number;
-  explanation: string;
-  confidence: number;
+  voteKind: CoffeePollVoteKind;
+  optionIndex: number | null;
+  explanation: string | null;
+  confidence: number | null;
   deliberation: CoffeePollDeliberation;
 } {
-  const optionIndex = Math.floor(
-    stableUnitValue(`${args.pollId}:${args.bot.id}:${args.question}`) * args.options.length
-  ) % args.options.length;
-  const confidence = Math.round(
-    (0.55 + stableUnitValue(`${args.pollId}:${args.bot.id}:confidence`) * 0.35) * 100
-  ) / 100;
-  const option = args.options[optionIndex] ?? args.options[0] ?? "";
+  const scores = scoreCoffeePollOptionsForBot({
+    pollId: args.pollId,
+    options: args.options,
+    bot: args.bot,
+    transcript: args.transcript,
+    assistantLines: args.assistantLines,
+    playerOptionIndex: args.playerOptionIndex,
+  });
+  const ranked = scores
+    .map((score, optionIndex) => ({ score, optionIndex }))
+    .sort((left, right) => right.score - left.score);
+  const top = ranked[0] ?? { score: 0, optionIndex: 0 };
+  const second = ranked[1] ?? { score: 0, optionIndex: top.optionIndex };
+  const leaningOptionIndex = top.optionIndex;
+  const alternateOptionIndex =
+    second.score > 0 && top.score - second.score < 1.25 ? second.optionIndex : null;
+  const scoreTotal = scores.reduce((sum, score) => sum + score, 0);
+  const confidence =
+    Math.round((0.35 + (top.score / Math.max(1, scoreTotal)) * 0.55) * 100) / 100;
+  const leaningLabel = args.options[leaningOptionIndex] ?? args.options[0] ?? "";
+  const alternateLabel =
+    alternateOptionIndex === null ? null : args.options[alternateOptionIndex] ?? null;
+  const existingVoteKind = args.existingVoteKind ?? "pending";
+  const existingOptionIndex = args.existingOptionIndex ?? null;
+  const voteDecision = resolveCoffeePollBotVote({
+    forceClose: args.forceClose,
+    inFinalizeWindow: args.inFinalizeWindow,
+    leaningOptionIndex,
+    existingVoteKind,
+    existingOptionIndex,
+  });
+
+  let stage: CoffeePollDeliberation["stage"];
+  if (voteDecision.commit && (args.forceClose || confidence >= 0.72)) {
+    stage = "finalized";
+  } else if (voteDecision.commit) {
+    stage = "finalized";
+  } else if (args.inFinalizeWindow) {
+    stage = "deciding";
+  } else if (args.messageCount <= 0) {
+    stage = "idle";
+  } else if (alternateOptionIndex !== null || voteDecision.revote) {
+    stage = "teetering";
+  } else {
+    stage = "evaluating";
+  }
+
+  const note =
+    stage === "teetering" && alternateLabel
+      ? voteDecision.revote
+        ? `Rethinking after the table made the case for "${alternateLabel}".`
+        : `Still weighing "${leaningLabel}" against "${alternateLabel}".`
+      : stage === "deciding" && alternateLabel
+        ? `Nearly settled on "${leaningLabel}", but "${alternateLabel}" still tugs.`
+        : stage === "idle"
+          ? "Listening before leaning."
+          : null;
+
+  if (voteDecision.commit && typeof voteDecision.optionIndex === "number") {
+    const optionIndex = voteDecision.optionIndex;
+    const pickedLabel = args.options[optionIndex] ?? leaningLabel;
+    const explanation = voteDecision.revote
+      ? `${args.bot.name} changes to "${pickedLabel}" after hearing the table.`
+      : existingVoteKind === "option"
+        ? `${args.bot.name} holds with "${pickedLabel}".`
+        : `${args.bot.name} picks "${pickedLabel}" once they had heard enough.`;
+    return {
+      voteKind: "option",
+      optionIndex,
+      explanation,
+      confidence,
+      deliberation: {
+        stage,
+        leaningOptionIndex: optionIndex,
+        alternateOptionIndex,
+        confidence,
+        blocker: null,
+        note,
+        updatedAt: args.now,
+      },
+    };
+  }
+
   return {
-    optionIndex,
+    voteKind: "pending",
+    optionIndex: null,
+    explanation: null,
     confidence,
-    explanation: `${args.bot.name} leans toward "${option}" for this table prompt.`,
     deliberation: {
-      stage: "finalized",
-      leaningOptionIndex: optionIndex,
-      alternateOptionIndex: null,
+      stage,
+      leaningOptionIndex,
+      alternateOptionIndex,
       confidence,
       blocker: null,
-      note: null,
+      note,
       updatedAt: args.now,
     },
   };
 }
 
-export async function collectCoffeePollVotes(
+function formatCoffeeActivePollContext(
+  poll: CoffeePoll,
+  group: readonly CoffeeBotProfile[],
+  sessionRemainingMs: number | null | undefined
+): string {
+  const inFinalize = coffeePollIsInFinalizeWindow(sessionRemainingMs);
+  const optionList = poll.options.map((option, index) => `${index + 1}. ${option}`).join(" ");
+  const leaningLines = poll.votes
+    .filter((vote) => vote.voterKind !== "player")
+    .map((vote) => {
+      const bot = group.find((candidate) => candidate.id === vote.botId);
+      const leaningIndex = vote.deliberation?.leaningOptionIndex;
+      if (typeof leaningIndex !== "number") return null;
+      const leaning = poll.options[leaningIndex];
+      if (!leaning) return null;
+      const alternateIndex = vote.deliberation?.alternateOptionIndex;
+      const alternate =
+        typeof alternateIndex === "number" ? poll.options[alternateIndex] : null;
+      if (vote.kind === "option" && typeof vote.optionIndex === "number") {
+        const locked = poll.options[vote.optionIndex] ?? leaning;
+        return `${bot?.name ?? vote.botId} locked on ${locked}`;
+      }
+      if (alternate) {
+        return `${bot?.name ?? vote.botId} teetering between ${leaning} and ${alternate}`;
+      }
+      return `${bot?.name ?? vote.botId} leaning ${leaning}`;
+    })
+    .filter((line): line is string => Boolean(line));
+  const playerVote = poll.votes.find((vote) => vote.voterKind === "player");
+  const playerVoteLine =
+    playerVote?.kind === "option" && typeof playerVote.optionIndex === "number"
+      ? `The player voted for "${poll.options[playerVote.optionIndex] ?? "an option"}".`
+      : "";
+  return [
+    `Active table poll: "${poll.question}".`,
+    `Options: ${optionList}.`,
+    inFinalize
+      ? "Any bot still undecided must lock a vote now — persuasive arguments can still move people."
+      : "Bots may lean toward an option while the table discusses, but votes stay open until the final 30 seconds.",
+    playerVoteLine,
+    leaningLines.length > 0 ? `Current leanings: ${leaningLines.join("; ")}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function loadActiveCoffeeSessionPoll(
   db: DatabaseSync,
   userId: string,
-  conversationId: string,
-  pollId: string,
-  _settings: CoffeeTurnSettings
-): Promise<{ poll: CoffeePoll }> {
-  const { group } = loadCoffeeConversationGroup(db, userId, conversationId);
-  const loadedBefore = loadCoffeePollRows(db, userId, conversationId, pollId);
-  if (!loadedBefore) {
+  conversationId: string
+): CoffeePoll | null {
+  const loaded = loadCoffeePollRows(db, userId, conversationId);
+  if (!loaded) return null;
+  const status = normalizeCoffeePollStatus(loaded.poll.status);
+  if (status === "closed" || status === "cancelled") return null;
+  return mapCoffeePoll(loaded.poll, loaded.votes);
+}
+
+function advanceCoffeePollState(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  pollId: string;
+  group: readonly CoffeeBotProfile[];
+  sessionRemainingMs: number | null | undefined;
+  historyLimit?: number;
+}): CoffeePoll {
+  const loaded = loadCoffeePollRows(args.db, args.userId, args.conversationId, args.pollId);
+  if (!loaded) {
     throw new Error("Coffee poll not found.");
   }
-  const status = normalizeCoffeePollStatus(loadedBefore.poll.status);
-  if (status === "cancelled") {
-    throw new Error("Coffee poll has been cancelled.");
+  const status = normalizeCoffeePollStatus(loaded.poll.status);
+  if (status === "cancelled" || status === "closed") {
+    return mapCoffeePoll(loaded.poll, loaded.votes);
   }
-  const options = parseCoffeePollOptions(loadedBefore.poll.options_json);
+
+  const options = parseCoffeePollOptions(loaded.poll.options_json);
+  const historyLimit = args.historyLimit ?? 80;
+  const history = loadMessages(args.db, args.userId, args.conversationId, historyLimit);
+  const transcript = coffeePollScorableTranscript(history);
+  const assistantLines = coffeePollAssistantLines(history, args.group);
+  const messageCount = history.length;
+  const playerVoteRow = loaded.votes.find((vote) => vote.bot_id === COFFEE_POLL_PLAYER_VOTER_ID);
+  const playerOptionIndex =
+    playerVoteRow && normalizeCoffeePollVoteKind(playerVoteRow.vote_kind) === "option"
+      ? playerVoteRow.option_index
+      : null;
+  const inFinalize = coffeePollIsInFinalizeWindow(args.sessionRemainingMs);
+  const forceClose =
+    typeof args.sessionRemainingMs === "number" &&
+    Number.isFinite(args.sessionRemainingMs) &&
+    args.sessionRemainingMs <= 0;
   const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE coffee_polls
-        SET status = 'collecting', updated_at = ?
-      WHERE id = ? AND user_id = ? AND conversation_id = ?`
-  ).run(now, pollId, userId, conversationId);
-  const voteUpsert = db.prepare(
+  const nextStatus: CoffeePollStatus = forceClose
+    ? "closed"
+    : inFinalize
+      ? "collecting"
+      : "open";
+
+  const voteUpsert = args.db.prepare(
     `INSERT INTO coffee_poll_votes
        (user_id, poll_id, conversation_id, bot_id, vote_kind, option_index,
         explanation, suggested_option, confidence, deliberation_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'option', ?, ?, NULL, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
      ON CONFLICT(user_id, poll_id, bot_id) DO UPDATE SET
        vote_kind = excluded.vote_kind,
        option_index = excluded.option_index,
@@ -3802,37 +4624,151 @@ export async function collectCoffeePollVotes(
        deliberation_json = excluded.deliberation_json,
        updated_at = excluded.updated_at`
   );
-  for (const bot of group) {
-    const vote = deterministicCoffeePollVote({
-      pollId,
-      question: loadedBefore.poll.question,
+
+  for (const bot of args.group) {
+    const existingVote = loaded.votes.find((vote) => vote.bot_id === bot.id);
+    const computed = computeCoffeePollDeliberationForBot({
+      pollId: args.pollId,
+      question: loaded.poll.question,
       options,
       bot,
+      transcript,
+      assistantLines,
+      messageCount,
+      sessionRemainingMs: args.sessionRemainingMs,
       now,
+      inFinalizeWindow: inFinalize,
+      forceClose,
+      existingVoteKind: normalizeCoffeePollVoteKind(existingVote?.vote_kind),
+      existingOptionIndex: existingVote?.option_index ?? null,
+      playerOptionIndex,
     });
     voteUpsert.run(
-      userId,
-      pollId,
-      conversationId,
+      args.userId,
+      args.pollId,
+      args.conversationId,
       bot.id,
-      vote.optionIndex,
-      vote.explanation,
-      vote.confidence,
-      JSON.stringify(vote.deliberation),
+      computed.voteKind,
+      computed.optionIndex,
+      computed.explanation,
+      computed.confidence,
+      JSON.stringify(computed.deliberation),
       now,
       now
     );
   }
-  db.prepare(
-    `UPDATE coffee_polls
-        SET status = 'closed', closed_at = ?, updated_at = ?
-      WHERE id = ? AND user_id = ? AND conversation_id = ?`
-  ).run(now, now, pollId, userId, conversationId);
-  const loadedAfter = loadCoffeePollRows(db, userId, conversationId, pollId);
+
+  args.db
+    .prepare(
+      `UPDATE coffee_polls
+          SET status = ?,
+              closed_at = CASE WHEN ? = 'closed' THEN ? ELSE closed_at END,
+              updated_at = ?
+        WHERE id = ? AND user_id = ? AND conversation_id = ?`
+    )
+    .run(
+      nextStatus,
+      nextStatus,
+      now,
+      now,
+      args.pollId,
+      args.userId,
+      args.conversationId
+    );
+
+  const loadedAfter = loadCoffeePollRows(args.db, args.userId, args.conversationId, args.pollId);
   if (!loadedAfter) {
     throw new Error("Coffee poll not found.");
   }
-  return { poll: mapCoffeePoll(loadedAfter.poll, loadedAfter.votes) };
+  return mapCoffeePoll(loadedAfter.poll, loadedAfter.votes);
+}
+
+export async function collectCoffeePollVotes(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  pollId: string,
+  settings: CoffeeTurnSettings
+): Promise<{ poll: CoffeePoll }> {
+  const { group } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const poll = advanceCoffeePollState({
+    db,
+    userId,
+    conversationId,
+    pollId,
+    group,
+    sessionRemainingMs: settings.sessionRemainingMs,
+  });
+  return { poll };
+}
+
+export function setCoffeePollPlayerVote(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  pollId: string,
+  rawOptionIndex: unknown,
+  sessionRemainingMs: number | null | undefined = null
+): CoffeePoll {
+  const loaded = loadCoffeePollRows(db, userId, conversationId, pollId);
+  if (!loaded) {
+    throw new Error("Coffee poll not found.");
+  }
+  const status = normalizeCoffeePollStatus(loaded.poll.status);
+  if (status === "cancelled" || status === "closed") {
+    throw new Error("Coffee poll is closed.");
+  }
+  const options = parseCoffeePollOptions(loaded.poll.options_json);
+  const optionIndex =
+    typeof rawOptionIndex === "number" && Number.isFinite(rawOptionIndex)
+      ? Math.floor(rawOptionIndex)
+      : -1;
+  if (optionIndex < 0 || optionIndex >= options.length) {
+    throw new Error("Invalid poll option.");
+  }
+  const now = new Date().toISOString();
+  const picked = options[optionIndex] ?? "";
+  db.prepare(
+    `INSERT INTO coffee_poll_votes
+       (user_id, poll_id, conversation_id, bot_id, vote_kind, option_index,
+        explanation, suggested_option, confidence, deliberation_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'option', ?, ?, NULL, 1, ?, ?, ?)
+     ON CONFLICT(user_id, poll_id, bot_id) DO UPDATE SET
+       vote_kind = excluded.vote_kind,
+       option_index = excluded.option_index,
+       explanation = excluded.explanation,
+       suggested_option = excluded.suggested_option,
+       confidence = excluded.confidence,
+       deliberation_json = excluded.deliberation_json,
+       updated_at = excluded.updated_at`
+  ).run(
+    userId,
+    pollId,
+    conversationId,
+    COFFEE_POLL_PLAYER_VOTER_ID,
+    optionIndex,
+    `You picked "${picked}".`,
+    JSON.stringify({
+      stage: "finalized",
+      leaningOptionIndex: optionIndex,
+      alternateOptionIndex: null,
+      confidence: 1,
+      blocker: null,
+      note: null,
+      updatedAt: now,
+    }),
+    now,
+    now
+  );
+  const { group } = loadCoffeeConversationGroup(db, userId, conversationId);
+  return advanceCoffeePollState({
+    db,
+    userId,
+    conversationId,
+    pollId,
+    group,
+    sessionRemainingMs,
+  });
 }
 
 /**
@@ -4117,29 +5053,50 @@ async function generateCoffeeBotReply(args: {
   let interruptionEvent: CoffeeInterruptionEvent | undefined = playerInterruptionEvent;
   const directedSpeaker = pickDirectedSpeaker(group, directedSpeakerBotId);
   const lastSpeakerBotId = loadLastSpeakerBotId(db, userId, row.id);
-  const latestPollSummary = loadLatestClosedCoffeePollSummary(db, userId, row.id);
+  const activePoll = loadActiveCoffeeSessionPoll(db, userId, row.id);
+  const latestPollSummary =
+    activePoll === null ? loadLatestClosedCoffeePollSummary(db, userId, row.id) : null;
+  const activePollContext =
+    activePoll === null
+      ? null
+      : formatCoffeeActivePollContext(activePoll, group, settings.sessionRemainingMs);
+  const meetingSummary =
+    typeof row.coffee_meeting_summary === "string" && row.coffee_meeting_summary.trim().length > 0
+      ? row.coffee_meeting_summary.trim()
+      : null;
+  const meetingSummaryAssistantCount =
+    typeof row.coffee_meeting_summary_message_count === "number" &&
+      Number.isFinite(row.coffee_meeting_summary_message_count)
+      ? Math.max(0, Math.floor(row.coffee_meeting_summary_message_count))
+      : null;
   const latestAssistantBeforeTurn = [...history]
     .reverse()
     .find((message): message is ChatMessage => message.role === "assistant") ?? null;
+  const seatedBotIds = new Set(group.map((bot) => bot.id));
+  const priorAssistantSpeakerBotId = latestAssistantBeforeTurn
+    ? resolveAssistantSpeakerBotId(latestAssistantBeforeTurn, group)
+    : null;
+  const addressedBotId = latestAssistantBeforeTurn
+    ? extractLastAddressedBotId({
+        line: latestAssistantBeforeTurn.content,
+        speakerBotId: priorAssistantSpeakerBotId,
+        seatedBotIds,
+      })
+    : null;
   let pickedBotId: string;
   let routerReason: string;
+  let routerDirective: string | null = null;
   if (directedSpeaker) {
     pickedBotId = directedSpeaker.id;
     routerReason = `Director mode picked ${directedSpeaker.name}.`;
+    routerDirective = "Start a fresh concrete beat tied to the latest table moment.";
   } else {
-    const seatedBotIds = new Set(group.map((bot) => bot.id));
-    const addressedBotId = latestAssistantBeforeTurn
-      ? extractLastAddressedBotId({
-          line: latestAssistantBeforeTurn.content,
-          speakerBotId: resolveAssistantSpeakerBotId(latestAssistantBeforeTurn, group),
-          seatedBotIds,
-        })
-      : null;
     if (addressedBotId) {
       const addressedSpeaker = group.find((bot) => bot.id === addressedBotId);
       if (addressedSpeaker) {
         pickedBotId = addressedSpeaker.id;
         routerReason = `Followed direct bot address to ${addressedSpeaker.name}.`;
+        routerDirective = "Answer the direct call-out first, then add one concrete new angle.";
       } else {
         const fallbackSpeaker = pickFallbackSpeaker(group, lastSpeakerBotId);
         pickedBotId = fallbackSpeaker.id;
@@ -4158,6 +5115,8 @@ async function generateCoffeeBotReply(args: {
         sessionSettings,
         coffeeTopic: row.coffee_topic,
         pollSummary: latestPollSummary,
+        activePollContext,
+        meetingSummary,
         sessionRemainingMs: settings.sessionRemainingMs,
       });
       try {
@@ -4169,6 +5128,7 @@ async function generateCoffeeBotReply(args: {
         if (parsed) {
           pickedBotId = parsed.botId;
           routerReason = parsed.reason;
+          routerDirective = parsed.directive;
         } else {
           const fallbackSpeaker = pickFallbackSpeaker(group, lastSpeakerBotId);
           pickedBotId = fallbackSpeaker.id;
@@ -4183,6 +5143,13 @@ async function generateCoffeeBotReply(args: {
   }
 
   const speaker = group.find((bot) => bot.id === pickedBotId) ?? group[0]!;
+  const peerAddressByBotId = await loadCoffeePeerAddressPreferences({
+    db,
+    userId,
+    userKey: settings.userKey,
+    speakerBotId: speaker.id,
+    peers: group.filter((bot) => bot.id !== speaker.id),
+  });
   if (!interruptionEvent) {
     const botInterruptionEvent = maybeBuildBotInterruptionEvent({
       turnKind,
@@ -4235,12 +5202,32 @@ async function generateCoffeeBotReply(args: {
     sessionSettings,
     coffeeTopic: row.coffee_topic,
     pollSummary: latestPollSummary,
+    activePollContext,
+    meetingSummary,
+    directorCue: routerDirective,
     sessionRemainingMs: settings.sessionRemainingMs,
+    peerAddressByBotId,
   });
-  const speakerReply = await speakerProvider.generateResponse(
-    speakerMessages,
-    speakerOptions
-  );
+  let speakerReply = "";
+  try {
+    speakerReply = await speakerProvider.generateResponse(
+      speakerMessages,
+      speakerOptions
+    );
+  } catch (error) {
+    if (
+      effectiveProvider === "openai" &&
+      error instanceof Error &&
+      /openai returned an empty response/i.test(error.message)
+    ) {
+      console.warn(
+        `[coffee] speaker returned empty OpenAI response; falling back to emergency line conversation=${row.id} speaker=${speaker.id}`
+      );
+      speakerReply = "";
+    } else {
+      throw error;
+    }
+  }
   // Repair orphan `[Name]` brackets emitted without their `(prism-bot://…)`
   // href before sanitizing — otherwise they leak as visible artifacts on the
   // table (and the visible-length clamp still works correctly because the
@@ -4279,6 +5266,7 @@ async function generateCoffeeBotReply(args: {
       historyLength: history.length,
       avoidTexts: recentCoffeeAssistantTexts(history),
       maxChars: replyCaps.tableReplyMaxChars,
+      activePoll,
     });
   }
   if (coffeeReplyLooksLikePromptLeak(replyText)) {
@@ -4289,6 +5277,7 @@ async function generateCoffeeBotReply(args: {
       historyLength: history.length,
       avoidTexts: recentCoffeeAssistantTexts(history),
       maxChars: replyCaps.tableReplyMaxChars,
+      activePoll,
     });
   }
   if (
@@ -4323,6 +5312,7 @@ async function generateCoffeeBotReply(args: {
       seedExtra: "repeat",
       avoidTexts: recentCoffeeAssistantTexts(history),
       maxChars: replyCaps.tableReplyMaxChars,
+      activePoll,
     });
   }
   if (!replyText) {
@@ -4334,19 +5324,27 @@ async function generateCoffeeBotReply(args: {
     speaker,
     latestAssistantBeforeTurn,
     group,
+    peerAddressByBotId,
   });
-  replyText = maybeApplyCoffeeOrganicSeed({
-    replyText,
-    conversationId: row.id,
-    speaker,
-    historyLength: history.length,
-    turnKind,
-    avoidTexts: recentCoffeeAssistantTexts(history),
-  });
+  if (!activePoll) {
+    replyText = maybeApplyCoffeeOrganicSeed({
+      replyText,
+      conversationId: row.id,
+      speaker,
+      historyLength: history.length,
+      turnKind,
+      avoidTexts: recentCoffeeAssistantTexts(history),
+    });
+  }
   // Promote any plain `@Name` / bare-name peer references into prism-bot mention
   // markdown so the client renders the chip + lights the notified glyph on the
   // addressed bot's seat. Safe even when the model already used the markdown.
-  replyText = autoTagPeerMentionsInCoffeeReply(replyText, speaker, group);
+  replyText = autoTagPeerMentionsInCoffeeReply(
+    replyText,
+    speaker,
+    group,
+    peerAddressByBotId
+  );
   const nextSocialByBotId = computeNextCoffeeSocialState({
     previousByBotId: preTurnSocialByBotId,
     group,
@@ -4375,7 +5373,56 @@ async function generateCoffeeBotReply(args: {
   db.prepare(
     "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
   ).run(assistantNow, row.id, userId);
+  if (settings.userKey && priorAssistantSpeakerBotId && addressedBotId === speaker.id) {
+    const preferredAddressCandidates = extractBotPreferredAddressMemoryCandidates({
+      assistantMessage: replyText,
+      targetBotName: speaker.name,
+    });
+    if (preferredAddressCandidates.length > 0) {
+      const validation = await validateMemoryCandidates(
+        getAuxiliaryProvider(settings.prismDefaultLlmModel ?? undefined),
+        {
+        source: "inferred",
+        scope: "bot",
+        rawContext: replyText,
+        candidates: preferredAddressCandidates,
+        userDisplayName: settings.userDisplayName,
+        }
+      );
+      if (validation.candidates.length > 0) {
+        await persistMemoryCandidates(
+          db,
+          userId,
+          row.id,
+          priorAssistantSpeakerBotId,
+          validation.candidates,
+          settings.userKey,
+          {
+            source: "inferred",
+            category: "bot_relation",
+            tier: "short_term",
+            sourceMessageIds: [assistantMessageId],
+          }
+        );
+      }
+    }
+  }
   upsertCoffeeBotSocialState(db, userId, row.id, nextSocialByBotId, assistantNow);
+  if (activePoll) {
+    try {
+      advanceCoffeePollState({
+        db,
+        userId,
+        conversationId: row.id,
+        pollId: activePoll.id,
+        group,
+        sessionRemainingMs: settings.sessionRemainingMs,
+        historyLimit,
+      });
+    } catch {
+      // Poll advancement should never block a Coffee turn.
+    }
+  }
   if (turnKind === "user") {
     await ensureCoffeeAboutYouMemory({
       db,
@@ -4391,6 +5438,17 @@ async function generateCoffeeBotReply(args: {
   const refreshedRow = loadConversationRow(db, userId, row.id) ?? row;
   const finalHistory = loadMessages(db, userId, refreshedRow.id, historyLimit);
   const finalLastSpeakerBotId = loadLastSpeakerBotId(db, userId, refreshedRow.id);
+  void kickoffCoffeeMeetingSummaryRefresh({
+    db,
+    userId,
+    conversationId: refreshedRow.id,
+    group,
+    history: finalHistory,
+    previousSummary: meetingSummary,
+    previousSummaryAssistantCount: meetingSummaryAssistantCount,
+    activePollContext,
+    prismDefaultLlmModel: settings.prismDefaultLlmModel ?? null,
+  });
   return {
     conversation: buildConversationResponse({
       row: refreshedRow,

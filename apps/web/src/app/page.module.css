@@ -15156,6 +15156,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--fg) 76%, var(--fg-muted));
 }
 
+.botProfileDetails {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.botProfileDetails summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  list-style: none;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.botProfileDetails summary::-webkit-details-marker {
+  display: none;
+}
+
+.botProfileDetailsBody {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--line);
+}
+
 .botProfileBirthdayField {
   gap: 8px;
 }
@@ -24194,21 +24222,78 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeStage[data-phase="finished"] .coffeeCenterMessage {
   width: min(276px, 42vmin);
   height: auto;
-  min-height: min(192px, 30vmin);
+  min-height: min(180px, 28vmin);
   max-width: min(276px, 56%);
-  max-height: none;
+  max-height: min(360px, 48vmin);
 }
 
 .coffeeStage[data-phase="live"] .coffeeCenterMessageScroll,
 .coffeeStage[data-phase="finished"] .coffeeCenterMessageScroll {
-  flex: 0 1 auto;
-  overflow-y: visible;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: clamp(200px, 32vmin, 300px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  /* Fade transcript lines before they hit the table rim — keeps the marquee readable
+     without letting text spill into the seat ring. Percentage stops scale with height. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.82) 7%,
+    #000 13%,
+    #000 87%,
+    rgba(0, 0, 0, 0.82) 93%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.82) 7%,
+    #000 13%,
+    #000 87%,
+    rgba(0, 0, 0, 0.82) 93%,
+    transparent 100%
+  );
 }
 
 .coffeeStage[data-phase="live"] .coffeeCenterFeedLine,
 .coffeeStage[data-phase="finished"] .coffeeCenterFeedLine {
-  font-size: clamp(1rem, 1.75vw, 1.3rem);
-  line-height: 1.34;
+  font-size: clamp(0.9rem, 1.5vw, 1.15rem);
+  line-height: 1.32;
+}
+
+.coffeeStage[data-phase="live"] .coffeeCenterFeedLine[data-speaker-break="true"],
+.coffeeStage[data-phase="finished"] .coffeeCenterFeedLine[data-speaker-break="true"] {
+  margin-top: 14px;
+}
+
+.coffeeStage[data-phase="live"] .coffeeCenterFeed,
+.coffeeStage[data-phase="finished"] .coffeeCenterFeed {
+  /* Extra scroll runway so lines stay readable past the top/bottom fade mask. */
+  padding: 2.75rem 0;
+  gap: 4px;
+}
+
+.coffeeCenterMessage[data-live-transcript="true"] {
+  gap: 0;
+  padding-top: 8px;
+}
+
+.coffeeStage[data-phase="live"] .coffeeSeat[data-table-dimmed="true"] .coffeeSeatCluster,
+.coffeeStage[data-phase="finished"] .coffeeSeat[data-table-dimmed="true"] .coffeeSeatCluster {
+  opacity: 0.34;
+  filter: saturate(0.45) brightness(0.72);
+  transition:
+    opacity 240ms ease,
+    filter 240ms ease;
+}
+
+.coffeeStage[data-phase="live"] .coffeeSeat[data-table-speaking="true"] .coffeeSeatCluster,
+.coffeeStage[data-phase="finished"] .coffeeSeat[data-table-speaking="true"] .coffeeSeatCluster {
+  opacity: 1;
+  filter: none;
 }
 
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
@@ -25659,6 +25744,47 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   cursor: pointer;
 }
 
+.coffeePollBubble {
+  position: fixed;
+  z-index: 145;
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(120, 200, 255, 0.42);
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.32), transparent 24%),
+    radial-gradient(circle at 66% 76%, rgba(120, 200, 255, 0.34), transparent 44%),
+    rgba(12, 13, 16, 0.88);
+  color: rgba(235, 248, 255, 0.96);
+  font: inherit;
+  font-size: 1.65rem;
+  font-weight: 860;
+  line-height: 1;
+  box-shadow:
+    0 16px 42px rgba(0, 0, 0, 0.38),
+    0 0 38px rgba(120, 200, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(14px);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.coffeePollBubble:active {
+  cursor: grabbing;
+}
+
+.coffeePollBubble:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 4px rgba(120, 200, 255, 0.2),
+    0 16px 42px rgba(0, 0, 0, 0.38),
+    0 0 42px rgba(120, 200, 255, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
 .coffeePollResultsBody {
   min-height: 0;
   display: grid;
@@ -25679,6 +25805,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeePollResultsVoteGrid {
   display: grid;
   gap: 7px;
+}
+
+.coffeePollResultsTallyList[data-binary="true"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.coffeePollResultsTallyList[data-binary="true"] .coffeePollResultsBar span {
+  background: linear-gradient(90deg, rgba(120, 200, 255, 0.92), rgba(255, 210, 140, 0.82));
 }
 
 .coffeePollResultsTally {
@@ -25756,6 +25891,84 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeePollResultsVote small {
   color: rgba(255, 255, 255, 0.6);
   font-size: 0.7rem;
+}
+
+.coffeePollPlayerVoteBlock {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.coffeePollPlayerVoteHeader {
+  display: grid;
+  gap: 2px;
+}
+
+.coffeePollPlayerVoteHeader strong {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.78rem;
+}
+
+.coffeePollPlayerVoteHeader small {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.68rem;
+}
+
+.coffeePollPlayerOptionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.coffeePollPlayerOptionRow[data-binary="true"] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.coffeePollPlayerOptionRow[data-binary="true"] .coffeePollPlayerOption {
+  min-height: 44px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.coffeePollPlayerOption {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.86);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.coffeePollPlayerOption:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.coffeePollPlayerOption[data-selected="true"] {
+  background: rgba(120, 190, 255, 0.18);
+  border-color: rgba(150, 210, 255, 0.55);
+  color: rgba(235, 246, 255, 0.96);
+}
+
+.coffeePollPlayerOption:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.coffeePollPlayerDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(130, 205, 255, 0.95), rgba(90, 150, 255, 0.85));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  flex: 0 0 auto;
 }
 
 .coffeePollModalBackdrop {
@@ -25874,10 +26087,122 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: rgba(255, 255, 255, 0.34);
 }
 
-.coffeePollModalOptionList {
+.coffeePollModalOptionSection {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  min-width: 0;
+}
+
+.coffeePollModalOptionLabel {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coffeePollModalOptionHint {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.coffeePollOptionChipList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.coffeePollOptionChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+}
+
+.coffeePollOptionChip[data-filled="true"] {
+  border-color: rgba(120, 200, 255, 0.42);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(120, 200, 255, 0.14), transparent 52%),
+    rgba(255, 255, 255, 0.08);
+}
+
+.coffeePollOptionChip input {
+  width: min(9.5rem, 36vw);
+  min-width: 4.5rem;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.94);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.2;
+  padding: 2px 0;
+}
+
+.coffeePollOptionChip input:focus {
+  outline: none;
+}
+
+.coffeePollOptionChip input::placeholder {
+  color: rgba(255, 255, 255, 0.38);
+  font-weight: 620;
+}
+
+.coffeePollOptionChipRemove {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.58);
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.coffeePollOptionChipRemove:hover,
+.coffeePollOptionChipRemove:focus-visible {
+  color: rgba(255, 210, 210, 0.96);
+  outline: none;
+}
+
+.coffeePollOptionAddChip {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px dashed rgba(120, 200, 255, 0.44);
+  background:
+    radial-gradient(circle at 30% 0%, rgba(120, 200, 255, 0.12), transparent 55%),
+    rgba(255, 255, 255, 0.04);
+  color: rgba(220, 240, 255, 0.94);
+  font: inherit;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.coffeePollOptionAddChip:hover,
+.coffeePollOptionAddChip:focus-visible {
+  border-color: rgba(120, 200, 255, 0.66);
+  background:
+    radial-gradient(circle at 30% 0%, rgba(120, 200, 255, 0.18), transparent 55%),
+    rgba(120, 200, 255, 0.1);
+  outline: none;
 }
 
 .coffeePollModalHint {
@@ -26851,9 +27176,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     grid-column: 1 / -1;
   }
 
-  .coffeeOpeningPollOptionList,
-  .coffeePollModalOptionList {
-    grid-template-columns: 1fr;
+  .coffeePollOptionChipList {
+    gap: 6px;
+  }
+
+  .coffeePollOptionChip input {
+    width: min(8rem, 42vw);
   }
 
   .coffeeHeaderActions {

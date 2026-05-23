@@ -59,6 +59,26 @@ function parseIdList(raw: string): string[] {
   }
 }
 
+export function deleteCoffeePollsForConversations(
+  db: DatabaseSync,
+  userId: string,
+  conversationIds: string[]
+): void {
+  if (conversationIds.length === 0) return;
+  const table = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'coffee_polls'")
+    .get() as { name?: string } | undefined;
+  if (!table?.name) return;
+
+  const placeholders = inClausePlaceholders(conversationIds.length);
+  db.prepare(
+    `DELETE FROM coffee_poll_votes WHERE user_id = ? AND conversation_id IN (${placeholders})`
+  ).run(userId, ...conversationIds);
+  db.prepare(
+    `DELETE FROM coffee_polls WHERE user_id = ? AND conversation_id IN (${placeholders})`
+  ).run(userId, ...conversationIds);
+}
+
 function deleteConversationsByIds(
   db: DatabaseSync,
   userId: string,
@@ -68,6 +88,8 @@ function deleteConversationsByIds(
   const placeholders = inClausePlaceholders(conversationIds.length);
   const scopedInClause = `user_id = ? AND id IN (${placeholders})`;
   const messageScopedInClause = `user_id = ? AND conversation_id IN (${placeholders})`;
+
+  deleteCoffeePollsForConversations(db, userId, conversationIds);
 
   db.prepare(
     `UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${placeholders})`
@@ -583,6 +605,7 @@ export function deleteConversation(
 
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
+    deleteCoffeePollsForConversations(db, userId, [conversationId]);
     db.prepare(
       "UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
     ).run(userId, conversationId);

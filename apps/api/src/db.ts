@@ -153,6 +153,9 @@ export function createDatabase(): DatabaseSync {
       coffee_duration_minutes INTEGER,
       coffee_preset_id TEXT,
       coffee_topic TEXT,
+      coffee_meeting_summary TEXT,
+      coffee_meeting_summary_message_count INTEGER,
+      coffee_meeting_summary_updated_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -569,6 +572,24 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasConversationCoffeeTopicColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_topic TEXT;");
+  }
+  const hasConversationCoffeeMeetingSummaryColumn = conversationColumns.some(
+    (column) => column.name === "coffee_meeting_summary"
+  );
+  if (!hasConversationCoffeeMeetingSummaryColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary TEXT;");
+  }
+  const hasConversationCoffeeMeetingSummaryCountColumn = conversationColumns.some(
+    (column) => column.name === "coffee_meeting_summary_message_count"
+  );
+  if (!hasConversationCoffeeMeetingSummaryCountColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_message_count INTEGER;");
+  }
+  const hasConversationCoffeeMeetingSummaryUpdatedAtColumn = conversationColumns.some(
+    (column) => column.name === "coffee_meeting_summary_updated_at"
+  );
+  if (!hasConversationCoffeeMeetingSummaryUpdatedAtColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_updated_at TEXT;");
   }
   const coffeeGroupColumns = db
     .prepare("PRAGMA table_info(coffee_groups)")

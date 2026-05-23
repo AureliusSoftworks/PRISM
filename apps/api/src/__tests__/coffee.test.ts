@@ -1,19 +1,24 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
+import type { LlmProvider } from "../providers.ts";
 import {
   COFFEE_GROUP_MAX_SIZE,
   COFFEE_GROUP_MIN_SIZE,
   autoTagPeerMentionsInCoffeeReply,
+  applyCoffeeOrganicSeedToReply,
+  buildCoffeeEmergencyFallbackReply,
   buildCoffeeTableTuningAppendix,
   buildRouterPrompt,
   buildSpeakerPrompt,
   clampCoffeeSocialValue,
   clampCoffeeTableReplyText,
   coffeeReplyBreaksCharacterImmersion,
+  coffeeMeetingSummarySourceMessages,
   coffeeReplyLooksLikePromptLeak,
   coffeeReplyRepeatsRecentAssistant,
   coffeeReplyRepeatsRecentMotifs,
+  coffeeSpeakerUsesOrganicSeeds,
   collectCoffeePollVotes,
   computePlayerInterruptionConsequences,
   computeNextCoffeeSocialState,
@@ -38,11 +43,14 @@ import {
   parseStoredCoffeeSeatBotIds,
   parseStoredCoffeeSessionSettings,
   parseRouterResponse,
+  persistCoffeeMeetingSummaryIfNewer,
   pickDirectedSpeaker,
   pickFallbackSpeaker,
   repairBotMentionBrackets,
+  shouldRefreshCoffeeMeetingSummary,
   setCoffeeConversationTopic,
   sanitizeCoffeeTableReply,
+  kickoffCoffeeMeetingSummaryRefresh,
   stripCoffeeSpeakerPrefix,
   updateCoffeeGroup,
   updateCoffeePreset,
@@ -53,8 +61,8 @@ import {
   coffeeReplyLengthCaps,
   coffeeRouterTemperature,
   DEFAULT_COFFEE_SESSION_SETTINGS,
-  normalizeCoffeeSessionSettings,
   serializeStoredBotPrompt,
+  normalizeCoffeeSessionSettings,
 } from "@localai/shared";
 
 /**
@@ -223,6 +231,9 @@ function createCoffeeTestDb(): DatabaseSync {
       coffee_duration_minutes INTEGER,
       coffee_preset_id TEXT,
       coffee_topic TEXT,
+      coffee_meeting_summary TEXT,
+      coffee_meeting_summary_message_count INTEGER,
+      coffee_meeting_summary_updated_at TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -474,24 +485,57 @@ describe("createCoffeeConversation", () => {
     assert.equal(activePoll?.id, result.poll?.id);
     assert.equal(activePoll?.question, "Which virtue should guide the table?");
 
-    const collected = await collectCoffeePollVotes(
+    const deliberating = await collectCoffeePollVotes(
       db,
       userId,
       result.conversation.id,
       result.poll?.id ?? "",
-      { preferredProvider: "local" }
+      { preferredProvider: "local", sessionRemainingMs: 120_000 }
     );
 
-    assert.equal(collected.poll.status, "closed");
-    assert.equal(collected.poll.votes.length, 2);
+    assert.equal(deliberating.poll.status, "open");
+    assert.ok(
+      deliberating.poll.votes.every(
+        (vote) =>
+          vote.kind === "pending" && typeof vote.deliberation?.leaningOptionIndex === "number"
+      ),
+      "expected bots to lean without locking votes before the final window"
+    );
     assert.equal(
-      collected.poll.votes.every((vote) => vote.kind === "option" && typeof vote.optionIndex === "number"),
+      deliberating.poll.votes.some((vote) => vote.kind === "option"),
+      false
+    );
+
+    const locking = await collectCoffeePollVotes(
+      db,
+      userId,
+      result.conversation.id,
+      result.poll?.id ?? "",
+      { preferredProvider: "local", sessionRemainingMs: 15_000 }
+    );
+
+    assert.equal(locking.poll.status, "collecting");
+    assert.equal(
+      locking.poll.votes.every(
+        (vote) => vote.kind === "option" && typeof vote.optionIndex === "number"
+      ),
       true
     );
     assert.equal(
-      collected.poll.tallies.reduce((sum, tally) => sum + tally.voteCount, 0),
+      locking.poll.tallies.reduce((sum, tally) => sum + tally.voteCount, 0),
       2
     );
+
+    const closed = await collectCoffeePollVotes(
+      db,
+      userId,
+      result.conversation.id,
+      result.poll?.id ?? "",
+      { preferredProvider: "local", sessionRemainingMs: 0 }
+    );
+
+    assert.equal(closed.poll.status, "closed");
+    assert.equal(closed.poll.votes.length, 2);
 
     const followUpPoll = createCoffeePoll(db, userId, result.conversation.id, {
       question: "What should we discuss next?",
@@ -499,6 +543,62 @@ describe("createCoffeeConversation", () => {
     });
     assert.equal(followUpPoll.status, "open");
     assert.equal(getCoffeeSessionPoll(db, userId, result.conversation.id)?.id, followUpPoll.id);
+  });
+
+  it("ignores prompt-leaked assistant lines when computing poll votes", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const result = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialPoll: {
+        question: "Who is cooler, Mermaid Man or Barnacle Boy?",
+        options: ["Mermaid Man", "Barnacle Boy"],
+      },
+    });
+    const now = "2026-05-23T00:00:00.000Z";
+    const insert = db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, 'local', NULL, ?, NULL, ?)`
+    );
+    insert.run(
+      "valid-mermaid-1",
+      result.conversation.id,
+      userId,
+      "Mermaid Man has the cooler entrance. Mermaid Man owns the theme-song moment.",
+      ALICE.id,
+      now
+    );
+    insert.run(
+      "valid-mermaid-2",
+      result.conversation.id,
+      userId,
+      "Mermaid Man still wins for me: the belt, the pose, the whole heroic sparkle.",
+      BORIS.id,
+      now
+    );
+    insert.run(
+      "leaked-barnacle",
+      result.conversation.id,
+      userId,
+      "We need to reply as Patrick Star. The topic is still Mermaid Man versus Barnacle Boy. Patrick is leaning Barnacle Boy. Barnacle Boy, Barnacle Boy, Barnacle Boy.",
+      BORIS.id,
+      now
+    );
+
+    const collected = await collectCoffeePollVotes(
+      db,
+      userId,
+      result.conversation.id,
+      result.poll?.id ?? "",
+      { preferredProvider: "local", sessionRemainingMs: 15_000 }
+    );
+
+    assert.equal(collected.poll.tallies[0]?.option, "Mermaid Man");
+    assert.equal(collected.poll.tallies[0]?.voteCount, 2);
   });
 
   it("renames the session title to the chosen coffee topic", async () => {
@@ -834,6 +934,7 @@ describe("buildRouterPrompt", () => {
     assert.match(system!.content, /id="bot-cara"/);
     assert.match(system!.content, /name="Alice"/);
     assert.match(system!.content, /Curious philosopher/);
+    assert.match(system!.content, /"directive": "<one short next-move cue>"/);
   });
 
   it("threads the session topic into the router system prompt when provided", () => {
@@ -858,6 +959,20 @@ describe("buildRouterPrompt", () => {
     });
     assert.match(messages[0]!.content, /Opening poll result/);
     assert.match(messages[0]!.content, /Courage/);
+  });
+
+  it("threads meeting-summary context into the router prompt", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Keep it moving.",
+      lastSpeakerBotId: ALICE.id,
+      meetingSummary:
+        "They disagree on who is cooler, but both care about heroic style over strict logic.",
+    });
+    assert.match(messages[0]!.content, /Meeting summary so far/);
+    assert.match(messages[0]!.content, /disagree on who is cooler/);
+    assert.match(messages[0]!.content, /prioritize the latest table line/i);
   });
 
   it("notes the previous speaker and asks for variety when one exists", () => {
@@ -1233,6 +1348,37 @@ describe("buildSpeakerPrompt", () => {
     assert.match(joined, /react to the result/);
   });
 
+  it("threads meeting-summary context into the speaker prompt", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Your turn.",
+      socialByBotId: {},
+      meetingSummary:
+        "Patrick keeps calling Barnacle Boy underrated while SpongeBob keeps defending Mermaid Man's flair.",
+    });
+    const joined = messages.map((message) => message.content).join("\n");
+    assert.match(joined, /Meeting summary so far/);
+    assert.match(joined, /Barnacle Boy underrated/);
+    assert.match(joined, /React to the latest line first/i);
+  });
+
+  it("threads a silent moderator cue into the speaker prompt when provided", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Keep this moving.",
+      socialByBotId: {},
+      directorCue: "Challenge the strongest claim with one concrete example.",
+    });
+    const joined = messages.map((message) => message.content).join("\n");
+    assert.match(joined, /Silent moderator cue for this turn/);
+    assert.match(joined, /Challenge the strongest claim with one concrete example/);
+    assert.match(joined, /Do not mention any moderator/i);
+  });
+
   it("adds explicit kickoff guidance for a session-opening autonomous turn", () => {
     const messages = buildSpeakerPrompt({
       speaker: ALICE,
@@ -1549,7 +1695,11 @@ describe("parseRouterResponse", () => {
       `{"botId": "bot-boris", "reason": "talking about food"}`,
       allowed
     );
-    assert.deepEqual(result, { botId: "bot-boris", reason: "talking about food" });
+    assert.deepEqual(result, {
+      botId: "bot-boris",
+      reason: "talking about food",
+      directive: null,
+    });
   });
 
   it("recovers JSON wrapped in code-fence-style chatter", () => {
@@ -1559,6 +1709,7 @@ describe("parseRouterResponse", () => {
     );
     assert.equal(result?.botId, "bot-cara");
     assert.equal(result?.reason, "engineering question");
+    assert.equal(result?.directive, null);
   });
 
   it("rejects bot ids that are not in the allowed group", () => {
@@ -1592,7 +1743,21 @@ describe("parseRouterResponse", () => {
     assert.deepEqual(result, {
       botId: "bot-boris",
       reason: "Boris was addressed directly",
+      directive: null,
     });
+  });
+
+  it("accepts router directives and normalizes them", () => {
+    const result = parseRouterResponse(
+      `{"botId":"bot-alice","reason":"fresh angle","directive":"  Challenge the claim with one concrete counterexample.  "}`,
+      allowed
+    );
+    assert.equal(result?.botId, "bot-alice");
+    assert.equal(result?.reason, "fresh angle");
+    assert.equal(
+      result?.directive,
+      "Challenge the claim with one concrete counterexample."
+    );
   });
 });
 
@@ -1652,6 +1817,18 @@ describe("coffee prompt leak cleanup", () => {
       ),
       true
     );
+    assert.equal(
+      coffeeReplyLooksLikePromptLeak(
+        "We need to reply as SpongeBob, following all the constraints. The user wants me to say my next short table line now."
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplyLooksLikePromptLeak(
+        "The user requests a short line from Patrick Star, presumably about the poll."
+      ),
+      true
+    );
   });
 
   it("does not flag normal visible banter", () => {
@@ -1684,6 +1861,13 @@ describe("coffee prompt leak cleanup", () => {
       sanitizeCoffeeTableReply(
         "The user wants a single clause of up to 72 characters, no speaker label.",
         "Plankton"
+      ),
+      ""
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "We need to reply as SpongeBob, following all the constraints. The user wants me to say my next short table line now.",
+        "SpongeBob"
       ),
       ""
     );
@@ -1720,6 +1904,20 @@ describe("coffee prompt leak cleanup", () => {
       sanitizeCoffeeTableReply("*sips tea* We continue.", "Mr. Krabs"),
       "*sips tea* We continue."
     );
+  });
+
+  it("uses poll-aware emergency fallback lines during active polls", () => {
+    const line = buildCoffeeEmergencyFallbackReply({
+      tableFocus: "Continue the table.",
+      speaker: { id: "bot-sponge", name: "SpongeBob" },
+      conversationId: "poll-conv",
+      historyLength: 4,
+      maxChars: 110,
+      activePoll: { options: ["Mermaid Man", "Barnacle Boy"] },
+    });
+
+    assert.match(line, /Mermaid Man|Barnacle Boy/);
+    assert.doesNotMatch(line, /Let's ground it|Hold that thought|I hear the point/);
   });
 });
 
@@ -1771,6 +1969,170 @@ describe("coffee character immersion guard", () => {
         "Alan Watts"
       ),
       ""
+    );
+  });
+});
+
+describe("coffee meeting summary helpers", () => {
+  it("filters prompt-leaked assistant lines out of summary source messages", () => {
+    const source = coffeeMeetingSummarySourceMessages([
+      { id: "u1", role: "user", content: "Who is cooler?", createdAt: "2026-01-01T00:00:00.000Z" },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "Mermaid Man still has the better hero vibe.",
+        botName: "SpongeBob",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        id: "a2",
+        role: "assistant",
+        content:
+          "We need to reply as SpongeBob, following all constraints. The user wants my next short table line now.",
+        botName: "SpongeBob",
+        createdAt: "2026-01-01T00:00:02.000Z",
+      },
+    ]);
+    assert.equal(source.length, 2);
+    assert.equal(source.some((message) => message.id === "a2"), false);
+  });
+
+  it("refreshes summaries only after enough new assistant turns", () => {
+    assert.equal(
+      shouldRefreshCoffeeMeetingSummary({
+        assistantMessageCount: 3,
+        lastSummarizedAssistantCount: null,
+      }),
+      false
+    );
+    assert.equal(
+      shouldRefreshCoffeeMeetingSummary({
+        assistantMessageCount: 4,
+        lastSummarizedAssistantCount: null,
+      }),
+      true
+    );
+    assert.equal(
+      shouldRefreshCoffeeMeetingSummary({
+        assistantMessageCount: 6,
+        lastSummarizedAssistantCount: 4,
+      }),
+      false
+    );
+    assert.equal(
+      shouldRefreshCoffeeMeetingSummary({
+        assistantMessageCount: 8,
+        lastSummarizedAssistantCount: 4,
+      }),
+      true
+    );
+  });
+
+  it("keeps stale summary writes from overwriting newer summary state", () => {
+    const db = createCoffeeTestDb();
+    const userId = "summary-user";
+    db.prepare(
+      `INSERT INTO conversations
+         (id, user_id, title, conversation_mode, bot_id, bot_group_ids, coffee_settings, coffee_group_id,
+          coffee_duration_minutes, coffee_preset_id, coffee_topic, coffee_meeting_summary,
+          coffee_meeting_summary_message_count, coffee_meeting_summary_updated_at, incognito, created_at, updated_at)
+       VALUES (?, ?, 'Coffee Session', 'coffee', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, ?, ?)`
+    ).run("conv-summary", userId, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+
+    const firstWrite = persistCoffeeMeetingSummaryIfNewer({
+      db,
+      userId,
+      conversationId: "conv-summary",
+      summary: "First pass summary.",
+      assistantMessageCount: 8,
+      nowIso: "2026-01-01T00:00:08.000Z",
+    });
+    assert.equal(firstWrite, true);
+
+    const staleWrite = persistCoffeeMeetingSummaryIfNewer({
+      db,
+      userId,
+      conversationId: "conv-summary",
+      summary: "Stale summary should not win.",
+      assistantMessageCount: 6,
+      nowIso: "2026-01-01T00:00:09.000Z",
+    });
+    assert.equal(staleWrite, false);
+
+    const row = db
+      .prepare(
+        "SELECT coffee_meeting_summary, coffee_meeting_summary_message_count FROM conversations WHERE id = ?"
+      )
+      .get("conv-summary") as {
+      coffee_meeting_summary: string | null;
+      coffee_meeting_summary_message_count: number | null;
+    };
+    assert.equal(row.coffee_meeting_summary, "First pass summary.");
+    assert.equal(row.coffee_meeting_summary_message_count, 8);
+  });
+
+  it("swallows summarizer provider failures", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "summary-user";
+    const now = "2026-01-01T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO conversations
+         (id, user_id, title, conversation_mode, bot_id, bot_group_ids, coffee_settings, coffee_group_id,
+          coffee_duration_minutes, coffee_preset_id, coffee_topic, coffee_meeting_summary,
+          coffee_meeting_summary_message_count, coffee_meeting_summary_updated_at, incognito, created_at, updated_at)
+       VALUES (?, ?, 'Coffee Session', 'coffee', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, ?, ?)`
+    ).run("conv-summary-fail", userId, now, now);
+
+    const history = [
+      {
+        id: "a1",
+        role: "assistant" as const,
+        content: "Mermaid Man has stronger flair.",
+        botName: "SpongeBob",
+        createdAt: now,
+      },
+      {
+        id: "a2",
+        role: "assistant" as const,
+        content: "Barnacle Boy still has grit.",
+        botName: "Patrick Star",
+        createdAt: now,
+      },
+      {
+        id: "a3",
+        role: "assistant" as const,
+        content: "Mermaid Man feels more iconic to me.",
+        botName: "SpongeBob",
+        createdAt: now,
+      },
+      {
+        id: "a4",
+        role: "assistant" as const,
+        content: "Barnacle Boy gets my sympathy vote.",
+        botName: "Patrick Star",
+        createdAt: now,
+      },
+    ];
+
+    await assert.doesNotReject(() =>
+      kickoffCoffeeMeetingSummaryRefresh({
+        db,
+        userId,
+        conversationId: "conv-summary-fail",
+        group: [
+          { ...ALICE, name: "SpongeBob" },
+          { ...BORIS, name: "Patrick Star" },
+        ],
+        history,
+        previousSummary: null,
+        previousSummaryAssistantCount: null,
+        activePollContext: null,
+        summaryProvider: {
+          generateResponse: async () => {
+            throw new Error("provider offline");
+          },
+        } as unknown as LlmProvider,
+      })
     );
   });
 });
@@ -2217,5 +2579,123 @@ describe("autoTagPeerMentionsInCoffeeReply", () => {
       [ALICE, BORIS, CARA]
     );
     assert.equal(out, "Just talking to myself here.");
+  });
+
+  it("tags @mentions that use learned preferred labels", () => {
+    const out = autoTagPeerMentionsInCoffeeReply(
+      "@Dr. Freud, what do you think?",
+      ALICE,
+      [ALICE, BORIS, CARA],
+      new Map([[BORIS.id, "Dr. Freud"]])
+    );
+    assert.equal(out, "[Dr. Freud](prism-bot://bot-boris), what do you think?");
+  });
+});
+
+function coffeeTestPromptWithProfile(
+  overrides: Partial<{
+    communicationStyle: "neutral" | "warm" | "concise" | "playful" | "formal";
+    birthEra: "ad" | "bc";
+    deceased: boolean;
+    basedOnRealPersonOrCharacter: boolean;
+  }>
+): string {
+  const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+  if (overrides.communicationStyle) {
+    fields.core.communicationStyle = overrides.communicationStyle;
+  }
+  if (overrides.birthEra) fields.facts.birthEra = overrides.birthEra;
+  if (typeof overrides.deceased === "boolean") fields.facts.deceased = overrides.deceased;
+  if (typeof overrides.basedOnRealPersonOrCharacter === "boolean") {
+    fields.facts.basedOnRealPersonOrCharacter = overrides.basedOnRealPersonOrCharacter;
+  }
+  return serializeStoredBotPrompt(fields);
+}
+
+describe("coffee organic seed persona gating", () => {
+  it("skips transitional beats for formal historical personas", () => {
+    const speaker = {
+      id: "marcus",
+      name: "Marcus Aurelius",
+      systemPrompt: coffeeTestPromptWithProfile({
+        communicationStyle: "formal",
+        birthEra: "bc",
+        deceased: true,
+        basedOnRealPersonOrCharacter: true,
+      }),
+    };
+    assert.equal(coffeeSpeakerUsesOrganicSeeds(speaker), false);
+    const out = applyCoffeeOrganicSeedToReply({
+      replyText: "Duty binds us all.",
+      conversationId: "conv-1",
+      speaker,
+      historyLength: 3,
+      turnKind: "autonomous",
+      avoidTexts: [],
+    });
+    assert.equal(out, "Duty binds us all.");
+  });
+
+  it("allows playful beats for modern playful personas", () => {
+    const speaker = {
+      id: "sponge",
+      name: "SpongeBob",
+      systemPrompt: coffeeTestPromptWithProfile({ communicationStyle: "playful" }),
+    };
+    assert.equal(coffeeSpeakerUsesOrganicSeeds(speaker), true);
+    let seeded: string | null = null;
+    for (let index = 0; index < 200; index += 1) {
+      const out = applyCoffeeOrganicSeedToReply({
+        replyText: "Jellyfishing sounds fun.",
+        conversationId: `conv-playful-${index}`,
+        speaker,
+        historyLength: 0,
+        turnKind: "autonomous",
+        avoidTexts: [],
+      });
+      if (out !== "Jellyfishing sounds fun.") {
+        seeded = out;
+        break;
+      }
+    }
+    assert.ok(seeded, "expected at least one deterministic playful seed to apply");
+    assert.match(
+      seeded!,
+      /Jellyfishing sounds fun\.|I know, right\?|kind of wild|that tracks|over my head|this is boring|Didn't see that coming/
+    );
+  });
+
+  it("threads persona-aware transitional guidance into the speaker prompt", () => {
+    const formalSpeaker: CoffeeBotProfile = {
+      ...ALICE,
+      systemPrompt: coffeeTestPromptWithProfile({
+        communicationStyle: "formal",
+        birthEra: "bc",
+        deceased: true,
+        basedOnRealPersonOrCharacter: true,
+      }),
+    };
+    const formalMessages = buildSpeakerPrompt({
+      speaker: formalSpeaker,
+      group: [formalSpeaker, BORIS],
+      history: [],
+      userMessage: "What is virtue?",
+      socialByBotId: {},
+    });
+    assert.match(formalMessages[1]!.content, /Do not slip into modern internet slang/);
+    assert.doesNotMatch(formalMessages[1]!.content, /kind of wild/);
+
+    const playfulSpeaker: CoffeeBotProfile = {
+      ...BORIS,
+      systemPrompt: coffeeTestPromptWithProfile({ communicationStyle: "playful" }),
+    };
+    const playfulMessages = buildSpeakerPrompt({
+      speaker: playfulSpeaker,
+      group: [playfulSpeaker, ALICE],
+      history: [],
+      userMessage: "Who wants snacks?",
+      socialByBotId: {},
+    });
+    assert.match(playfulMessages[1]!.content, /playful beat/);
   });
 });

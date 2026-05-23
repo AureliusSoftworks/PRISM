@@ -50,6 +50,29 @@ export function formatBotMentionMarkdown(bot: { id: string; name: string }): str
 }
 
 /**
+ * Prefer the explicit chip label when it differs intentionally from the
+ * canonical roster name (for example learned address preferences like
+ * "Dr. Freud"), but still repair obvious truncations like `Mr` -> `Mr. Krabs`.
+ */
+export function normalizePeerMentionChipLabel(
+  label: string,
+  botCanonicalName: string,
+  preferredLabel?: string | null
+): string {
+  const canonical = botCanonicalName.trim();
+  const raw = label.trim();
+  const preferred = typeof preferredLabel === "string" ? preferredLabel.trim() : "";
+  if (preferred.length > 0) return preferred;
+  if (canonical.length === 0) return raw;
+  if (raw.length === 0) return canonical;
+  const rawLower = raw.toLocaleLowerCase();
+  const canonicalLower = canonical.toLocaleLowerCase();
+  if (rawLower === canonicalLower) return canonical;
+  if (canonicalLower.startsWith(rawLower)) return canonical;
+  return raw;
+}
+
+/**
  * Source-text segment used by both the static and reveal-aware bot-mention
  * renderers. `srcStart`/`srcEnd` are offsets into the original markdown
  * string. Mention segments span the entire `[name](prism-bot://id)` token;
@@ -207,7 +230,7 @@ function looksLikeStageDirectionAction(inner: string): boolean {
   if (!normalized) return false;
   // Keep this conservative: only treat common physical/social action verbs
   // as stage directions when the token is embedded in prose.
-  return /^(?:glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snorts?|snorting|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|mutters?|muttering|scoffs?|scoffing)\b/u.test(
+  return /^(?:glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snorts?|snorting|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|mutters?|muttering|scoffs?|scoffing|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|drums?|drumming|twirls?|twirling|pats?|patting|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling)\b/u.test(
     normalized
   );
 }
@@ -220,13 +243,32 @@ function looksLikeInlineActionAtSentenceBoundary(before: string, after: string):
   return beforeEndsSentence && afterStartsSentenceish;
 }
 
+const PARENTHETICAL_STAGE_START_RE =
+  /^(?:the sound of|sound of|pauses?|pausing|takes?|taking|sips?|sipping|smiles?|smiling|grins?|grinning|frowns?|frowning|nods?|nodding|shrugs?|shrugging|sighs?|sighing|laughs?|laughing|chuckles?|chuckling|whispers?|whispering|murmurs?|murmuring|breathes?|breathing|inhales?|inhaling|exhales?|exhaling|glances?|glancing|looks?|looking|stares?|staring|glares?|glaring|leans?|leaning|tilts?|tilting|turns?|turning|gestures?|gesturing|points?|pointing|waves?|waving|with\s+|as\s+|while\s+|eyes?\s+|voice\s+|tone\s+)/u;
+
+function looksLikeParentheticalStageDirection(
+  inner: string,
+  before: string,
+  after: string
+): boolean {
+  const normalized = inner.trim().toLowerCase();
+  if (!normalized || normalized.length > 220) return false;
+  if (/\?|https?:\/\//u.test(normalized)) return false;
+  if (looksLikeStageDirectionAction(normalized)) return true;
+  if (PARENTHETICAL_STAGE_START_RE.test(normalized)) return true;
+  // Treat standalone-ish parentheticals as stage cues when they sit between
+  // sentence boundaries. This catches ambience-style notes like
+  // "(The sound of rain in the background.)" that some models emit.
+  return looksLikeInlineActionAtSentenceBoundary(before, after);
+}
+
 const LEADING_UNMARKED_STAGE_START_RE = new RegExp(
   [
     String.raw`^(?:(?:[\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+){0,3})(?:,\s+|\s+))?`,
     String.raw`(?:`,
     String.raw`(?:his|her|their|its)\s+(?:eyes?|gaze|breath(?:ing)?|jaw|mouth|shoulders?)\b`,
     String.raw`|eyes?\s+(?:narrow|narrowing|widen|widening|shift|shifting|glance|glancing|gaze|gazing|roll|rolling)\b`,
-    String.raw`|(?:leans?|leaning|glances?|glancing|gazes?|gazing|glares?|glaring|stares?|staring|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|winces?|wincing|grimaces?|grimacing|chuckles?|chuckling|snorts?|snorting|blinks?|blinking|turns?|turning|tilts?|tilting|pauses?|pausing|sips?|sipping|picks?|picking)\b(?!\s+(?:like|are|is)\b)`,
+    String.raw`|(?:leans?|leaning|glances?|glancing|gazes?|gazing|glares?|glaring|stares?|staring|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|winces?|wincing|grimaces?|grimacing|chuckles?|chuckling|snorts?|snorting|blinks?|blinking|turns?|turning|tilts?|tilting|pauses?|pausing|sips?|sipping|picks?|picking|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|drums?|drumming|twirls?|twirling|pats?|patting|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling)\b(?!\s+(?:like|are|is)\b)`,
     String.raw`)`,
   ].join(""),
   "iu"
@@ -239,7 +281,7 @@ const UNMARKED_STAGE_ADDRESS_PREFIX_RE = new RegExp(
 );
 
 const LEADING_UNMARKED_STAGE_SPOKEN_OPENER_RE =
-  /\s+(?=(?:["“'‘])?(?:I|I'm|I've|I'd|You|You're|You've|We|We're|That's|The|This|These|Those|But|Still|Anyway|Honestly|Listen|Look,|Well|Ah|Oh|No offense|No,|Yes,|Okay|Sure|Mine|Yours|Consider|Imagine|Suppose|Notice|Think|Let's|Let us|Picture)\b)/gu;
+  /\s+(?=(?:["“'‘])?(?:I|I'm|I've|I'd|You|You're|You've|We|We're|That's|The|This|These|Those|But|Still|Anyway|Honestly|Listen|Look,|Well|Ah|Oh|No offense|No,|Yes,|Okay|Sure|Mine|Yours|Consider|Imagine|Suppose|Notice|Think|Let's|Let us|Picture|Now|Yeah|Yup|Hey|Huh|Hmm|Actually|Me|True|False|Maybe|Perhaps|My|So|And|Because|If|When|Where|Why|How|What)\b)/gu;
 
 function normalizeUnmarkedStageAction(raw: string): string {
   return raw.replace(/[,.!?;:\s]+$/u, "").trim();
@@ -338,15 +380,18 @@ function parseStageDirectionsDetailed(text: string): {
   cues: StageDirectionCue[];
 } {
   if (!text) return { mainText: "", actions: [], cues: [] };
-  // 1+ leading asterisks, non-asterisk content (lazy), 1+ trailing asterisks.
-  const re = /\*+([^*\n]+?)\*+/g;
+  // Stage-direction tokens:
+  // - `*action*` / `**action**` (canonical roleplay notation)
+  // - `(action)` (fallback style some models emit)
+  const re = /(\*+([^*\n]+?)\*+)|(\(([^()\n]+?)\))/g;
   const cues: StageDirectionCue[] = [];
   let spokenRaw = "";
   let cursor = 0;
   for (const match of text.matchAll(re)) {
     const start = match.index ?? 0;
     const token = match[0] ?? "";
-    const trimmed = String(match[1] ?? "").trim();
+    const isAsteriskToken = typeof match[2] === "string";
+    const trimmed = String(isAsteriskToken ? match[2] : match[4] ?? "").trim();
     if (start > cursor) {
       spokenRaw += text.slice(cursor, start);
     }
@@ -355,19 +400,34 @@ function parseStageDirectionsDetailed(text: string): {
     const hasSpokenBefore = /\p{L}|\p{N}/u.test(before);
     const hasSpokenAfter = /\p{L}|\p{N}/u.test(after);
 
-    if (
-      hasSpokenBefore &&
-      hasSpokenAfter &&
-      !looksLikeStageDirectionAction(trimmed) &&
-      !looksLikeInlineActionAtSentenceBoundary(before, after)
-    ) {
-      // Inline emphasis in ordinary prose.
-      spokenRaw += trimmed;
-    } else if (trimmed.length > 0) {
+    if (trimmed.length === 0) {
+      cursor = start + token.length;
+      continue;
+    }
+
+    if (isAsteriskToken) {
+      if (
+        hasSpokenBefore &&
+        hasSpokenAfter &&
+        !looksLikeStageDirectionAction(trimmed) &&
+        !looksLikeInlineActionAtSentenceBoundary(before, after)
+      ) {
+        // Inline emphasis in ordinary prose.
+        spokenRaw += trimmed;
+      } else {
+        const revealAtDisplayLength = getBotMentionDisplayLength(
+          normalizeStageDirectionMainText(spokenRaw)
+        );
+        cues.push({ action: trimmed, revealAtDisplayLength });
+      }
+    } else if (looksLikeParentheticalStageDirection(trimmed, before, after)) {
       const revealAtDisplayLength = getBotMentionDisplayLength(
         normalizeStageDirectionMainText(spokenRaw)
       );
       cues.push({ action: trimmed, revealAtDisplayLength });
+    } else {
+      // Non-stage parentheticals are ordinary prose.
+      spokenRaw += token;
     }
     cursor = start + token.length;
   }

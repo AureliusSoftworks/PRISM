@@ -210,6 +210,11 @@ export type CoffeePollStatus = "open" | "collecting" | "closed" | "cancelled";
 
 export type CoffeePollVoteKind = "option" | "abstain" | "pending" | "error";
 
+export type CoffeePollVoterKind = "bot" | "player";
+
+/** Sentinel `botId` stored for the human player's poll vote row. */
+export const COFFEE_POLL_PLAYER_VOTER_ID = "__player__";
+
 export interface CoffeePollDeliberation {
   stage:
     | "idle"
@@ -229,6 +234,7 @@ export interface CoffeePollDeliberation {
 
 export interface CoffeePollVote {
   botId: string;
+  voterKind: CoffeePollVoterKind;
   kind: CoffeePollVoteKind;
   optionIndex?: number | null;
   explanation?: string | null;
@@ -263,6 +269,12 @@ export type CoffeeSessionDurationMinutes = 1 | 5 | 10;
 
 export const COFFEE_SESSION_DURATION_MINUTES = [1, 5, 10] as const;
 export const DEFAULT_COFFEE_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
+/** Bots may hold their Coffee poll vote until this close to session end. */
+export const COFFEE_POLL_FINALIZE_REMAINING_MS = 30_000;
+/** Minimum answer choices when the player starts a Coffee poll. */
+export const COFFEE_POLL_OPTION_COUNT_MIN = 2;
+/** Maximum answer choices when the player starts a Coffee poll. */
+export const COFFEE_POLL_OPTION_COUNT_MAX = 4;
 
 export type CoffeePresetMode = "manual" | "auto";
 
@@ -756,9 +768,22 @@ export interface CoffeePollCreateResponse {
 export interface CoffeePollCollectVotesRequest {
   preferredProvider?: "local" | "openai";
   sessionRemainingMs?: number | null;
+  /** Optional player vote to record before bot deliberation is advanced. */
+  optionIndex?: number;
 }
 
 /** Response body for `POST /api/coffee/sessions/:id/polls/:pollId/collect`. */
 export interface CoffeePollCollectVotesResponse {
+  poll: CoffeePoll;
+}
+
+/** Request body for `POST /api/coffee/sessions/:id/polls/:pollId/vote`. */
+export interface CoffeePollPlayerVoteRequest {
+  optionIndex: number;
+  sessionRemainingMs?: number | null;
+}
+
+/** Response body for `POST /api/coffee/sessions/:id/polls/:pollId/vote`. */
+export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }

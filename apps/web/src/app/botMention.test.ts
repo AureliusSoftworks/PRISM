@@ -9,6 +9,7 @@ import {
   filterBotsForMentionQuery,
   findAtMentionTokenPlain,
   formatBotMentionMarkdown,
+  normalizePeerMentionChipLabel,
   getBotMentionDisplayLength,
   mentionTabPlainTextAction,
   parsePrismBotMentionHref,
@@ -46,6 +47,31 @@ describe("formatBotMentionMarkdown", () => {
       formatBotMentionMarkdown({ id: "x", name: "Pat" }),
       "[Pat](prism-bot://x)"
     );
+  });
+});
+
+describe("normalizePeerMentionChipLabel", () => {
+  it("uses the canonical roster name on chips", () => {
+    assert.equal(normalizePeerMentionChipLabel("Alan Watts", "Alan Watts"), "Alan Watts");
+    assert.equal(normalizePeerMentionChipLabel("Mr", "Mr. Krabs"), "Mr. Krabs");
+  });
+
+  it("keeps intentional non-canonical labels", () => {
+    assert.equal(
+      normalizePeerMentionChipLabel("Dr. Freud", "Sigmund Freud"),
+      "Dr. Freud"
+    );
+  });
+
+  it("honors an explicit preferred label when provided", () => {
+    assert.equal(
+      normalizePeerMentionChipLabel("Sigmund Freud", "Sigmund Freud", "Dr. Freud"),
+      "Dr. Freud"
+    );
+  });
+
+  it("falls back to the label when canonical name is missing", () => {
+    assert.equal(normalizePeerMentionChipLabel("Watts", ""), "Watts");
   });
 });
 
@@ -350,6 +376,30 @@ describe("extractStageDirections", () => {
     assert.deepEqual(out.actions, []);
   });
 
+  it("extracts parenthetical stage directions into action badges", () => {
+    const out = extractStageDirections(
+      "(pausing to sip from an adjacent glass) I hear you."
+    );
+    assert.equal(out.mainText, "I hear you.");
+    assert.deepEqual(out.actions, ["pausing to sip from an adjacent glass"]);
+  });
+
+  it("extracts ambience parentheticals and keeps spoken table text", () => {
+    const out = extractStageDirections(
+      "I hear you. (The sound of gentle rain in the background.) We can keep going."
+    );
+    assert.equal(out.mainText, "I hear you. We can keep going.");
+    assert.deepEqual(out.actions, ["The sound of gentle rain in the background."]);
+  });
+
+  it("preserves normal explanatory parentheticals in prose", () => {
+    const out = extractStageDirections(
+      "Policy (for example, taxes and wages) matters to working families."
+    );
+    assert.equal(out.mainText, "Policy (for example, taxes and wages) matters to working families.");
+    assert.deepEqual(out.actions, []);
+  });
+
   it("extracts a single stage direction and returns the remainder as mainText", () => {
     const out = extractStageDirections("*pours coffee* Cheers.");
     assert.equal(out.mainText, "Cheers.");
@@ -482,6 +532,17 @@ describe("extractStageDirections", () => {
     const out = extractStageDirections("Looks like rain today.");
     assert.equal(out.mainText, "Looks like rain today.");
     assert.deepEqual(out.actions, []);
+  });
+
+  it("lifts unmarked strokes actions after a bot mention", () => {
+    const out = extractStageDirections(
+      "[SpongeBob](prism-bot://bot-sponge), strokes chin thoughtfully Now that's a true statement indeed."
+    );
+    assert.equal(
+      out.mainText,
+      "[SpongeBob](prism-bot://bot-sponge), Now that's a true statement indeed."
+    );
+    assert.deepEqual(out.actions, ["strokes chin thoughtfully"]);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   deleteMemoriesLinkedToMessages,
   demoteMemoryToShortTerm,
   deleteOrphanedBotMemories,
+  extractBotPreferredAddressMemoryCandidates,
   extractBotJudgmentMemoryCandidates,
   extractCoffeeObserverMemoryCandidates,
   findMemoryByCue,
@@ -319,6 +320,53 @@ describe("extractCoffeeObserverMemoryCandidates", () => {
       seatedBotNames: ["Alice", "Boris"],
     });
 
+    assert.deepEqual(candidates, []);
+  });
+});
+
+describe("extractBotPreferredAddressMemoryCandidates", () => {
+  it("captures direct call-me cues as bot_relation memory", () => {
+    const candidates = extractBotPreferredAddressMemoryCandidates({
+      assistantMessage: "Please refer to me as Dr. Freud.",
+      targetBotName: "Sigmund Freud",
+    });
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      {
+        text: "Sigmund Freud prefers to be called Dr. Freud.",
+        confidence: 0.71,
+      },
+    ]);
+    assert.equal(candidates[0]?.category, "bot_relation");
+  });
+
+  it("captures softer preference phrasing", () => {
+    const candidates = extractBotPreferredAddressMemoryCandidates({
+      assistantMessage: "I'd prefer you call me Patrick.",
+      targetBotName: "Patrick Star",
+    });
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      {
+        text: "Patrick Star prefers to be called Patrick.",
+        confidence: 0.71,
+      },
+    ]);
+  });
+
+  it("ignores unsafe preferred labels", () => {
+    const candidates = extractBotPreferredAddressMemoryCandidates({
+      assistantMessage: "Please call me psycho.",
+      targetBotName: "Sigmund Freud",
+    });
+    assert.deepEqual(candidates, []);
+  });
+
+  it("ignores no-op canonical address", () => {
+    const candidates = extractBotPreferredAddressMemoryCandidates({
+      assistantMessage: "Please call me Sigmund Freud.",
+      targetBotName: "Sigmund Freud",
+    });
     assert.deepEqual(candidates, []);
   });
 });
