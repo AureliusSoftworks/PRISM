@@ -16,12 +16,15 @@ import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
 import { pollImageJobForUser, releaseImageSlot, tryAcquireImageSlot } from "./image-job-slot.ts";
 import {
+  collectCoffeePollVotes,
+  createCoffeePoll,
   createCoffeePreset,
-  createCoffeeGroup,
+  createCoffeeGroupWithGeneratedName,
   createCoffeeConversation,
   createCoffeeConversationFromGroup,
   deleteCoffeeGroup,
   deleteCoffeePreset,
+  getCoffeeSessionPoll,
   listCoffeeGroups,
   listCoffeePresets,
   parseStoredCoffeeSessionSettings,
@@ -41,6 +44,7 @@ import {
   normalizeMemoryDurability,
   restoreMemory
 } from "./memory.ts";
+import { parseMemoryListQueryOptions } from "./memory-list-query.ts";
 import { inferAndStoreBotMemories } from "./memory-inference.ts";
 import {
   createDevSeedConversations,
@@ -80,7 +84,7 @@ import type { GenerateOptions } from "./providers.ts";
 import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import {
-  composeAugmentedImagePrompt,
+  composeVerbatimFirstImagePrompt,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   encodeComfyUiModelId,
   encodeComfyUiRemoteWorkflowModelId,
@@ -1437,8 +1441,9 @@ function buildRoutes(): RouteDefinition[] {
       const incognito = mode === "chat" && body.incognito === true;
       // Per-request provider override so a fresh sidebar switch takes effect
       // immediately, even if the settings PATCH is still in flight.
+      const explicitModelOverride = readOptionalString(body.modelOverride);
       const requestedProvider =
-        (mode === "sandbox" || incognito) &&
+        (mode === "sandbox" || incognito || explicitModelOverride) &&
         (body.preferredProvider === "openai" || body.preferredProvider === "local")
           ? body.preferredProvider
           : undefined;
@@ -1446,18 +1451,14 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
       const effectiveBotId = botId;
-      const explicitModelOverride =
-        mode === "sandbox" ? readOptionalString(body.modelOverride) : null;
       if (
         mode === "chat" &&
         !incognito &&
-        (
-          body.preferredProvider !== undefined ||
-          body.modelOverride !== undefined
-        )
+        body.preferredProvider !== undefined &&
+        !explicitModelOverride
       ) {
         console.info(
-          `[chat-contract] Ignored advanced Chat controls for user ${userId} (provider/model).`
+          `[chat-contract] Ignored advanced Chat provider control for user ${userId}.`
         );
       }
       const ephemeralMessages = Array.isArray(body.ephemeralMessages)
@@ -1472,7 +1473,7 @@ function buildRoutes(): RouteDefinition[] {
       if (effectiveBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, model, local_model, online_model, online_enabled, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, model, local_model, online_model, online_enabled, flirt_enabled, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(effectiveBotId, userId) as
           | {
@@ -1482,6 +1483,7 @@ function buildRoutes(): RouteDefinition[] {
               local_model?: string | null;
               online_model?: string | null;
               online_enabled?: number | null;
+              flirt_enabled?: number | null;
               temperature?: number | null;
               max_tokens?: number | null;
             }
@@ -1492,7 +1494,11 @@ function buildRoutes(): RouteDefinition[] {
           // the model actually knows who it's supposed to be, even when the
           // user left the prompt field blank. Unit-tested in
           // `__tests__/bots.test.ts`.
-          botSystemPrompt = composeBotSystemPrompt(bot.name, bot.system_prompt);
+          botSystemPrompt = composeBotSystemPrompt(
+            bot.name,
+            bot.system_prompt,
+            bot.flirt_enabled === 1
+          );
           if (bot.online_enabled === 0 && effectiveProvider === "openai") {
             effectiveProvider = "local";
             botForcesLocalProvider = true;
@@ -1592,6 +1598,8 @@ function buildRoutes(): RouteDefinition[] {
         botOpinion,
         summaryCompaction,
         pendingImageJob,
+        toolCalls,
+        backendEvents,
       } = result;
       json(ctx.res, 200, {
         ok: true,
@@ -1603,6 +1611,8 @@ function buildRoutes(): RouteDefinition[] {
         ...(memoryLearned ? { memoryLearned } : {}),
         ...(conversationStarters ? { conversationStarters } : {}),
         ...(pendingImageJob ? { pendingImageJob } : {}),
+        ...(toolCalls ? { toolCalls } : {}),
+        ...(backendEvents ? { backendEvents } : {}),
       });
     }),
     route("GET", "/api/image-jobs/:id", async (ctx) => {
@@ -1677,18 +1687,19 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/coffee/groups", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      const group = createCoffeeGroup(db, userId, {
+      const group = await createCoffeeGroupWithGeneratedName(db, userId, {
         name: body.name,
         groupBotIds,
         coffeeSettings: body.coffeeSettings,
         ...(body.modelChoiceByProvider !== undefined
           ? { modelChoiceByProvider: body.modelChoiceByProvider }
           : {}),
-      });
+      }, { prismDefaultLlmModel: user.prism_default_llm_model });
       json(ctx.res, 201, {
         ok: true,
         group,
@@ -1724,6 +1735,13 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
+      const initialPoll =
+        body.initialPoll && typeof body.initialPoll === "object" && !Array.isArray(body.initialPoll)
+          ? {
+              question: (body.initialPoll as Record<string, unknown>).question,
+              options: (body.initialPoll as Record<string, unknown>).options,
+            }
+          : undefined;
       const result = await createCoffeeConversationFromGroup(
         db,
         userId,
@@ -1732,6 +1750,7 @@ function buildRoutes(): RouteDefinition[] {
           coffeeSettings: body.coffeeSettings,
           durationMinutes: body.durationMinutes,
           presetId: body.presetId,
+          initialPoll,
         },
         { prismDefaultLlmModel: user.prism_default_llm_model }
       );
@@ -1747,12 +1766,20 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
+      const initialPoll =
+        body.initialPoll && typeof body.initialPoll === "object" && !Array.isArray(body.initialPoll)
+          ? {
+              question: (body.initialPoll as Record<string, unknown>).question,
+              options: (body.initialPoll as Record<string, unknown>).options,
+            }
+          : undefined;
       const result = await createCoffeeConversation(
         db,
         userId,
         {
           groupBotIds,
           coffeeSettings: body.coffeeSettings,
+          initialPoll,
         },
         { prismDefaultLlmModel: user.prism_default_llm_model }
       );
@@ -1787,6 +1814,73 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         coffeeSettings,
+      });
+    }),
+    route("GET", "/api/coffee/sessions/:id/polls/active", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const poll = getCoffeeSessionPoll(db, userId, ctx.params.id);
+      json(ctx.res, 200, {
+        ok: true,
+        poll,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/polls", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const poll = createCoffeePoll(db, userId, ctx.params.id, {
+        question: body.question,
+        options: body.options,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        poll,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/polls/:pollId/collect", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
+      const sessionRemainingMs =
+        typeof body.sessionRemainingMs === "number" &&
+        Number.isFinite(body.sessionRemainingMs)
+          ? Math.max(0, body.sessionRemainingMs)
+          : null;
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const result = await collectCoffeePollVotes(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.pollId,
+        {
+          preferredProvider: effectiveProvider,
+          openAiApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          userDisplayName: user.display_name,
+          userKey,
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          assistantImageUserPrefs: {
+            preferredLocalImageModel: user.preferred_local_image_model,
+            preferredOpenAiImageModel: user.preferred_openai_image_model,
+            lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
+            comfyuiHost: user.comfyui_host,
+            comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+            secondaryOllamaHost: user.secondary_ollama_host,
+          },
+          sessionRemainingMs,
+          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+        }
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
       });
     }),
     route("POST", "/api/coffee/sessions/:id/continue", async (ctx) => {
@@ -1928,11 +2022,10 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/memories", async (ctx) => {
       const userId = requireAuth(ctx);
       const userKey = decryptUserKey(userId);
-      const conversationId = readOptionalString(ctx.query.get("conversationId"));
-      const botId = readOptionalString(ctx.query.get("botId"));
-      const scope = readOptionalString(ctx.query.get("scope"));
+      const { conversationId, botId, scope, inferBotMemories, limit } =
+        parseMemoryListQueryOptions(ctx.query);
       deleteOrphanedBotMemories(db, userId);
-      if (botId) {
+      if (botId && inferBotMemories) {
         const inferenceState = db.prepare(`
           SELECT
             MAX(CASE WHEN source = 'direct' THEN created_at END) AS latest_direct_at,
@@ -1987,29 +2080,33 @@ function buildRoutes(): RouteDefinition[] {
       const rows = botId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT ?"
             )
-            .all(userId, botId) as MemoryRow[]
+            .all(userId, botId, limit) as MemoryRow[]
         : scope === "default"
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT ?"
             )
-            .all(userId) as MemoryRow[]
+            .all(userId, limit) as MemoryRow[]
         : conversationId
         ? db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT ?"
             )
-            .all(userId, conversationId) as MemoryRow[]
+            .all(userId, conversationId, limit) as MemoryRow[]
         : db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT 100"
+              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT ?"
             )
-            .all(userId) as MemoryRow[];
+            .all(userId, limit) as MemoryRow[];
       const memoryCountRows = db
         .prepare(
-          "SELECT bot_id, COUNT(*) AS count FROM memories WHERE user_id = ? GROUP BY bot_id"
+          `SELECT bot_id, COUNT(*) AS count
+           FROM memories
+           WHERE user_id = ?
+             AND COALESCE(source, 'direct') != 'about_you'
+           GROUP BY bot_id`
         )
         .all(userId) as Array<{ bot_id: string | null; count: number }>;
       const memoryCountsByBotId: Record<string, number> = {};
@@ -2047,9 +2144,12 @@ function buildRoutes(): RouteDefinition[] {
           createdAt: row.created_at
         };
       });
+      const visibleMemories = decryptedMemories.filter(
+        (memory) => memory.source !== "about_you"
+      );
       json(ctx.res, 200, {
         ok: true,
-        memories: filterConflictingMemories(decryptedMemories),
+        memories: filterConflictingMemories(visibleMemories),
         memoryCountsByBotId,
         defaultMemoryCount,
         directCountsByBotId: memoryCountsByBotId,
@@ -2650,10 +2750,11 @@ function buildRoutes(): RouteDefinition[] {
           )
           .get(personaBotId, userId) as BotPersonaImageRow | undefined;
         if (botPersona) {
-          promptForModel = composeAugmentedImagePrompt({
+          promptForModel = composeVerbatimFirstImagePrompt({
+            userPrompt: prompt,
             botName: botPersona.name,
             systemPrompt: botPersona.system_prompt,
-            userPrompt: prompt,
+            mode: "strict_verbatim",
           });
         }
       }
@@ -3100,6 +3201,7 @@ function buildRoutes(): RouteDefinition[] {
       const openaiImageModel = readOptionalString(body.openaiImageModel);
       const onlineEnabled = body.onlineEnabled === false ? 0 : 1;
       const deleteProtected = body.deleteProtected === true ? 1 : 0;
+      const flirtEnabled = body.flirtEnabled === true ? 1 : 0;
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
       const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 2048;
       const exportHash = resolveBotExportHashForCreate({
@@ -3128,7 +3230,7 @@ function buildRoutes(): RouteDefinition[] {
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
       ).run(
         botId,
         userId,
@@ -3142,6 +3244,7 @@ function buildRoutes(): RouteDefinition[] {
         openaiImageModel,
         onlineEnabled,
         deleteProtected,
+        flirtEnabled,
         temperature,
         maxTokens,
         color,
@@ -3164,6 +3267,7 @@ function buildRoutes(): RouteDefinition[] {
           openai_image_model: openaiImageModel,
           online_enabled: onlineEnabled,
           delete_protected: deleteProtected,
+          flirt_enabled: flirtEnabled,
           temperature,
           maxTokens,
           color,
@@ -3175,7 +3279,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -3215,6 +3319,10 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.deleteProtected === "boolean") {
         fields.push("delete_protected = ?");
         values.push(body.deleteProtected ? 1 : 0);
+      }
+      if (typeof body.flirtEnabled === "boolean") {
+        fields.push("flirt_enabled = ?");
+        values.push(body.flirtEnabled ? 1 : 0);
       }
       if (typeof body.chatEnabled === "boolean") {
         fields.push("chat_enabled = ?");
