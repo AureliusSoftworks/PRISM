@@ -8761,6 +8761,36 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-underline-offset: 0.18em;
 }
 
+.commandMentionChip {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  -webkit-text-fill-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    #ff6b9d 0%,
+    #ffa94d 18%,
+    #ffe066 36%,
+    #69db7c 54%,
+    #4dabf7 72%,
+    #b197fc 88%,
+    #ff6b9d 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+.commandMentionChip:hover,
+.commandMentionChip:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
 .botMentionChip {
   display: inline;
   font-weight: 600;
@@ -14386,6 +14416,242 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   line-height: 1.45;
 }
 
+.commandSpecsBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: grid;
+  place-items: center;
+  padding:
+    calc(env(safe-area-inset-top) + 16px)
+    max(14px, calc(env(safe-area-inset-right) + 14px))
+    calc(env(safe-area-inset-bottom) + 16px)
+    max(14px, calc(env(safe-area-inset-left) + 14px));
+  background: color-mix(in srgb, #000 52%, transparent);
+}
+
+.commandSpecsModal {
+  width: min(680px, 100%);
+  max-height: min(86vh, 760px);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 76%, var(--line));
+  border-radius: 16px;
+  /* Keep this surface opaque even if theme vars are missing/transparent. */
+  background: color-mix(in srgb, var(--bg-elevated, #14161c) 97%, #14161c 3%);
+  box-shadow:
+    0 28px 80px color-mix(in srgb, #000 54%, transparent),
+    0 1px 0 color-mix(in srgb, #fff 12%, transparent) inset;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.commandSpecsHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.commandSpecsHeader span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.commandSpecsHeader h4 {
+  margin: 4px 0 4px;
+  font-size: 21px;
+  line-height: 1.1;
+}
+
+.commandSpecsHeader p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.commandSpecsClose {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.commandSpecsClose:hover:not(:disabled),
+.commandSpecsClose:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  outline: none;
+}
+
+.commandSpecsBody {
+  min-height: 0;
+  overflow-y: visible;
+  padding: 14px 16px 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.commandSpecsSection {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 11px;
+  display: grid;
+  gap: 7px;
+  background: color-mix(in srgb, var(--bg-surface, #101218) 92%, #101218 8%);
+}
+
+.commandSpecsSection h5 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.commandSpecsSection code,
+.commandSpecsSection pre {
+  margin: 0;
+  font: 500 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg);
+}
+
+.commandSpecsField {
+  display: grid;
+  gap: 6px;
+}
+
+.commandSpecsField span {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.commandSpecsField input,
+.commandSpecsField textarea {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--bg-surface, #101218) 94%, #101218 6%);
+  color: var(--fg);
+  padding: 9px 10px;
+  font: 500 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.commandSpecsField textarea {
+  resize: none;
+  min-height: 88px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.commandSpecsField input:focus-visible,
+.commandSpecsField textarea:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--line-strong) 44%, transparent);
+}
+
+.commandSpecsArgumentList {
+  display: grid;
+  gap: 8px;
+  max-height: 188px;
+  overflow-y: scroll;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 62%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface, #101218) 94%, #101218 6%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    inset 0 14px 16px -16px color-mix(in srgb, #000 72%, transparent),
+    inset 0 -14px 16px -16px color-mix(in srgb, #000 72%, transparent);
+  padding: 8px;
+  padding-right: 4px;
+}
+
+.commandSpecsArgumentRow {
+  display: grid;
+  grid-template-columns: minmax(84px, 0.42fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.commandSpecsArgumentRemove {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 55%, var(--line));
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  color: var(--fg);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.commandSpecsArgumentRemove:hover:not(:disabled),
+.commandSpecsArgumentRemove:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--line-strong) 75%, var(--line));
+  background: var(--bg-hover);
+}
+
+.commandSpecsAddArgumentButton {
+  justify-self: start;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.commandSpecsAddArgumentButton:hover:not(:disabled),
+.commandSpecsAddArgumentButton:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+
+.commandSpecsActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.commandSpecsDeleteButton {
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg));
+  color: color-mix(in srgb, var(--danger) 80%, var(--fg));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 11px;
+  cursor: pointer;
+}
+
+.commandSpecsDeleteButton:hover:not(:disabled),
+.commandSpecsDeleteButton:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--danger) 72%, var(--line));
+  background: color-mix(in srgb, var(--danger) 22%, var(--bg));
+}
+
 .botProfileSummaryCard {
   gap: 9px;
 }
@@ -14814,6 +15080,80 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .botProfileField textarea {
   min-height: 86px;
+}
+
+.botVoicePresetGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.form button.botVoicePresetOption,
+.botVoicePresetOption {
+  -webkit-appearance: none;
+  appearance: none;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--fg) 5%, transparent),
+      transparent 58%
+    ),
+    var(--bg);
+  color: var(--fg);
+  text-align: left;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
+}
+
+.form button.botVoicePresetOption:hover:not(:disabled),
+.form button.botVoicePresetOption:focus-visible,
+.botVoicePresetOption:hover,
+.botVoicePresetOption:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, var(--line-strong));
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, transparent),
+      transparent 62%
+    ),
+    var(--bg-hover);
+  color: var(--fg);
+  outline: none;
+}
+
+.botVoicePresetOption[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 54%, var(--line));
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, transparent),
+      transparent 64%
+    ),
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, var(--bg));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent),
+    0 0 18px -14px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 58%, transparent);
+}
+
+.botVoicePresetOption span {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.botVoicePresetOption small {
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.botVoicePresetOption[data-selected="true"] small {
+  color: color-mix(in srgb, var(--fg) 76%, var(--fg-muted));
 }
 
 .botProfileBirthdayField {
@@ -22880,53 +23220,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     transform 140ms ease;
 }
 
-.coffeeGroupCollapseButton {
-  position: absolute;
-  top: 7px;
-  right: 42px;
-  z-index: 4;
-  width: 30px;
-  height: 30px;
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.78);
-  background: rgba(0, 0, 0, 0.36);
-  cursor: pointer;
-  transition: color 140ms ease, background 140ms ease, border-color 140ms ease, opacity 140ms ease,
-    transform 140ms ease;
-}
-
-.coffeeGroupCollapseButton:hover,
-.coffeeGroupCollapseButton:focus-visible {
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.32);
-  background: rgba(255, 255, 255, 0.12);
-  outline: none;
-  transform: scale(1.04);
-}
-
-.coffeeGroupCollapseButton:disabled {
-  opacity: 0.42;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.coffeeGroupCollapseChevron {
-  width: 8px;
-  height: 8px;
-  border: solid currentColor;
-  border-width: 0 2px 2px 0;
-  transform: translateY(-1px) rotate(45deg);
-  transition: transform 140ms ease;
-}
-
-.coffeeGroupRow[data-collapsed="true"] .coffeeGroupCollapseChevron {
-  transform: translateX(-1px) rotate(-45deg);
-}
-
 .coffeeGroupDeleteButton svg {
   width: 15px;
   height: 15px;
@@ -22968,7 +23261,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow: hidden;
   padding-left: 12px;
   padding-top: 12px;
-  padding-right: 78px;
+  padding-right: 48px;
   padding-bottom: 12px;
   gap: 5px;
   min-height: 86px;
@@ -23609,7 +23902,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow-y: visible;
 }
 
-.coffeeStage[data-compact="true"] .coffeeCenterMessageScroll p {
+.coffeeStage[data-compact="true"] .coffeeCenterFeedLine {
   font-size: clamp(0.78rem, 3.2vw, 0.94rem);
 }
 
@@ -23912,8 +24205,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow-y: visible;
 }
 
-.coffeeStage[data-phase="live"] .coffeeCenterMessageScroll p,
-.coffeeStage[data-phase="finished"] .coffeeCenterMessageScroll p {
+.coffeeStage[data-phase="live"] .coffeeCenterFeedLine,
+.coffeeStage[data-phase="finished"] .coffeeCenterFeedLine {
   font-size: clamp(1rem, 1.75vw, 1.3rem);
   line-height: 1.34;
 }
@@ -24085,13 +24378,36 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-radius: 999px;
 }
 
-.coffeeCenterMessageScroll p {
+.coffeeCenterFeed {
+  display: grid;
+  grid-auto-rows: min-content;
+  gap: 6px;
+  min-height: 100%;
+  align-content: end;
+}
+
+.coffeeCenterFeedLine {
   margin: 0;
   color: rgba(255, 255, 255, 0.88);
   font-size: clamp(0.94rem, 1.65vw, 1.22rem);
   line-height: 1.26;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.coffeeCenterFeedLineTyping {
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.coffeeCenterFeedLineFallback {
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 0.9rem;
+  line-height: 1.32;
+}
+
+.coffeeCenterFeedSpeaker {
+  color: rgba(255, 255, 255, 0.62);
+  font-weight: 600;
 }
 
 .coffeeCenterMessage strong {
@@ -24104,10 +24420,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: transparent;
 }
 
-.coffeeCenterMessage[data-empty="true"] .coffeeCenterMessageScroll p {
-  color: rgba(255, 255, 255, 0.52);
-  font-size: 0.9rem;
-  line-height: 1.32;
+.coffeeCenterMessage[data-empty="true"] .coffeeCenterFeedLine {
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .coffeeCenterMessage .coffeeTableStartButton,
@@ -25082,6 +25396,108 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: none;
 }
 
+.coffeeOpeningPollPanel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 7px;
+  min-height: 0;
+  max-height: min(30vh, 260px);
+  overflow-y: auto;
+  padding: 7px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(0, 0, 0, 0.22);
+  scrollbar-gutter: stable;
+}
+
+.coffeeOpeningPollPanel[data-enabled="true"] {
+  border-color: rgba(120, 200, 255, 0.34);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(120, 200, 255, 0.12), transparent 42%),
+    rgba(0, 0, 0, 0.28);
+}
+
+.coffeeOpeningPollToggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.76rem;
+  font-weight: 760;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.coffeeOpeningPollToggle input {
+  margin-top: 2px;
+}
+
+.coffeeOpeningPollToggle small {
+  display: block;
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.68rem;
+  font-weight: 620;
+  line-height: 1.25;
+}
+
+.coffeeOpeningPollFields {
+  display: grid;
+  gap: 7px;
+  min-height: 0;
+}
+
+.coffeeOpeningPollFields label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.coffeeOpeningPollFields label span {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coffeeOpeningPollFields input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 30px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(0, 0, 0, 0.34);
+  color: rgba(255, 255, 255, 0.92);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.coffeeOpeningPollFields input:focus {
+  outline: none;
+  border-color: rgba(120, 200, 255, 0.52);
+  background: rgba(0, 0, 0, 0.44);
+}
+
+.coffeeOpeningPollFields input::placeholder {
+  color: rgba(255, 255, 255, 0.36);
+}
+
+.coffeeOpeningPollOptionList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.coffeeOpeningPollValidation {
+  margin: 0;
+  color: rgba(255, 210, 128, 0.86);
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
 .coffeeAutoTopicToggle input {
   margin-top: 3px;
 }
@@ -25171,6 +25587,335 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeTopicChip:disabled {
   opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.coffeeTopicChip[data-kind="poll"] {
+  border-style: dashed;
+  border-color: rgba(120, 200, 255, 0.42);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(120, 200, 255, 0.14), transparent 48%),
+    rgba(10, 10, 12, 0.72);
+}
+
+.coffeePollResultsPanel {
+  position: fixed;
+  z-index: 145;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(72vh, 560px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(120, 200, 255, 0.3);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(120, 200, 255, 0.14), transparent 46%),
+    rgba(12, 13, 16, 0.94);
+  box-shadow:
+    0 18px 52px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(16px);
+}
+
+.coffeePollResultsHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.coffeePollResultsHeader:active {
+  cursor: grabbing;
+}
+
+.coffeePollResultsHeader span {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 0.64rem;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.coffeePollResultsHeader h4 {
+  margin: 3px 0 0;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 0.92rem;
+  line-height: 1.22;
+}
+
+.coffeePollResultsHeader button {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.coffeePollResultsBody {
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 11px 12px 12px;
+  scrollbar-gutter: stable;
+}
+
+.coffeePollResultsSummary {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.coffeePollResultsTallyList,
+.coffeePollResultsVoteGrid {
+  display: grid;
+  gap: 7px;
+}
+
+.coffeePollResultsTally {
+  display: grid;
+  gap: 5px;
+}
+
+.coffeePollResultsTallyTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.78rem;
+}
+
+.coffeePollResultsTallyTop span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coffeePollResultsTallyTop strong {
+  flex: 0 0 auto;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.coffeePollResultsBar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.coffeePollResultsBar span {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(120, 200, 255, 0.86), rgba(255, 255, 255, 0.58));
+}
+
+.coffeePollResultsVote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.coffeePollResultsVote .coffeeSessionDot {
+  flex: 0 0 auto;
+}
+
+.coffeePollResultsVote div {
+  display: grid;
+  min-width: 0;
+}
+
+.coffeePollResultsVote strong,
+.coffeePollResultsVote small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coffeePollResultsVote strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.76rem;
+}
+
+.coffeePollResultsVote small {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.7rem;
+}
+
+.coffeePollModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: grid;
+  place-items: center;
+  padding: max(16px, env(safe-area-inset-top))
+    max(16px, calc(env(safe-area-inset-right) + 16px))
+    max(16px, env(safe-area-inset-bottom))
+    max(16px, calc(env(safe-area-inset-left) + 16px));
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.coffeePollModal {
+  width: min(520px, 100%);
+  max-height: min(82vh, 620px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(120, 200, 255, 0.28);
+  background:
+    radial-gradient(circle at 20% 0%, rgba(120, 200, 255, 0.12), transparent 44%),
+    color-mix(in srgb, var(--bg-elevated) 94%, #102033 6%);
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.58);
+}
+
+.coffeePollModalHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 16px 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.coffeePollModalHeader span {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.coffeePollModalHeader h4 {
+  margin: 3px 0 4px;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 1.05rem;
+  line-height: 1.1;
+}
+
+.coffeePollModalHeader p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.coffeePollModalHeader button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.coffeePollModalBody {
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  scrollbar-gutter: stable;
+}
+
+.coffeePollModalBody label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.coffeePollModalBody label span {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coffeePollModalBody input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.32);
+  color: rgba(255, 255, 255, 0.92);
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.coffeePollModalBody input:focus {
+  outline: none;
+  border-color: rgba(120, 200, 255, 0.58);
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.coffeePollModalBody input::placeholder {
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.coffeePollModalOptionList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.coffeePollModalHint {
+  margin: 0;
+  color: rgba(255, 210, 128, 0.86);
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+
+.coffeePollModalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.coffeePollModalActions button {
+  min-height: 34px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.88);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.coffeePollModalActions button[type="submit"] {
+  border-color: rgba(120, 200, 255, 0.46);
+  background: rgba(120, 200, 255, 0.16);
+  color: #ffffff;
+}
+
+.coffeePollModalActions button:disabled {
+  opacity: 0.48;
   cursor: not-allowed;
 }
 
@@ -25564,6 +26309,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
+}
+
+/* Wide viewports: dock Table Talk in-layout (chat-like), not overlay. */
+@media (min-width: 1160px) {
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"] {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  }
+
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"] .coffeeTranscriptOverlay {
+    display: none;
+  }
+
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"] .coffeeTranscriptPanel {
+    position: sticky;
+    top: 0;
+    right: auto;
+    bottom: auto;
+    z-index: 2;
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    animation: none;
+  }
 }
 
 .coffeeTranscriptHeader {
@@ -26081,6 +26849,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .coffeeGroupOverview .coffeeAutoTopicToggle,
   .coffeeGroupOverview .coffeeSend {
     grid-column: 1 / -1;
+  }
+
+  .coffeeOpeningPollOptionList,
+  .coffeePollModalOptionList {
+    grid-template-columns: 1fr;
   }
 
   .coffeeHeaderActions {

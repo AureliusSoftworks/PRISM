@@ -220,6 +220,112 @@ function looksLikeInlineActionAtSentenceBoundary(before: string, after: string):
   return beforeEndsSentence && afterStartsSentenceish;
 }
 
+const LEADING_UNMARKED_STAGE_START_RE = new RegExp(
+  [
+    String.raw`^(?:(?:[\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+){0,3})(?:,\s+|\s+))?`,
+    String.raw`(?:`,
+    String.raw`(?:his|her|their|its)\s+(?:eyes?|gaze|breath(?:ing)?|jaw|mouth|shoulders?)\b`,
+    String.raw`|eyes?\s+(?:narrow|narrowing|widen|widening|shift|shifting|glance|glancing|gaze|gazing|roll|rolling)\b`,
+    String.raw`|(?:leans?|leaning|glances?|glancing|gazes?|gazing|glares?|glaring|stares?|staring|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|winces?|wincing|grimaces?|grimacing|chuckles?|chuckling|snorts?|snorting|blinks?|blinking|turns?|turning|tilts?|tilting|pauses?|pausing|sips?|sipping|picks?|picking)\b(?!\s+(?:like|are|is)\b)`,
+    String.raw`)`,
+  ].join(""),
+  "iu"
+);
+
+const MARKDOWN_BOT_MENTION_PATTERN = String.raw`\[[^\]\n]+\]\(prism-bot:\/\/[^)\n]+\)`;
+const UNMARKED_STAGE_ADDRESS_PREFIX_RE = new RegExp(
+  String.raw`^(?:${MARKDOWN_BOT_MENTION_PATTERN}\s*,?\s*)`,
+  "u"
+);
+
+const LEADING_UNMARKED_STAGE_SPOKEN_OPENER_RE =
+  /\s+(?=(?:["“'‘])?(?:I|I'm|I've|I'd|You|You're|You've|We|We're|That's|The|This|These|Those|But|Still|Anyway|Honestly|Listen|Look,|Well|Ah|Oh|No offense|No,|Yes,|Okay|Sure|Mine|Yours|Consider|Imagine|Suppose|Notice|Think|Let's|Let us|Picture)\b)/gu;
+
+function normalizeUnmarkedStageAction(raw: string): string {
+  return raw.replace(/[,.!?;:\s]+$/u, "").trim();
+}
+
+function splitUnmarkedAddressPrefix(text: string): {
+  prefix: string;
+  rest: string;
+} {
+  const match = text.match(UNMARKED_STAGE_ADDRESS_PREFIX_RE);
+  if (!match) return { prefix: "", rest: text };
+  const prefix = match[0] ?? "";
+  return { prefix, rest: text.slice(prefix.length).trimStart() };
+}
+
+function looksLikeStandaloneUnmarkedStageAction(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed.length >= 8 &&
+    trimmed.length <= 180 &&
+    !/[?"]/u.test(trimmed) &&
+    LEADING_UNMARKED_STAGE_START_RE.test(trimmed)
+  );
+}
+
+function extractLeadingUnmarkedStageDirection(text: string): {
+  action: string;
+  mainText: string;
+  revealAtDisplayLength: number;
+} | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const { prefix, rest } = splitUnmarkedAddressPrefix(trimmed);
+  const startsLikeAction = LEADING_UNMARKED_STAGE_START_RE.test(rest);
+  if (!startsLikeAction) return null;
+
+  for (const match of rest.matchAll(LEADING_UNMARKED_STAGE_SPOKEN_OPENER_RE)) {
+    const splitIndex = match.index ?? -1;
+    if (splitIndex < 12 || splitIndex > 180) continue;
+    const action = normalizeUnmarkedStageAction(rest.slice(0, splitIndex));
+    const spokenText = rest.slice(splitIndex).trim();
+    const mainText = normalizeStageDirectionMainText(`${prefix}${spokenText}`);
+    if (action.length > 0 && mainText.length > 0) {
+      return {
+        action,
+        mainText,
+        revealAtDisplayLength: getBotMentionDisplayLength(prefix),
+      };
+    }
+  }
+  if (looksLikeStandaloneUnmarkedStageAction(rest)) {
+    return {
+      action: normalizeUnmarkedStageAction(rest),
+      mainText: "",
+      revealAtDisplayLength: 0,
+    };
+  }
+  return null;
+}
+
+function extractTrailingUnmarkedStageDirection(text: string): {
+  action: string;
+  mainText: string;
+  revealAtDisplayLength: number;
+} | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const sentenceBreaks = Array.from(trimmed.matchAll(/[.!?…]\s+/gu));
+  for (let index = sentenceBreaks.length - 1; index >= 0; index -= 1) {
+    const match = sentenceBreaks[index]!;
+    const tailStart = (match.index ?? 0) + match[0].length;
+    const mainText = trimmed.slice(0, tailStart).trim();
+    const tail = trimmed.slice(tailStart).trim();
+    const { rest } = splitUnmarkedAddressPrefix(tail);
+    if (!mainText || !rest) continue;
+    if (looksLikeStandaloneUnmarkedStageAction(rest)) {
+      return {
+        action: normalizeUnmarkedStageAction(rest),
+        mainText,
+        revealAtDisplayLength: getBotMentionDisplayLength(mainText),
+      };
+    }
+  }
+  return null;
+}
+
 function normalizeStageDirectionMainText(raw: string): string {
   let mainText = raw.replace(/\*+/g, "");
   mainText = mainText.replace(/\s+/g, " ").trim();
@@ -268,7 +374,19 @@ function parseStageDirectionsDetailed(text: string): {
   if (cursor < text.length) {
     spokenRaw += text.slice(cursor);
   }
-  const mainText = normalizeStageDirectionMainText(spokenRaw);
+  let mainText = normalizeStageDirectionMainText(spokenRaw);
+  if (cues.length === 0 && !text.includes("*")) {
+    const unmarked =
+      extractLeadingUnmarkedStageDirection(mainText) ??
+      extractTrailingUnmarkedStageDirection(mainText);
+    if (unmarked) {
+      mainText = unmarked.mainText;
+      cues.push({
+        action: unmarked.action,
+        revealAtDisplayLength: unmarked.revealAtDisplayLength,
+      });
+    }
+  }
   return {
     mainText,
     actions: cues.map((cue) => cue.action),
@@ -287,6 +405,7 @@ function parseStageDirectionsDetailed(text: string): {
  *   - `*pours coffee*`         (canonical, what the prompt asks for)
  *   - `**pours coffee**`       (Markdown bold — many models default to this)
  *   - `*pours coffee* and...`  (leading action, then spoken line)
+ *   - `eyes narrow... No offense` (unmarked leading physical action)
  *   - `*pours coffee` (no close) → orphan asterisks are still scrubbed so
  *     the table line never starts or ends with a stray `*`.
  *
