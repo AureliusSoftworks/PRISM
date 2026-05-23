@@ -121,7 +121,7 @@ npm run dev
 - Chat fork/export flows
 - Persona bots with configurable behavior
 - In-thread image generation + image library
-- Memory pipelines for continuity (with mode-aware behavior)
+- Memory pipelines for continuity, including Coffee bots learning likely facts from each other
 - Dark/light theme and responsive UI
 
 ---
