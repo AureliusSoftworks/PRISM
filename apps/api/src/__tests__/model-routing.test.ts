@@ -34,6 +34,22 @@ function catalog(overrides: Partial<ModelCatalog> = {}): ModelCatalog {
 }
 
 describe("resolveAutoModel", () => {
+  it("uses an explicit picker override before a bot preferred model", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      explicitModelOverride: "gpt-4o",
+      botPreferredModel: "gpt-4.1-mini",
+      hiddenModelIds: [],
+      catalog: catalog(),
+    });
+
+    assert.deepEqual(resolved, {
+      provider: "openai",
+      model: "gpt-4o",
+      usedRequiredLocalFallback: false,
+    });
+  });
+
   it("uses a visible bot preferred model before catalog fallbacks", () => {
     const resolved = resolveAutoModel({
       provider: "openai",

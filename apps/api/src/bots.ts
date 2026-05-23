@@ -3,6 +3,10 @@ import { stripBotProfileMetaSuffix } from "@localai/shared";
 import { randomId } from "./security.ts";
 
 const BOT_EXPORT_HASH_PATTERN = /^[a-f0-9]{32}$/i;
+const BOT_FLIRT_DISABLED_POLICY =
+  "Interaction boundary: If the user makes romantic, sexual, or flirtatious advances, decline gently in character and redirect to a non-romantic direction. Keep the tone warm and natural, and avoid policy-style refusal wording such as \"I can't help with that request.\"";
+const BOT_FLIRT_ENABLED_POLICY =
+  "Interaction policy: You may engage in consensual flirt or romantic roleplay when invited, as long as it stays respectful and in character. Keep boundaries clear and do not claim real-world intimacy beyond this conversation.";
 
 /**
  * Build the system-prompt string sent to the model for a selected bot.
@@ -22,13 +26,16 @@ const BOT_EXPORT_HASH_PATTERN = /^[a-f0-9]{32}$/i;
  *     preamble (e.g. "Respond as a pirate" overrides the identity tone).
  *   - Structured bot-editor metadata (`<<<PRISM_BOT_META>>>` …), when present,
  *     is stripped before this helper runs so providers never see JSON tails.
+ *   - Optional flirt-roleplay routing policy can be appended from the per-bot
+ *     `flirt_enabled` toggle.
  *   - Returns undefined when neither a usable name nor prompt is present,
  *     so callers pass no bot-owned persona; `buildPromptMessages` still ships
  *     the Prism tool appendix alone for Default chats.
  */
 export function composeBotSystemPrompt(
   name: string | null | undefined,
-  systemPrompt: string | null | undefined
+  systemPrompt: string | null | undefined,
+  flirtEnabled?: boolean
 ): string | undefined {
   const trimmedName = typeof name === "string" ? name.trim() : "";
   const trimmedPrompt =
@@ -37,13 +44,18 @@ export function composeBotSystemPrompt(
       : "";
 
   if (!trimmedName && !trimmedPrompt) return undefined;
-  if (!trimmedName) return trimmedPrompt || undefined;
-
-  const preamble =
-    `You are ${trimmedName}. When the user addresses you as ${trimmedName}, ` +
-    `respond as ${trimmedName}.`;
-  if (!trimmedPrompt) return preamble;
-  return `${preamble}\n\n${trimmedPrompt}`;
+  const preamble = trimmedName.length > 0
+    ? `You are ${trimmedName}. When the user addresses you as ${trimmedName}, respond as ${trimmedName}.`
+    : "";
+  const interactionPolicy = flirtEnabled === undefined
+    ? ""
+    : flirtEnabled
+      ? BOT_FLIRT_ENABLED_POLICY
+      : BOT_FLIRT_DISABLED_POLICY;
+  const sections = [preamble, interactionPolicy, trimmedPrompt].filter(
+    (value) => value.length > 0
+  );
+  return sections.length > 0 ? sections.join("\n\n") : undefined;
 }
 
 /** Generates the persistent identity hash stored on each bot row. */

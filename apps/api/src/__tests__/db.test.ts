@@ -76,6 +76,7 @@ describe("createDatabase bot export hash migration", () => {
         .prepare("PRAGMA table_info(bots)")
         .all() as Array<{ name: string }>;
       assert.ok(columns.some((column) => column.name === "export_hash"));
+      assert.ok(columns.some((column) => column.name === "flirt_enabled"));
       const opinionColumns = reopened
         .prepare("PRAGMA table_info(session_opinions)")
         .all() as Array<{ name: string }>;

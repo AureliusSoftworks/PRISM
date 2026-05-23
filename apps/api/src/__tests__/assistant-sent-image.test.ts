@@ -21,11 +21,11 @@ describe("buildContextAwareImageUserPrompt", () => {
         "User: That sounds lovely. May I see a picture?",
       ],
     });
-    assert.match(out, /Primary scene request: a picture please/);
-    assert.match(out, /User's latest message: May I see what it looks like\?/);
-    assert.match(out, /Instruction priority \(highest to lowest\)/);
+    assert.match(out, /Primary scene request \(keep wording\): a picture please/);
+    assert.match(out, /Latest user message: May I see what it looks like\?/);
+    assert.match(out, /Use context only to resolve references/);
     assert.match(out, /Recent user signal 1:/);
-    assert.match(out, /Recent conversation context/);
+    assert.match(out, /Context:/);
     assert.match(out, /The serenity outside my window/);
     assert.match(out, /Do NOT include the speaking persona in-frame by default/i);
     assert.match(out, /follow the latest user request/i);
@@ -53,8 +53,8 @@ describe("buildContextAwareImageUserPrompt", () => {
         "User: Please paint a picture of Florence.",
       ],
     });
-    assert.match(out, /Composition constraint: this is a scene\/place request/i);
-    assert.match(out, /Do not include human figures, faces, or character portraits/i);
+    assert.match(out, /Composition constraint: scene\/place request only/i);
+    assert.match(out, /No people, portraits, or character figures/i);
   });
 
   it("does not force scene-only lock when user explicitly requests the persona", () => {

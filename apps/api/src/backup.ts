@@ -38,6 +38,7 @@ export interface BackupBotSnapshot {
   openaiImageModel?: string | null;
   onlineEnabled: boolean;
   deleteProtected: boolean;
+  flirtEnabled: boolean;
   temperature: number;
   maxTokens: number;
   color?: string | null;
@@ -220,6 +221,7 @@ export function exportUserSnapshot(
          openai_image_model,
          online_enabled,
          delete_protected,
+         flirt_enabled,
          temperature,
          max_tokens,
          color,
@@ -244,6 +246,7 @@ export function exportUserSnapshot(
     openai_image_model: string | null;
     online_enabled: number;
     delete_protected: number;
+    flirt_enabled: number;
     temperature: number | null;
     max_tokens: number | null;
     color: string | null;
@@ -344,6 +347,7 @@ export function exportUserSnapshot(
       openaiImageModel: bot.openai_image_model,
       onlineEnabled: bot.online_enabled !== 0,
       deleteProtected: bot.delete_protected === 1,
+      flirtEnabled: bot.flirt_enabled === 1,
       temperature: typeof bot.temperature === "number" ? bot.temperature : 0.7,
       maxTokens: typeof bot.max_tokens === "number" ? bot.max_tokens : 2048,
       color: bot.color,
@@ -464,6 +468,7 @@ export function importUserSnapshot(
         openai_image_model,
         online_enabled,
         delete_protected,
+        flirt_enabled,
         temperature,
         max_tokens,
         color,
@@ -472,7 +477,7 @@ export function importUserSnapshot(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -500,6 +505,7 @@ export function importUserSnapshot(
           : null,
         bot.onlineEnabled === false ? 0 : 1,
         bot.deleteProtected === true ? 1 : 0,
+        bot.flirtEnabled === true ? 1 : 0,
         typeof bot.temperature === "number" ? bot.temperature : 0.7,
         typeof bot.maxTokens === "number" ? Math.max(1, Math.floor(bot.maxTokens)) : 2048,
         typeof bot.color === "string" && bot.color.trim().length > 0 ? bot.color.trim() : null,

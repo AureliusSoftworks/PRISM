@@ -88,6 +88,20 @@ describe("composeBotSystemPrompt", () => {
     assert.ok(prompt);
     assert.match(prompt!, /You are DJ K-Razor\./);
   });
+
+  it("adds gentle rejection guidance when flirt mode is disabled", () => {
+    const prompt = composeBotSystemPrompt("Tim", "Stay concise.", false);
+    assert.ok(prompt);
+    assert.match(prompt!, /decline gently in character/i);
+    assert.match(prompt!, /avoid policy-style refusal wording/i);
+  });
+
+  it("adds reciprocal roleplay guidance when flirt mode is enabled", () => {
+    const prompt = composeBotSystemPrompt("Tim", "Stay concise.", true);
+    assert.ok(prompt);
+    assert.match(prompt!, /engage in consensual flirt or romantic roleplay/i);
+    assert.match(prompt!, /stays respectful and in character/i);
+  });
 });
 
 describe("bot export hash helpers", () => {

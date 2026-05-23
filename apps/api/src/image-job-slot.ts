@@ -168,6 +168,12 @@ export function pollImageJobForUser(userId: string, jobId: string): ImageJobPoll
   return { ok: true, status: "failed", error: done.error };
 }
 
+export function conversationIdForImageGeneration(
+  job: Pick<RunningImageJob, "conversationId" | "incognito">
+): string | null {
+  return job.incognito ? null : job.conversationId;
+}
+
 type MessageRow = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -360,7 +366,7 @@ export function startChatImageBackgroundJob(args: {
         db,
         userId: job.userId,
         mode: job.mode,
-        conversationId: job.conversationId,
+        conversationId: conversationIdForImageGeneration(job),
         botIdTriState: job.botId,
         userMessage: job.userMessage,
         captionPrompt: job.captionPrompt,

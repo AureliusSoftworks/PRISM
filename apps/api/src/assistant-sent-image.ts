@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ChatMode, ComfyUiWorkflowRegistration, SentGeneratedImagePayload } from "@localai/shared";
-import { composeAugmentedImagePrompt } from "@localai/shared";
+import { composeVerbatimFirstImagePrompt } from "@localai/shared";
 import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
 import { generateImage } from "./image-provider.ts";
@@ -176,25 +176,25 @@ export function buildContextAwareImageUserPrompt(args: {
   const { allowPersonaPortrait, sceneOnlyComposition } =
     resolveImageSubjectPolicy(policySignalText);
   if (contextLines.length === 0) return caption;
+  const compactContext = contextLines.slice(-2).map((line) => `Context: ${line}`);
+  const compactSignals = latestUserPriorityLines
+    .slice(0, 2)
+    .map((line, index) => `Recent user signal ${index + 1}: ${line}`);
   return [
-    `Primary scene request: ${caption}`,
-    `User's latest message: ${userMessage}`,
-    "Instruction priority (highest to lowest):",
-    "1) User's latest message and the most recent user lines below.",
-    "2) Primary scene request line.",
-    "3) Assistant/context lines only for pronoun/reference resolution.",
-    ...latestUserPriorityLines.map((line, index) => `Recent user signal ${index + 1}: ${line}`),
-    "Recent conversation context (use this to resolve references like it/that/this scene):",
-    ...contextLines.map((line) => `- ${line}`),
+    `Primary scene request (keep wording): ${caption}`,
+    `Latest user message: ${userMessage}`,
+    "Use context only to resolve references (it/that/this), not to replace the request.",
+    ...compactSignals,
+    ...compactContext,
     allowPersonaPortrait
-      ? "The user explicitly asked for the persona/you to appear. Keep the requested scene details accurate, and include the persona only as requested."
-      : "Do NOT include the speaking persona in-frame by default. When the user asks to see a place/object/scene, depict that referenced subject (for example, the landscape itself) and avoid unsolicited portraits.",
+      ? "The user explicitly asked for the persona/you to appear. Include persona only as requested."
+      : "Do NOT include the speaking persona in-frame by default.",
     ...(sceneOnlyComposition
       ? [
-          "Composition constraint: this is a scene/place request. Do not include human figures, faces, or character portraits unless explicitly asked.",
+          "Composition constraint: scene/place request only. No people, portraits, or character figures unless explicitly requested.",
         ]
       : []),
-    "If assistant wording conflicts with the latest user request, follow the latest user request.",
+    "If context conflicts with the latest user request, follow the latest user request.",
   ].join("\n");
 }
 
@@ -301,10 +301,11 @@ export async function runAssistantSentImageGeneration(args: {
       .get(personaBotId, args.userId) as BotPersonaImageRow | undefined;
     if (botPersona) {
       if (subjectPolicy.allowPersonaPortrait) {
-        promptForModel = composeAugmentedImagePrompt({
+        promptForModel = composeVerbatimFirstImagePrompt({
+          userPrompt: contextAwareUserPrompt,
           botName: botPersona.name,
           systemPrompt: botPersona.system_prompt,
-          userPrompt: contextAwareUserPrompt,
+          mode: "chat_balanced",
         });
         if (sceneOnlyHardConstraint) {
           promptForModel = `${sceneOnlyHardConstraint}\n${promptForModel}`;

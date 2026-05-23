@@ -299,11 +299,19 @@ function isAllowedOpenAiChatModel(id: string): boolean {
 }
 
 async function discoverLocalModelIds(ollamaHost: string): Promise<string[]> {
+  for (const host of localModelHostCandidates(ollamaHost)) {
+    const modelIds = await fetchLocalModelIds(host);
+    if (modelIds) return modelIds;
+  }
+  return [];
+}
+
+async function fetchLocalModelIds(ollamaHost: string): Promise<string[] | null> {
   try {
     const response = await fetch(`${ollamaHost}/api/tags`, {
       signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
     });
-    if (!response.ok) return [];
+    if (!response.ok) return null;
     const payload = (await response.json()) as {
       models?: Array<{ name?: unknown; model?: unknown }>;
     };
@@ -318,23 +326,17 @@ async function discoverLocalModelIds(ollamaHost: string): Promise<string[]> {
         )
     );
   } catch {
-    return [];
+    return null;
   }
 }
 
-export async function checkLocalModelHostStatus(
-  ollamaHost: string | null | undefined
-): Promise<LocalModelHostStatus> {
-  const normalizedHost = ollamaHost?.trim();
-  if (!normalizedHost) {
-    return { configured: false, reachable: false, modelCount: 0 };
-  }
-  const hostCandidates = [normalizedHost];
-  const seenCandidates = new Set<string>([normalizedHost]);
+function localModelHostCandidates(ollamaHost: string): string[] {
+  const hostCandidates = [ollamaHost];
+  const seenCandidates = new Set<string>([ollamaHost]);
   try {
     // Some local setups resolve `localhost` to IPv6 first (::1) even when
     // Ollama only listens on IPv4. Probe 127.0.0.1 as a fallback.
-    const parsedHost = new URL(normalizedHost);
+    const parsedHost = new URL(ollamaHost);
     const hostname = parsedHost.hostname.toLowerCase();
     if (
       hostname === "localhost" ||
@@ -344,7 +346,7 @@ export async function checkLocalModelHostStatus(
       hostname === "::ffff:127.0.0.1" ||
       hostname === "host.docker.internal"
     ) {
-      const loopbackIpv4 = new URL(normalizedHost);
+      const loopbackIpv4 = new URL(ollamaHost);
       loopbackIpv4.hostname = "127.0.0.1";
       const loopbackIpv4Candidate = loopbackIpv4.toString().replace(/\/$/, "");
       if (!seenCandidates.has(loopbackIpv4Candidate)) {
@@ -352,8 +354,6 @@ export async function checkLocalModelHostStatus(
         seenCandidates.add(loopbackIpv4Candidate);
       }
 
-      // If this API's primary host is pinned to a LAN IP in env, also probe
-      // that address for loopback inputs.
       const primaryHostCandidate = config.ollamaHost.trim();
       if (primaryHostCandidate && !seenCandidates.has(primaryHostCandidate)) {
         hostCandidates.push(primaryHostCandidate);
@@ -363,31 +363,21 @@ export async function checkLocalModelHostStatus(
   } catch {
     // Keep the original candidate; malformed hosts are treated as unreachable.
   }
+  return hostCandidates;
+}
 
-  for (const host of hostCandidates) {
-    try {
-      const response = await fetch(`${host}/api/tags`, {
-        signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
-      });
-      if (!response.ok) {
-        continue;
-      }
-      const payload = (await response.json()) as {
-        models?: Array<{ name?: unknown; model?: unknown }>;
-      };
-      const modelIds = uniqueModelIds(
-        (payload.models ?? [])
-          .map((model) =>
-            typeof model.name === "string"
-              ? model.name
-              : typeof model.model === "string"
-                ? model.model
-                : ""
-          )
-      );
+export async function checkLocalModelHostStatus(
+  ollamaHost: string | null | undefined
+): Promise<LocalModelHostStatus> {
+  const normalizedHost = ollamaHost?.trim();
+  if (!normalizedHost) {
+    return { configured: false, reachable: false, modelCount: 0 };
+  }
+
+  for (const host of localModelHostCandidates(normalizedHost)) {
+    const modelIds = await fetchLocalModelIds(host);
+    if (modelIds) {
       return { configured: true, reachable: true, modelCount: modelIds.length };
-    } catch {
-      // Try next host candidate.
     }
   }
 

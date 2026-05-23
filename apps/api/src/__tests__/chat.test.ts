@@ -2797,19 +2797,19 @@ describe("compactPreImageLeadMessage", () => {
     );
   });
 
-  it("falls back to neutral lead when first sentence is descriptive instead of defer-style", () => {
+  it("keeps descriptive first sentence instead of forcing a canned fallback", () => {
     assert.equal(
       compactPreImageLeadMessage(
         "The view from my window is quite lovely today with mountains and rooftops. I'll share it now."
       ),
-      "One moment - I'll share that image shortly."
+      "The view from my window is quite lovely today with mountains and rooftops."
     );
   });
 
   it("falls back to a short default line when input is empty", () => {
     assert.equal(
       compactPreImageLeadMessage("   "),
-      "One moment - I'll share that image shortly."
+      "Got it - I will share it in a sec."
     );
   });
 });
@@ -3025,5 +3025,73 @@ describe("buildAssistantToolCallEvents", () => {
     assert.ok(detected, "expected a detected event");
     assert.ok(detected!.prompt!.length <= 201, "prompt should be capped to roughly 200 chars");
     assert.ok(detected!.prompt!.endsWith("…"), "long prompts should be marked with an ellipsis");
+  });
+});
+
+describe("bot judgment memories", () => {
+  it("stores validated inferred bot-scoped judgment memories from assistant replies", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Lara", "#5b8cff", "triangle");
+    installChatFetchStub("Your vibe is creepy, and I need clearer boundaries.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Hi Lara",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        starterPrompt: false,
+        starterPromptLabel: "Lara",
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const created = result.memoryLearned?.created ?? [];
+    assert.ok(
+      created.some(
+        (memory) =>
+          memory.source === "inferred" &&
+          memory.botId === "bot-1" &&
+          memory.category === "general" &&
+          /Lara felt uneasy/i.test(memory.text)
+      )
+    );
+  });
+
+  it("does not store unsafe judgment content", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Lara", "#5b8cff", "triangle");
+    installChatFetchStub("You are disgusting and I never want to talk to you again.");
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Hi Lara",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        starterPrompt: false,
+        starterPromptLabel: "Lara",
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const inferredCount = db
+      .prepare(
+        "SELECT COUNT(*) as count FROM memories WHERE user_id = ? AND bot_id = ? AND source = 'inferred'"
+      )
+      .get("user-1", "bot-1") as { count: number };
+    assert.equal(inferredCount.count, 0);
   });
 });

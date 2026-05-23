@@ -192,6 +192,34 @@ describe("buildModelCatalog", () => {
     assert.ok(!catalog.online.some((model) => model.id === "dall-e-3"));
   });
 
+  it("falls back to IPv4 loopback when catalog discovery hits unreachable localhost", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.startsWith("http://localhost:11434/")) {
+        throw new Error("ECONNREFUSED ::1:11434");
+      }
+      if (url.startsWith("http://127.0.0.1:11434/")) {
+        return new Response(
+          JSON.stringify({
+            models: [{ name: "gemma3:latest" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog(undefined);
+
+    assert.ok(catalog.local.some((model) => model.id === "gemma3:latest"));
+    assert.deepEqual(requestedUrls, [
+      "http://localhost:11434/api/tags",
+      "http://127.0.0.1:11434/api/tags",
+    ]);
+  });
+
   it("merges secondary Ollama host models while preferring primary duplicate names", async () => {
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);

@@ -5,6 +5,7 @@ import {
   analyzeMemoryIntent,
   hasAboutYouMemoryForBot,
   buildInitialAboutYouMemoryText,
+  extractBotJudgmentMemoryCandidates,
   demoteMemoryToShortTerm,
   deleteMemoryById,
   findMemoryByCue,
@@ -114,6 +115,22 @@ export interface ChatToolCallEvent {
   detail?: string;
 }
 
+export type ChatBackendDebugEventKind =
+  | "route"
+  | "context"
+  | "model"
+  | "memory"
+  | "summary"
+  | "tool";
+
+/** Developer-only trace line describing what the chat backend did during a turn. */
+export interface ChatBackendDebugEvent {
+  kind: ChatBackendDebugEventKind;
+  message: string;
+  detail?: string;
+  elapsedMs: number;
+}
+
 /** POST /api/chat returns this shape; `conversationStarters` is present only after a starter turn. */
 export interface ProcessChatMessageResult {
   conversation: Conversation;
@@ -151,6 +168,8 @@ export interface ProcessChatMessageResult {
    * whether sendGeneratedImage is actually firing or being silently dropped.
    */
   toolCalls?: ChatToolCallEvent[];
+  /** Developer-only backend trace for the floating metrics terminal. */
+  backendEvents?: ChatBackendDebugEvent[];
   memoryLearned?: {
     created: Array<{
       id: string;
@@ -235,6 +254,30 @@ const POSITIVE_PHRASES = [
   "you're cool",
   "kind words",
 ];
+
+function describePromptMessages(messages: ProviderMessage[]): string {
+  const roleCounts = messages.reduce(
+    (counts, promptMessage) => {
+      counts[promptMessage.role] += 1;
+      return counts;
+    },
+    { system: 0, user: 0, assistant: 0 }
+  );
+  const charCount = messages.reduce(
+    (total, promptMessage) => total + promptMessage.content.length,
+    0
+  );
+  return (
+    `${messages.length} prompt messages ` +
+    `(system=${roleCounts.system}, user=${roleCounts.user}, assistant=${roleCounts.assistant}, chars=${charCount})`
+  );
+}
+
+function describeRequestedModel(provider: LlmProvider, botOverrides?: GenerateOptions): string {
+  return normalizeModelValue(botOverrides?.model) ??
+    (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
+}
+
 const NEGATIVE_PHRASES = [
   "stupid",
   "useless",
@@ -779,7 +822,7 @@ export function autoBackfillSendGeneratedImagePrompt(args: {
   return `${normalized.slice(0, AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS - 3).trimEnd()}...`;
 }
 
-const PRE_IMAGE_LEAD_FALLBACK = "One moment - I'll share that image shortly.";
+const PRE_IMAGE_LEAD_FALLBACK = "Got it - I will share it in a sec.";
 const PRE_IMAGE_LEAD_MAX_CHARS = 110;
 
 /**
@@ -794,11 +837,6 @@ export function compactPreImageLeadMessage(raw: string): string {
       .split(/(?<=[.!?])\s+/)
       .map((part) => part.trim())
       .find((part) => part.length > 0) ?? normalized;
-  const deferLeadPattern =
-    /\b(?:one moment|just a moment|hang on|hold on|coming right up|i(?:'ll| will)\s+(?:share|send|show|paint|draw)|i(?:'d| would)\s+be\s+happy\s+to\s+(?:share|send|show|paint|draw)|working on it|on its way|almost ready)\b/i;
-  if (!deferLeadPattern.test(firstSentence)) {
-    return PRE_IMAGE_LEAD_FALLBACK;
-  }
   if (firstSentence.length <= PRE_IMAGE_LEAD_MAX_CHARS) return firstSentence;
   return `${firstSentence.slice(0, PRE_IMAGE_LEAD_MAX_CHARS - 3).trimEnd()}...`;
 }
@@ -1503,11 +1541,11 @@ const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
 
 /** Appended to assistant prose when `sendGeneratedImage` parsed but image pipeline returned nothing. */
 const ASSISTANT_IMAGE_GEN_UNAVAILABLE_NOTE =
-  "I couldn't generate that image just now. You can try again in a moment, or check your image model settings under Settings → Defaults & fallbacks.";
+  "I could not generate that image this time. Try again in a moment, or switch image models in Settings -> Defaults & fallbacks.";
 
 /** When another thread (or panel) already holds the single image slot. */
 const ASSISTANT_IMAGE_SLOT_BUSY_NOTE =
-  "I'm already tied up finishing another picture on this account — I can't start a new one until that finishes. Ask me again in a little while.";
+  "I am still finishing another image right now. Ask again in a moment and I will jump on it.";
 
 const CHAT_IMAGE_TOOL_VARIANT_TAGS = {
   portrait: [
@@ -3229,6 +3267,20 @@ export async function processChatMessage(
   settings: UserChatSettings,
   conversationId?: string
 ): Promise<ProcessChatMessageResult> {
+  const backendStartedAtMs = Date.now();
+  const backendEvents: ChatBackendDebugEvent[] = [];
+  const pushBackendEvent = (
+    kind: ChatBackendDebugEventKind,
+    messageText: string,
+    detail?: string
+  ): void => {
+    backendEvents.push({
+      kind,
+      message: messageText,
+      ...(detail ? { detail } : {}),
+      elapsedMs: Date.now() - backendStartedAtMs,
+    });
+  };
   const now = new Date().toISOString();
   const mode: ChatMode = settings.mode ?? "sandbox";
   const isStarterPrompt = settings.starterPrompt === true;
@@ -3244,6 +3296,15 @@ export async function processChatMessage(
   const effectiveProvider = settings.preferredProvider;
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
+  pushBackendEvent(
+    "route",
+    "POST /api/chat accepted",
+    `mode=${mode}; incognito=${incognitoForTurn ? "yes" : "no"}; conversation=${
+      conversationId ?? "new"
+    }; retrieval=${retrievalMode}; memory=${skipPersonalFacts ? "skipped" : "enabled"}; summaries=${
+      skipSummarization ? "skipped" : "enabled"
+    }`
+  );
   // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
   // UI surfaces can still choose to lock Chat mode by omitting that field.
   const activeBotId = settings.botId;
@@ -3285,6 +3346,11 @@ export async function processChatMessage(
       askQuestionMode,
       imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
     });
+    pushBackendEvent(
+      "context",
+      "Prepared private chat prompt",
+      `${describePromptMessages(promptMessages)}; ephemeralHistory=${history.length}; askQuestion=${askQuestionMode}`
+    );
 
     const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
       resolvePrimaryChatProviderForPossibleImageToolTurn({
@@ -3296,6 +3362,14 @@ export async function processChatMessage(
         prismImageToolLlmModel: settings.prismImageToolLlmModel,
         recentMessages: history,
       });
+    pushBackendEvent(
+      "model",
+      "Calling chat model",
+      `provider=${primaryProvider.name}; model=${describeRequestedModel(
+        primaryProvider,
+        primaryBotOverrides
+      )}; imageToolRoute=${primaryProvider === provider ? "normal" : "rerouted"}`
+    );
 
     const {
       assistantReplyRaw,
@@ -3309,6 +3383,11 @@ export async function processChatMessage(
       secondaryOllamaHost: settings.secondaryOllamaHost,
       lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
     });
+    pushBackendEvent(
+      "model",
+      "Model response received",
+      `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}`
+    );
     if (
       shouldSuppressAssistantReply(assistantReplyRaw) &&
       !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
@@ -3362,6 +3441,9 @@ export async function processChatMessage(
     let incognitoImageSlot: "acquired" | "busy" | "none" = sendImgPromptInc ? "busy" : "none";
     let incognitoImageJobId: string | undefined;
     if (sendImgPromptInc) {
+      const chatToolRequestedSize = inferChatToolRequestedImageSize(
+        `${message}\n${sendImgPromptInc}`
+      );
       const acq = await tryAcquireImageSlot({
         userId,
         conversationId: conversationId ?? null,
@@ -3371,6 +3453,7 @@ export async function processChatMessage(
         captionPrompt: sendImgPromptInc,
         userMessage: message,
         source: "chat_tool",
+        requestedSize: chatToolRequestedSize,
       });
       if (!acq.ok) {
         sendImgPromptInc = undefined;
@@ -3401,6 +3484,11 @@ export async function processChatMessage(
         incognitoImageSlot = "acquired";
         incognitoImageJobId = acq.job.id;
       }
+      pushBackendEvent(
+        "tool",
+        "Processed sendGeneratedImage tool request",
+        `slot=${incognitoImageSlot}; job=${incognitoImageJobId ?? "none"}`
+      );
     }
     const incognitoToolCallEvents = buildAssistantToolCallEvents({
       rawReply: assistantReplyRaw,
@@ -3493,6 +3581,11 @@ export async function processChatMessage(
             assistantCreatedAt
           );
         })();
+    pushBackendEvent(
+      "route",
+      "POST /api/chat completed",
+      `conversation=${conversationIncognito.id}; messages=${nextMessages.length}; provider=${providerNameUsed}; model=${modelUsed}`
+    );
 
     return {
       conversation: conversationIncognito,
@@ -3502,6 +3595,7 @@ export async function processChatMessage(
       ...(incognitoToolCallEvents.length > 0
         ? { toolCalls: incognitoToolCallEvents }
         : {}),
+      backendEvents,
       ...(conversationStartersIncognito
         ? { conversationStarters: conversationStartersIncognito }
         : {}),
@@ -3618,6 +3712,11 @@ export async function processChatMessage(
     threadSummary = pipelineResult.threadSummary;
     memoryLines = pipelineResult.memoryLines;
   }
+  pushBackendEvent(
+    "context",
+    "Loaded model context",
+    `history=${history.length}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}`
+  );
 
   const existingSessionOpinion = readSessionOpinion(
     db,
@@ -3670,6 +3769,7 @@ export async function processChatMessage(
     askQuestionMode: memoryClarification ? "explicit" : askQuestionMode,
     imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
   });
+  pushBackendEvent("context", "Prepared persisted chat prompt", describePromptMessages(promptMessages));
 
   let userMessageId: string | null = null;
   if (!isStarterPrompt) {
@@ -3689,6 +3789,14 @@ export async function processChatMessage(
       prismImageToolLlmModel: settings.prismImageToolLlmModel,
       recentMessages: history,
     });
+  pushBackendEvent(
+    "model",
+    "Calling chat model",
+    `provider=${primaryProvider.name}; model=${describeRequestedModel(
+      primaryProvider,
+      primaryBotOverrides
+    )}; imageToolRoute=${primaryProvider === provider ? "normal" : "rerouted"}`
+  );
 
   const {
     assistantReplyRaw,
@@ -3702,6 +3810,11 @@ export async function processChatMessage(
     secondaryOllamaHost: settings.secondaryOllamaHost,
     lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
   });
+  pushBackendEvent(
+    "model",
+    "Model response received",
+    `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}`
+  );
   if (
     shouldSuppressAssistantReply(assistantReplyRaw) &&
     !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
@@ -3808,6 +3921,11 @@ export async function processChatMessage(
       persistedImageSlot = "acquired";
       persistedImageJobId = acq.job.id;
     }
+    pushBackendEvent(
+      "tool",
+      "Processed sendGeneratedImage tool request",
+      `slot=${persistedImageSlot}; job=${persistedImageJobId ?? "none"}`
+    );
   }
   const persistedToolCallEvents = buildAssistantToolCallEvents({
     rawReply: assistantReplyRaw,
@@ -3995,127 +4113,184 @@ export async function processChatMessage(
   // Cross-thread facts: auto-memory still captures normal personal facts,
   // while explicit conversational cues ("save that globally", "forget X")
   // are honored even when the global auto-memory toggle is off.
+  // Bot-authored judgment memories are treated as inferred bot-scoped memories
+  // and only run when auto-memory is enabled.
   let memoryLearned: ProcessChatMessageResult["memoryLearned"];
-  const shouldProcessExplicitMemory =
-    memoryIntent !== null &&
+  const shouldProcessExplicitMemory = memoryIntent !== null &&
     (memoryIntent.kind !== "create" || memoryIntent.scope === "global" || memoryIntent.explicit);
-  if (
-    !skipPersonalFacts &&
-    !isStarterPrompt &&
-    memoryIntent &&
-    (settings.autoMemory || shouldProcessExplicitMemory)
-  ) {
+  if (!skipPersonalFacts && !isStarterPrompt) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
     const retractedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["retracted"] = [];
     const rejectedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["rejected"] = [];
-    const cuePhrases =
-      memoryIntent.kind === "retract" || memoryIntent.kind === "correct"
-        ? memoryIntent.cuePhrases
-        : [];
-    for (const cuePhrase of cuePhrases) {
-      const target = longTermRetractionTargets.has(cuePhrase)
-        ? longTermRetractionTargets.get(cuePhrase)
-        : await findMemoryByCue(
-            db,
-            userId,
-            activeConversationId,
-            activeMemoryBotId,
-            cuePhrase,
-            userKey
-          );
-      const shouldDeleteLongTerm = Boolean(
-        target &&
-        isLongTermMemory(target) &&
-        target.conversationId === activeConversationId
-      );
-      const shouldDemoteLongTerm = Boolean(
-        target &&
-        isLongTermMemory(target) &&
-        !shouldDeleteLongTerm &&
-        messageAllowsLongTermDemotion(message)
-      );
-      const changed = target
-        ? shouldDeleteLongTerm
-          ? deleteMemoryById(db, userId, target.id, { allowLongTerm: true })
-          : shouldDemoteLongTerm
-          ? demoteMemoryToShortTerm(db, userId, target.id)
-          : deleteMemoryById(db, userId, target.id)
-        : false;
-      if (target && changed) {
-        retractedMemories.push({
-          id: target.id,
-          text: target.text,
-          botId: target.botId ?? null,
-          conversationId: target.conversationId,
-          confidence: shouldDemoteLongTerm ? 0.34 : target.confidence,
-          category: target.category,
-          tier: shouldDemoteLongTerm ? "short_term" : target.tier,
-          source: target.source,
-          certainty: target.certainty,
-          durability: target.durability,
-          sourceMessageIds: target.sourceMessageIds,
+    if (memoryIntent && (settings.autoMemory || shouldProcessExplicitMemory)) {
+      const cuePhrases =
+        memoryIntent.kind === "retract" || memoryIntent.kind === "correct"
+          ? memoryIntent.cuePhrases
+          : [];
+      for (const cuePhrase of cuePhrases) {
+        const target = longTermRetractionTargets.has(cuePhrase)
+          ? longTermRetractionTargets.get(cuePhrase)
+          : await findMemoryByCue(
+              db,
+              userId,
+              activeConversationId,
+              activeMemoryBotId,
+              cuePhrase,
+              userKey
+            );
+        const shouldDeleteLongTerm = Boolean(
+          target &&
+          isLongTermMemory(target) &&
+          target.conversationId === activeConversationId
+        );
+        const shouldDemoteLongTerm = Boolean(
+          target &&
+          isLongTermMemory(target) &&
+          !shouldDeleteLongTerm &&
+          messageAllowsLongTermDemotion(message)
+        );
+        const changed = target
+          ? shouldDeleteLongTerm
+            ? deleteMemoryById(db, userId, target.id, { allowLongTerm: true })
+            : shouldDemoteLongTerm
+              ? demoteMemoryToShortTerm(db, userId, target.id)
+              : deleteMemoryById(db, userId, target.id)
+          : false;
+        if (target && changed) {
+          retractedMemories.push({
+            id: target.id,
+            text: target.text,
+            botId: target.botId ?? null,
+            conversationId: target.conversationId,
+            confidence: shouldDemoteLongTerm ? 0.34 : target.confidence,
+            category: target.category,
+            tier: shouldDemoteLongTerm ? "short_term" : target.tier,
+            source: target.source,
+            certainty: target.certainty,
+            durability: target.durability,
+            sourceMessageIds: target.sourceMessageIds,
+          });
+        }
+      }
+
+      const candidates =
+        memoryIntent.kind === "correct"
+          ? memoryIntent.newCandidates
+          : memoryIntent.kind === "create"
+            ? memoryIntent.candidates
+            : [];
+      if (candidates.length > 0) {
+        const memoryIntentScope =
+          memoryIntent.kind === "retract" ? "bot" : memoryIntent.scope;
+        const memoryBotId =
+          memoryIntentScope === "global"
+            ? null
+            : activeMemoryBotId;
+        const validation = await validateMemoryCandidates(auxiliaryProvider, {
+          source: "direct",
+          scope: memoryIntentScope,
+          rawContext: message,
+          candidates,
+          userDisplayName: settings.userDisplayName,
         });
+        rejectedMemories.push(...validation.rejected);
+        const validatedByText = new Map(
+          validation.candidates.map((candidate) => [candidate.text, candidate])
+        );
+        const storedMemories = await persistMemoryCandidates(
+          db,
+          userId,
+          activeConversationId,
+          memoryBotId,
+          validation.candidates,
+          userKey,
+          { sourceMessageIds: userMessageId ? [userMessageId] : [] }
+        );
+        createdMemories.push(
+          ...storedMemories.map((memory) => {
+            const validationMatch = validatedByText.get(memory.text);
+            return {
+              id: memory.id,
+              text: memory.text,
+              botId: memory.botId ?? null,
+              conversationId: memory.conversationId,
+              confidence: memory.confidence,
+              category: memory.category,
+              tier: memory.tier,
+              source: memory.source,
+              certainty: memory.certainty,
+              durability: memory.durability,
+              sourceMessageIds: memory.sourceMessageIds,
+              ...(validationMatch
+                ? {
+                    validationStatus: validationMatch.validationStatus,
+                    originalText: validationMatch.originalText,
+                    reasonCodes: validationMatch.reasonCodes,
+                  }
+                : {}),
+            };
+          })
+        );
       }
     }
 
-    const candidates =
-      memoryIntent.kind === "correct"
-        ? memoryIntent.newCandidates
-        : memoryIntent.kind === "create"
-          ? memoryIntent.candidates
-          : [];
-    if (candidates.length > 0) {
-      const memoryIntentScope =
-        memoryIntent.kind === "retract" ? "bot" : memoryIntent.scope;
-      const memoryBotId =
-        memoryIntentScope === "global"
-          ? null
-          : activeMemoryBotId;
-      const validation = await validateMemoryCandidates(auxiliaryProvider, {
-        source: "direct",
-        scope: memoryIntentScope,
-        rawContext: message,
-        candidates,
-        userDisplayName: settings.userDisplayName,
+    if (settings.autoMemory && activeMemoryBotId) {
+      const judgmentCandidates = extractBotJudgmentMemoryCandidates({
+        assistantMessage: assistantDisplay,
+        botName: settings.starterPromptLabel ?? null,
       });
-      rejectedMemories.push(...validation.rejected);
-      const validatedByText = new Map(
-        validation.candidates.map((candidate) => [candidate.text, candidate])
-      );
-      const storedMemories = await persistMemoryCandidates(
-        db,
-        userId,
-        activeConversationId,
-        memoryBotId,
-        validation.candidates,
-        userKey,
-        { sourceMessageIds: userMessageId ? [userMessageId] : [] }
-      );
-      createdMemories.push(
-        ...storedMemories.map((memory) => {
-          const validationMatch = validatedByText.get(memory.text);
-          return {
-            id: memory.id,
-            text: memory.text,
-            botId: memory.botId ?? null,
-            conversationId: memory.conversationId,
-            confidence: memory.confidence,
-            category: memory.category,
-            tier: memory.tier,
-            source: memory.source,
-            certainty: memory.certainty,
-            durability: memory.durability,
-            sourceMessageIds: memory.sourceMessageIds,
-            ...(validationMatch
-              ? {
-                  validationStatus: validationMatch.validationStatus,
-                  originalText: validationMatch.originalText,
-                  reasonCodes: validationMatch.reasonCodes,
-                }
-              : {}),
-          };
-        })
-      );
+      if (judgmentCandidates.length > 0) {
+        const validation = await validateMemoryCandidates(auxiliaryProvider, {
+          source: "inferred",
+          scope: "bot",
+          rawContext: assistantDisplay,
+          candidates: judgmentCandidates,
+          userDisplayName: settings.userDisplayName,
+        });
+        rejectedMemories.push(...validation.rejected);
+        const validatedByText = new Map(
+          validation.candidates.map((candidate) => [candidate.text, candidate])
+        );
+        const storedJudgments = await persistMemoryCandidates(
+          db,
+          userId,
+          activeConversationId,
+          activeMemoryBotId,
+          validation.candidates,
+          userKey,
+          {
+            source: "inferred",
+            category: "general",
+            tier: "short_term",
+            sourceMessageIds: assistantProseMessageId ? [assistantProseMessageId] : [],
+          }
+        );
+        createdMemories.push(
+          ...storedJudgments.map((memory) => {
+            const validationMatch = validatedByText.get(memory.text);
+            return {
+              id: memory.id,
+              text: memory.text,
+              botId: memory.botId ?? null,
+              conversationId: memory.conversationId,
+              confidence: memory.confidence,
+              category: memory.category,
+              tier: memory.tier,
+              source: memory.source,
+              certainty: memory.certainty,
+              durability: memory.durability,
+              sourceMessageIds: memory.sourceMessageIds,
+              ...(validationMatch
+                ? {
+                    validationStatus: validationMatch.validationStatus,
+                    originalText: validationMatch.originalText,
+                    reasonCodes: validationMatch.reasonCodes,
+                  }
+                : {}),
+            };
+          })
+        );
+      }
     }
 
     if (
@@ -4134,6 +4309,11 @@ export async function processChatMessage(
         ),
       };
     }
+    pushBackendEvent(
+      "memory",
+      "Memory pipeline checked",
+      `intent=${memoryIntent?.kind ?? "none"}; created=${createdMemories.length}; retracted=${retractedMemories.length}; rejected=${rejectedMemories.length}`
+    );
   }
   if (!skipPersonalFacts && !isStarterPrompt) {
     await ensureAboutYouMemory({
@@ -4173,6 +4353,11 @@ export async function processChatMessage(
         userKey
       ).catch(() => {});
     }
+    pushBackendEvent(
+      "summary",
+      "Queued thread compaction",
+      `reason=milestone; mode=${mode}; totalMessages=${totalMessages}`
+    );
   }
   if (shouldCompactAtSessionEnd) {
     const compacted = await summarizeThreadCompact(
@@ -4199,6 +4384,11 @@ export async function processChatMessage(
         { reason: "mode_exit", userKey }
       );
     }
+    pushBackendEvent(
+      "summary",
+      "Ran thread compaction",
+      `reason=mode_exit; mode=${mode}; triggered=${compacted.triggered ? "yes" : "no"}`
+    );
   }
 
   // Row payload mirrors the GET endpoints' shape — last_bot_* plus
@@ -4281,6 +4471,11 @@ export async function processChatMessage(
       conversationStartersPersisted = startersPersisted;
     }
   }
+  pushBackendEvent(
+    "route",
+    "POST /api/chat completed",
+    `conversation=${conversationPersisted.id}; totalMessages=${totalMessages}; assistantMessages=${assistantMessageCount}; provider=${providerNameUsed}; model=${modelUsed}`
+  );
 
   return {
     conversation: conversationPersisted,
@@ -4296,5 +4491,6 @@ export async function processChatMessage(
     ...(persistedToolCallEvents.length > 0
       ? { toolCalls: persistedToolCallEvents }
       : {}),
+    backendEvents,
   };
 }
