@@ -7,6 +7,7 @@ import {
   ageFromIsoBirthday,
   composeBotProfileProse,
   composeAugmentedImagePrompt,
+  composeVerbatimFirstImagePrompt,
   buildImagePersonaContext,
   DEFAULT_BOT_PROFILE_FIELDS,
   listBotProfileFacts,
@@ -181,8 +182,10 @@ describe("bot profile serialization", () => {
     const profile = parseStoredBotPrompt("").fields;
 
     assert.equal(profile.facts.birthday, "");
+    assert.equal(profile.facts.birthMonthDay, "");
     assert.equal(profile.facts.birthYear, "");
     assert.equal(profile.facts.birthEra, "ad");
+    assert.equal(profile.facts.deceased, false);
     assert.equal(profile.facts.basedOnRealPersonOrCharacter, false);
     assert.deepEqual(profile.facts.customFacts, []);
   });
@@ -190,7 +193,9 @@ describe("bot profile serialization", () => {
   it("round-trips the birthday and custom facts", () => {
     const profile = parseStoredBotPrompt("").fields;
     profile.facts.birthday = "1942-10-29";
+    profile.facts.birthMonthDay = "10-29";
     profile.facts.birthYear = "1942";
+    profile.facts.deceased = true;
     profile.facts.customFacts = [
       { label: "Catchphrase", value: "Happy little trees" },
       { label: "Signature method", value: "Wet-on-wet oil painting" },
@@ -201,8 +206,10 @@ describe("bot profile serialization", () => {
 
     const stripRowIds = (facts: BotFactsProfile) => ({
       birthday: facts.birthday,
+      birthMonthDay: facts.birthMonthDay,
       birthYear: facts.birthYear,
       birthEra: facts.birthEra,
+      deceased: facts.deceased,
       customFacts: facts.customFacts.map(({ label, value }) => ({ label, value })),
     });
     assert.deepEqual(stripRowIds(parsed.facts), stripRowIds(profile.facts));
@@ -234,6 +241,17 @@ describe("bot profile serialization", () => {
 
     const rows = listBotProfileFacts(profile.facts);
     assert.equal(rows[0]?.key, "known-entity");
+    assert.equal(rows[0]?.value, "Yes");
+  });
+
+  it("lists deceased status as a permanent fact", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.deceased = true;
+
+    const rows = listBotProfileFacts(profile.facts);
+
+    assert.equal(rows[0]?.key, "deceased");
+    assert.equal(rows[0]?.label, "Deceased");
     assert.equal(rows[0]?.value, "Yes");
   });
 
@@ -281,6 +299,7 @@ describe("bot profile serialization", () => {
     const profile = parseStoredBotPrompt("").fields;
     profile.facts.birthEra = "bc";
     profile.facts.birthYear = "256";
+    profile.facts.birthMonthDay = "05-11";
     profile.facts.birthday = "1942-10-29";
 
     const stored = serializeStoredBotPrompt(profile, "Hannibal");
@@ -289,10 +308,37 @@ describe("bot profile serialization", () => {
     const prose = composeBotProfileProse(parsed, "Hannibal");
 
     assert.equal(parsed.facts.birthday, "");
-    assert.equal(rows[0]?.key, "birth-year");
-    assert.equal(rows[0]?.value, "256 BC");
+    assert.equal(parsed.facts.birthMonthDay, "");
+    const birthYearRow = rows.find((row) => row.key === "birth-year");
+    assert.equal(birthYearRow?.value, "256 BC");
     assert.match(prose, /Birth year: 256 BC/);
     assert.doesNotMatch(prose, /Birthday:/);
+  });
+
+  it("forces BC birth profiles to be deceased", () => {
+    const stored = [
+      "Old prose",
+      BOT_PROFILE_META_START,
+      JSON.stringify({
+        v: 2,
+        purpose: { statement: "", legacyNotes: "" },
+        core: {},
+        identity: {},
+        worldview: {},
+        appearance: {},
+        facts: {
+          birthEra: "bc",
+          birthYear: "256",
+          deceased: false,
+        },
+      }),
+      BOT_PROFILE_META_END,
+    ].join("\n");
+
+    const parsed = parseStoredBotPrompt(stored).fields;
+
+    assert.equal(parsed.facts.birthEra, "bc");
+    assert.equal(parsed.facts.deceased, true);
   });
 
   it("supports AD year-only birth facts when a full date is unknown", () => {
@@ -306,6 +352,18 @@ describe("bot profile serialization", () => {
     assert.equal(rows[0]?.value, "256 AD");
   });
 
+  it("supports month/day birthdays with a separate AD year", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.facts.birthEra = "ad";
+    profile.facts.birthMonthDay = "05-11";
+    profile.facts.birthYear = "1904";
+
+    const rows = listBotProfileFacts(profile.facts);
+
+    assert.equal(rows[0]?.key, "birthday");
+    assert.equal(rows[0]?.value, "May 11, 1904");
+  });
+
   it("random birthdays are always ISO YYYY-MM-DD when populated", () => {
     let isoCount = 0;
     let populatedCount = 0;
@@ -317,6 +375,7 @@ describe("bot profile serialization", () => {
       populatedCount += 1;
       if (/^\d{4}-\d{2}-\d{2}$/.test(value)) isoCount += 1;
       assert.equal(profile.facts.birthEra, "ad");
+      assert.equal(profile.facts.birthMonthDay, value.slice(5));
       assert.equal(profile.facts.birthYear, String(Number(value.slice(0, 4))));
     }
     assert.ok(populatedCount > 0, "expected at least one populated birthday");
@@ -370,6 +429,22 @@ describe("bot profile serialization", () => {
         hits <= 1,
         `Expected at most 1 surreal term in a profile, got ${hits}: ${text}`
       );
+    }
+  });
+
+  it("keeps randomized purpose statements grounded and human-readable", () => {
+    const oldArchetypeStyle =
+      /\b(?:witch|lighthouse|oracle|spellcaster|cartographer|gremlin|cosmic|moonlit|ritual engineer|mental static|noisy intentions|bureaucracy|dream-clerk|star-chart|weather-reader)\b/i;
+    const groundedHumanCue =
+      /\b(?:person|lover|homebody|friend|optimist|regular|type|storyteller|learner|night owl|overthinker|contrarian|maker|romantic|dreamer)\b/i;
+    const trials = 96;
+
+    for (let i = 0; i < trials; i += 1) {
+      const profile = randomBotProfile("Random");
+      const purpose = profile.purpose.statement;
+
+      assert.doesNotMatch(purpose, oldArchetypeStyle);
+      assert.match(purpose, groundedHumanCue);
     }
   });
 
@@ -508,6 +583,34 @@ describe("image persona context", () => {
     });
     assert.ok(full.includes("Scene request: reading under a tree"));
     assert.ok(full.startsWith("Character:"));
+  });
+
+  it("composeVerbatimFirstImagePrompt keeps user text first in strict mode", () => {
+    const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+    fields.appearance.description = "round glasses";
+    const stored = serializeStoredBotPrompt(fields, "Mo");
+    const full = composeVerbatimFirstImagePrompt({
+      userPrompt: "reading under a tree",
+      botName: "Mo",
+      systemPrompt: stored,
+      mode: "strict_verbatim",
+    });
+    assert.ok(full.startsWith("reading under a tree"));
+    assert.match(full, /Optional bot style hint:/);
+  });
+
+  it("composeVerbatimFirstImagePrompt preserves user anchor in chat mode", () => {
+    const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+    fields.identity.role = "cartographer";
+    const stored = serializeStoredBotPrompt(fields, "Mo");
+    const full = composeVerbatimFirstImagePrompt({
+      userPrompt: "show me the city at dusk",
+      botName: "Mo",
+      systemPrompt: stored,
+      mode: "chat_balanced",
+    });
+    assert.match(full, /^Primary user request \(preserve\): show me the city at dusk/);
+    assert.match(full, /Optional persona guidance/);
   });
 
   it("prefers canonical likeness when facts flag says this is a known person/character", () => {

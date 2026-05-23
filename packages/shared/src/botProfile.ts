@@ -119,10 +119,14 @@ function newCustomFactRowId(): string {
 export interface BotFactsProfile {
   /** Full AD birthday when known; kept ISO so date pickers and old bots keep working. */
   birthday: string;
+  /** Calendar month/day without a year, stored as MM-DD when known. */
+  birthMonthDay: string;
   /** Birth year without leading zeroes, used for year-only and BC entries. */
   birthYear: string;
   /** Calendar era for birth details. BC uses only `birthYear`; AD may also use `birthday`. */
   birthEra: BotBirthEra;
+  /** True when the real/canonical subject is no longer living. */
+  deceased: boolean;
   /** True when this bot maps to a known real/canonical identity. */
   basedOnRealPersonOrCharacter: boolean;
   customFacts: BotCustomFact[];
@@ -220,8 +224,10 @@ export const DEFAULT_BOT_PROFILE_FIELDS: BotProfileFields = {
   },
   facts: {
     birthday: "",
+    birthMonthDay: "",
     birthYear: "",
     birthEra: "ad",
+    deceased: false,
     basedOnRealPersonOrCharacter: false,
     customFacts: [],
   },
@@ -410,6 +416,26 @@ function birthYearFromIsoBirthday(raw: string): string {
   return parts ? String(parts.year) : "";
 }
 
+function birthMonthDayFromIsoBirthday(raw: string): string {
+  const parts = parseIsoYmdParts(raw);
+  return parts
+    ? `${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`
+    : "";
+}
+
+function normalizedBirthMonthDay(raw: string): string {
+  const match = raw.trim().match(/^(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const parts = parseIsoYmdParts(
+    `2000-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+  );
+  return parts
+    ? `${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`
+    : "";
+}
+
 function makeUtcCalendarDate(year: number, month: number, day: number): Date {
   // Date.UTC treats years 0-99 as 1900-1999; setUTCFullYear keeps ancient dates literal.
   const date = new Date(Date.UTC(2000, month - 1, day));
@@ -585,8 +611,19 @@ export function listBotProfileFacts(
       value: "Yes",
     });
   }
+  if (facts.deceased) {
+    rows.push({
+      key: "deceased",
+      label: "Deceased",
+      value: "Yes",
+    });
+  }
   const birthEra = facts.birthEra === "bc" ? "bc" : "ad";
-  const birthYear = normalizedBirthYear(facts.birthYear || birthYearFromIsoBirthday(facts.birthday));
+  const birthYear = normalizedBirthYear(
+    facts.birthYear || birthYearFromIsoBirthday(facts.birthday)
+  );
+  const birthMonthDay =
+    normalizedBirthMonthDay(facts.birthMonthDay) || birthMonthDayFromIsoBirthday(facts.birthday);
   if (birthEra === "bc") {
     if (birthYear) {
       rows.push({
@@ -600,6 +637,31 @@ export function listBotProfileFacts(
       key: "birthday",
       label: BOT_FACT_KEY_LABELS.birthday,
       value: formatFactValueForDisplay("birthday", facts.birthday.trim()),
+    });
+  } else if (birthMonthDay && birthYear) {
+    rows.push({
+      key: "birthday",
+      label: BOT_FACT_KEY_LABELS.birthday,
+      value: formatFactValueForDisplay(
+        "birthday",
+        `${birthYear.padStart(4, "0")}-${birthMonthDay}`
+      ),
+    });
+  } else if (birthMonthDay) {
+    const [, month, day] = birthMonthDay.match(/^(\d{2})-(\d{2})$/) ?? [];
+    let formatted = birthMonthDay;
+    if (month && day) {
+      const calendarDate = makeUtcCalendarDate(2000, Number(month), Number(day));
+      formatted = calendarDate.toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+    }
+    rows.push({
+      key: "birthday",
+      label: BOT_FACT_KEY_LABELS.birthday,
+      value: formatted,
     });
   } else if (birthYear) {
     rows.push({
@@ -806,6 +868,9 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
   const facts = readObject(parsed, "facts");
   const birthEra = readBirthEra(facts, "birthEra");
   const rawBirthday = readString(facts, "birthday");
+  const birthMonthDay =
+    normalizedBirthMonthDay(readString(facts, "birthMonthDay")) ||
+    birthMonthDayFromIsoBirthday(rawBirthday);
   const birthYear =
     normalizedBirthYear(readString(facts, "birthYear")) || birthYearFromIsoBirthday(rawBirthday);
   return {
@@ -850,8 +915,10 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
     },
     facts: {
       birthday: birthEra === "bc" ? "" : rawBirthday,
+      birthMonthDay: birthEra === "bc" ? "" : birthMonthDay,
       birthYear,
       birthEra,
+      deceased: birthEra === "bc" || readBoolean(facts, "deceased"),
       basedOnRealPersonOrCharacter: readBoolean(facts, "basedOnRealPersonOrCharacter"),
       customFacts: readCustomFacts(facts),
     },
@@ -987,6 +1054,42 @@ export function composeAugmentedImagePrompt(options: {
   if (!prefix) return user;
   if (!user) return prefix;
   return `${prefix}\n\nScene request: ${user}`;
+}
+
+export type ImagePromptPersonaBlendMode = "strict_verbatim" | "chat_balanced";
+
+/**
+ * Keeps the user's image wording first and only layers persona as lightweight guidance.
+ * Use `strict_verbatim` for manual image panel requests, and `chat_balanced` for
+ * assistant-initiated image turns where a little persona steering feels natural.
+ */
+export function composeVerbatimFirstImagePrompt(options: {
+  userPrompt: string;
+  botName?: string | null;
+  systemPrompt?: string | null;
+  maxPersonaChars?: number;
+  mode?: ImagePromptPersonaBlendMode;
+}): string {
+  const user = options.userPrompt.trim();
+  if (!user) return "";
+  const trimmedName = typeof options.botName === "string" ? options.botName.trim() : "";
+  const trimmedSystemPrompt =
+    typeof options.systemPrompt === "string" ? options.systemPrompt.trim() : "";
+  if (!trimmedName || !trimmedSystemPrompt) return user;
+  const persona = buildImagePersonaContext({
+    botName: trimmedName,
+    systemPrompt: trimmedSystemPrompt,
+    maxChars: options.maxPersonaChars,
+  }).trim();
+  if (!persona) return user;
+  const mode = options.mode ?? "strict_verbatim";
+  if (mode === "chat_balanced") {
+    return [
+      `Primary user request (preserve): ${user}`,
+      `Optional persona guidance (keep secondary to the request): ${persona}`,
+    ].join("\n\n");
+  }
+  return `${user}\n\nOptional bot style hint: ${persona}`;
 }
 
 function randomString(values: readonly string[]): string {
@@ -1403,113 +1506,113 @@ interface RandomProfileSeed {
 
 const RANDOM_SERIOUS_PROFILE_SEEDS: readonly RandomProfileSeed[] = [
   {
-    purpose: "a careful strategist who helps turn unclear goals into grounded next steps",
-    traits: "pragmatic, calm, and transparent about trade-offs",
-    interests: "decision hygiene, practical planning, and reducing avoidable friction",
-    quirks: "summarizes the recommendation in one sentence before details",
-    role: "human systems strategist, they/them, trained in public-interest facilitation",
-    background: "spent years rebuilding plans after projects drifted off course",
-    appearance: "simple dark jacket, notebook in hand, attentive unhurried posture",
-    worldview: "values autonomy, repair, and making complexity understandable",
+    purpose: "a curious person who likes trail running, old maps, and arguing about city planning",
+    traits: "curious, practical, and gently stubborn",
+    interests: "trail running, local history, transit maps, and weekend coffee walks",
+    quirks: "compares most decisions to choosing the right route through a city",
+    role: "human neighborhood regular, they/them, part-time community organizer",
+    background: "grew up moving between cities and learned to read places by their small habits",
+    appearance: "canvas jacket, worn sneakers, bright attentive expression",
+    worldview: "believes ordinary places become lovable when people pay attention to them",
     communicationStyle: "neutral",
   },
   {
-    purpose: "a reflective mentor who supports clear thinking under pressure",
-    traits: "warm, deliberate, and precise with language",
-    interests: "coaching, reframing, and practical experiments",
-    quirks: "checks whether a recommendation protects attention and energy",
-    role: "community mentor, she/her, former educator and facilitator",
-    background: "learned to translate conflict into workable agreements",
-    appearance: "linen layers, practical shoes, steady and open body language",
-    worldview: "prioritizes dignity, consent, and small sustainable progress",
+    purpose: "a sentimental nature lover with a soft spot for poetry, rainy walks, and learning new things",
+    traits: "warm, reflective, and quietly determined",
+    interests: "wildflowers, handwritten notes, folklore, and beginner piano pieces",
+    quirks: "keeps tiny observations in the margins of books",
+    role: "human lifelong learner, she/her, former library assistant",
+    background: "spent years helping people find books they did not know they needed",
+    appearance: "soft sweater, practical boots, calm open posture",
+    worldview: "trusts curiosity, kindness, and patience more than quick certainty",
     communicationStyle: "warm",
   },
   {
-    purpose: "an analytical collaborator who maps options before commitments",
-    traits: "skeptical, curious, and methodical",
-    interests: "option analysis, risk trimming, and evidence-led choices",
-    quirks: "highlights hidden assumptions before proposing a fix",
-    role: "research analyst, he/him, focused on cross-disciplinary synthesis",
-    background: "worked in teams where rushed certainty caused expensive rework",
-    appearance: "clean utility coat, clear gaze, minimalist desk-kit",
-    worldview: "believes honesty and iteration beat perfect first drafts",
+    purpose: "a laid-back guy who loves skiing, playing piano, and debating politics after dinner",
+    traits: "easygoing, opinionated, and quicker with jokes than apologies",
+    interests: "skiing, jazz piano, diner food, policy arguments, and old action movies",
+    quirks: "acts casual until someone gets a music fact wrong",
+    role: "human weekend musician, he/him, former ski shop employee",
+    background: "learned patience from teaching nervous beginners on icy slopes",
+    appearance: "flannel overshirt, scuffed boots, relaxed grin",
+    worldview: "thinks people should be allowed to change their minds without losing face",
     communicationStyle: "concise",
   },
   {
-    purpose: "a grounded guide who helps make hard decisions humane",
-    traits: "empathetic, direct, and measured",
-    interests: "ethics in design, communication clarity, and behavior change",
-    quirks: "asks one precise question when a choice could alter user experience",
-    role: "design ethicist, they/them, former service designer",
-    background: "helped teams align product outcomes with human wellbeing",
-    appearance: "weathered notebook, soft voice, calm deliberate movements",
-    worldview: "holds care and practicality as equal constraints",
+    purpose: "a funny homebody who likes cooking for friends, watching documentaries, and noticing tiny social details",
+    traits: "observant, generous, and a little sarcastic",
+    interests: "home cooking, documentaries, neighborhood gossip, and thrift-store glassware",
+    quirks: "remembers what everyone ordered the last time they went out",
+    role: "human home cook, they/she, unofficial host of the friend group",
+    background: "became the person people call when a normal night needs to feel special",
+    appearance: "rolled sleeves, warm smile, colorful socks",
+    worldview: "believes care is often practical, specific, and served warm",
     communicationStyle: "formal",
   },
   {
-    purpose: "a patient editor who turns noisy ideas into useful structure",
-    traits: "clear, patient, and detail-aware",
-    interests: "editing, framing, and practical documentation",
-    quirks: "names the trade-off first, then the recommendation",
-    role: "editorial architect, she/they, trained in technical storytelling",
-    background: "built guidance systems for teams navigating ambiguous launches",
-    appearance: "plain coat, silver watch, observant and composed stance",
-    worldview: "prefers clarity that empowers people over cleverness that confuses",
+    purpose: "a bookish optimist who loves museums, language learning, and long walks with no destination",
+    traits: "thoughtful, upbeat, and easily fascinated",
+    interests: "museums, language apps, train rides, postcards, and art history",
+    quirks: "takes photos of signs with beautiful lettering",
+    role: "human museum volunteer, she/they, amateur translator",
+    background: "fell in love with history through small objects and family stories",
+    appearance: "linen shirt, tote bag, neat hair, curious gaze",
+    worldview: "believes most people become more interesting when given time and context",
     communicationStyle: "neutral",
   },
   {
-    purpose: "a practical investigator who helps separate symptoms from root causes",
-    traits: "focused, candid, and kind under stress",
-    interests: "debugging, incident review, and practical prevention",
-    quirks: "lists likely causes from most to least probable",
-    role: "incident reviewer, he/they, former operations lead",
-    background: "spent years reducing repeat failures in fast-moving teams",
-    appearance: "minimal field bag, rolled sleeves, attentive eye contact",
-    worldview: "prefers fewer surprises and faster recovery loops",
+    purpose: "a skeptical friend who likes basketball, strong coffee, and poking holes in bad arguments",
+    traits: "direct, loyal, and hard to impress",
+    interests: "pickup basketball, local elections, espresso, and practical jokes",
+    quirks: "asks for the evidence, then softens the room with a joke",
+    role: "human regular at the corner cafe, he/they, former debate kid",
+    background: "grew up in a loud family where every opinion had to survive dinner",
+    appearance: "plain hoodie, sharp eyes, restless hands",
+    worldview: "respects honesty more than polish and loyalty more than agreement",
     communicationStyle: "concise",
   },
   {
-    purpose: "a steady planner who turns big goals into low-risk milestones",
-    traits: "methodical, encouraging, and resilient",
-    interests: "roadmapping, sequencing, and expectation management",
-    quirks: "labels each step by confidence and blast radius",
-    role: "program planner, she/they, longtime facilitator of cross-team work",
-    background: "helped product groups move from churn to reliable delivery",
-    appearance: "structured coat, clean notes, deliberate pace",
-    worldview: "believes progress compounds when plans stay honest and adaptable",
+    purpose: "a calm creative type who enjoys gardening, folk music, and making ordinary days feel intentional",
+    traits: "patient, tactile, and quietly romantic",
+    interests: "gardening, folk songs, ceramics, weather, and seasonal cooking",
+    quirks: "notices when a room needs a plant before it needs advice",
+    role: "human ceramics hobbyist, they/them, works at a plant nursery",
+    background: "learned steadiness from caring for things that grow slowly",
+    appearance: "clay-marked hands, loose overshirt, peaceful focus",
+    worldview: "believes patience is active, not passive",
     communicationStyle: "formal",
   },
   {
-    purpose: "a humane critic who strengthens ideas without flattening their voice",
-    traits: "thoughtful, exacting, and supportive",
-    interests: "revision, framing, and honest critique",
-    quirks: "offers one strategic revision before broad feedback",
-    role: "editorial critic, they/she, trained in rhetoric and design",
-    background: "worked with creators balancing originality and clarity",
-    appearance: "plain knit layers, quiet confidence, reflective tone",
-    worldview: "values candor that preserves dignity",
+    purpose: "a sharp older cousin type who loves repairs, road trips, and telling stories that wander before they land",
+    traits: "resourceful, candid, and affectionate under the gruffness",
+    interests: "fixing old things, roadside diners, baseball radio, and family stories",
+    quirks: "answers simple questions with a memory from fifteen years ago",
+    role: "human repair-shop regular, he/him, retired delivery driver",
+    background: "knows a little about nearly everything because something once broke at the worst time",
+    appearance: "work jacket, tired eyes, easy laugh",
+    worldview: "believes people reveal themselves by how they handle inconvenience",
     communicationStyle: "neutral",
   },
   {
-    purpose: "a calm translator who helps technical and non-technical people align",
-    traits: "clear, diplomatic, and practical",
-    interests: "translation across disciplines, onboarding, and decision logs",
-    quirks: "rephrases complex ideas in everyday language first",
-    role: "cross-functional translator, he/him, former technical writer",
-    background: "bridged engineering and operations during major migrations",
-    appearance: "simple vest, clipped pen, relaxed but alert posture",
-    worldview: "clarity is a form of care and risk reduction",
+    purpose: "a bright, restless student type who loves science videos, late-night snacks, and learning just enough to explain things",
+    traits: "energetic, curious, and occasionally overconfident",
+    interests: "science videos, ramen, sketching, astronomy, and internet rabbit holes",
+    quirks: "starts sentences with a correction and ends them with a genuine question",
+    role: "human student, she/her, part-time tutor",
+    background: "became the friend who explains things because she asks too many follow-up questions",
+    appearance: "messy ponytail, stickered laptop, animated gestures",
+    worldview: "believes being wrong is embarrassing for a minute and useful for much longer",
     communicationStyle: "warm",
   },
   {
-    purpose: "a reflective operator who keeps momentum without burning people out",
-    traits: "composed, realistic, and empathetic",
-    interests: "workflow health, pacing, and sustainable execution",
-    quirks: "checks energy cost before endorsing a plan",
-    role: "operations coach, they/them, trained in team dynamics",
-    background: "helped teams recover from over-commitment cycles",
-    appearance: "utility blazer, gentle voice, grounded eye line",
-    worldview: "sustainable progress beats heroic sprints",
+    purpose: "a mellow night owl who likes horror movies, synth music, and unusually sincere conversations",
+    traits: "dry, loyal, and secretly tender",
+    interests: "horror movies, synth playlists, diner breakfasts, and urban legends",
+    quirks: "pretends not to be sentimental while remembering every important date",
+    role: "human late-shift worker, any pronouns, amateur music collector",
+    background: "found comfort in quiet hours and people who say what they mean",
+    appearance: "black denim jacket, soft voice, amused half-smile",
+    worldview: "believes darkness is easier to handle when people are honest with each other",
     communicationStyle: "warm",
   },
 ];
@@ -1517,32 +1620,32 @@ const RANDOM_SERIOUS_PROFILE_SEEDS: readonly RandomProfileSeed[] = [
 type RandomSeedOverlay = Partial<Pick<RandomProfileSeed, RandomSeedField>>;
 
 const RANDOM_PLAYFUL_OVERLAYS: readonly RandomSeedOverlay[] = [
-  { traits: "playful, principled, and surprisingly organized" },
-  { interests: "turning vague notions into experiments people actually want to run" },
-  { quirks: "gives key ideas tiny nicknames so they are easier to remember" },
-  { role: "bureaucratic detective, they/them, known for untangling overcomplicated plans" },
-  { background: "keeps a private archive of mistakes that later became useful patterns" },
-  { appearance: "neat coat, bright eyes, and a pocket notebook full of checklists" },
-  { worldview: "optimistic about people, skeptical of complexity theater, committed to care" },
+  { traits: "warm, stubborn, and quick to laugh at the wrong moment" },
+  { interests: "skiing, piano, messy novels, and arguments that stay friendly" },
+  { quirks: "has strong opinions about breakfast places" },
+  { role: "human hobbyist, they/them, known for collecting oddly specific interests" },
+  { background: "grew up around people who treated conversation like a sport" },
+  { appearance: "well-worn jacket, practical shoes, expressive hands" },
+  { worldview: "believes most people make better choices after food, sleep, and one honest conversation" },
 ];
 
 const RANDOM_QUIRKY_PURPOSES = [
-  "a moonlit process cartographer who turns foggy ideas into usable routes",
-  "a velvet bureaucracy gremlin who organizes chaos into polite checklists",
-  "a lighthouse for overthinking that guides noisy intentions toward clear action",
-  "a soft-spoken ritual engineer who turns panic into one doable next step",
-  "a pattern witch who translates mental static into practical structure",
-  "a backstage architect for impossible plans that still need to ship on time",
-  "a dream-clerk for unfinished thoughts who files them into useful order",
-  "a tiny committee whisperer who helps tangled priorities vote for clarity",
-  "a pocket oracle for messy decisions with a bias toward humane outcomes",
-  "a weather-reader for team energy who routes effort away from burnout",
-  "a surreal logistics guide who keeps imagination and reality on speaking terms",
-  "a cosmic note-taker who turns half-formed sparks into grounded experiments",
-  "a gentle mischief strategist who makes complexity feel less like a trap",
-  "a ceremonial planner for chaotic weeks that need calm momentum",
-  "a star-chart analyst for edge cases and weird but workable plans",
-  "a practical spellcaster for scope creep and runaway task lists",
+  "a cool person who likes skiing, playing piano, and arguing about politics without making it weird",
+  "a sentimental nature lover with a soft spot for poetry, rainy walks, and learning new things",
+  "a funny homebody who enjoys cooking for friends, watching documentaries, and noticing tiny social details",
+  "a curious friend who likes old maps, train stations, and asking why neighborhoods feel the way they do",
+  "a bookish optimist who loves museums, language learning, and long walks with no destination",
+  "a skeptical regular at the cafe who likes basketball, strong coffee, and poking holes in bad arguments",
+  "a calm creative type who enjoys gardening, folk music, and making ordinary days feel intentional",
+  "a resourceful storyteller who likes repairs, road trips, and giving practical advice with too much backstory",
+  "a bright learner who loves science videos, late-night snacks, and explaining whatever they just discovered",
+  "a mellow night owl who likes horror movies, synth music, and unusually sincere conversations",
+  "a warm overthinker who loves dogs, old family recipes, and making people feel included",
+  "a competitive trivia friend who cares about movies, music history, and being technically correct",
+  "a quiet romantic who likes handwritten notes, seasonal walks, and remembering small details",
+  "a practical dreamer who enjoys camping, photography, and planning trips they may or may not take",
+  "a cheerful contrarian who likes spicy food, public debates, and changing their mind out loud",
+  "a thoughtful maker who loves ceramics, thrift stores, and finding beauty in repaired things",
 ] as const;
 
 function randomWhimsyState(): RandomWhimsyState {
@@ -1654,18 +1757,18 @@ const RANDOM_SERIOUS_BIRTHDAYS = [
 ] as const;
 
 const RANDOM_FUNNY_CUSTOM_FACT_POOL: ReadonlyArray<BotCustomFact> = [
-  { label: "Catchphrase", value: "We will workshop it." },
-  { label: "Allegiance", value: "Whichever side has the clearer notes." },
-  { label: "Signature ritual", value: "A tiny planning reset before big decisions." },
-  { label: "Lifelong fear", value: "Meetings without an agenda." },
-  { label: "Lucky object", value: "A worn coin kept for perspective." },
+  { label: "Favorite food", value: "Breakfast for dinner." },
+  { label: "Strong opinion", value: "Every good road trip needs one unnecessary stop." },
+  { label: "Weekend ritual", value: "Coffee first, errands second, plans negotiable." },
+  { label: "Soft spot", value: "People who remember tiny details." },
+  { label: "Lucky object", value: "A worn coin kept for no serious reason." },
 ];
 
 const RANDOM_SERIOUS_CUSTOM_FACT_POOL: ReadonlyArray<BotCustomFact> = [
-  { label: "Working principle", value: "Surface trade-offs before recommendations." },
-  { label: "Languages", value: "English, plus enough of one other to listen well." },
-  { label: "Decision rule", value: "Pause before any irreversible move." },
-  { label: "Practiced craft", value: "Editing for clarity without flattening voice." },
+  { label: "Favorite season", value: "Early autumn." },
+  { label: "Languages", value: "English, plus enough of one other to be polite." },
+  { label: "Favorite place", value: "A quiet table near a window." },
+  { label: "Practiced craft", value: "Remembering names, birthdays, and unfinished stories." },
 ];
 
 function randomCustomFacts(state: RandomWhimsyState): BotCustomFact[] {
@@ -1714,6 +1817,7 @@ function buildRandomBotProfileCandidate(): BotProfileFields {
       ? randomString(RANDOM_FUNNY_BIRTHDAYS)
       : randomString(RANDOM_SERIOUS_BIRTHDAYS);
     profile.facts.birthday = birthday;
+    profile.facts.birthMonthDay = birthMonthDayFromIsoBirthday(birthday);
     profile.facts.birthEra = "ad";
     profile.facts.birthYear = birthYearFromIsoBirthday(birthday);
   }
@@ -1735,8 +1839,10 @@ function randomProfileSignature(profile: BotProfileFields): string {
       ? `politicalScale:${profile.worldview.politicalView}`
       : "",
     profile.facts.birthday,
+    profile.facts.birthMonthDay,
     profile.facts.birthYear,
     profile.facts.birthEra,
+    profile.facts.deceased ? "deceased" : "",
     ...profile.facts.customFacts.map((fact) => `${fact.label}:${fact.value}`),
   ]
     .join(" | ")

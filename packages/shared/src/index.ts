@@ -20,6 +20,8 @@ export {
   ageFromIsoBirthday,
   buildImagePersonaContext,
   composeAugmentedImagePrompt,
+  composeVerbatimFirstImagePrompt,
+  type ImagePromptPersonaBlendMode,
   DEFAULT_IMAGE_PERSONA_CONTEXT_MAX_CHARS,
   parseIsoYmdParts,
   westernZodiacFromIsoBirthday,
@@ -202,6 +204,59 @@ export interface CoffeeInterruptionEvent {
   visibleTokenCount?: number;
   interruptedSnippet?: string;
   socialConsequences: CoffeeInterruptionSocialDelta[];
+}
+
+export type CoffeePollStatus = "open" | "collecting" | "closed" | "cancelled";
+
+export type CoffeePollVoteKind = "option" | "abstain" | "pending" | "error";
+
+export interface CoffeePollDeliberation {
+  stage:
+    | "idle"
+    | "evaluating"
+    | "teetering"
+    | "blocked"
+    | "deciding"
+    | "finalized"
+    | "error";
+  leaningOptionIndex?: number | null;
+  alternateOptionIndex?: number | null;
+  confidence?: number | null;
+  blocker?: string | null;
+  note?: string | null;
+  updatedAt: string;
+}
+
+export interface CoffeePollVote {
+  botId: string;
+  kind: CoffeePollVoteKind;
+  optionIndex?: number | null;
+  explanation?: string | null;
+  suggestedOption?: string | null;
+  confidence?: number | null;
+  deliberation?: CoffeePollDeliberation | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CoffeePollOptionTally {
+  optionIndex: number;
+  option: string;
+  voteCount: number;
+}
+
+export interface CoffeePoll {
+  id: string;
+  conversationId: string;
+  question: string;
+  options: string[];
+  status: CoffeePollStatus;
+  createdBy: "user";
+  createdAt: string;
+  updatedAt: string;
+  closedAt?: string | null;
+  votes: CoffeePollVote[];
+  tallies: CoffeePollOptionTally[];
 }
 
 export type CoffeeSessionDurationMinutes = 1 | 5 | 10;
@@ -418,7 +473,11 @@ export type MemoryValidationReasonCode =
   | "question_fragment"
   | "trailing_conversation_tag"
   | "lost_preference_payload"
+  | "figurative_preference"
+  | "implausible_literal"
+  | "joke_without_stable_signal"
   | "contradiction"
+  | "unsafe_judgment"
   | "low_confidence"
   | "malformed_text"
   | "validator_error";
@@ -449,8 +508,8 @@ export interface MemoryValidationEvent {
 export type ChatMode = "chat" | "sandbox" | "coffee";
 
 /**
- * Companion-only preferences. These are intentionally "feel" controls, not
- * runtime model knobs, so Chat can stay calm and low-control.
+ * Companion-only preferences. These are intentionally "feel" controls, while
+ * an explicit model picker choice may still override the bot/account default.
  */
 export interface ChatCompanionPreferences {
   /** Optional tone cue for the single companion persona. */
@@ -460,10 +519,8 @@ export interface ChatCompanionPreferences {
 }
 
 /**
- * Advanced runtime controls reserved for Sandbox.
- *
- * In Chat mode these knobs are accepted for backwards compatibility but
- * ignored server-side so the companion contract remains stable.
+ * Advanced runtime controls. Sandbox uses the full set; Chat may honor the
+ * explicit model choice while keeping the rest of the companion contract stable.
  */
 export interface SandboxRuntimeControls {
   preferredProvider?: "local" | "openai";
@@ -480,9 +537,9 @@ export interface ChatRequestPayload {
   mode?: ChatMode;
   /** Companion-only optional preferences (used only when mode === "chat"). */
   companionPreferences?: ChatCompanionPreferences;
-  /** Advanced controls intended for Sandbox-only routing. */
+  /** Advanced controls for runtime routing. */
   sandboxControls?: SandboxRuntimeControls;
-  /** Back-compat top-level advanced knobs (ignored when mode === "chat"). */
+  /** Back-compat top-level advanced knobs. Chat honors explicit modelOverride only. */
   preferredProvider?: "local" | "openai";
   modelOverride?: string;
   botId?: string | null;
@@ -605,6 +662,8 @@ export interface CoffeeSessionCreateRequest {
   groupBotIds: Array<string | null>;
   /** Optional session tuning; omitted rows use server defaults. */
   coffeeSettings?: unknown;
+  /** Optional opening poll that seeds the initial table topic. */
+  initialPoll?: CoffeePollCreateRequest;
 }
 
 /** Response body for `POST /api/coffee/sessions`. */
@@ -617,6 +676,8 @@ export interface CoffeeSessionCreateResponse {
    * already persisted {@link Conversation.coffeeTopic}, e.g. auto-topic groups).
    */
   coffeeStarterTopics?: string[];
+  /** Present when the session started with an opening poll. */
+  poll?: CoffeePoll;
 }
 
 /** Request body for `POST /api/coffee/sessions/:id/continue`. */
@@ -678,4 +739,26 @@ export interface CoffeeTurnResponse {
     jobId: string;
     conversationId: string | null;
   };
+}
+
+/** Request body for `POST /api/coffee/sessions/:id/polls`. */
+export interface CoffeePollCreateRequest {
+  question: string;
+  options: string[];
+}
+
+/** Response body for `POST /api/coffee/sessions/:id/polls`. */
+export interface CoffeePollCreateResponse {
+  poll: CoffeePoll;
+}
+
+/** Request body for `POST /api/coffee/sessions/:id/polls/:pollId/collect`. */
+export interface CoffeePollCollectVotesRequest {
+  preferredProvider?: "local" | "openai";
+  sessionRemainingMs?: number | null;
+}
+
+/** Response body for `POST /api/coffee/sessions/:id/polls/:pollId/collect`. */
+export interface CoffeePollCollectVotesResponse {
+  poll: CoffeePoll;
 }
