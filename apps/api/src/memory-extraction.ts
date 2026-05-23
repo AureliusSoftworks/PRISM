@@ -7,6 +7,17 @@ export interface MemoryCandidate {
   durability?: number;
 }
 
+interface BotJudgmentRule {
+  pattern: RegExp;
+  memoryFactory: (botName: string) => string;
+  confidence: number;
+}
+
+interface CoffeeObserverMemoryRule {
+  pattern: RegExp;
+  textFactory: (speakerName: string, peerName: string) => string;
+}
+
 export interface MemoryRetractionCue {
   cuePhrase: string;
 }
@@ -134,11 +145,103 @@ const EXPLICIT_DISCLOSURE_PREFIX_PATTERN =
 const TASK_REQUEST_PREFIX_PATTERN =
   /^(?:please\s+)?(?:write|draft|compose|create|make|generate|summarize|summarise|explain|help|help\s+me|give\s+me|show\s+me|tell\s+me|find|search|look\s+up|translate|rewrite|edit|review|fix|debug|build|plan)\b/i;
 
+const BOT_JUDGMENT_DISALLOWED_PATTERN =
+  /\b(?:worthless|pathetic|disgusting|subhuman|hate\s+you|idiot|moron|stupid|deranged|crazy|insane|psycho|kill|harm|punish|ban(?:ned)?\s+you|never\s+talk\s+to\s+you)\b/i;
+
+const BOT_JUDGMENT_RULES: BotJudgmentRule[] = [
+  {
+    pattern:
+      /\b(?:creepy|creeped\s+out|uncomfortable|unsettling|inappropriate|cross(?:ing)?\s+(?:a\s+)?line)\b/i,
+    memoryFactory: (botName) =>
+      `${botName} felt uneasy about the user's vibe and wanted clearer boundaries.`,
+    confidence: 0.7,
+  },
+  {
+    pattern:
+      /\b(?:pushy|pressuring|pressure(?:d|s)?|too\s+aggressive|too\s+intense|back\s+off)\b/i,
+    memoryFactory: (botName) =>
+      `${botName} felt pressured by the user's approach and preferred a calmer pace.`,
+    confidence: 0.68,
+  },
+  {
+    pattern:
+      /\b(?:rude|dismissive|condescending|harsh|hostile|disrespectful)\b/i,
+    memoryFactory: (botName) =>
+      `${botName} felt the user's wording was harsh and preferred gentler language.`,
+    confidence: 0.66,
+  },
+  {
+    pattern:
+      /\b(?:guarded|wary|don't\s+fully\s+trust|not\s+sure\s+about\s+your\s+intent|unsure\s+about\s+your\s+intent)\b/i,
+    memoryFactory: (botName) =>
+      `${botName} felt unsure about the user's intent and stayed a little guarded.`,
+    confidence: 0.64,
+  },
+];
+
+const COFFEE_OBSERVER_USER_FACT_CONFIDENCE = 0.64;
+const COFFEE_OBSERVER_NAME_CONFIDENCE = 0.62;
+const COFFEE_OBSERVER_BOT_RELATION_CONFIDENCE = 0.56;
+const COFFEE_OBSERVER_USER_FACT_DURABILITY = 0.74;
+const COFFEE_OBSERVER_BOT_RELATION_DURABILITY = 0.68;
+
+const COFFEE_OBSERVER_USER_VERB_REWRITES = new Map<string, string>([
+  ["likes", "like"],
+  ["loves", "love"],
+  ["enjoys", "enjoy"],
+  ["prefers", "prefer"],
+  ["dislikes", "dislike"],
+  ["hates", "hate"],
+  ["avoids", "avoid"],
+  ["needs", "need"],
+  ["wants", "want"],
+  ["values", "value"],
+  ["uses", "use"],
+  ["lives", "live"],
+]);
+
+const COFFEE_OBSERVER_BOT_RELATION_RULES: CoffeeObserverMemoryRule[] = [
+  {
+    pattern: /\b(?:agree|agrees|agreed)\b/i,
+    textFactory: (speakerName, peerName) =>
+      `${speakerName} tended to agree with ${peerName} during Coffee.`,
+  },
+  {
+    pattern: /\b(?:disagree|disagrees|disagreed|challenge|challenges|challenged)\b/i,
+    textFactory: (speakerName, peerName) =>
+      `${speakerName} challenged ${peerName}'s view during Coffee.`,
+  },
+  {
+    pattern: /\b(?:calm|calms|calmed|soothe|soothes|soothed)\b/i,
+    textFactory: (speakerName, peerName) =>
+      `${speakerName} seemed to calm ${peerName} during Coffee.`,
+  },
+  {
+    pattern: /\b(?:trust|trusts|trusted|admire|admires|admired|appreciate|appreciates|appreciated)\b/i,
+    textFactory: (speakerName, peerName) =>
+      `${speakerName} showed warmth toward ${peerName} during Coffee.`,
+  },
+  {
+    pattern: /\b(?:annoy|annoys|annoyed|frustrate|frustrates|frustrated|tense|tension)\b/i,
+    textFactory: (speakerName, peerName) =>
+      `${speakerName} seemed tense with ${peerName} during Coffee.`,
+  },
+];
+
 const FOUNDATIONAL_MEMORY_PATTERNS = [
   /\b(?:always|never|do not|don't|like|likes|love|loves|enjoy|enjoys|prefer|prefers|favorite|favourite|need|needs|want|wants|value|values|care about|cares about)\b/i,
   /\b(?:identity|personality|character|believes?|principles?|boundary|boundaries|comfort|safe|safety)\b/i,
   /\b(?:sees|treats|uses|understands)\s+.+\s+as\s+/i,
   /\b(?:born|founded|created|developed|built|grew|became|known for|signature|method|career|company|inc\.?|workshops?|instructors?|instructional|materials?|art supplies)\b/i,
+] as const;
+
+const PREFERRED_NAME_PATTERNS = [
+  /^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:only\s+)?call\s+me(?:\s+(?:only|exclusively))?\s+(.+)$/i,
+  /^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:only\s+)?(?:refer\s+to|address)\s+me(?:\s+(?:only|exclusively))?(?:\s+as)?\s+(.+)$/i,
+  /^(?:you\s+(?:can|may)\s+)?call\s+me\s+(.+)$/i,
+  /^my\s+name\s+is\s+(.+)$/i,
+  /^i\s+go\s+by\s+(.+)$/i,
+  /^i(?:'m| am)\s+called\s+(.+)$/i,
 ] as const;
 
 /**
@@ -188,6 +291,7 @@ export function rewriteMemoryText(rawLine: string): string {
   text = text.replace(EXPLICIT_DISCLOSURE_PREFIX_PATTERN, "");
   text = text.replace(/^please[\s,]+/i, "");
   text = text.replace(TRAILING_CONVERSATIONAL_TAG_PATTERN, "").trim();
+  text = rewritePreferredNameMemory(text);
   text = rewriteAssistantDirectedMemory(text);
   for (const [pattern, replacement] of FIRST_PERSON_REWRITES) {
     text = text.replace(pattern, replacement);
@@ -197,6 +301,42 @@ export function rewriteMemoryText(rawLine: string): string {
   text = text.replace(/\s+/g, " ").trim().replace(/[.!?]+$/, "").trim();
   if (text.length === 0) return rawLine.trim();
   return `${text[0].toUpperCase()}${text.slice(1)}.`;
+}
+
+function normalizeBotJudgmentName(rawName: string | null | undefined): string {
+  const trimmed = rawName?.trim();
+  if (!trimmed) return "This bot";
+  return trimmed.length > 80 ? trimmed.slice(0, 80).trim() : trimmed;
+}
+
+function cleanPreferredName(rawName: string): string | null {
+  const name = rawName
+    .replace(/[.!?]+$/, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim();
+  if (!name) return null;
+  if (/^(?:not|no|none|nothing|unknown)\b/i.test(name)) return null;
+  if (name.length > 80) return null;
+  return name;
+}
+
+function extractPreferredName(text: string): string | null {
+  const normalized = stripGlobalScopeCues(text)
+    .replace(MEMORY_CUE_PREFIX_PATTERN_RAW, "")
+    .replace(/^please[\s,]+/i, "")
+    .trim();
+  for (const pattern of PREFERRED_NAME_PATTERNS) {
+    const match = normalized.match(pattern);
+    const name = match?.[1] ? cleanPreferredName(match[1]) : null;
+    if (name) return name;
+  }
+  return null;
+}
+
+function rewritePreferredNameMemory(text: string): string {
+  const name = extractPreferredName(text);
+  if (!name) return text;
+  return `you prefer to be called ${name}`;
 }
 
 function rewriteAssistantDirectedMemory(text: string): string {
@@ -278,11 +418,13 @@ function extractMemoryCandidatesFromLines(lines: string[]): MemoryCandidate[] {
     const lower = line.toLowerCase();
     const hasHighConfidenceCue = hasSubstantiveHighConfidenceMemory(lower);
     const hasExplicitDisclosure = hasExplicitDisclosureCue(line);
+    const hasPreferredNameCue = extractPreferredName(cleanLine) !== null;
     if (!hasHighConfidenceCue && isTaskRequest(cleanLine)) {
       continue;
     }
     const looksPersonal =
       hasHighConfidenceCue ||
+      hasPreferredNameCue ||
       hasExplicitDisclosure ||
       lower.includes("i am") ||
       lower.includes("i'm") ||
@@ -295,11 +437,18 @@ function extractMemoryCandidatesFromLines(lines: string[]): MemoryCandidate[] {
       lower.includes("i want") ||
       lower.includes("i need") ||
       lower.includes("i use") ||
-      lower.includes("i dislike");
+      lower.includes("i dislike") ||
+      lower.includes("call me") ||
+      lower.includes("refer to me") ||
+      lower.includes("my name is") ||
+      lower.includes("i go by") ||
+      lower.includes("address me");
     if (!looksPersonal) {
       continue;
     }
-    const confidence = hasHighConfidenceCue
+    const confidence = hasPreferredNameCue
+      ? 0.98
+      : hasHighConfidenceCue
       ? 0.98
       : hasExplicitDisclosure
         ? Math.max(0.9, Math.min(0.95, 0.55 + cleanLine.length / 220))
@@ -310,7 +459,7 @@ function extractMemoryCandidatesFromLines(lines: string[]): MemoryCandidate[] {
       text,
       confidence: Number(confidence.toFixed(2)),
       category: classifyMemoryCategory(text),
-      durability: estimateMemoryDurability(text, hasHighConfidenceCue),
+      durability: estimateMemoryDurability(text, hasHighConfidenceCue || hasPreferredNameCue),
     });
   }
   return candidates.slice(0, 3);
@@ -320,6 +469,189 @@ export function extractMemoryCandidates(message: string): MemoryCandidate[] {
   return extractMemoryCandidatesFromLines(
     splitMemorySentences(message).filter((line) => !isRetractionCue(line))
   );
+}
+
+export function extractBotJudgmentMemoryCandidates(args: {
+  assistantMessage: string;
+  botName?: string | null;
+}): MemoryCandidate[] {
+  const normalized = args.assistantMessage.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+  if (BOT_JUDGMENT_DISALLOWED_PATTERN.test(normalized)) return [];
+  if (!/\b(?:you|your|user)\b/i.test(normalized)) return [];
+  const botName = normalizeBotJudgmentName(args.botName);
+  for (const rule of BOT_JUDGMENT_RULES) {
+    if (!rule.pattern.test(normalized)) continue;
+    const text = rule.memoryFactory(botName);
+    return [
+      {
+        text,
+        confidence: rule.confidence,
+        category: "general",
+        durability: estimateMemoryDurability(text),
+      },
+    ];
+  }
+  return [];
+}
+
+function normalizeCoffeeObserverName(rawName: string | null | undefined): string | null {
+  const name = rawName
+    ?.replace(/^@/, "")
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}' -]+$/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!name) return null;
+  if (name.length > 80) return null;
+  return name;
+}
+
+function coffeeObserverNameKey(rawName: string | null | undefined): string | null {
+  return normalizeCoffeeObserverName(rawName)?.toLocaleLowerCase() ?? null;
+}
+
+function stripCoffeeBotMentionMarkdown(text: string): string {
+  return text.replace(/\[([^\]]+)\]\(prism-bot:\/\/[^)]+\)/g, "$1");
+}
+
+function uniqueMemoryCandidates(candidates: MemoryCandidate[]): MemoryCandidate[] {
+  const seen = new Set<string>();
+  const unique: MemoryCandidate[] = [];
+  for (const candidate of candidates) {
+    const key = `${candidate.category ?? "general"}:${candidate.text
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLocaleLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(candidate);
+  }
+  return unique;
+}
+
+function sanitizeCoffeeObserverDetail(rawDetail: string): string | null {
+  const detail = rawDetail
+    .replace(/\s+/g, " ")
+    .replace(/^[,;:\s]+/, "")
+    .replace(/[.!?]+$/, "")
+    .trim();
+  if (detail.length < 3 || detail.length > 160) return null;
+  if (/^(?:that|this|it|you|me|i|we)\b/i.test(detail)) return null;
+  return detail;
+}
+
+function subjectLooksLikeCoffeeUser(
+  subject: string,
+  botNameKeys: Set<string>
+): boolean {
+  const normalized = subject.trim().replace(/\s+/g, " ");
+  if (/^(?:the\s+user|user|our\s+user|the\s+human|human)$/i.test(normalized)) {
+    return true;
+  }
+  const key = coffeeObserverNameKey(normalized);
+  return key !== null && !botNameKeys.has(key);
+}
+
+function extractCoffeeObserverUserFacts(
+  normalizedMessage: string,
+  botNameKeys: Set<string>
+): MemoryCandidate[] {
+  const candidates: MemoryCandidate[] = [];
+  const sentences = splitMemorySentences(normalizedMessage);
+  for (const sentence of sentences) {
+    const fact = sentence.match(
+      /^(the\s+user|user|our\s+user|the\s+human|human|[A-Z][\p{L}'-]*(?:\s+[A-Z][\p{L}'-]*){0,2})\s+(likes|loves|enjoys|prefers|dislikes|hates|avoids|needs|wants|values|uses|lives)\s+(.+)$/u
+    );
+    if (fact?.[1] && fact[2] && fact[3] && subjectLooksLikeCoffeeUser(fact[1], botNameKeys)) {
+      const verb = COFFEE_OBSERVER_USER_VERB_REWRITES.get(fact[2].toLocaleLowerCase());
+      const detail = sanitizeCoffeeObserverDetail(fact[3]);
+      if (verb && detail) {
+        const text = `You ${verb} ${detail}.`;
+        candidates.push({
+          text,
+          confidence: COFFEE_OBSERVER_USER_FACT_CONFIDENCE,
+          category: "user",
+          durability: COFFEE_OBSERVER_USER_FACT_DURABILITY,
+        });
+      }
+      continue;
+    }
+
+    const address = sentence.match(
+      /^([A-Z][\p{L}'-]*(?:\s+[A-Z][\p{L}'-]*){0,2}),\s+.{4,}$/u
+    );
+    const addressedName = address?.[1]
+      ? normalizeCoffeeObserverName(address[1])
+      : null;
+    const addressedKey = coffeeObserverNameKey(addressedName);
+    if (addressedName && addressedKey && !botNameKeys.has(addressedKey)) {
+      candidates.push({
+        text: `You prefer to be called ${addressedName}.`,
+        confidence: COFFEE_OBSERVER_NAME_CONFIDENCE,
+        category: "user",
+        durability: COFFEE_OBSERVER_USER_FACT_DURABILITY,
+      });
+    }
+  }
+  return candidates;
+}
+
+function textMentionsName(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?:$|[^\\p{L}\\p{N}])`, "iu").test(text);
+}
+
+function extractCoffeeObserverBotRelations(args: {
+  normalizedMessage: string;
+  speakerName: string;
+  seatedBotNames: string[];
+}): MemoryCandidate[] {
+  const candidates: MemoryCandidate[] = [];
+  const speakerKey = coffeeObserverNameKey(args.speakerName);
+  for (const peerName of args.seatedBotNames) {
+    const peerKey = coffeeObserverNameKey(peerName);
+    if (!peerKey || peerKey === speakerKey) continue;
+    if (!textMentionsName(args.normalizedMessage, peerName)) continue;
+    for (const rule of COFFEE_OBSERVER_BOT_RELATION_RULES) {
+      if (!rule.pattern.test(args.normalizedMessage)) continue;
+      candidates.push({
+        text: rule.textFactory(args.speakerName, peerName),
+        confidence: COFFEE_OBSERVER_BOT_RELATION_CONFIDENCE,
+        category: "bot_relation",
+        durability: COFFEE_OBSERVER_BOT_RELATION_DURABILITY,
+      });
+      break;
+    }
+  }
+  return candidates;
+}
+
+export function extractCoffeeObserverMemoryCandidates(args: {
+  speakerName: string;
+  assistantMessage: string;
+  seatedBotNames: string[];
+}): MemoryCandidate[] {
+  const normalizedMessage = stripCoffeeBotMentionMarkdown(args.assistantMessage)
+    .replace(/\s+/g, " ")
+    .trim();
+  const speakerName = normalizeCoffeeObserverName(args.speakerName);
+  if (!normalizedMessage || !speakerName) return [];
+  const seatedBotNames = args.seatedBotNames
+    .map(normalizeCoffeeObserverName)
+    .filter((name): name is string => name !== null);
+  const botNameKeys = new Set(
+    seatedBotNames
+      .map(coffeeObserverNameKey)
+      .filter((key): key is string => key !== null)
+  );
+  return uniqueMemoryCandidates([
+    ...extractCoffeeObserverUserFacts(normalizedMessage, botNameKeys),
+    ...extractCoffeeObserverBotRelations({
+      normalizedMessage,
+      speakerName,
+      seatedBotNames,
+    }),
+  ]).slice(0, 3);
 }
 
 export function analyzeMemoryIntent(message: string): MemoryIntent {

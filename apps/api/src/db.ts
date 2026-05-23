@@ -223,6 +223,7 @@ export function createDatabase(): DatabaseSync {
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
       delete_protected INTEGER NOT NULL DEFAULT 0,
+      flirt_enabled INTEGER NOT NULL DEFAULT 0,
       visibility TEXT NOT NULL DEFAULT 'private',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -342,6 +343,38 @@ export function createDatabase(): DatabaseSync {
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(group_id) REFERENCES coffee_groups(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS coffee_polls (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      question TEXT NOT NULL,
+      options_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_by TEXT NOT NULL DEFAULT 'user',
+      closed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS coffee_poll_votes (
+      user_id TEXT NOT NULL,
+      poll_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      vote_kind TEXT NOT NULL DEFAULT 'pending',
+      option_index INTEGER,
+      explanation TEXT,
+      suggested_option TEXT,
+      confidence REAL,
+      deliberation_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, poll_id, bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(poll_id) REFERENCES coffee_polls(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
   const userColumns = db
@@ -785,6 +818,12 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotDeleteProtectedColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN delete_protected INTEGER NOT NULL DEFAULT 0;");
   }
+  const hasBotFlirtEnabledColumn = botColumns.some(
+    (column) => column.name === "flirt_enabled"
+  );
+  if (!hasBotFlirtEnabledColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN flirt_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
   const hasBotLocalModelColumn = botColumns.some(
     (column) => column.name === "local_model"
   );
@@ -846,6 +885,15 @@ export function createDatabase(): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_conversations_coffee_group ON conversations (user_id, coffee_group_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_polls_session_updated ON coffee_polls (user_id, conversation_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_polls_status ON coffee_polls (user_id, conversation_id, status, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_poll_votes_poll ON coffee_poll_votes (user_id, poll_id, updated_at DESC);"
   );
 
   return db;

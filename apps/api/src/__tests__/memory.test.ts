@@ -9,6 +9,8 @@ import {
   deleteMemoriesLinkedToMessages,
   demoteMemoryToShortTerm,
   deleteOrphanedBotMemories,
+  extractBotJudgmentMemoryCandidates,
+  extractCoffeeObserverMemoryCandidates,
   findMemoryByCue,
   extractMemoryCandidates,
   filterConflictingMemories,
@@ -196,6 +198,128 @@ describe("extractMemoryCandidates", () => {
         confidence: 0.98,
       },
     ]);
+  });
+
+  it("treats call-me directives as explicit name preference memories", () => {
+    const candidates = extractMemoryCandidates("Please, call me Jared.");
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      {
+        text: "You prefer to be called Jared.",
+        confidence: 0.98,
+      },
+    ]);
+  });
+
+  it("normalizes name reminders into explicit preferred-name memories", () => {
+    const examples = [
+      "Please only refer to me as Jared.",
+      "Do not forget my name is Jared",
+      "Remember, my name is Jared.",
+      "Only call me Jared.",
+      "Please refer to me only as Jared.",
+      "I go by Jared.",
+    ];
+
+    for (const example of examples) {
+      const candidates = extractMemoryCandidates(example);
+      assert.deepEqual(
+        memoryCandidateCore(candidates),
+        [
+          {
+            text: "You prefer to be called Jared.",
+            confidence: 0.98,
+          },
+        ],
+        example
+      );
+    }
+  });
+});
+
+describe("extractBotJudgmentMemoryCandidates", () => {
+  it("captures calm persona-grounded discomfort judgments", () => {
+    const candidates = extractBotJudgmentMemoryCandidates({
+      assistantMessage:
+        "That is crossing a line for me, and your tone is starting to feel creepy.",
+      botName: "Lara",
+    });
+
+    assert.equal(candidates.length, 1);
+    assert.equal(
+      candidates[0]?.text,
+      "Lara felt uneasy about the user's vibe and wanted clearer boundaries."
+    );
+    assert.equal(candidates[0]?.category, "general");
+  });
+
+  it("rejects abusive or punitive judgments", () => {
+    const candidates = extractBotJudgmentMemoryCandidates({
+      assistantMessage: "You are disgusting and I never want to talk to you again.",
+      botName: "Lara",
+    });
+
+    assert.equal(candidates.length, 0);
+  });
+});
+
+describe("extractCoffeeObserverMemoryCandidates", () => {
+  it("infers likely user name memories from Coffee bot address", () => {
+    const candidates = extractCoffeeObserverMemoryCandidates({
+      speakerName: "Alice",
+      assistantMessage: "Jared, that preference for quiet mornings makes sense.",
+      seatedBotNames: ["Alice", "Boris"],
+    });
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      {
+        text: "You prefer to be called Jared.",
+        confidence: 0.62,
+      },
+    ]);
+    assert.equal(candidates[0]?.category, "user");
+  });
+
+  it("infers likely user preference facts from Coffee bot statements", () => {
+    const candidates = extractCoffeeObserverMemoryCandidates({
+      speakerName: "Alice",
+      assistantMessage: "Jared prefers short, calm answers.",
+      seatedBotNames: ["Alice", "Boris"],
+    });
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      {
+        text: "You prefer short, calm answers.",
+        confidence: 0.64,
+      },
+    ]);
+    assert.equal(candidates[0]?.category, "user");
+  });
+
+  it("infers other-bot relationship memories from Coffee dialogue", () => {
+    const candidates = extractCoffeeObserverMemoryCandidates({
+      speakerName: "Alice",
+      assistantMessage: "Boris, I agree with your gentle approach.",
+      seatedBotNames: ["Alice", "Boris", "Cara"],
+    });
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      {
+        text: "Alice tended to agree with Boris during Coffee.",
+        confidence: 0.56,
+      },
+    ]);
+    assert.equal(candidates[0]?.category, "bot_relation");
+  });
+
+  it("does not mistake seated bot names for the user's likely name", () => {
+    const candidates = extractCoffeeObserverMemoryCandidates({
+      speakerName: "Alice",
+      assistantMessage: "Boris, what do you think about the rain?",
+      seatedBotNames: ["Alice", "Boris"],
+    });
+
+    assert.deepEqual(candidates, []);
   });
 });
 
@@ -556,6 +680,53 @@ describe("persistMemoryCandidates", () => {
       }),
       true
     );
+  });
+
+  it("replaces seeded about-you name memory with explicit preference", async () => {
+    const db = createMemoryTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    await restoreMemory(db, "user-1", userKey, {
+      conversationId: "conversation-1",
+      botId: "bot-1",
+      text: "You prefer to be called Jared.",
+      confidence: 0.96,
+      certainty: 0.96,
+      category: "user",
+      tier: "long_term",
+      durability: 1,
+      source: "about_you",
+    });
+
+    const stored = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-2",
+      "bot-1",
+      [{ text: "You want to be referred to as Jay.", confidence: 0.98 }],
+      userKey
+    );
+
+    const rows = db
+      .prepare(
+        "SELECT source, COUNT(*) AS count FROM memories WHERE user_id = ? AND bot_id = ? GROUP BY source"
+      )
+      .all("user-1", "bot-1") as Array<{ source: string; count: number }>;
+    const counts = new Map(rows.map((row) => [row.source, row.count]));
+    const memories = await retrieveRelevantMemories(
+      db,
+      "user-1",
+      "What should I call you?",
+      userKey,
+      "bot-1",
+      10
+    );
+
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0]?.text, "You want to be referred to as Jay.");
+    assert.equal(counts.get("about_you") ?? 0, 0);
+    assert.equal(counts.get("direct"), 1);
+    assert.equal(memories.some((memory) => memory.text === "You prefer to be called Jared."), false);
+    assert.equal(memories.some((memory) => memory.text === "You want to be referred to as Jay."), true);
   });
 
   it("still stores memories when embedding generation is unavailable", async () => {

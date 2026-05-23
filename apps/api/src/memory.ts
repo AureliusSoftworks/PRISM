@@ -7,10 +7,17 @@ import type { MemoryCandidate } from "./memory-extraction.ts";
 import {
   analyzeMemoryIntent,
   estimateMemoryDurability,
+  extractBotJudgmentMemoryCandidates,
+  extractCoffeeObserverMemoryCandidates,
   extractMemoryCandidates,
 } from "./memory-extraction.ts";
 
-export { analyzeMemoryIntent, extractMemoryCandidates };
+export {
+  analyzeMemoryIntent,
+  extractCoffeeObserverMemoryCandidates,
+  extractBotJudgmentMemoryCandidates,
+  extractMemoryCandidates,
+};
 
 interface StoredMemoryPayload {
   text: string;
@@ -249,6 +256,33 @@ function normalizedMemoryText(text: string): string {
     .trim();
 }
 
+export function hasMemoryTextForBot(
+  db: DatabaseSync,
+  userId: string,
+  userKey: Buffer,
+  botId: string | null,
+  text: string
+): boolean {
+  const normalizedTarget = normalizedMemoryText(text);
+  if (!normalizedTarget) return false;
+  const rows = botId
+    ? db.prepare(`
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+        FROM memories
+        WHERE user_id = ? AND bot_id = ?
+        ORDER BY created_at DESC
+        LIMIT 200
+      `).all(userId, botId) as MemoryRow[]
+    : db.prepare(`
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+        FROM memories
+        WHERE user_id = ? AND bot_id IS NULL
+        ORDER BY created_at DESC
+        LIMIT 200
+      `).all(userId) as MemoryRow[];
+  return rows.some((row) => normalizedMemoryText(decryptMemoryRow(row, userKey).text) === normalizedTarget);
+}
+
 function normalizeSourceMessageIds(sourceMessageIds?: string[]): string[] {
   const seen = new Set<string>();
   for (const id of sourceMessageIds ?? []) {
@@ -302,6 +336,15 @@ function sourceIdsOverlap(raw: string, targetIds: Set<string>): boolean {
 
 function getSingleValueMemoryKey(text: string): string | null {
   const normalized = normalizedMemoryText(text);
+  const preferredNameMatch = normalized.match(
+    /^you\s+(?:prefer|want)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+(.+)$/
+  );
+  const preferredNameWithLeadMatch = normalized.match(
+    /^[a-z0-9][a-z0-9'\-]*(?:\s+[a-z0-9][a-z0-9'\-]*){0,2}\s+(?:prefers|wants)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+(.+)$/
+  );
+  if (preferredNameMatch?.[1] || preferredNameWithLeadMatch?.[1]) {
+    return "single-value:preferred-name";
+  }
   const match = normalized.match(
     /^(?:my|your|the user's)\s+(.+?)\s+(?:is|are|was|were)\s+.+$/
   );
@@ -894,7 +937,6 @@ function loadScopeMemoriesForReinforcement(
         FROM memories
         WHERE user_id = ?
           AND bot_id = ?
-          AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, botId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[]
@@ -903,7 +945,6 @@ function loadScopeMemoriesForReinforcement(
         FROM memories
         WHERE user_id = ?
           AND bot_id IS NULL
-          AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[];
