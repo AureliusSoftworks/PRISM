@@ -24902,14 +24902,41 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .coffeeSeatPlateEmoji {
   display: block;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
   font-size: clamp(1.97rem, 5.87vw, 2.93rem);
   line-height: 1;
   font-weight: 750;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
   color: color-mix(in srgb, var(--coffee-bot-color) 78%, #ffffff);
   /* rotate() + scaleY() come from inline style; keep origin stable for translate+rotate+scale */
   transform-origin: center center;
   transition: transform 140ms ease;
+}
+
+.coffeeSeatPlateEmoji[data-voice-preset="warm"] {
+  font-family: inherit;
+  font-weight: inherit;
+}
+
+.coffeeSeatPlateEmoji[data-voice-preset="concise"] {
+  font-family: var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.006em;
+}
+
+.coffeeSeatPlateEmoji[data-voice-preset="playful"] {
+  font-family: var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.coffeeSeatPlateEmoji[data-voice-preset="formal"] {
+  font-family: var(--font-formal-serif), var(--font-chat-serif), Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  font-variant-numeric: lining-nums;
 }
 
 .coffeeSeat[data-director-enabled="true"] .coffeeSeatPlate {

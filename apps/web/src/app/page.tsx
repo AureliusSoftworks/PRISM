@@ -3073,6 +3073,15 @@ function coffeeSeatPlateGlyph(emojiMood: CoffeeSeatEmojiMood, mouthOpen: boolean
   }
 }
 
+function coffeeSeatVoicePreset(bot: Pick<Bot, "system_prompt"> | null | undefined): BotVoicePreset {
+  if (!bot) return "neutral";
+  try {
+    return parseStoredBotPrompt(bot.system_prompt).fields.core.communicationStyle;
+  } catch {
+    return "neutral";
+  }
+}
+
 /** Dev-only: `"live"` uses thread + social moods; otherwise every seat shows this Prism mood. */
 type CoffeeSeatMoodDevSlot = "live" | BotMoodKey;
 
@@ -39705,6 +39714,7 @@ function HomeContent(): React.JSX.Element {
               ? Math.floor(coffeeTypewriterLength / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE) % 2 ===
                 0
               : false;
+            const seatVoicePreset = coffeeSeatVoicePreset(bot);
             const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
             const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, mouthOpenWhileTyping);
             const isTopHeadSeat = coffeeSeatIsTopHead(
@@ -39777,6 +39787,7 @@ function HomeContent(): React.JSX.Element {
                       scheduleKey={bot.id}
                       baseText={seatPlateGlyph.text}
                       rotateDeg={seatPlateGlyph.rotateDeg}
+                      voicePreset={seatVoicePreset}
                       className={styles.coffeeSeatPlateEmoji}
                     />
                   </div>
