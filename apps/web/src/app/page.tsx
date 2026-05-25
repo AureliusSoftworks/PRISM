@@ -165,8 +165,6 @@ const DELETE_ALL_KEY = "__delete_all__";
 const DELETE_ALL_COFFEE_SESSIONS_KEY = "__delete_all_coffee_sessions__";
 /** Single Coffee Group delete — opens the same centered confirm modal as bulk deletes. */
 const DELETE_COFFEE_GROUP_KEY_PREFIX = "__delete_coffee_group__:";
-/** Lets Coffee group cards distinguish a deliberate double-click focus from a single-click collapse toggle. */
-const COFFEE_GROUP_SINGLE_CLICK_DELAY_MS = 180;
 
 function coffeeGroupDeleteKey(groupId: string): string {
   return `${DELETE_COFFEE_GROUP_KEY_PREFIX}${groupId}`;
@@ -18636,7 +18634,6 @@ function HomeContent(): React.JSX.Element {
   const coffeeArrivalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeLoopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeTranscriptCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const coffeeGroupClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Matches `randomCoffeeRevealDelayMs` for the current pending assistant line so typewriter finishes with reveal. */
@@ -18694,10 +18691,6 @@ function HomeContent(): React.JSX.Element {
       if (coffeeTranscriptCloseTimerRef.current) {
         clearTimeout(coffeeTranscriptCloseTimerRef.current);
         coffeeTranscriptCloseTimerRef.current = null;
-      }
-      if (coffeeGroupClickTimerRef.current) {
-        clearTimeout(coffeeGroupClickTimerRef.current);
-        coffeeGroupClickTimerRef.current = null;
       }
     };
   }, []);
@@ -19261,12 +19254,17 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!coffeeSelectedGroupId) return;
     setCoffeeCollapsedGroupIds((current) => {
-      if (!current.has(coffeeSelectedGroupId)) return current;
-      const next = new Set(current);
-      next.delete(coffeeSelectedGroupId);
+      const next = new Set(
+        coffeeGroups
+          .map((group) => group.id)
+          .filter((groupId) => groupId !== coffeeSelectedGroupId)
+      );
+      if (current.size === next.size && [...next].every((groupId) => current.has(groupId))) {
+        return current;
+      }
       return next;
     });
-  }, [coffeeSelectedGroupId]);
+  }, [coffeeGroups, coffeeSelectedGroupId]);
 
   const refreshCoffeeGroups = useCallback(async (): Promise<CoffeeGroupState[]> => {
     setCoffeeGroupsLoading(true);
@@ -30696,24 +30694,7 @@ function HomeContent(): React.JSX.Element {
             id={headerButtonId}
             aria-expanded={isExpanded}
             aria-controls={nestedListId}
-            onPointerDown={(event) =>
-              (() => {
-                const tileRect = event.currentTarget.getBoundingClientRect();
-                const pressedChevronZone = event.clientX <= tileRect.left + 22;
-                if (pressedChevronZone) {
-                  disarmDelete();
-                  setExpandedConversationGroupKey((previous) =>
-                    previous === group.key ? null : group.key
-                  );
-                  if (!isExpanded) {
-                    setConversationListScrollTop(0);
-                  }
-                  suppressConversationGroupClickRef.current = true;
-                  return;
-                }
-                beginConversationGroupPointerDrag(event, group.key);
-              })()
-            }
+            onPointerDown={(event) => beginConversationGroupPointerDrag(event, group.key)}
             onPointerMove={updateConversationGroupPointerDrag}
             onPointerUp={endConversationGroupPointerDrag}
             onPointerCancel={endConversationGroupPointerDrag}
@@ -30722,24 +30703,19 @@ function HomeContent(): React.JSX.Element {
               event.stopPropagation();
               openConversationGroupContextMenu(group.key, event.clientX, event.clientY);
             }}
-            onClick={(event) => {
+            onClick={() => {
               if (suppressConversationGroupClickRef.current) {
                 suppressConversationGroupClickRef.current = false;
                 return;
               }
               disarmDelete();
-              if (isExpanded) {
-                performShowAllBotsView(group.botId);
-                return;
+              if (!isExpanded) {
+                setConversationListScrollTop(0);
               }
               setExpandedConversationGroupKey(group.key);
-              setConversationListScrollTop(0);
+              performShowAllBotsView(group.botId);
             }}
-            aria-label={
-              isExpanded
-                ? `Show all bots from ${group.name} conversations`
-                : `Expand ${group.name} conversations`
-            }
+            aria-label={`Select and expand ${group.name} conversations`}
           >
             <span
               className={styles.conversationGroupChevronHitbox}
@@ -37547,6 +37523,11 @@ function HomeContent(): React.JSX.Element {
     setCoffeePollResultsOpen(false);
     setCoffeePollPanelMinimized(false);
   };
+  const collapseCoffeeGroupsExcept = (groupId: string) => {
+    setCoffeeCollapsedGroupIds(
+      new Set(coffeeGroups.map((group) => group.id).filter((id) => id !== groupId))
+    );
+  };
   const openCoffeeGroup = (group: CoffeeGroupState) => {
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
@@ -37555,6 +37536,7 @@ function HomeContent(): React.JSX.Element {
     setCoffeeConversation(null);
     setCoffeeSelectedSessionId(null);
     setCoffeeSelectedGroupId(group.id);
+    collapseCoffeeGroupsExcept(group.id);
     setCoffeeSelectedSeatBotIds(group.coffeeSeatBotIds);
     setCoffeeSessionSettings(normalizeCoffeeSessionSettings(group.coffeeSettings));
     setCoffeeSettingsDraft(normalizeCoffeeSessionSettings(group.coffeeSettings));
@@ -38727,39 +38709,6 @@ function HomeContent(): React.JSX.Element {
     markCoffeeSessionResumed(sessionId);
     await deleteConversation(sessionId);
   };
-  const clearCoffeeGroupClickTimer = () => {
-    if (!coffeeGroupClickTimerRef.current) return;
-    clearTimeout(coffeeGroupClickTimerRef.current);
-    coffeeGroupClickTimerRef.current = null;
-  };
-  const toggleCoffeeGroupCollapsed = (groupId: string) => {
-    setCoffeeCollapsedGroupIds((current) => {
-      const next = new Set(current);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
-      }
-      return next;
-    });
-  };
-  const handleCoffeeGroupSingleClick = (groupId: string) => {
-    clearCoffeeGroupClickTimer();
-    coffeeGroupClickTimerRef.current = setTimeout(() => {
-      coffeeGroupClickTimerRef.current = null;
-      toggleCoffeeGroupCollapsed(groupId);
-    }, COFFEE_GROUP_SINGLE_CLICK_DELAY_MS);
-  };
-  const handleCoffeeGroupDoubleClick = (group: CoffeeGroupState) => {
-    clearCoffeeGroupClickTimer();
-    setCoffeeCollapsedGroupIds((current) => {
-      if (!current.has(group.id)) return current;
-      const next = new Set(current);
-      next.delete(group.id);
-      return next;
-    });
-    openCoffeeGroup(group);
-  };
   const renderCoffeeGroupRow = (group: CoffeeGroupState): React.JSX.Element => {
     const groupBots = coffeeGroupBots(group);
     const groupSessions = coffeeSessionsByGroupId.get(group.id) ?? [];
@@ -38797,25 +38746,14 @@ function HomeContent(): React.JSX.Element {
           aria-label={
             groupSessions.length === 0
               ? `Open Coffee Group ${group.name}`
-              : `${collapsed ? "Expand" : "Collapse"} Coffee Group ${group.name} sessions`
+              : `Select and expand Coffee Group ${group.name}`
           }
           title={
             groupSessions.length === 0
               ? "Open this Coffee Group."
-              : "Click to show or hide saved sessions. Double-click to focus this Coffee Group."
+              : "Select this Coffee Group and show its saved sessions."
           }
-          onClick={(event) => {
-            if (event.detail > 1) return;
-            if (groupSessions.length === 0) {
-              clearCoffeeGroupClickTimer();
-              openCoffeeGroup(group);
-              return;
-            }
-            handleCoffeeGroupSingleClick(group.id);
-          }}
-          onDoubleClick={
-            groupSessions.length > 0 ? () => handleCoffeeGroupDoubleClick(group) : undefined
-          }
+          onClick={() => openCoffeeGroup(group)}
         >
           <span className={styles.coffeeSessionDots} aria-hidden="true">
             {groupBots.slice(0, COFFEE_GROUP_MAX_SIZE_CLIENT).map((bot) => (
