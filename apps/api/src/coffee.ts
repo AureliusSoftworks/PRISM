@@ -131,6 +131,33 @@ type CoffeeTurnKind = "user" | "autonomous";
 
 type RouterAllowedBot = string | Pick<CoffeeBotProfile, "id" | "name">;
 
+export type CoffeeTurnObjective =
+  | "challenge"
+  | "clarify"
+  | "concrete-example"
+  | "synthesize"
+  | "redirect"
+  | "ask-sharper-question"
+  | "close-thread";
+
+export type CoffeeConversationPhase = "opening" | "middle" | "final-minute";
+
+export interface CoffeeConversationQualityState {
+  guardrailStrength: "light" | "standard" | "strong";
+  phase: CoffeeConversationPhase;
+  objective: CoffeeTurnObjective;
+  recentAssistantTurnCount: number;
+  speakerDistribution: Array<{ botId: string; name: string; count: number }>;
+  quietBotIds: string[];
+  quietBotNames: string[];
+  dominantDuoBotIds: string[];
+  dominantDuoBotNames: string[];
+  dominantDuoDetected: boolean;
+  topicDriftDetected: boolean;
+  repeatedMetaphorOrJokeShapeDetected: boolean;
+  lowValueLatestTurnDetected: boolean;
+}
+
 /**
  * Bot row shape used internally by the router and speaker pipeline.
  * Subset of the `bots` table — only what Coffee needs for v0.
@@ -657,6 +684,51 @@ export function coffeeReplyBreaksCharacterImmersion(raw: string): boolean {
   return COFFEE_CHARACTER_IMMERSION_BREAK_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+function visibleCoffeeSpeechForValueScan(raw: string): string {
+  return raw
+    .replace(COFFEE_STAGE_ACTION_BLOCK_RE, " ")
+    .replace(/\[[^\]\n]+\]\(prism-bot:\/\/[^)\s]+?\)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const COFFEE_LOW_VALUE_TABLE_LINE_PATTERNS = [
+  /^(?:yeah,?\s*)?true enough[.!?]?$/i,
+  /^(?:yeah,?\s*)?fair point[.!?]?$/i,
+  /^fair enough[.!?]?$/i,
+  /^noted[.!?]?$/i,
+  /^(?:yeah|honestly|okay|ok),?\s*that tracks[.!?]?$/i,
+  /^that tracks[.!?]?$/i,
+  /^i hear you(?: on that)?[.!?]?$/i,
+  /^i hear the (?:angle|point)[.!?]?$/i,
+  /^i get that[.!?]?$/i,
+  /^could be[.!?]?$/i,
+  /^maybe[.!?]?$/i,
+  /^fair question[.!?]?$/i,
+  /^hold that thought[.!?]?$/i,
+  /^let'?s ground it[.!?]?$/i,
+  /^let'?s keep this simple[.!?]?$/i,
+  /^okay,?\s*keep it moving[.!?]?$/i,
+] as const;
+
+const COFFEE_META_TABLE_MANAGEMENT_PATTERNS = [
+  /\bthe table is circling\b/i,
+  /\btime for a cleaner point\b/i,
+  /\btable-management\b/i,
+  /\bsilent moderator\b/i,
+] as const;
+
+export function coffeeReplyIsLowValueTableLine(raw: string): boolean {
+  const visible = visibleCoffeeSpeechForValueScan(raw).replace(/[“”]/g, "\"");
+  const normalized = visible.replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  if (COFFEE_META_TABLE_MANAGEMENT_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return true;
+  }
+  if (normalized.length > 72) return false;
+  return COFFEE_LOW_VALUE_TABLE_LINE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 /**
  * Normalize a raw speaker draft into something safe for the visible Coffee
  * table. Returning an empty string signals "do not show this".
@@ -671,6 +743,7 @@ export function sanitizeCoffeeTableReply(
   const withStageActionsSanitized = sanitizeCoffeeStageActions(stripped);
   if (coffeeReplyLooksLikePromptLeak(withStageActionsSanitized)) return "";
   if (coffeeReplyBreaksCharacterImmersion(withStageActionsSanitized)) return "";
+  if (coffeeReplyIsLowValueTableLine(withStageActionsSanitized)) return "";
   return clampCoffeeTableReplyText(withStageActionsSanitized, maxChars);
 }
 
@@ -808,7 +881,8 @@ async function repairCoffeeRepeatedReply(args: {
     : "";
   return visible &&
     !coffeeReplyRepeatsRecentAssistant(visible, args.history) &&
-    !coffeeReplyRepeatsRecentMotifs(visible, args.history)
+    !coffeeReplyRepeatsRecentMotifs(visible, args.history) &&
+    !coffeeReplyIsLowValueTableLine(visible)
     ? visible
     : "";
 }
@@ -844,20 +918,16 @@ export function buildCoffeeEmergencyFallbackReply(args: {
       })
     : /\?\s*$/.test(args.tableFocus.trim())
     ? [
-        "Could be.",
-        "I hear the angle.",
-        "Maybe, with one tweak.",
-        "That checks out for now.",
-        "Fair question.",
+        "*turns the cup once* I need one sharper reason before I buy that.",
+        "*leans in slightly* The missing piece is what this costs someone.",
+        "*glances at the table* Put a concrete example under it and it gets more interesting.",
+        "*taps the rim once* The answer depends on what we are protecting.",
       ]
     : [
-        "Let's ground it.",
-        "Hold that thought.",
-        "I hear the point.",
-        "Okay, keep it moving.",
-        "Let's pivot to something concrete.",
-        "Noted. One beat at a time.",
-        "Let's keep this simple.",
+        "*sets the cup down* The stronger point is still hiding under the easy one.",
+        "*looks around the table* Someone should name the cost, not just the mood.",
+        "*stirs slowly* Bring it back to the thing we can actually test.",
+        "*leans back* That needs a sharper object on the table.",
       ];
   const seed = `${args.conversationId}:${args.speaker.id}:${args.historyLength}:${args.seedExtra ?? ""}:${args.tableFocus}`;
   const startIndex = Math.floor(stableUnitValue(seed) * options.length) % options.length;
@@ -916,7 +986,7 @@ function buildCoffeeFreshFallbackBeat(args: {
     "*taps the cup once* Someone needs to add evidence, not just another lean.",
     "*glances around the table* The interesting part is what everyone is dodging.",
     "*sits back for a beat* That answer needs a sharper reason before I buy it.",
-    "*stirs the coffee slowly* The table is circling; time for a cleaner point.",
+    "*stirs the coffee slowly* The cleaner point is the one nobody wants to test out loud.",
   ];
   const seed = `${args.conversationId}:${args.speaker.id}:${args.historyLength}:${args.seedExtra ?? ""}:fresh-fallback`;
   const startIndex = Math.floor(stableUnitValue(seed) * options.length) % options.length;
@@ -930,6 +1000,274 @@ function buildCoffeeFreshFallbackBeat(args: {
     }
   }
   return clampCoffeeTableReplyText(fallback, args.maxChars);
+}
+
+function coffeeQualityTokens(raw: string): string[] {
+  return raw
+    .toLowerCase()
+    .replace(COFFEE_STAGE_ACTION_BLOCK_RE, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(
+      (token) =>
+        token.length >= 4 &&
+        !COFFEE_LOOP_MOTIF_STOPWORDS.has(token)
+    );
+}
+
+function coffeeQualityShapeKey(raw: string): string | null {
+  const tokens = coffeeQualityTokens(raw).slice(0, 5);
+  if (tokens.length < 2) return null;
+  return tokens.join(" ");
+}
+
+function coffeeConversationPhase(args: {
+  assistantTurnCount: number;
+  groupSize: number;
+  sessionRemainingMs?: number | null;
+}): CoffeeConversationPhase {
+  if (
+    typeof args.sessionRemainingMs === "number" &&
+    Number.isFinite(args.sessionRemainingMs) &&
+    args.sessionRemainingMs <= 60_000
+  ) {
+    return "final-minute";
+  }
+  if (args.assistantTurnCount < Math.max(4, args.groupSize)) return "opening";
+  return "middle";
+}
+
+function coffeeQualityGuardrailStrength(args: {
+  groupSize: number;
+  settings: CoffeeSessionSettings;
+}): CoffeeConversationQualityState["guardrailStrength"] {
+  const energetic =
+    args.settings.tableEnergy === "theatre" ||
+    args.settings.crossTalk === "chatty";
+  if (args.groupSize >= 4 && energetic) return "strong";
+  if (args.groupSize >= 4 || energetic) return "standard";
+  return "light";
+}
+
+function detectCoffeeTopicDrift(args: {
+  coffeeTopic?: string | null;
+  recentAssistantMessages: readonly ChatMessage[];
+  activePollContext?: string | null;
+}): boolean {
+  if (typeof args.activePollContext === "string" && args.activePollContext.trim()) {
+    return false;
+  }
+  const topicTokens = new Set(coffeeQualityTokens(args.coffeeTopic ?? ""));
+  if (topicTokens.size < 2) return false;
+  if (args.recentAssistantMessages.length < 4) return false;
+  const recentTokens = coffeeQualityTokens(
+    args.recentAssistantMessages.slice(-3).map((message) => message.content).join(" ")
+  );
+  if (recentTokens.length < 6) return false;
+  let overlap = 0;
+  for (const token of topicTokens) {
+    if (recentTokens.includes(token)) overlap += 1;
+  }
+  return overlap === 0;
+}
+
+function detectCoffeeRepeatedShape(
+  recentAssistantMessages: readonly ChatMessage[]
+): boolean {
+  const keys = recentAssistantMessages
+    .slice(-5)
+    .map((message) => coffeeQualityShapeKey(message.content))
+    .filter((key): key is string => key !== null);
+  if (keys.length < 4) return false;
+  const counts = new Map<string, number>();
+  for (const key of keys) {
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.values()].some((count) => count >= 3);
+}
+
+function coffeeObjectiveInstruction(objective: CoffeeTurnObjective): string {
+  switch (objective) {
+    case "challenge":
+      return "challenge the strongest claim with one specific contrast or counterexample";
+    case "clarify":
+      return "clarify the live claim with one precise distinction";
+    case "concrete-example":
+      return "add one concrete example, object, or consequence";
+    case "synthesize":
+      return "synthesize two views without flattening their disagreement";
+    case "redirect":
+      return "redirect in character back to the topic using one table object or concrete detail";
+    case "ask-sharper-question":
+      return "ask one sharper question that exposes the real disagreement";
+    case "close-thread":
+      return "land the current thread or leave one strong unresolved question";
+  }
+}
+
+export function buildCoffeeConversationQualityState(args: {
+  group: readonly CoffeeBotProfile[];
+  history: readonly ChatMessage[];
+  coffeeTopic?: string | null;
+  sessionSettings?: CoffeeSessionSettings;
+  sessionRemainingMs?: number | null;
+  activePollContext?: string | null;
+}): CoffeeConversationQualityState {
+  const settings = args.sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
+  const guardrailStrength = coffeeQualityGuardrailStrength({
+    groupSize: args.group.length,
+    settings,
+  });
+  const assistantMessages = args.history.filter((message) => message.role === "assistant");
+  const recentAssistantMessages = assistantMessages.slice(-COFFEE_ROUTER_BALANCE_HISTORY_LIMIT);
+  const countsByBotId = new Map(args.group.map((bot) => [bot.id, 0]));
+  for (const message of recentAssistantMessages) {
+    const botId = resolveAssistantSpeakerBotId(message, args.group);
+    if (!botId || !countsByBotId.has(botId)) continue;
+    countsByBotId.set(botId, (countsByBotId.get(botId) ?? 0) + 1);
+  }
+  const speakerDistribution = args.group.map((bot) => ({
+    botId: bot.id,
+    name: bot.name,
+    count: countsByBotId.get(bot.id) ?? 0,
+  }));
+  const maxCount = Math.max(0, ...speakerDistribution.map((entry) => entry.count));
+  const quietThreshold = guardrailStrength === "strong" ? 2 : 3;
+  const quiet =
+    args.group.length >= 3 &&
+    recentAssistantMessages.length >= Math.min(5, args.group.length)
+      ? speakerDistribution.filter(
+          (entry) => entry.count === 0 || maxCount - entry.count >= quietThreshold
+        )
+      : [];
+
+  const sortedActive = speakerDistribution
+    .filter((entry) => entry.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const topTwo = sortedActive.slice(0, 2);
+  const topTwoCount = topTwo.reduce((sum, entry) => sum + entry.count, 0);
+  const dominantDuoDetected =
+    args.group.length >= 4 &&
+    recentAssistantMessages.length >= 6 &&
+    topTwo.length === 2 &&
+    quiet.length > 0 &&
+    topTwoCount >= recentAssistantMessages.length - 1;
+
+  const latestAssistant = assistantMessages.at(-1) ?? null;
+  const lowValueLatestTurnDetected = latestAssistant
+    ? coffeeReplyIsLowValueTableLine(latestAssistant.content)
+    : false;
+  const topicDriftDetected = detectCoffeeTopicDrift({
+    coffeeTopic: args.coffeeTopic,
+    recentAssistantMessages,
+    activePollContext: args.activePollContext,
+  });
+  const repeatedMetaphorOrJokeShapeDetected = detectCoffeeRepeatedShape(recentAssistantMessages);
+  const phase = coffeeConversationPhase({
+    assistantTurnCount: assistantMessages.length,
+    groupSize: args.group.length,
+    sessionRemainingMs: args.sessionRemainingMs,
+  });
+
+  let objective: CoffeeTurnObjective;
+  if (phase === "final-minute") {
+    objective = "close-thread";
+  } else if (topicDriftDetected || dominantDuoDetected) {
+    objective = "redirect";
+  } else if (lowValueLatestTurnDetected) {
+    objective = "concrete-example";
+  } else if (repeatedMetaphorOrJokeShapeDetected) {
+    objective = "challenge";
+  } else if (phase === "opening") {
+    objective = "concrete-example";
+  } else if (quiet.length > 0 && guardrailStrength !== "light") {
+    objective = "synthesize";
+  } else {
+    objective = "clarify";
+  }
+
+  return {
+    guardrailStrength,
+    phase,
+    objective,
+    recentAssistantTurnCount: recentAssistantMessages.length,
+    speakerDistribution,
+    quietBotIds: quiet.map((entry) => entry.botId),
+    quietBotNames: quiet.map((entry) => entry.name),
+    dominantDuoBotIds: dominantDuoDetected ? topTwo.map((entry) => entry.botId) : [],
+    dominantDuoBotNames: dominantDuoDetected ? topTwo.map((entry) => entry.name) : [],
+    dominantDuoDetected,
+    topicDriftDetected,
+    repeatedMetaphorOrJokeShapeDetected,
+    lowValueLatestTurnDetected,
+  };
+}
+
+function buildCoffeeConversationQualityAppendix(
+  state: CoffeeConversationQualityState,
+  mode: "router" | "speaker"
+): string[] {
+  const lines = [
+    "",
+    `Conversation quality state: phase=${state.phase}; guardrail=${state.guardrailStrength}; objective=${state.objective}.`,
+  ];
+  if (state.speakerDistribution.length > 0 && state.recentAssistantTurnCount > 0) {
+    lines.push(
+      `Recent speaker distribution: ${state.speakerDistribution
+        .map((entry) => `${entry.name}=${entry.count}`)
+        .join(", ")}.`
+    );
+  }
+  if (state.guardrailStrength === "strong") {
+    lines.push(
+      "Strong ensemble guidance for 4-5 bot or theatre/chatty sessions: recover quiet relevant bots and break dominant duos, but do not force strict round-robin."
+    );
+  }
+  if (state.quietBotNames.length > 0) {
+    lines.push(
+      `Quiet relevant candidates: ${state.quietBotNames.join(", ")}. Prefer one when they can move the thread.`
+    );
+  }
+  if (state.dominantDuoDetected) {
+    lines.push(
+      `Dominant duo detected: ${state.dominantDuoBotNames.join(" + ")}. Break the loop unless the duel is clearly still productive.`
+    );
+  }
+  if (state.topicDriftDetected) {
+    lines.push("Topic drift detected: steer back to the shared question with an in-world detail.");
+  }
+  if (state.repeatedMetaphorOrJokeShapeDetected) {
+    lines.push("Repeated metaphor/joke shape detected: change the object, stakes, or social motion.");
+  }
+  if (state.lowValueLatestTurnDetected) {
+    lines.push("Low-value latest turn detected: the next move must add evidence, contrast, or a concrete example.");
+  }
+
+  const instruction = coffeeObjectiveInstruction(state.objective);
+  if (mode === "router") {
+    lines.push(
+      `Router turn objective: ${state.objective} — choose the next speaker who can ${instruction}.`,
+      "Write the directive as one concrete in-character move, e.g. \"redirect back to the truth/art question using one table object.\"",
+      "Never expose moderator/table-management language in the directive."
+    );
+  } else {
+    lines.push(
+      `Speaker turn objective: ${state.objective} — ${instruction}.`,
+      "Follow the objective without naming it or mentioning moderation.",
+      "Agreement must add a reason; disagreement must add a specific contrast; redirection must stay in character.",
+      "Do not use bare filler such as \"Fair point\", \"True enough\", \"Noted\", or \"That tracks\" unless the same line adds a concrete claim."
+    );
+    if (state.phase === "opening") {
+      lines.push("Opening phase: establish a position or angle; do not summarize a debate that has not happened.");
+    } else if (state.phase === "middle") {
+      lines.push("Middle phase: deepen the conflict, sharpen the example, or connect two live claims.");
+    } else {
+      lines.push("Final-minute phase: land the current thread or leave one strong unresolved question; do not start a new tangent.");
+    }
+  }
+
+  return lines;
 }
 
 function buildCoffeeSpeakerBalanceAppendix(args: {
@@ -3655,6 +3993,14 @@ export function buildRouterPrompt(args: {
     : "";
 
   const prismBotMentionHint = coffeeTranscriptContainsPrismBotMention(userMessage, history);
+  const conversationQuality = buildCoffeeConversationQualityState({
+    group,
+    history,
+    coffeeTopic,
+    sessionSettings: settings,
+    sessionRemainingMs,
+    activePollContext,
+  });
   const speakerBalanceLines = buildCoffeeSpeakerBalanceAppendix({ group, history });
 
   const systemContent = [
@@ -3669,7 +4015,7 @@ export function buildRouterPrompt(args: {
     "Output requirements:",
     "  - Reply with a single line of valid JSON only.",
     `  - Schema: {"botId": "<one of the listed ids>", "reason": "<one short sentence>", "directive": "<one short next-move cue>"}`,
-    "  - `directive` should be concrete and anti-echo (for example: challenge the strongest claim with one specific counterexample).",
+    "  - `directive` should be concrete, objective-based, and anti-echo (for example: challenge the strongest claim with one specific counterexample).",
     "  - Do not include any prose, code fences, comments, or extra fields.",
     "",
     "Bots in this group:",
@@ -3682,6 +4028,7 @@ export function buildRouterPrompt(args: {
     ...pollLines,
     ...activePollLines,
     ...meetingSummaryLines,
+    ...buildCoffeeConversationQualityAppendix(conversationQuality, "router"),
     ...speakerBalanceLines,
     ...buildCoffeeWrapUpRouterAppendix(sessionRemainingMs),
     "",
@@ -3978,6 +4325,14 @@ export function buildSpeakerPrompt(args: {
           "Use this as your turn-level objective while staying fully in character. Do not mention any moderator, system, or behind-the-scenes guidance.",
         ]
       : [];
+  const conversationQuality = buildCoffeeConversationQualityState({
+    group,
+    history,
+    coffeeTopic,
+    sessionSettings: settings,
+    sessionRemainingMs,
+    activePollContext,
+  });
 
   const groupContextLines = [
     "You are sitting at Coffee Mode: an ambiguous coffee shop table inside PRISM.",
@@ -3989,6 +4344,7 @@ export function buildSpeakerPrompt(args: {
     ...activePollLines,
     ...meetingSummaryLines,
     ...directorCueLines,
+    ...buildCoffeeConversationQualityAppendix(conversationQuality, "speaker"),
     ...buildCoffeeWrapUpSpeakerAppendix(sessionRemainingMs),
     "You are participating in a live group conversation with the user and the following other bots:",
     ...peerLines,
@@ -5798,7 +6154,7 @@ async function generateCoffeeBotReply(args: {
       activePoll,
     });
   }
-  if (coffeeReplyLooksLikePromptLeak(replyText)) {
+  if (coffeeReplyLooksLikePromptLeak(replyText) || coffeeReplyIsLowValueTableLine(replyText)) {
     replyText = buildCoffeeEmergencyFallbackReply({
       tableFocus,
       speaker,
@@ -5809,7 +6165,11 @@ async function generateCoffeeBotReply(args: {
       activePoll,
     });
   }
-  if (replyText && coffeeReplyNeedsRepeatRepair(replyText, history)) {
+  if (
+    replyText &&
+    (coffeeReplyNeedsRepeatRepair(replyText, history) ||
+      coffeeReplyIsLowValueTableLine(replyText))
+  ) {
     try {
       replyText = await repairCoffeeRepeatedReply({
         speakerProvider,
@@ -5824,7 +6184,11 @@ async function generateCoffeeBotReply(args: {
       replyText = "";
     }
   }
-  if (!replyText || coffeeReplyNeedsRepeatRepair(replyText, history)) {
+  if (
+    !replyText ||
+    coffeeReplyNeedsRepeatRepair(replyText, history) ||
+    coffeeReplyIsLowValueTableLine(replyText)
+  ) {
     replyText = buildCoffeeFreshFallbackBeat({
       speaker,
       conversationId: row.id,

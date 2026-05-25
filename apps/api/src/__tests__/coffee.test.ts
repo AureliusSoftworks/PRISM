@@ -7,6 +7,7 @@ import {
   COFFEE_GROUP_MIN_SIZE,
   autoTagPeerMentionsInCoffeeReply,
   applyCoffeeOrganicSeedToReply,
+  buildCoffeeConversationQualityState,
   buildCoffeeEmergencyFallbackReply,
   buildCoffeeTableTuningAppendix,
   buildRouterPrompt,
@@ -15,6 +16,7 @@ import {
   clampCoffeeTableReplyText,
   coffeeReplyBreaksCharacterImmersion,
   coffeeMeetingSummarySourceMessages,
+  coffeeReplyIsLowValueTableLine,
   coffeeReplyLooksLikePromptLeak,
   coffeeReplyRepeatsRecentAssistant,
   coffeeReplyRepeatsRecentMotifs,
@@ -65,6 +67,7 @@ import {
   DEFAULT_COFFEE_SESSION_SETTINGS,
   serializeStoredBotPrompt,
   normalizeCoffeeSessionSettings,
+  type ChatMessage,
 } from "@localai/shared";
 
 /**
@@ -123,6 +126,34 @@ const CARA: CoffeeBotProfile = {
   systemPrompt: "Pragmatic engineer who plans things in lists.",
   color: "#3377ff",
   glyph: "spark",
+  localModel: null,
+  onlineModel: null,
+  defaultModel: null,
+  temperature: 0.7,
+  maxTokens: 512,
+  onlineEnabled: true,
+};
+
+const DANTE: CoffeeBotProfile = {
+  id: "bot-dante",
+  name: "Dante",
+  systemPrompt: "Theatre critic who listens for tension and subtext.",
+  color: "#9944ff",
+  glyph: "moon",
+  localModel: null,
+  onlineModel: null,
+  defaultModel: null,
+  temperature: 0.7,
+  maxTokens: 512,
+  onlineEnabled: true,
+};
+
+const ELENA: CoffeeBotProfile = {
+  id: "bot-elena",
+  name: "Elena",
+  systemPrompt: "Archivist who keeps returning abstractions to concrete evidence.",
+  color: "#ffaa33",
+  glyph: "book",
   localModel: null,
   onlineModel: null,
   defaultModel: null,
@@ -1127,6 +1158,67 @@ describe("buildRouterPrompt", () => {
     assert.match(messages[0]!.content, /Balanced organic rule/);
   });
 
+  it("adds stronger quality guidance for a dominant 5-bot theatre duo", () => {
+    const group = [ALICE, BORIS, CARA, DANTE, ELENA];
+    const history: ChatMessage[] = [
+      { id: "m1", role: "assistant", botName: "Alice", content: "The oyster joke is the whole point.", createdAt: new Date().toISOString() },
+      { id: "m2", role: "assistant", botName: "Boris", content: "No, the frying pan joke is the whole point.", createdAt: new Date().toISOString() },
+      { id: "m3", role: "assistant", botName: "Alice", content: "The oyster joke is still the whole point.", createdAt: new Date().toISOString() },
+      { id: "m4", role: "assistant", botName: "Boris", content: "The frying pan joke still wins.", createdAt: new Date().toISOString() },
+      { id: "m5", role: "assistant", botName: "Alice", content: "Oysters, pans, same old stage gag.", createdAt: new Date().toISOString() },
+      { id: "m6", role: "assistant", botName: "Boris", content: "Pans beat oysters every time.", createdAt: new Date().toISOString() },
+    ];
+    const quality = buildCoffeeConversationQualityState({
+      group,
+      history,
+      coffeeTopic: "What art owes truth",
+      sessionSettings: normalizeCoffeeSessionSettings({
+        tableEnergy: "theatre",
+        crossTalk: "chatty",
+      }),
+    });
+
+    assert.equal(quality.guardrailStrength, "strong");
+    assert.equal(quality.dominantDuoDetected, true);
+    assert.deepEqual(quality.quietBotNames, ["Cara", "Dante", "Elena"]);
+    assert.equal(quality.objective, "redirect");
+
+    const messages = buildRouterPrompt({
+      group,
+      history,
+      userMessage: "Keep going.",
+      lastSpeakerBotId: BORIS.id,
+      coffeeTopic: "What art owes truth",
+      sessionSettings: normalizeCoffeeSessionSettings({
+        tableEnergy: "theatre",
+        crossTalk: "chatty",
+      }),
+    });
+    const system = messages[0]!.content;
+    assert.match(system, /Conversation quality state: phase=middle; guardrail=strong; objective=redirect/);
+    assert.match(system, /Strong ensemble guidance/);
+    assert.match(system, /Quiet relevant candidates: Cara, Dante, Elena/);
+    assert.match(system, /Dominant duo detected: Alice \+ Boris/);
+    assert.match(system, /redirect back to the truth\/art question using one table object/);
+  });
+
+  it("keeps small quiet sessions on lighter quality guidance", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Start softly.",
+      lastSpeakerBotId: null,
+      sessionSettings: normalizeCoffeeSessionSettings({
+        tableEnergy: "still",
+        crossTalk: "rare",
+      }),
+    });
+    const system = messages[0]!.content;
+    assert.match(system, /Conversation quality state: phase=opening; guardrail=light; objective=concrete-example/);
+    assert.doesNotMatch(system, /Strong ensemble guidance/);
+    assert.doesNotMatch(system, /Dominant duo detected/);
+  });
+
   it("indicates a fresh thread when no one has spoken yet", () => {
     const messages = buildRouterPrompt({
       group: [ALICE, BORIS],
@@ -1609,6 +1701,38 @@ describe("buildSpeakerPrompt", () => {
     assert.match(joined, /Do not mention any moderator/i);
   });
 
+  it("teaches speakers to follow the quality objective with a concrete move", () => {
+    const group = [ALICE, BORIS, CARA, DANTE, ELENA];
+    const history: ChatMessage[] = [
+      { id: "m1", role: "assistant", botName: "Alice", content: "The oyster joke is the whole point.", createdAt: new Date().toISOString() },
+      { id: "m2", role: "assistant", botName: "Boris", content: "No, the frying pan joke is the whole point.", createdAt: new Date().toISOString() },
+      { id: "m3", role: "assistant", botName: "Alice", content: "The oyster joke is still the whole point.", createdAt: new Date().toISOString() },
+      { id: "m4", role: "assistant", botName: "Boris", content: "The frying pan joke still wins.", createdAt: new Date().toISOString() },
+      { id: "m5", role: "assistant", botName: "Alice", content: "Oysters, pans, same old stage gag.", createdAt: new Date().toISOString() },
+      { id: "m6", role: "assistant", botName: "Boris", content: "Pans beat oysters every time.", createdAt: new Date().toISOString() },
+    ];
+    const messages = buildSpeakerPrompt({
+      speaker: CARA,
+      group,
+      history,
+      userMessage: "Keep this alive.",
+      socialByBotId: {},
+      coffeeTopic: "What art owes truth",
+      sessionSettings: normalizeCoffeeSessionSettings({
+        tableEnergy: "theatre",
+        crossTalk: "chatty",
+      }),
+    });
+    const combined = messages.map((message) => message.content).join("\n");
+    assert.match(combined, /Conversation quality state: phase=middle; guardrail=strong; objective=redirect/);
+    assert.match(combined, /Speaker turn objective: redirect/);
+    assert.match(combined, /Agreement must add a reason/);
+    assert.match(combined, /disagreement must add a specific contrast/);
+    assert.match(combined, /Do not use bare filler/);
+    assert.match(combined, /Fair point/);
+    assert.match(combined, /without naming it or mentioning moderation/);
+  });
+
   it("adds explicit kickoff guidance for a session-opening autonomous turn", () => {
     const messages = buildSpeakerPrompt({
       speaker: ALICE,
@@ -2089,6 +2213,21 @@ describe("coffee prompt leak cleanup", () => {
     assert.equal(coffeeReplyLooksLikePromptLeak("Yeah, that tracks."), false);
   });
 
+  it("detects low-value filler and meta table-management lines", () => {
+    assert.equal(coffeeReplyIsLowValueTableLine("Fair point."), true);
+    assert.equal(coffeeReplyIsLowValueTableLine("True enough."), true);
+    assert.equal(coffeeReplyIsLowValueTableLine("Noted."), true);
+    assert.equal(coffeeReplyIsLowValueTableLine("That tracks."), true);
+    assert.equal(
+      coffeeReplyIsLowValueTableLine("Fair point, but the receipt is who pays afterward."),
+      false
+    );
+    assert.equal(
+      coffeeReplyIsLowValueTableLine("*stirs the coffee slowly* The table is circling; time for a cleaner point."),
+      true
+    );
+  });
+
   it("drops prompt-leak replies instead of showing them on the table", () => {
     assert.equal(
       sanitizeCoffeeTableReply(
@@ -2124,6 +2263,25 @@ describe("coffee prompt leak cleanup", () => {
         "SpongeBob"
       ),
       ""
+    );
+  });
+
+  it("drops low-value filler and meta table-management replies", () => {
+    assert.equal(sanitizeCoffeeTableReply("Fair point.", "SpongeBob"), "");
+    assert.equal(sanitizeCoffeeTableReply("That tracks.", "SpongeBob"), "");
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "*stirs the coffee slowly* The table is circling; time for a cleaner point.",
+        "SpongeBob"
+      ),
+      ""
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Fair point, but the receipt is who pays afterward.",
+        "SpongeBob"
+      ),
+      "Fair point, but the receipt is who pays afterward."
     );
   });
 
@@ -2176,6 +2334,20 @@ describe("coffee prompt leak cleanup", () => {
 
     assert.match(line, /Mermaid Man|Barnacle Boy/);
     assert.doesNotMatch(line, /Let's ground it|Hold that thought|I hear the point/);
+  });
+
+  it("uses in-world emergency fallback lines that add substance", () => {
+    const line = buildCoffeeEmergencyFallbackReply({
+      tableFocus: "Continue the table.",
+      speaker: { id: "bot-sponge", name: "SpongeBob" },
+      conversationId: "fallback-conv",
+      historyLength: 4,
+      maxChars: 110,
+    });
+
+    assert.equal(coffeeReplyIsLowValueTableLine(line), false);
+    assert.doesNotMatch(line, /Fair point|Noted|I hear the point|The table is circling|time for a cleaner point/);
+    assert.match(line, /\b(cost|mood|test|object|point)\b/i);
   });
 
   it("keeps poll emergency fallback aligned with the bot's current leaning", () => {
