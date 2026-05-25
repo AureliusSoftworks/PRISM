@@ -14025,6 +14025,7 @@ function BotProfileBuilder({
                   type="button"
                   className={styles.botVoicePresetOption}
                   data-selected={profile.core.communicationStyle === preset ? "true" : undefined}
+                  aria-pressed={profile.core.communicationStyle === preset}
                   onClick={() => updateCore("communicationStyle", preset)}
                 >
                   <span>{BOT_VOICE_PRESET_LABELS[preset]}</span>
@@ -14416,7 +14417,15 @@ function BotProfileBuilder({
   };
 
   return (
-    <div className={styles.botProfileBuilderBackdrop} role="presentation">
+    <div
+      className={styles.botProfileBuilderBackdrop}
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (!isPrimaryPointerDismissal(event.nativeEvent)) return;
+        onClose();
+      }}
+    >
       <section
         className={styles.botProfileBuilder}
         role="dialog"
