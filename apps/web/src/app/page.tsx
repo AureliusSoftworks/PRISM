@@ -4736,6 +4736,7 @@ interface ImportBotOptions {
   allowDuplicateHash?: boolean;
   suppressNotice?: boolean;
   suppressPanelReset?: boolean;
+  selectInChat?: boolean;
 }
 
 interface ImportBotResult {
@@ -14959,6 +14960,7 @@ function HomeContent(): React.JSX.Element {
   const [commandCenterSpecsCommandId, setCommandCenterSpecsCommandId] =
     useState<string | null>(null);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+  const pendingImportedChatBotSelectionRef = useRef<string | null>(null);
   // Visual bot focus in the Sandbox canvas should only come from explicit
   // bot-square picks in the grid, not from sidebar conversation navigation.
   const [sandboxGridSelectedBotId, setSandboxGridSelectedBotId] =
@@ -25114,7 +25116,7 @@ function HomeContent(): React.JSX.Element {
     for (const memory of memories) {
       if (!memory || typeof memory.text !== "string" || memory.text.trim().length === 0) continue;
       const source = normalizeImportedMemorySource(memory.source);
-      const category = normalizeImportedMemoryCategory(memory.category, source);
+      const category = normalizeImportedMemoryCategory(memory.category);
       await api("/api/memories/restore", {
         method: "POST",
         body: JSON.stringify({
@@ -25143,7 +25145,9 @@ function HomeContent(): React.JSX.Element {
     await refreshBots();
     await refreshMemories();
     await refreshBotMemories(createdBotId);
-    setSelectedBotId(createdBotId);
+    if (options?.selectInChat !== false) {
+      selectImportedBotInChatMode(createdBotId);
+    }
     if (!options?.suppressNotice) {
       setPanelNotice(
         restored > 0
@@ -25240,6 +25244,7 @@ function HomeContent(): React.JSX.Element {
           allowDuplicateHash,
           suppressNotice: true,
           suppressPanelReset: true,
+          selectInChat: false,
         });
         importedCount += 1;
         restoredTotal += result.restoredMemories;
@@ -25311,6 +25316,9 @@ function HomeContent(): React.JSX.Element {
       summaryParts.push(`${restoredTotal} memories restored`);
     }
     setPanelNotice(`ZIP import complete: ${summaryParts.join(" · ")}.`);
+    if (importedBotIds.length === 1) {
+      selectImportedBotInChatMode(importedBotIds[0]!);
+    }
   }
 
   async function handleBotImportFileSelection(
@@ -25612,6 +25620,31 @@ function HomeContent(): React.JSX.Element {
     spotlightTypingArmedRef.current = false;
     focusDraftInput();
   }, [cancelPendingEmptyStateSearchOpen, focusDraftInput, selectedBotId]);
+
+  useEffect(() => {
+    if (view !== "chat") return;
+    const botId = pendingImportedChatBotSelectionRef.current;
+    if (!botId) return;
+    pendingImportedChatBotSelectionRef.current = null;
+    commitEmptyStateBotSelection(botId);
+  }, [commitEmptyStateBotSelection, view]);
+
+  function selectImportedBotInChatMode(botId: string): void {
+    pendingImportedChatBotSelectionRef.current = null;
+    if (view !== "chat") {
+      pendingImportedChatBotSelectionRef.current = botId;
+      navigateToView("chat");
+      return;
+    }
+    setConversationStarterPrompts(null);
+    setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
+    chatSummaryRefreshMarkerRef.current = null;
+    setSelectedId(null);
+    setDetail(null);
+    setChatBotOverride(undefined);
+    setSidebarOpen(false);
+    commitEmptyStateBotSelection(botId);
+  }
 
   const openEmptyStateBotSearchFromTyping = useCallback((typedCharacter: string) => {
     cancelPendingEmptyStateSearchOpen();
