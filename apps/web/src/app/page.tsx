@@ -38089,9 +38089,11 @@ function HomeContent(): React.JSX.Element {
       setCoffeePollPanelMinimized(false);
       if (response.conversation.messages.length > 0) {
         setCoffeeSessionPhase("finished");
-        setCoffeeReplayActive(true);
-        setCoffeeReplayPlaying(true);
+        setCoffeeReplayActive(false);
+        setCoffeeReplayPlaying(false);
         setCoffeeReplayMessageIndex(0);
+        setCoffeeReplayTypewriterLength(0);
+        setCoffeeReplayActionPanelBotId(null);
       } else {
         setCoffeeSessionPhase("preview");
       }
@@ -39558,10 +39560,20 @@ function HomeContent(): React.JSX.Element {
         ? coffeeTableDisplayText(replayMessage.content)
         : coffeeTableDisplayText(coffeeUserRevealText);
     const centerMessageDisplayText = centerMessage ? coffeeTableDisplayText(centerMessage.content) : "";
+    const synopsisMessages =
+      coffeeSessionPhase === "finished" && !coffeeReplayActive
+        ? messages.filter(
+            (message) =>
+              message.role === "system" &&
+              message.content.trim().startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX)
+          )
+        : [];
     const centerFeedSourceMessages =
-      coffeeReplayActive && messages.length > 0
-        ? replayCompletedThreadMessages
-        : messages;
+      coffeeSessionPhase === "finished" && !coffeeReplayActive
+        ? synopsisMessages
+        : coffeeReplayActive && messages.length > 0
+          ? replayCompletedThreadMessages
+          : messages;
     const baseCenterFeedLines: CoffeeCenterFeedLine[] = centerFeedSourceMessages
       .filter((message): message is CoffeeConversationMessage => coffeeMessageHasTableText(message))
       .slice(-COFFEE_CENTER_FEED_MAX_LINES)
@@ -39646,6 +39658,8 @@ function HomeContent(): React.JSX.Element {
               ? previewCanResumeSession
                 ? "Fresh table. Join when you are ready."
                 : "Reviewing a completed session."
+              : coffeeSessionPhase === "finished" && !coffeeReplayActive
+                ? "Preparing session synopsis..."
               : coffeeSelectedGroup
                 ? "This group is ready."
                 : "Select bots below, then create a Coffee Group.";
@@ -40094,8 +40108,20 @@ function HomeContent(): React.JSX.Element {
                     <p className={styles.coffeeFinishedRecapCaption}>
                       {coffeeReplayActive
                         ? "Replay mode — watching this session back."
-                        : "Session ended. Export it, replay it, or open Table talk."}
+                        : coffeeConversationHasSessionSynopsis(coffeeConversation)
+                          ? "Session ended. Review the synopsis or watch the table back."
+                          : "Session ended. Building the synopsis..."}
                     </p>
+                    {!coffeeReplayActive ? (
+                      <button
+                        type="button"
+                        className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
+                        disabled={messages.length === 0}
+                        onClick={startCoffeeReplay}
+                      >
+                        View replay
+                      </button>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -40915,7 +40941,10 @@ function HomeContent(): React.JSX.Element {
   const renderCoffeeShell = (): React.JSX.Element => {
     const conversationActive = coffeeConversation !== null;
     /** Live at the table (not merely previewing a saved session from the sidebar). */
-    const coffeeSessionJoined = conversationActive && coffeeSessionPhase !== "preview";
+    const coffeeSessionJoined =
+      conversationActive &&
+      coffeeSessionPhase !== "preview" &&
+      (coffeeSessionPhase !== "finished" || coffeeReplayActive);
     const coffeePreviewCanResume =
       coffeeSessionPhase === "preview" &&
       coffeeConversation != null &&
@@ -40956,7 +40985,7 @@ function HomeContent(): React.JSX.Element {
         coffeeSessionPhase === "arriving");
     const coffeeComposerVisible = coffeeComposerEnabled;
     const coffeeFinishedControlsVisible =
-      conversationActive && coffeeSessionPhase === "finished";
+      conversationActive && coffeeSessionPhase === "finished" && coffeeReplayActive;
     const coffeeFinishedControlMessages = coffeeConversation?.messages ?? [];
     const coffeeFinishedReplayMessageIndex = clampCoffeeReplayMessageIndex(
       coffeeFinishedControlMessages.length,
