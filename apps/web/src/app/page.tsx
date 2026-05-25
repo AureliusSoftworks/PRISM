@@ -74,6 +74,7 @@ import {
   normalizeOpenAiImageModelId,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   resolveAutoModel,
+  memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
   COFFEE_POLL_FINALIZE_REMAINING_MS,
   COFFEE_POLL_OPTION_COUNT_MAX,
@@ -4962,22 +4963,21 @@ function normalizeImportedBotHash(value: unknown): string | null {
 
 function normalizeImportedMemorySource(
   source: BotExportMemory["source"] | undefined
-): "direct" | "inferred" | "compiled" | "about_you" {
-  return source === "inferred" || source === "compiled" || source === "about_you"
+): "direct" | "inferred" | "compiled" {
+  return source === "inferred" || source === "compiled" || source === "direct"
     ? source
-    : "direct";
+    : "compiled";
 }
 
 function normalizeImportedMemoryCategory(
-  category: BotExportMemory["category"] | undefined,
-  source: "direct" | "inferred" | "compiled" | "about_you"
+  category: BotExportMemory["category"] | undefined
 ): MemoryCategory {
   if (category === "general" || category === "user" || category === "bot_relation") {
     return category;
   }
   // Bot-export payloads often omit category; for imported bot memories, default
   // to "general" so second-person persona lines are not mistaken as "About you."
-  return source === "about_you" ? "user" : "general";
+  return "general";
 }
 
 function createClientBotExportHash(): string {
@@ -6203,11 +6203,13 @@ function memoryTier(memory: UserMemory): MemoryTier {
     ? Math.max(0, Math.min(1, memory.durability as number))
     : 0;
   const durability = Math.max(storedDurability, estimatedDurability);
-  const truthScore = (confidence + certainty) / 2;
   return memory.tier === "long_term" ||
-    truthScore >= 0.95 ||
-    (truthScore >= 0.9 && durability >= 0.5) ||
-    (durability >= 0.72 && truthScore >= 0.78)
+    memoryQualifiesLongTerm({
+      confidence,
+      certainty,
+      durability,
+      source: memory.source ?? "direct",
+    })
     ? "long_term"
     : "short_term";
 }

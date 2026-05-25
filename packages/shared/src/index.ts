@@ -474,7 +474,16 @@ export {
   type ResolvedAutoModel,
 } from "./modelRouting.js";
 
-export { classifyMemoryCategoryFromText } from "./memoryClassification.js";
+export {
+  LONG_TERM_HIGH_TRUTH_SCORE,
+  LONG_TERM_MEMORY_SCORE,
+  LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH,
+  classifyMemoryCategoryFromText,
+  memoryLongTermScore,
+  memoryQualifiesLongTerm,
+  memoryTruthScore,
+  type MemorySource,
+} from "./memoryClassification.js";
 
 export type MemoryValidationStatus = "approved" | "auto_fixed";
 

@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifyMemoryCategoryFromText } from "./memoryClassification.ts";
+import {
+  classifyMemoryCategoryFromText,
+  memoryQualifiesLongTerm,
+} from "./memoryClassification.ts";
 
 describe("classifyMemoryCategoryFromText", () => {
   it("treats bot-export persona lines starting with You as general, not user", () => {
@@ -28,6 +31,41 @@ describe("classifyMemoryCategoryFromText", () => {
     assert.equal(
       classifyMemoryCategoryFromText("Another bot mentioned you like tea."),
       "bot_relation"
+    );
+  });
+});
+
+describe("memoryQualifiesLongTerm", () => {
+  it("keeps compiled persona memories below 95 percent in the orb layer", () => {
+    assert.equal(
+      memoryQualifiesLongTerm({
+        confidence: 0.9,
+        certainty: 0.9,
+        durability: 0.9,
+        source: "compiled",
+      }),
+      false
+    );
+  });
+
+  it("allows direct durable memories at 90 percent and compiled memories at 95 percent", () => {
+    assert.equal(
+      memoryQualifiesLongTerm({
+        confidence: 0.9,
+        certainty: 0.9,
+        durability: 0.5,
+        source: "direct",
+      }),
+      true
+    );
+    assert.equal(
+      memoryQualifiesLongTerm({
+        confidence: 0.95,
+        certainty: 0.95,
+        durability: 0.2,
+        source: "compiled",
+      }),
+      true
     );
   });
 });

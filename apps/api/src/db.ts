@@ -725,16 +725,13 @@ export function createDatabase(): DatabaseSync {
     SET tier = CASE
       WHEN lower(COALESCE(tier, '')) IN ('short_term', 'long_term')
         THEN lower(tier)
-      WHEN (
-          ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.95
-        )
+      WHEN COALESCE(source, 'direct') = 'about_you'
+        OR ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.95
         OR (
+          COALESCE(source, 'direct') = 'direct'
+          AND
           ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.9
           AND COALESCE(durability, 0.5) >= 0.5
-        )
-        OR (
-          COALESCE(durability, 0.5) >= 0.72
-          AND ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.78
         )
         THEN 'long_term'
       ELSE 'short_term'
@@ -743,42 +740,22 @@ export function createDatabase(): DatabaseSync {
        OR trim(tier) = ''
        OR lower(tier) NOT IN ('short_term', 'long_term');
   `);
-  db.exec(`
-    UPDATE memories
-    SET tier = 'long_term'
-    WHERE (
-      (
-        ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.95
-      )
-       OR (
-        ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.9
-        AND COALESCE(durability, 0.5) >= 0.5
-      )
-       OR (
-        COALESCE(durability, 0.5) >= 0.72
-        AND ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.78
-      )
-    )
-      AND tier = 'short_term';
-  `);
-  db.exec(`
-    UPDATE memories
-    SET tier = 'short_term'
-    WHERE NOT (
-        (
-          ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.95
+  if (!hasMemoryTierColumn) {
+    db.exec(`
+      UPDATE memories
+      SET tier = 'long_term'
+      WHERE (
+          COALESCE(source, 'direct') = 'about_you'
+          OR ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.95
+          OR (
+            COALESCE(source, 'direct') = 'direct'
+            AND ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.9
+            AND COALESCE(durability, 0.5) >= 0.5
+          )
         )
-        OR (
-          ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.9
-          AND COALESCE(durability, 0.5) >= 0.5
-        )
-        OR (
-          COALESCE(durability, 0.5) >= 0.72
-          AND ((confidence + COALESCE(certainty, confidence)) / 2.0) >= 0.78
-        )
-      )
-      AND tier = 'long_term';
-  `);
+        AND tier = 'short_term';
+    `);
+  }
 
   const imageColumns = db
     .prepare("PRAGMA table_info(images)")

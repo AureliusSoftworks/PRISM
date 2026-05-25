@@ -2802,8 +2802,15 @@ function botOpinionPromptContext(opinion: BotOpinion | null): string | null {
   ].join("\n");
 }
 
-function isLongTermMemory(memory: { tier?: MemoryTier; confidence: number; certainty?: number; durability?: number }): boolean {
-  return memory.tier === "long_term" || memoryQualifiesLongTerm(memory.confidence, memory.certainty, memory.durability);
+function isLongTermMemory(memory: {
+  tier?: MemoryTier;
+  confidence: number;
+  certainty?: number;
+  durability?: number;
+  source?: "direct" | "inferred" | "compiled" | "about_you";
+}): boolean {
+  return memory.tier === "long_term" ||
+    memoryQualifiesLongTerm(memory.confidence, memory.certainty, memory.durability, memory.source);
 }
 
 function messageAllowsLongTermDemotion(message: string): boolean {

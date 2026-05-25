@@ -1,8 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, encryptJson, randomId } from "./security.ts";
 import { embedTextLocal, fallbackEmbedding } from "./providers.ts";
-import type { MemoryCategory, MemoryTier, UserMemory } from "@localai/shared";
-import { classifyMemoryCategoryFromText } from "@localai/shared";
+import type { MemoryCategory, MemorySource, MemoryTier, UserMemory } from "@localai/shared";
+import {
+  classifyMemoryCategoryFromText,
+  memoryLongTermScore as sharedMemoryLongTermScore,
+  memoryQualifiesLongTerm as sharedMemoryQualifiesLongTerm,
+} from "@localai/shared";
 import type { MemoryCandidate } from "./memory-extraction.ts";
 import {
   analyzeMemoryIntent,
@@ -117,12 +121,7 @@ const CULMINATION_MIN_SIMILARITY = 0.55;
 const CULMINATION_CONTRADICTION_SIMILARITY = 0.78;
 const CULMINATION_LOOKBACK_LIMIT = 80;
 const CULMINATION_MAX_DETAILS = 4;
-export const LONG_TERM_MEMORY_SCORE = 0.95;
 export const ABOUT_YOU_MEMORY_SOURCE = "about_you";
-const LONG_TERM_HIGH_TRUTH_SCORE = 0.9;
-const LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH = 0.5;
-const LONG_TERM_DURABILITY_PROMOTION = 0.72;
-const LONG_TERM_DURABILITY_TRUTH_FLOOR = 0.78;
 export const DEMOTED_LONG_TERM_CONFIDENCE = 0.34;
 const MEMORY_TARGET_LOOKBACK_LIMIT = 20;
 const MEMORY_TARGET_SCORE_THRESHOLD = 0.55;
@@ -203,46 +202,32 @@ function explicitMemoryDurability(durability: number | undefined): number | unde
     : undefined;
 }
 
-function memoryTruthScore(confidence: number, certainty = confidence): number {
-  const safeConfidence = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0;
-  const safeCertainty = Number.isFinite(certainty) ? Math.max(0, Math.min(1, certainty)) : safeConfidence;
-  return (safeConfidence + safeCertainty) / 2;
-}
-
 export function memoryLongTermScore(
   confidence: number,
   certainty = confidence,
   durability = 0
 ): number {
-  const safeDurability = Number.isFinite(durability) ? Math.max(0, Math.min(1, durability)) : 0;
-  return (memoryTruthScore(confidence, certainty) + safeDurability) / 2;
+  return sharedMemoryLongTermScore(confidence, certainty, durability);
 }
 
 export function memoryQualifiesLongTerm(
   confidence: number,
   certainty = confidence,
-  durability = 0
+  durability = 0,
+  source: MemorySource | string | null = "direct"
 ): boolean {
-  const truthScore = memoryTruthScore(confidence, certainty);
-  const safeDurability = Number.isFinite(durability) ? Math.max(0, Math.min(1, durability)) : 0;
-  return (
-    truthScore >= LONG_TERM_MEMORY_SCORE ||
-    (
-      truthScore >= LONG_TERM_HIGH_TRUTH_SCORE &&
-      safeDurability >= LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH
-    ) ||
-    (safeDurability >= LONG_TERM_DURABILITY_PROMOTION && truthScore >= LONG_TERM_DURABILITY_TRUTH_FLOOR)
-  );
+  return sharedMemoryQualifiesLongTerm({ confidence, certainty, durability, source });
 }
 
 export function normalizeMemoryTier(
   tier: MemoryTier | string | null | undefined,
   confidence: number,
   certainty = confidence,
-  durability = 0
+  durability = 0,
+  source: MemorySource | string | null = "direct"
 ): MemoryTier {
-  if (tier === "short_term" || tier === "long_term") return tier;
-  return memoryQualifiesLongTerm(confidence, certainty, durability)
+  if (tier === "short_term") return "short_term";
+  return memoryQualifiesLongTerm(confidence, certainty, durability, source)
     ? "long_term"
     : "short_term";
 }
@@ -663,12 +648,12 @@ export async function restoreMemory(
 
   const id = randomId(12);
   const createdAt = new Date().toISOString();
+  const source = options.source ?? "direct";
   const confidence = options.confidence ?? options.certainty ?? 0.9;
   const certainty = options.certainty ?? confidence;
   const category = normalizeMemoryCategory(options.category, options.text);
   const durability = explicitMemoryDurability(options.durability) ?? normalizeMemoryDurability(undefined, options.text);
-  const tier = normalizeMemoryTier(options.tier, confidence, certainty, durability);
-  const source = options.source ?? "direct";
+  const tier = normalizeMemoryTier(options.tier, confidence, certainty, durability, source);
   const sourceMessageIds = normalizeSourceMessageIds(options.sourceMessageIds);
   const encrypted = encryptJson(
     { text: options.text, embedding } as unknown as Record<string, unknown>,
@@ -748,7 +733,15 @@ function decryptMemoryRow(row: MemoryRow, userKey: Buffer): StoredMemoryWithEmbe
     botId: row.bot_id ?? undefined,
     confidence: row.confidence,
     category: normalizeMemoryCategory(row.category, decrypted.text),
-    tier: normalizeMemoryTier(row.tier, row.confidence, row.certainty ?? row.confidence, row.durability ?? undefined),
+    tier: row.tier === "long_term" || row.tier === "short_term"
+      ? row.tier
+      : normalizeMemoryTier(
+        undefined,
+        row.confidence,
+        row.certainty ?? row.confidence,
+        row.durability ?? undefined,
+        row.source
+      ),
     durability: normalizeMemoryDurability(row.durability, decrypted.text),
     source: row.source,
     certainty: row.certainty ?? row.confidence,
@@ -857,7 +850,7 @@ async function resolveMemoryCulmination(
     encrypted.tag,
     confidence,
     normalizeMemoryCategory(newMemory.category, compiledText),
-    normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability),
+    normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability, "compiled"),
     newMemory.durability,
     confidence,
     sourceMessageIdsJson(sourceMessageIds),
@@ -882,7 +875,7 @@ async function resolveMemoryCulmination(
       botId: botId ?? undefined,
       confidence,
       category: normalizeMemoryCategory(newMemory.category, compiledText),
-      tier: normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability),
+      tier: normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability, "compiled"),
       durability: newMemory.durability,
       source: "compiled",
       certainty: confidence,
@@ -1014,7 +1007,7 @@ export async function persistMemoryCandidates(
     const target = source === "direct"
       ? pickReinforcementTarget(scopeMemoriesForReinforcement, candidate.text)
       : null;
-    const tier = normalizeMemoryTier(options.tier, candidateConfidence, certainty, durability);
+    const tier = normalizeMemoryTier(options.tier, candidateConfidence, certainty, durability, source);
     if (target) {
       const mergedSourceMessageIds = normalizeSourceMessageIds([
         ...target.sourceMessageIds,
@@ -1033,7 +1026,8 @@ export async function persistMemoryCandidates(
         options.tier,
         reinforcedConfidence,
         reinforcedCertainty,
-        reinforcedDurability
+        reinforcedDurability,
+        source
       );
       db.prepare(`
         UPDATE memories
@@ -1196,7 +1190,7 @@ export function createDevSeedMemories(
         encrypted.tag,
         confidence,
         options.category ?? "user",
-        options.tier ?? normalizeMemoryTier(undefined, confidence, options.certainty ?? confidence, durability),
+        normalizeMemoryTier(options.tier, confidence, options.certainty ?? confidence, durability, options.source ?? "direct"),
         durability,
         options.source ?? "direct",
         options.certainty ?? confidence,

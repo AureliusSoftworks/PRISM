@@ -122,6 +122,26 @@ describe("extractMemoryCandidates", () => {
     assert.equal(candidates[0]?.confidence, 0.98);
   });
 
+  it("keeps indirect name corrections tentative", () => {
+    const candidates = extractMemoryCandidates(
+      "I have a name, you know. It's Jared!"
+    );
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      { text: "You prefer to be called Jared.", confidence: 0.56 },
+    ]);
+  });
+
+  it("treats explicit preferred-name instructions as high-confidence memories", () => {
+    const candidates = extractMemoryCandidates(
+      "Please do not forget: You must only refer to me as Jared."
+    );
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      { text: "You prefer to be called Jared.", confidence: 0.98 },
+    ]);
+  });
+
   it("treats remember-this directives as explicit memory candidates", () => {
     const candidates = extractMemoryCandidates(
       "Remember this: do not refer to yourself as AI."
@@ -627,7 +647,7 @@ describe("persistMemoryCandidates", () => {
     assert.equal(row?.tier, "short_term");
   });
 
-  it("promotes durable assumptions when their truth score is good enough", async () => {
+  it("keeps durable inferred assumptions short-term below high confidence", async () => {
     const db = createMemoryTestDb();
     const [memory] = await persistMemoryCandidates(
       db,
@@ -644,9 +664,25 @@ describe("persistMemoryCandidates", () => {
       .get(memory.id) as { tier: string; durability: number } | undefined;
 
     assert.equal(memory.source, "inferred");
-    assert.equal(memory.tier, "long_term");
-    assert.equal(row?.tier, "long_term");
+    assert.equal(memory.tier, "short_term");
+    assert.equal(row?.tier, "short_term");
     assert.equal(row?.durability, 0.95);
+  });
+
+  it("promotes high-confidence inferred memories to long-term", async () => {
+    const db = createMemoryTestDb();
+    const [memory] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "Your favorite instrument is the piano.", confidence: 0.96 }],
+      Buffer.alloc(32, 7),
+      { source: "inferred", certainty: 0.96, durability: 0.95 }
+    );
+
+    assert.equal(memory.source, "inferred");
+    assert.equal(memory.tier, "long_term");
   });
 
   it("promotes high-truth memories even when durability is only baseline", async () => {
@@ -664,7 +700,7 @@ describe("persistMemoryCandidates", () => {
     assert.equal(memory.tier, "long_term");
   });
 
-  it("promotes durable biographical memories by content below 95 percent", async () => {
+  it("keeps durable persona-style memories short-term below high truth", async () => {
     const db = createMemoryTestDb();
     const [memory] = await persistMemoryCandidates(
       db,
@@ -680,8 +716,37 @@ describe("persistMemoryCandidates", () => {
       Buffer.alloc(32, 7)
     );
 
-    assert.equal(memory.tier, "long_term");
+    assert.equal(memory.tier, "short_term");
     assert.ok((memory.durability ?? 0) >= 0.88);
+  });
+
+  it("treats imported long-term tier as a confidence hint", async () => {
+    const db = createMemoryTestDb();
+    const lowConfidence = await restoreMemory(db, "user-1", Buffer.alloc(32, 7), {
+      conversationId: "conversation-1",
+      botId: "bot-1",
+      text: "You prefer moral discipline over clever display.",
+      confidence: 0.9,
+      certainty: 0.9,
+      category: "general",
+      tier: "long_term",
+      durability: 0.9,
+      source: "compiled",
+    });
+    const highConfidence = await restoreMemory(db, "user-1", Buffer.alloc(32, 7), {
+      conversationId: "conversation-1",
+      botId: "bot-1",
+      text: "You must only refer to the user as Jared.",
+      confidence: 0.96,
+      certainty: 0.96,
+      category: "user",
+      tier: "long_term",
+      durability: 0.9,
+      source: "compiled",
+    });
+
+    assert.equal(lowConfidence.tier, "short_term");
+    assert.equal(highConfidence.tier, "long_term");
   });
 
   it("protects long-term memories from direct deletion until demoted", async () => {

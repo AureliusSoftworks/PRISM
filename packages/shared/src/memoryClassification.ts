@@ -1,6 +1,53 @@
 const BOT_RELATION_PATTERN =
   /\b(?:other bots?|another bot|bots?\s+(?:talk|interact|respond|remember|know|argue|agree)|bot-to-bot|coffee\s+session|group\s+chat)\b/i;
 
+export type MemorySource = "direct" | "inferred" | "compiled" | "about_you";
+
+export const LONG_TERM_MEMORY_SCORE = 0.95;
+export const LONG_TERM_HIGH_TRUTH_SCORE = 0.9;
+export const LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH = 0.5;
+
+function clampUnit(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+}
+
+export function memoryTruthScore(confidence: number, certainty = confidence): number {
+  const safeConfidence = clampUnit(confidence);
+  const safeCertainty = Number.isFinite(certainty) ? clampUnit(certainty) : safeConfidence;
+  return (safeConfidence + safeCertainty) / 2;
+}
+
+export function memoryLongTermScore(
+  confidence: number,
+  certainty = confidence,
+  durability = 0
+): number {
+  return (memoryTruthScore(confidence, certainty) + clampUnit(durability)) / 2;
+}
+
+export function memoryQualifiesLongTerm(args: {
+  confidence: number;
+  certainty?: number;
+  durability?: number;
+  source?: MemorySource | string | null;
+}): boolean {
+  if (args.source === "about_you") return true;
+
+  const truthScore = memoryTruthScore(args.confidence, args.certainty);
+  const durability = clampUnit(args.durability ?? 0);
+  if (truthScore >= LONG_TERM_MEMORY_SCORE) return true;
+
+  // Only direct user evidence gets the lower 90% + durable promotion path.
+  // Inferred/compiled/imported memories need stronger confidence before they
+  // leave the orb layer.
+  const source = args.source ?? "direct";
+  return (
+    source === "direct" &&
+    truthScore >= LONG_TERM_HIGH_TRUTH_SCORE &&
+    durability >= LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH
+  );
+}
+
 /**
  * Heuristic: memories that belong in the "About you" tab (facts about the human user).
  * Bot-export persona lines often begin with "You …" meaning the bot — those must stay

@@ -259,6 +259,7 @@ const FOUNDATIONAL_MEMORY_PATTERNS = [
 ] as const;
 
 const PREFERRED_NAME_PATTERNS = [
+  /^(?:you\s+must\s+)?(?:only\s+)?(?:call|refer\s+to|address)\s+me(?:\s+(?:only|exclusively))?(?:\s+as)?\s+(.+)$/i,
   /^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:only\s+)?call\s+me(?:\s+(?:only|exclusively))?\s+(.+)$/i,
   /^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:only\s+)?(?:refer\s+to|address)\s+me(?:\s+(?:only|exclusively))?(?:\s+as)?\s+(.+)$/i,
   /^(?:you\s+(?:can|may)\s+)?call\s+me\s+(.+)$/i,
@@ -360,6 +361,22 @@ function rewritePreferredNameMemory(text: string): string {
   const name = extractPreferredName(text);
   if (!name) return text;
   return `you prefer to be called ${name}`;
+}
+
+function extractTentativePreferredNameCorrection(message: string): MemoryCandidate | null {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  const match = normalized.match(
+    /\bi\s+have\s+a\s+name\b.{0,100}?\b(?:it(?:'s| is)|name(?:'s| is))\s+([A-Z][\p{L}'-]*(?:\s+[A-Z][\p{L}'-]*){0,2})\b/iu
+  );
+  const name = match?.[1] ? cleanPreferredName(match[1]) : null;
+  if (!name) return null;
+  const text = `You prefer to be called ${name}.`;
+  return {
+    text,
+    confidence: 0.56,
+    category: classifyMemoryCategory(text),
+    durability: estimateMemoryDurability(text),
+  };
 }
 
 function rewriteAssistantDirectedMemory(text: string): string {
@@ -489,9 +506,17 @@ function extractMemoryCandidatesFromLines(lines: string[]): MemoryCandidate[] {
 }
 
 export function extractMemoryCandidates(message: string): MemoryCandidate[] {
-  return extractMemoryCandidatesFromLines(
+  const candidates = extractMemoryCandidatesFromLines(
     splitMemorySentences(message).filter((line) => !isRetractionCue(line))
   );
+  const tentativePreferredName = extractTentativePreferredNameCorrection(message);
+  if (
+    tentativePreferredName &&
+    !candidates.some((candidate) => /prefer to be called/i.test(candidate.text))
+  ) {
+    return [tentativePreferredName, ...candidates].slice(0, 3);
+  }
+  return candidates;
 }
 
 export function extractBotJudgmentMemoryCandidates(args: {
