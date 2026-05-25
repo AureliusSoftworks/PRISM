@@ -11,7 +11,7 @@ export interface ConversationSummary {
   /** Coffee-only — durable parent group for recurring table sessions. */
   coffeeGroupId?: string | null;
   /** Coffee-only — timed session duration once group-owned sessions are used. */
-  coffeeSessionDurationMinutes?: 1 | 5 | 10;
+  coffeeSessionDurationMinutes?: 2 | 3 | 5;
   incognito: boolean;
   lastBotId: string | null;
   lastBotColor: string | null;
@@ -312,8 +312,8 @@ export function listConversationSummaries(
   });
 }
 
-function isCoffeeSessionDurationMinutes(value: unknown): value is 1 | 5 | 10 {
-  return value === 1 || value === 5 || value === 10;
+function isCoffeeSessionDurationMinutes(value: unknown): value is 2 | 3 | 5 {
+  return value === 2 || value === 3 || value === 5;
 }
 
 function parseBotGroupIdsForSummary(raw: string | null): string[] {

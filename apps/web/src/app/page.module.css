@@ -23849,6 +23849,30 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   left: 67%;
 }
 
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="0"] {
+  left: 22%;
+  top: 34%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="1"] {
+  left: 78%;
+  top: 34%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="2"] {
+  left: 78%;
+  top: 73%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"]
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="3"] {
+  left: 22%;
+  top: 73%;
+}
+
 .coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"])
   .coffeeSeat[data-seat="0"] {
   top: 8.5%;
@@ -23896,6 +23920,30 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   left: 67%;
 }
 
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="0"] {
+  left: 24%;
+  top: 34%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="1"] {
+  left: 76%;
+  top: 34%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="2"] {
+  left: 76%;
+  top: 74%;
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="3"] {
+  left: 24%;
+  top: 74%;
+}
+
 .coffeeStage[data-phase="selecting"][data-group-ready="true"] .coffeeTableGlow {
   width: min(82%, 660px);
 }
@@ -23903,6 +23951,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeStage[data-phase="selecting"][data-group-ready="true"] .coffeeTableDisk {
   width: clamp(356px, 46vw, 388px);
   max-width: calc(100% - 48px);
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:has(.coffeeSeat[data-seat-count="4"])
+  .coffeeTableGlow {
+  width: min(70%, 560px);
+}
+
+.coffeeStage[data-phase="selecting"][data-group-ready="true"]:has(.coffeeSeat[data-seat-count="4"])
+  .coffeeTableDisk {
+  width: clamp(312px, 36vw, 332px);
 }
 
 .coffeeStage[data-compact="true"] .coffeeCenterMessage {
@@ -24167,6 +24225,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation-delay: 6200ms;
 }
 
+.coffeeStage[data-phase="finished"][data-replay-active="true"] .coffeeCup {
+  display: block;
+}
+
+.coffeeStage[data-phase="finished"][data-replay-active="true"] .coffeeSeat {
+  pointer-events: auto;
+  animation: none;
+  opacity: 1;
+  transform: translate(-50%, -50%);
+}
+
 @keyframes coffeeSeatWalkAway {
   0% {
     opacity: 1;
@@ -24341,10 +24410,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translate(-50%, calc(-50% + clamp(16px, 2.2vmin, 40px)));
 }
 
+.coffeeStage[data-phase="topic"]:has(.coffeeSeat[data-seat-count="4"]) .coffeeTableGlow {
+  width: min(78%, 640px);
+}
+
+.coffeeStage[data-phase="topic"]:has(.coffeeSeat[data-seat-count="4"]) .coffeeTableDisk {
+  width: min(52vw, 500px);
+  max-width: calc(100% - 80px);
+}
+
 .coffeeStage[data-phase="topic"] .coffeeTableFocalColumn {
   width: min(72vw, 640px);
   max-width: calc(100% - 40px);
   transform: translateY(clamp(16px, 2.2vmin, 40px));
+}
+
+.coffeeStage[data-phase="topic"]:has(.coffeeSeat[data-seat-count="4"]) .coffeeTableFocalColumn {
+  width: min(52vw, 500px);
+  max-width: calc(100% - 80px);
 }
 
 .coffeeStage[data-phase="topic"] .coffeeTableFocalStack {
@@ -24371,6 +24454,30 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   max-width: min(300px, 82vw);
   padding: 4px 8px;
   transform: translateY(clamp(10px, 1.8vh, 22px));
+}
+
+.coffeeStage[data-phase="topic"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="0"] {
+  left: 24%;
+  top: 34%;
+}
+
+.coffeeStage[data-phase="topic"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="1"] {
+  left: 76%;
+  top: 34%;
+}
+
+.coffeeStage[data-phase="topic"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="2"] {
+  left: 76%;
+  top: 74%;
+}
+
+.coffeeStage[data-phase="topic"]:not([data-compact="true"])
+  .coffeeSeat[data-seat-count="4"][data-layout-seat="3"] {
+  left: 24%;
+  top: 74%;
 }
 
 .coffeeStage[data-phase="topic"] .coffeeSeatCluster {
@@ -24480,8 +24587,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   word-break: break-word;
 }
 
+.coffeeCenterFeedLine[data-role="assistant"] {
+  color: var(--coffee-center-line-color, rgba(255, 255, 255, 0.88));
+}
+
 .coffeeCenterFeedLineTyping {
-  color: rgba(255, 255, 255, 0.96);
+  color: var(--coffee-center-line-color, rgba(255, 255, 255, 0.96));
 }
 
 .coffeeCenterFeedLineFallback {
@@ -24677,38 +24788,38 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .coffeeStage:not([data-compact="true"]) .coffeeSeat[data-seat-count="4"][data-layout-seat="0"] {
-  left: 50%;
-  top: 11%;
-  --coffee-cup-x: calc(50% + 15px);
-  --coffee-cup-y: calc(50% + 60px);
-  --coffee-cup-rotation: -127deg;
+  left: 24%;
+  top: 34%;
+  --coffee-cup-x: calc(50% + 53px);
+  --coffee-cup-y: calc(50% + 18px);
+  --coffee-cup-rotation: 176deg;
   --coffee-plate-emoji-face-scale-y: 1;
 }
 
 .coffeeStage:not([data-compact="true"]) .coffeeSeat[data-seat-count="4"][data-layout-seat="1"] {
   left: 76%;
-  top: 50%;
-  --coffee-cup-x: calc(50% - 85px);
-  --coffee-cup-y: calc(50% - 2px);
-  --coffee-cup-rotation: -22deg;
+  top: 34%;
+  --coffee-cup-x: calc(50% - 83px);
+  --coffee-cup-y: calc(50% + 18px);
+  --coffee-cup-rotation: -35deg;
   --coffee-plate-emoji-face-scale-y: -1;
 }
 
 .coffeeStage:not([data-compact="true"]) .coffeeSeat[data-seat-count="4"][data-layout-seat="2"] {
-  left: 50%;
-  top: 83%;
-  --coffee-cup-x: calc(50% + 7px);
-  --coffee-cup-y: calc(50% - 60px);
-  --coffee-cup-rotation: 74deg;
-  --coffee-plate-emoji-face-scale-y: 1;
+  left: 76%;
+  top: 74%;
+  --coffee-cup-x: calc(50% - 57px);
+  --coffee-cup-y: calc(50% - 56px);
+  --coffee-cup-rotation: 22deg;
+  --coffee-plate-emoji-face-scale-y: -1;
 }
 
 .coffeeStage:not([data-compact="true"]) .coffeeSeat[data-seat-count="4"][data-layout-seat="3"] {
   left: 24%;
-  top: 50%;
-  --coffee-cup-x: calc(50% + 55px);
-  --coffee-cup-y: calc(50% - 2px);
-  --coffee-cup-rotation: 155deg;
+  top: 74%;
+  --coffee-cup-x: calc(50% + 27px);
+  --coffee-cup-y: calc(50% - 56px);
+  --coffee-cup-rotation: 93deg;
   --coffee-plate-emoji-face-scale-y: 1;
 }
 
@@ -24790,6 +24901,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --coffee-cup-y: calc(50% - 66px);
   --coffee-cup-rotation: 46deg;
   --coffee-plate-emoji-face-scale-y: -1;
+}
+
+.coffeeStage[data-compact="true"] .coffeeSeat[data-seat-count="4"][data-layout-seat="0"] {
+  left: 22%;
+  top: 34%;
+}
+
+.coffeeStage[data-compact="true"] .coffeeSeat[data-seat-count="4"][data-layout-seat="1"] {
+  left: 78%;
+  top: 34%;
+}
+
+.coffeeStage[data-compact="true"] .coffeeSeat[data-seat-count="4"][data-layout-seat="2"] {
+  left: 78%;
+  top: 72%;
+}
+
+.coffeeStage[data-compact="true"] .coffeeSeat[data-seat-count="4"][data-layout-seat="3"] {
+  left: 22%;
+  top: 72%;
 }
 
 .coffeeSeatCluster {
@@ -24971,6 +25102,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 18px 34px rgba(0, 0, 0, 0.54);
 }
 
+.coffeeSeat[data-replay-review-enabled="true"]:hover .coffeeSeatCluster,
+.coffeeSeat[data-replay-review-enabled="true"]:focus-visible .coffeeSeatCluster {
+  transform: translateY(-2px) scale(1.025);
+}
+
+.coffeeSeat[data-replay-review-enabled="true"]:hover .coffeeSeatGlowPill,
+.coffeeSeat[data-replay-review-enabled="true"]:focus-visible .coffeeSeatGlowPill {
+  border-color: color-mix(in srgb, var(--coffee-bot-color) 58%, rgba(255, 255, 255, 0.24));
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.5) inset,
+    0 0 30px color-mix(in srgb, var(--coffee-bot-color) 42%, transparent);
+}
+
 .coffeeCup {
   position: relative;
   top: auto;
@@ -25135,6 +25279,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   filter: saturate(0.75);
 }
 
+.coffeeStage[data-phase="live"] .coffeeSeat[data-table-dimmed="true"] .coffeeSeatActionBadgeCurrent,
+.coffeeStage[data-phase="finished"] .coffeeSeat[data-table-dimmed="true"] .coffeeSeatActionBadgeCurrent {
+  opacity: 0.34;
+  filter: saturate(0.45) brightness(0.72);
+}
+
+.coffeeStage[data-phase="live"] .coffeeSeat[data-table-dimmed="true"] .coffeeSeatActionBadgeGhost,
+.coffeeStage[data-phase="finished"] .coffeeSeat[data-table-dimmed="true"] .coffeeSeatActionBadgeGhost {
+  opacity: 0.16;
+  filter: saturate(0.4) brightness(0.68);
+}
+
 .coffeeSeatActionBadgeGhost[data-badge-side="right"] {
   transform: translate3d(36px, -8px, 0) scale(0.92);
 }
@@ -25195,6 +25351,99 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+}
+
+.coffeeReplayActionPanel {
+  position: absolute;
+  right: clamp(12px, 3vw, 28px);
+  bottom: clamp(12px, 3vh, 28px);
+  z-index: 9;
+  width: min(260px, calc(100% - 24px));
+  max-height: min(260px, 48vh);
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 56%, rgba(255, 255, 255, 0.18));
+  background: rgba(7, 7, 7, 0.88);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.5),
+    0 0 28px color-mix(in srgb, var(--coffee-bot-color) 20%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.coffeeReplayActionPanel header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.coffeeReplayActionPanel header div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coffeeReplayActionPanel header span,
+.coffeeReplayActionPanel li small {
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.coffeeReplayActionPanel header strong {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--coffee-bot-color) 84%, #fff);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coffeeReplayActionPanel header button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+}
+
+.coffeeReplayActionPanel ul {
+  display: grid;
+  gap: 8px;
+  max-height: 184px;
+  margin: 0;
+  padding: 10px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.coffeeReplayActionPanel li {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.065);
+}
+
+.coffeeReplayActionPanel li span {
+  font-size: 0.84rem;
+  line-height: 1.3;
+}
+
+.coffeeReplayActionPanel p {
+  margin: 0;
+  padding: 14px 12px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.86rem;
 }
 
 /* Picker — empty state before a thread exists. */
@@ -26313,28 +26562,191 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   justify-content: center;
 }
 
-.coffeeReplayControls {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
+.coffeeReplayComposerControls {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding-inline: clamp(12px, 3vw, 22px);
 }
 
-.coffeeReplayControls button {
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.9);
-  font-weight: 720;
+.coffeeReplayTimelineRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+}
+
+.coffeeReplayScrubber {
+  display: block;
+  min-width: 0;
+}
+
+.coffeeReplayScrubber input {
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  accent-color: rgba(255, 255, 255, 0.86);
   cursor: pointer;
 }
 
-.coffeeReplayControls button:hover,
-.coffeeReplayControls button:focus-visible {
-  border-color: rgba(255, 255, 255, 0.3);
+.coffeeReplayScrubber input:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.coffeeReplayScrubber input::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.12)),
+    rgba(0, 0, 0, 0.34);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.coffeeReplayScrubber input::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  background: #f7f7f7;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.34);
+}
+
+.coffeeReplayScrubber input::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.coffeeReplayScrubber input::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.coffeeReplayScrubber input::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  background: #f7f7f7;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.34);
+}
+
+.coffeeReplayPosition {
+  min-width: 46px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.coffeeReplayControlRail {
+  display: grid;
+  grid-template-columns: minmax(118px, 1fr) auto minmax(118px, 1fr);
+  gap: clamp(10px, 2.2vw, 18px);
+  align-items: center;
+  width: 100%;
+}
+
+.coffeeReplayUtilityControls,
+.coffeeReplayTransportControls {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.coffeeReplayUtilityControls {
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.coffeeReplayUtilityControls[data-align="right"] {
+  justify-content: flex-end;
+}
+
+.coffeeReplayTransportControls {
+  justify-content: center;
+  gap: clamp(8px, 1.4vw, 12px);
+}
+
+.coffeeReplayIconButton {
+  appearance: none;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.075);
+  color: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 8px 18px rgba(0, 0, 0, 0.22);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease,
+    transform 140ms ease,
+    opacity 140ms ease;
+}
+
+.coffeeReplayIconButton svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.4;
+}
+
+.coffeeReplayPrimaryButton {
+  width: 48px;
+  height: 48px;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.coffeeReplayPrimaryButton svg {
+  width: 21px;
+  height: 21px;
+}
+
+.coffeeReplayIconButton:hover:not(:disabled),
+.coffeeReplayIconButton:focus-visible {
+  border-color: rgba(255, 255, 255, 0.34);
   background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.coffeeReplayIconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.36;
+  transform: none;
+}
+
+@media (max-width: 680px) {
+  .coffeeReplayControlRail {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .coffeeReplayUtilityControls,
+  .coffeeReplayUtilityControls[data-align="right"],
+  .coffeeReplayTransportControls {
+    justify-content: center;
+  }
 }
 
 .coffeeGroupOverviewGrid {

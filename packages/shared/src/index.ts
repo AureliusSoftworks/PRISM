@@ -265,9 +265,9 @@ export interface CoffeePoll {
   tallies: CoffeePollOptionTally[];
 }
 
-export type CoffeeSessionDurationMinutes = 1 | 5 | 10;
+export type CoffeeSessionDurationMinutes = 2 | 3 | 5;
 
-export const COFFEE_SESSION_DURATION_MINUTES = [1, 5, 10] as const;
+export const COFFEE_SESSION_DURATION_MINUTES = [2, 3, 5] as const;
 export const DEFAULT_COFFEE_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
 /** Bots may hold their Coffee poll vote until this close to session end. */
 export const COFFEE_POLL_FINALIZE_REMAINING_MS = 30_000;

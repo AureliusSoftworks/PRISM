@@ -979,8 +979,8 @@ export function mapConversation(
   };
 }
 
-function isCoffeeSessionDurationMinutes(value: unknown): value is 1 | 5 | 10 {
-  return value === 1 || value === 5 || value === 10;
+function isCoffeeSessionDurationMinutes(value: unknown): value is 2 | 3 | 5 {
+  return value === 2 || value === 3 || value === 5;
 }
 
 function parseBotGroupIds(raw: string | null | undefined): string[] {

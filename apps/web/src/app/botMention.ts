@@ -230,7 +230,7 @@ function looksLikeStageDirectionAction(inner: string): boolean {
   if (!normalized) return false;
   // Keep this conservative: only treat common physical/social action verbs
   // as stage directions when the token is embedded in prose.
-  return /^(?:glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snorts?|snorting|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|mutters?|muttering|scoffs?|scoffing|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|drums?|drumming|twirls?|twirling|pats?|patting|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling)\b/u.test(
+  return /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|mutters?|muttering|scoffs?|scoffing|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|drums?|drumming|twirls?|twirling|pats?|patting|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting)\b/u.test(
     normalized
   );
 }
@@ -268,7 +268,7 @@ const LEADING_UNMARKED_STAGE_START_RE = new RegExp(
     String.raw`(?:`,
     String.raw`(?:his|her|their|its)\s+(?:eyes?|gaze|breath(?:ing)?|jaw|mouth|shoulders?)\b`,
     String.raw`|eyes?\s+(?:narrow|narrowing|widen|widening|shift|shifting|glance|glancing|gaze|gazing|roll|rolling)\b`,
-    String.raw`|(?:leans?|leaning|glances?|glancing|gazes?|gazing|glares?|glaring|stares?|staring|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|winces?|wincing|grimaces?|grimacing|chuckles?|chuckling|snorts?|snorting|blinks?|blinking|turns?|turning|tilts?|tilting|pauses?|pausing|sips?|sipping|picks?|picking|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|drums?|drumming|twirls?|twirling|pats?|patting|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling)\b(?!\s+(?:like|are|is)\b)`,
+    String.raw`|(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|leans?|leaning|glances?|glancing|gazes?|gazing|glares?|glaring|stares?|staring|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|blinks?|blinking|turns?|turning|tilts?|tilting|pauses?|pausing|sips?|sipping|picks?|picking|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|drums?|drumming|twirls?|twirling|pats?|patting|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling)\b(?!\s+(?:like|are|is)\b)`,
     String.raw`)`,
   ].join(""),
   "iu"
@@ -281,7 +281,7 @@ const UNMARKED_STAGE_ADDRESS_PREFIX_RE = new RegExp(
 );
 
 const LEADING_UNMARKED_STAGE_SPOKEN_OPENER_RE =
-  /\s+(?=(?:["“'‘])?(?:I|I'm|I've|I'd|You|You're|You've|We|We're|That's|The|This|These|Those|But|Still|Anyway|Honestly|Listen|Look,|Well|Ah|Oh|No offense|No,|Yes,|Okay|Sure|Mine|Yours|Consider|Imagine|Suppose|Notice|Think|Let's|Let us|Picture|Now|Yeah|Yup|Hey|Huh|Hmm|Actually|Me|True|False|Maybe|Perhaps|My|So|And|Because|If|When|Where|Why|How|What)\b)/gu;
+  /\s+(?=(?:["“'‘])?(?:[A-Z][\p{L}'-]{1,24},|(?:I|I'm|I've|I'd|You|You're|You've|We|We're|A|That's|The|This|These|Those|But|Still|Anyway|Honestly|Listen|Look,|Well|Ah|Oh|No offense|No,|Yes,|Okay|Sure|Mine|Yours|Consider|Imagine|Suppose|Notice|Think|Let's|Let us|Picture|Now|Yeah|Yup|Hey|Huh|Hmm|Actually|Me|True|False|Maybe|Perhaps|My|So|And|Because|If|When|Where|Why|How|What|Dodging)\b))/gu;
 
 function normalizeUnmarkedStageAction(raw: string): string {
   return raw.replace(/[,.!?;:\s]+$/u, "").trim();
@@ -320,8 +320,9 @@ function extractLeadingUnmarkedStageDirection(text: string): {
 
   for (const match of rest.matchAll(LEADING_UNMARKED_STAGE_SPOKEN_OPENER_RE)) {
     const splitIndex = match.index ?? -1;
-    if (splitIndex < 12 || splitIndex > 180) continue;
     const action = normalizeUnmarkedStageAction(rest.slice(0, splitIndex));
+    if (splitIndex < 12 && !looksLikeStageDirectionAction(action)) continue;
+    if (splitIndex < 4 || splitIndex > 180) continue;
     const spokenText = rest.slice(splitIndex).trim();
     const mainText = normalizeStageDirectionMainText(`${prefix}${spokenText}`);
     if (action.length > 0 && mainText.length > 0) {

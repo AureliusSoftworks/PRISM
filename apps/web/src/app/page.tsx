@@ -32,8 +32,27 @@ import {
   coffeeHeadPlateFaceScaleYFromGazeTargetSide,
   coffeeSeatIsTopHead,
 } from "./coffee-seat-gaze";
+import {
+  coffeePendingSubmittedUserLineVisible,
+  coffeeShouldQueueAssistantRevealAfterUserTyping,
+} from "./coffee-user-reveal-flow";
+import {
+  clampCoffeeReplayMessageIndex,
+  coffeeReplayVisibleMessages,
+  collectCoffeeReplayActionsForBot,
+} from "./coffee-replay";
 import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
-import { Image as ImageGlyph } from "lucide-react";
+import {
+  Download,
+  Image as ImageGlyph,
+  LogOut,
+  Pause,
+  Play,
+  RotateCcw,
+  SkipBack,
+  SkipForward,
+  X,
+} from "lucide-react";
 import styles from "./page.module.css";
 import {
   BOT_FACT_KEY_LABELS,
@@ -2257,6 +2276,17 @@ function normalizeAccentForTheme(hex: string, theme?: "light" | "dark"): string 
   return clampLuminance(lightnessClamped, { max });
 }
 
+function coffeeBotTranscriptTextColor(
+  rawHex: string | null | undefined,
+  resolvedTheme: "light" | "dark"
+): string | undefined {
+  if (!rawHex) return undefined;
+  const normalized = normalizeAccentForTheme(rawHex, resolvedTheme);
+  const { h, s, l } = hexToHsl(normalized);
+  const desaturated = hslToHex(h, s * 0.28, l);
+  return ensureContrast(desaturated, THEME_BG[resolvedTheme], 4.5);
+}
+
 // --bg-surface hex per theme. Mirrored from .themeDark / .themeLight in
 // page.module.css so the swatch-border compensator can reason about what
 // surface the swatch actually sits on.
@@ -2390,7 +2420,9 @@ const COFFEE_INTERRUPTION_CUE_HIDE_MS = 3200;
 const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
 const COFFEE_INTERRUPTION_FALLBACK_VISIBLE_PROGRESS = 0.65;
 const COFFEE_CENTER_FEED_MAX_LINES = 14;
-const COFFEE_SESSION_DURATION_OPTIONS: readonly CoffeeSessionDurationMinutes[] = [1, 5, 10];
+const COFFEE_DISCARD_ON_EXIT_WINDOW_MS = 10_000;
+const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
+const COFFEE_SESSION_DURATION_OPTIONS: readonly CoffeeSessionDurationMinutes[] = [2, 3, 5];
 const COFFEE_DEFAULT_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
 const COFFEE_AUTO_PRESET_ID = "__auto__";
 const COFFEE_CUP_ROTATION_BIAS_DEGREES = 45;
@@ -2511,7 +2543,7 @@ function coffeeSessionDurationMs(
   conversation: Pick<CoffeeConversationState, "coffeeSessionDurationMinutes"> | null | undefined
 ): number {
   const minutes = conversation?.coffeeSessionDurationMinutes;
-  if (minutes === 1 || minutes === 5 || minutes === 10) {
+  if (minutes === 2 || minutes === 3 || minutes === 5) {
     return minutes * 60 * 1000;
   }
   return COFFEE_SESSION_DURATION_MS;
@@ -2739,6 +2771,7 @@ interface CoffeeCenterFeedLine {
   text: string;
   botGlyph?: string;
   botId?: string;
+  botTextColor?: string;
 }
 
 /** Local mirror of the Coffee conversation shape returned by `POST /api/coffee/turn`. */
@@ -2780,7 +2813,7 @@ interface CoffeeGroupState {
   updatedAt: string;
 }
 
-type CoffeeSessionDurationMinutes = 1 | 5 | 10;
+type CoffeeSessionDurationMinutes = 2 | 3 | 5;
 
 interface CoffeePresetState {
   id: string;
@@ -2906,6 +2939,27 @@ function coffeeMessageHasTableText(
   return mainText.trim().length > 0;
 }
 
+function coffeeConversationHasSessionSynopsis(
+  conversation: CoffeeConversationState | null | undefined
+): boolean {
+  return Boolean(
+    conversation?.messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content.trim().startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX)
+    )
+  );
+}
+
+function coffeeReplayMessageKey(message: CoffeeConversationMessage, index: number): string {
+  return message.id || `${index}:${message.createdAt}:${message.role}:${message.botName ?? ""}`;
+}
+
+function coffeeReplayDisplayLengthForMessage(message: CoffeeConversationMessage): number {
+  if (!coffeeMessageHasTableText(message)) return 0;
+  return getBotMentionDisplayLength(coffeeTableDisplayText(message.content));
+}
+
 interface SessionUser {
   id: string;
   username?: string;
@@ -2927,7 +2981,7 @@ interface ConversationSummary {
   /** Coffee-only durable parent group id, null for legacy sessions. */
   coffeeGroupId?: string | null;
   /** Coffee-only timed session duration once group-owned sessions are used. */
-  coffeeSessionDurationMinutes?: 1 | 5 | 10;
+  coffeeSessionDurationMinutes?: 2 | 3 | 5;
   /** Private chat flag — drives the sidebar privacy marker and, when opened, the grayscale-shell override. */
   incognito: boolean;
   /** Bot id of the most recent assistant message; null for Default-last OR no-reply-yet (disambiguate via hasAssistantReply). */
@@ -4179,7 +4233,12 @@ function interruptionFollowupLine(input: {
 }
 
 function interruptedMidWordSnippet(fullText: string, visibleTokenCount: number): string {
-  const tokens = fullText.match(/\S+\s*/g) ?? [];
+  const displayText = extractStageDirections(fullText)
+    .mainText.replace(/\[([^\]\n]+)\]\(prism-bot:\/\/[^)\n]+\)/gi, "$1")
+    .replace(/\*+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = displayText.match(/\S+\s*/g) ?? [];
   const visible = tokens.slice(0, Math.max(1, visibleTokenCount)).join("").trimEnd();
   if (visible.length === 0) return "…";
   const lastWordMatch = visible.match(/(\S+)$/);
@@ -18540,6 +18599,7 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSessionEndsAtMs, setCoffeeSessionEndsAtMs] = useState<number | null>(null);
   /** Mirrors {@link coffeeSessionEndsAtMs} for timers/async paths (state alone can be stale in callbacks). */
   const coffeeSessionEndsAtRef = useRef<number | null>(null);
+  const coffeeSessionStartedAtRef = useRef<number | null>(null);
   const coffeeConversationRef = useRef<CoffeeConversationState | null>(null);
   const assignCoffeeSessionEndsAtMs = (value: number | null) => {
     coffeeSessionEndsAtRef.current = value;
@@ -18549,6 +18609,7 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSessionClockMs, setCoffeeSessionClockMs] = useState(() => Date.now());
   const [coffeeTurnRhythmState, setCoffeeTurnRhythmState] =
     useState<CoffeeTurnRhythmState>("idle");
+  const coffeeTurnRhythmStateRef = useRef<CoffeeTurnRhythmState>("idle");
   /** Visible length during `userTableTyping` and `tableTyping` center typewriter (shared RAF). */
   const [coffeeTypewriterLength, setCoffeeTypewriterLength] = useState(0);
   const [coffeePendingSpeakerBotId, setCoffeePendingSpeakerBotId] = useState<string | null>(null);
@@ -18578,9 +18639,17 @@ function HomeContent(): React.JSX.Element {
   const coffeeAutoplayPausedRef = useRef(false);
   const coffeeDraftRef = useRef("");
   const coffeeReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coffeeReplayTypewriterRafRef = useRef<number | null>(null);
+  const coffeeReplayTypewriterLengthRef = useRef(0);
+  const coffeeReplayTypewriterMessageKeyRef = useRef<string | null>(null);
+  const coffeeSynopsisRequestIdsRef = useRef<Set<string>>(new Set());
   const [coffeeReplayActive, setCoffeeReplayActive] = useState(false);
   const [coffeeReplayPlaying, setCoffeeReplayPlaying] = useState(false);
   const [coffeeReplayMessageIndex, setCoffeeReplayMessageIndex] = useState(0);
+  const [coffeeReplayPlaybackVersion, setCoffeeReplayPlaybackVersion] = useState(0);
+  const [coffeeReplayTypewriterLength, setCoffeeReplayTypewriterLength] = useState(0);
+  const [coffeeReplayActionPanelBotId, setCoffeeReplayActionPanelBotId] =
+    useState<string | null>(null);
   const [coffeeSessionSettings, setCoffeeSessionSettings] = useState<CoffeeSessionSettings>(() =>
     loadCoffeeSettingsFromBrowser()
   );
@@ -18630,8 +18699,22 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionEndsAtRef.current = coffeeSessionEndsAtMs;
   }, [coffeeSessionEndsAtMs]);
   useEffect(() => {
+    if (!coffeeConversation || coffeeSessionPhase !== "live" || coffeeSessionEndsAtMs == null) {
+      if (coffeeSessionPhase === "selecting" || coffeeSessionPhase === "preview") {
+        coffeeSessionStartedAtRef.current = null;
+      }
+      return;
+    }
+    if (coffeeSessionStartedAtRef.current == null) {
+      coffeeSessionStartedAtRef.current = Date.now();
+    }
+  }, [coffeeConversation, coffeeSessionPhase, coffeeSessionEndsAtMs]);
+  useEffect(() => {
     coffeeConversationRef.current = coffeeConversation;
   }, [coffeeConversation]);
+  useEffect(() => {
+    coffeeTurnRhythmStateRef.current = coffeeTurnRhythmState;
+  }, [coffeeTurnRhythmState]);
   useEffect(() => {
     coffeeActivePollRef.current = coffeeActivePoll;
   }, [coffeeActivePoll]);
@@ -18717,6 +18800,7 @@ function HomeContent(): React.JSX.Element {
     coffeeTypewriterLength,
     coffeeReplayActive,
     coffeeReplayMessageIndex,
+    coffeeReplayTypewriterLength,
     coffeeUserRevealText,
     coffeeSessionPhase,
   ]);
@@ -18779,26 +18863,128 @@ function HomeContent(): React.JSX.Element {
     coffeeDraftRef.current = coffeeDraft;
   }, [coffeeDraft]);
   useEffect(() => {
+    coffeeReplayTypewriterLengthRef.current = coffeeReplayTypewriterLength;
+  }, [coffeeReplayTypewriterLength]);
+  useEffect(() => {
     if (coffeeReplayTimerRef.current) {
       clearTimeout(coffeeReplayTimerRef.current);
       coffeeReplayTimerRef.current = null;
     }
-    if (!coffeeReplayActive || !coffeeReplayPlaying || !coffeeConversation) return;
+    if (coffeeReplayTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+      coffeeReplayTypewriterRafRef.current = null;
+    }
+    if (!coffeeReplayActive || !coffeeConversation) {
+      coffeeReplayTypewriterMessageKeyRef.current = null;
+      coffeeReplayTypewriterLengthRef.current = 0;
+      setCoffeeReplayTypewriterLength(0);
+      return;
+    }
     const messages = coffeeConversation.messages;
-    if (messages.length === 0 || coffeeReplayMessageIndex >= messages.length - 1) {
+    if (messages.length === 0) {
+      coffeeReplayTypewriterMessageKeyRef.current = null;
+      coffeeReplayTypewriterLengthRef.current = 0;
+      setCoffeeReplayTypewriterLength(0);
       setCoffeeReplayPlaying(false);
       return;
     }
-    coffeeReplayTimerRef.current = setTimeout(() => {
-      setCoffeeReplayMessageIndex((index) => Math.min(messages.length - 1, index + 1));
-    }, 900);
+    const clampedIndex = clampCoffeeReplayMessageIndex(messages.length, coffeeReplayMessageIndex);
+    const message = messages[clampedIndex];
+    if (!message) return;
+    const messageKey = coffeeReplayMessageKey(message, clampedIndex);
+    const sameMessage = coffeeReplayTypewriterMessageKeyRef.current === messageKey;
+    const fullLength = coffeeReplayDisplayLengthForMessage(message);
+    const currentLength = sameMessage
+      ? Math.min(fullLength, Math.max(0, coffeeReplayTypewriterLengthRef.current))
+      : 0;
+    coffeeReplayTypewriterMessageKeyRef.current = messageKey;
+    if (!coffeeReplayPlaying) {
+      coffeeReplayTypewriterLengthRef.current = currentLength;
+      setCoffeeReplayTypewriterLength(currentLength);
+      return;
+    }
+    const advanceReplay = () => {
+      if (clampedIndex >= messages.length - 1) {
+        setCoffeeReplayPlaying(false);
+        return;
+      }
+      setCoffeeReplayMessageIndex((index) =>
+        Math.min(messages.length - 1, Math.max(clampedIndex + 1, index + 1))
+      );
+    };
+    if (fullLength <= 0) {
+      coffeeReplayTypewriterLengthRef.current = 0;
+      setCoffeeReplayTypewriterLength(0);
+      coffeeReplayTimerRef.current = setTimeout(advanceReplay, 360);
+      return () => {
+        if (coffeeReplayTimerRef.current) {
+          clearTimeout(coffeeReplayTimerRef.current);
+          coffeeReplayTimerRef.current = null;
+        }
+      };
+    }
+    coffeeReplayTypewriterLengthRef.current = currentLength;
+    setCoffeeReplayTypewriterLength(currentLength);
+    if (currentLength >= fullLength) {
+      coffeeReplayTimerRef.current = setTimeout(advanceReplay, 420);
+      return () => {
+        if (coffeeReplayTimerRef.current) {
+          clearTimeout(coffeeReplayTimerRef.current);
+          coffeeReplayTimerRef.current = null;
+        }
+      };
+    }
+    const durationMs = Math.max(
+      120,
+      randomCoffeeRevealDelayMs(
+        message.content,
+        message.role === "assistant" ? message.moodKey : undefined
+      )
+    );
+    const elapsedOffsetMs = durationMs * (currentLength / Math.max(1, fullLength));
+    const startMs = performance.now() - elapsedOffsetMs;
+    const step = (now: number) => {
+      const elapsed = now - startMs;
+      const t = Math.min(1, elapsed / durationMs);
+      const nextLen = Math.min(fullLength, Math.ceil(t * fullLength));
+      coffeeReplayTypewriterLengthRef.current = nextLen;
+      setCoffeeReplayTypewriterLength(nextLen);
+      if (t < 1) {
+        coffeeReplayTypewriterRafRef.current = requestAnimationFrame(step);
+        return;
+      }
+      coffeeReplayTypewriterRafRef.current = null;
+      coffeeReplayTimerRef.current = setTimeout(advanceReplay, 420);
+    };
+    coffeeReplayTypewriterRafRef.current = requestAnimationFrame(step);
     return () => {
       if (coffeeReplayTimerRef.current) {
         clearTimeout(coffeeReplayTimerRef.current);
         coffeeReplayTimerRef.current = null;
       }
+      if (coffeeReplayTypewriterRafRef.current != null) {
+        cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+        coffeeReplayTypewriterRafRef.current = null;
+      }
     };
-  }, [coffeeReplayActive, coffeeReplayPlaying, coffeeReplayMessageIndex, coffeeConversation]);
+  }, [
+    coffeeReplayActive,
+    coffeeReplayPlaying,
+    coffeeReplayMessageIndex,
+    coffeeReplayPlaybackVersion,
+    coffeeConversation,
+  ]);
+  useEffect(() => {
+    if (!coffeeReplayActive || !coffeeConversation) return;
+    setCoffeeReplayMessageIndex((index) =>
+      clampCoffeeReplayMessageIndex(coffeeConversation.messages.length, index)
+    );
+  }, [coffeeReplayActive, coffeeConversation]);
+  useEffect(() => {
+    if (!coffeeReplayActive || coffeeReplayPlaying) {
+      setCoffeeReplayActionPanelBotId(null);
+    }
+  }, [coffeeReplayActive, coffeeReplayPlaying]);
   // Per-request provider override (mirrors the Sandbox toggle). The
   // user can flip it inside the Coffee shell without touching their
   // global setting; once they manually toggle, we stop syncing from
@@ -18919,8 +19105,10 @@ function HomeContent(): React.JSX.Element {
           coffeePendingRevealAfterUserRef.current = null;
           if (queued) {
             queueCoffeeRevealFnRef.current(queued);
+          } else {
+            setCoffeeTypewriterLength(charCount);
+            setCoffeeTurnRhythmState("botThinking");
           }
-          setCoffeeUserRevealText("");
         }
       };
       coffeeTypewriterRafRef.current = requestAnimationFrame(step);
@@ -19337,6 +19525,43 @@ function HomeContent(): React.JSX.Element {
     coffeeProvider,
     coffeeModelChoiceByProvider,
   ]);
+
+  useEffect(() => {
+    if (!coffeeConversation || coffeeSessionPhase !== "finished") return;
+    if (coffeeConversationHasSessionSynopsis(coffeeConversation)) return;
+    const sessionId = coffeeConversation.id;
+    if (coffeeSynopsisRequestIdsRef.current.has(sessionId)) return;
+    coffeeSynopsisRequestIdsRef.current.add(sessionId);
+    let cancelled = false;
+    async function generateSynopsis() {
+      try {
+        const response = await api<{ ok: true; conversation: CoffeeConversationState }>(
+          `/api/coffee/sessions/${encodeURIComponent(sessionId)}/synopsis`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              preferredProvider: coffeeProvider,
+              ...(coffeeSessionModelOverride
+                ? { modelOverride: coffeeSessionModelOverride }
+                : {}),
+            }),
+          }
+        );
+        if (cancelled) return;
+        setCoffeeConversation((current) =>
+          current?.id === sessionId ? response.conversation : current
+        );
+        void refreshConversations();
+      } catch (err) {
+        coffeeSynopsisRequestIdsRef.current.delete(sessionId);
+        console.warn("[coffee] session synopsis failed", err);
+      }
+    }
+    void generateSynopsis();
+    return () => {
+      cancelled = true;
+    };
+  }, [coffeeConversation, coffeeProvider, coffeeSessionModelOverride, coffeeSessionPhase]);
 
   const coffeeMentionBotPicks = useMemo((): BotMentionPick[] => {
     const out: BotMentionPick[] = [];
@@ -24441,6 +24666,7 @@ function HomeContent(): React.JSX.Element {
 
   async function exportCoffeeSession(conversation: CoffeeConversationState | null): Promise<void> {
     if (!conversation) return;
+    if (coffeeSessionPhase !== "finished") return;
     const data = await api<{ markdown: string }>(
       `/api/conversations/${encodeURIComponent(conversation.id)}/export`,
       { method: "POST", body: "{}" }
@@ -31962,7 +32188,7 @@ function HomeContent(): React.JSX.Element {
         <button
           type="button"
           role="menuitem"
-          onClick={() => runAndClose(exitCoffeeToHub)}
+          onClick={() => runAndClose(() => void exitCoffeeToHub())}
         >
           <span className={styles.contextMenuItemLabel}>
             <span className={styles.contextMenuGlyph} aria-hidden="true">⌂</span>
@@ -37013,9 +37239,18 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(coffeeReplayTimerRef.current);
       coffeeReplayTimerRef.current = null;
     }
+    if (coffeeReplayTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+      coffeeReplayTypewriterRafRef.current = null;
+    }
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
     setCoffeeReplayActive(false);
     setCoffeeReplayPlaying(false);
     setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayPlaybackVersion((version) => version + 1);
+    setCoffeeReplayTypewriterLength(0);
+    setCoffeeReplayActionPanelBotId(null);
     setCoffeeTurnRhythmState("idle");
   };
   const queueCoffeeReveal = (args: {
@@ -37038,6 +37273,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeeSelectedSessionId(args.conversation.id);
       setCoffeePendingRevealConversation(null);
       setCoffeePendingSpeakerBotId(null);
+      setCoffeeUserRevealText("");
       setCoffeeTurnRhythmState(
         coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "idle"
       );
@@ -37191,23 +37427,52 @@ function HomeContent(): React.JSX.Element {
   const buildLocalCoffeeStarterTopicSuggestions = (
     seatBotIds: readonly (string | null)[]
   ): string[] => {
-    const names = seatBotIds
-      .map((id) => (typeof id === "string" ? coffeeBotsById.get(id)?.name : null))
-      .filter((name): name is string => Boolean(name && name.trim().length > 0));
-    if (names.length === 0) {
+    const context = seatBotIds
+      .map((id) => (typeof id === "string" ? coffeeBotsById.get(id) : null))
+      .filter((bot): bot is Bot => Boolean(bot))
+      .map((bot) => `${bot.name} ${bot.system_prompt}`)
+      .join(" ")
+      .toLowerCase();
+    if (/\b(power|empire|command|control|strategy)\b/u.test(context) &&
+      /\b(compassion|forgive|forgiveness|mercy|grace|love|service)\b/u.test(context)) {
       return [
-        "Light small talk while everyone settles",
-        "One honest check-in",
-        "A cozy what-are-we-doing thread",
+        "Power without cruelty",
+        "Duty versus forgiveness",
+        "When mercy has limits",
       ];
     }
-    const a = names[0]!;
-    const b = names[1] ?? names[0]!;
-    const c = names[2] ?? a;
+    if (/\b(philosoph|stoic|ethic|wisdom|metaphysic|logic|reason|free will)\b/u.test(context)) {
+      return [
+        "Is free will an illusion?",
+        "The cost of being right",
+        "A rule worth breaking",
+      ];
+    }
+    if (/\b(engineer|debug|code|system|build|logic)\b/u.test(context)) {
+      return [
+        "When systems fight back",
+        "The cost of clean logic",
+        "A bug worth keeping",
+      ];
+    }
+    if (/\b(money|profit|business|restaurant|secret|protect)\b/u.test(context)) {
+      return [
+        "What loyalty costs",
+        "A secret worth protecting",
+        "When profit needs mercy",
+      ];
+    }
+    if (coffeeSessionSettings.tableEnergy === "still") {
+      return [
+        "What silence protects",
+        "The cost of being right",
+        "A truth worth keeping",
+      ];
+    }
     return [
-      `Something ${a} would defend passionately (kindly)`,
-      `One shared curiosity between ${a} and ${b}`,
-      `A tiny story ${c} could unfold slowly`,
+      "The cost of being right",
+      "When kindness backfires",
+      "A rule worth breaking",
     ];
   };
   const resetCoffeeOpeningPollDraft = () => {
@@ -37330,6 +37595,12 @@ function HomeContent(): React.JSX.Element {
     if (typeof endsAt !== "number" || !Number.isFinite(endsAt)) return null;
     return Math.max(0, endsAt - Date.now());
   };
+  const enterCoffeeLivePhase = () => {
+    if (coffeeSessionStartedAtRef.current == null) {
+      coffeeSessionStartedAtRef.current = Date.now();
+    }
+    setCoffeeSessionPhase("live");
+  };
   const startCoffeeArrivalSequence = (
     conversation: CoffeeConversationState,
     scenario: CoffeeArrivalScenario
@@ -37357,7 +37628,7 @@ function HomeContent(): React.JSX.Element {
       coffeeArrivalTimerRef.current = setTimeout(() => {
         const endsAt = Date.now() + coffeeSessionDurationMs(conversation);
         assignCoffeeSessionEndsAtMs(endsAt);
-        setCoffeeSessionPhase("live");
+        enterCoffeeLivePhase();
         scheduleCoffeeAutonomousTurn(conversation.id, endsAt, true);
       }, COFFEE_ARRIVAL_SETTLE_MS);
     };
@@ -37529,7 +37800,11 @@ function HomeContent(): React.JSX.Element {
       if (!shouldStartArrival) {
         setCoffeeArrivedBotIds(response.conversation.botGroupIds ?? []);
         assignCoffeeSessionEndsAtMs(null);
-        setCoffeeSessionPhase(topicReady ? "live" : "topic");
+        if (topicReady) {
+          enterCoffeeLivePhase();
+        } else {
+          setCoffeeSessionPhase("topic");
+        }
         await refreshConversations();
         return response.conversation;
       }
@@ -37784,6 +38059,7 @@ function HomeContent(): React.JSX.Element {
     if (coffeeBusy || coffeeAutoBusy) return;
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
+    resetCoffeeRhythm();
     abortCoffeeRequests();
     setCoffeeBusy(true);
     setCoffeeError(null);
@@ -37807,8 +38083,18 @@ function HomeContent(): React.JSX.Element {
       setCoffeeArrivedBotIds(groupIds);
       closeCoffeeTranscript();
       assignCoffeeSessionEndsAtMs(null);
-      setCoffeeSessionPhase("preview");
       setCoffeeAutoplayPausedValue(false);
+      setCoffeeActivePoll(null);
+      setCoffeePollResultsOpen(false);
+      setCoffeePollPanelMinimized(false);
+      if (response.conversation.messages.length > 0) {
+        setCoffeeSessionPhase("finished");
+        setCoffeeReplayActive(true);
+        setCoffeeReplayPlaying(true);
+        setCoffeeReplayMessageIndex(0);
+      } else {
+        setCoffeeSessionPhase("preview");
+      }
     } catch (err) {
       setCoffeeError(err instanceof Error ? err.message : "Failed to open Coffee Session.");
     } finally {
@@ -37844,7 +38130,7 @@ function HomeContent(): React.JSX.Element {
     markCoffeeSessionResumed(coffeeConversation.id);
     setCoffeeArrivedBotIds(groupIds);
     assignCoffeeSessionEndsAtMs(endsAt);
-    setCoffeeSessionPhase("live");
+    enterCoffeeLivePhase();
     closeCoffeeTranscript();
     setCoffeeAutoplayPausedValue(false);
     scheduleCoffeeAutonomousTurn(coffeeConversation.id, endsAt, true);
@@ -38018,7 +38304,7 @@ function HomeContent(): React.JSX.Element {
       };
       const endsAt = coffeeSessionEndsAtMs ?? Date.now() + coffeeSessionDurationMs(nextConversation);
       assignCoffeeSessionEndsAtMs(endsAt);
-      setCoffeeSessionPhase("live");
+      enterCoffeeLivePhase();
       queueCoffeeReveal({
         conversation: nextConversation,
         speakerBotId: speaker.id,
@@ -38055,10 +38341,10 @@ function HomeContent(): React.JSX.Element {
       pendingRevealLatestMessage?.role === "assistant" &&
       coffeePendingSpeakerBotId
     ) {
-      const revealTokens = tokenizeMessageReveal(pendingRevealLatestMessage.content);
       const interruptedMainText = extractStageDirections(
         clampCoffeeTableText(pendingRevealLatestMessage.content)
       ).mainText;
+      const revealTokens = tokenizeMessageReveal(interruptedMainText);
       const totalVisibleChars = Math.max(1, getBotMentionDisplayLength(interruptedMainText));
       const visibleProgress = clampUnitInterval(
         coffeeTypewriterLength > 0
@@ -38101,7 +38387,7 @@ function HomeContent(): React.JSX.Element {
       activeEndsAt = Date.now() + coffeeSessionDurationMs(activeConversation);
       setCoffeeArrivedBotIds(groupIds);
       assignCoffeeSessionEndsAtMs(activeEndsAt);
-      setCoffeeSessionPhase("live");
+      enterCoffeeLivePhase();
       setCoffeeAutoplayPausedValue(false);
     } else if (coffeeSessionPhase === "topic" && activeConversation?.id) {
       if (coffeeCommand.kind === "ok") {
@@ -38158,7 +38444,7 @@ function HomeContent(): React.JSX.Element {
       };
       const endsAt = activeEndsAt ?? Date.now() + coffeeSessionDurationMs(nextConversation);
       assignCoffeeSessionEndsAtMs(endsAt);
-      setCoffeeSessionPhase("live");
+      enterCoffeeLivePhase();
       queueCoffeeReveal({
         conversation: nextConversation,
         speakerBotId: speaker.id,
@@ -38167,13 +38453,18 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     setCoffeeBusy(true);
-    // Clear composer immediately so the room can show "thinking" feedback
-    // while the backend is still generating the turn.
     setCoffeeDraft("");
-    setCoffeeTurnRhythmState("botThinking");
     setCoffeeError(null);
     const directedSpeakerBotId = findCoffeeDirectedMentionBotId(trimmed);
     setCoffeePendingSpeakerBotId(directedSpeakerBotId ?? null);
+    coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
+      trimmed,
+      undefined
+    );
+    coffeePendingRevealAfterUserRef.current = null;
+    clearCoffeeRhythmTimers();
+    setCoffeeUserRevealText(trimmed);
+    setCoffeeTurnRhythmState("userTableTyping");
     const abortController = new AbortController();
     coffeeTurnAbortRef.current = abortController;
     try {
@@ -38218,7 +38509,7 @@ function HomeContent(): React.JSX.Element {
       if (coffeeSessionPhase !== "finished") {
         const endsAt = activeEndsAt ?? Date.now() + coffeeSessionDurationMs(response.conversation);
         assignCoffeeSessionEndsAtMs(endsAt);
-        setCoffeeSessionPhase("live");
+        enterCoffeeLivePhase();
         const userLine = extractCoffeeUserLineFromTurnMessages(response.conversation.messages);
         const revealArgs: CoffeePendingRevealQueueArgs = {
           conversation: response.conversation,
@@ -38233,14 +38524,12 @@ function HomeContent(): React.JSX.Element {
           },
         };
         if (userLine) {
-          coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
-            userLine,
-            undefined
-          );
-          coffeePendingRevealAfterUserRef.current = revealArgs;
-          clearCoffeeRhythmTimers();
-          setCoffeeUserRevealText(userLine);
-          setCoffeeTurnRhythmState("userTableTyping");
+          setCoffeePendingSpeakerBotId(response.speakerBotId);
+          if (coffeeShouldQueueAssistantRevealAfterUserTyping(coffeeTurnRhythmStateRef.current)) {
+            coffeePendingRevealAfterUserRef.current = revealArgs;
+          } else {
+            queueCoffeeReveal(revealArgs);
+          }
         } else {
           queueCoffeeReveal(revealArgs);
         }
@@ -38248,6 +38537,8 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       setCoffeeDraft(trimmed);
+      coffeePendingRevealAfterUserRef.current = null;
+      setCoffeeUserRevealText("");
       setCoffeePendingSpeakerBotId(null);
       setCoffeeError(err instanceof Error ? err.message : "Failed to send.");
     } finally {
@@ -38269,51 +38560,129 @@ function HomeContent(): React.JSX.Element {
     setCoffeeActivePoll(null);
     setCoffeePollResultsOpen(false);
     setCoffeePollPanelMinimized(false);
+    coffeeSessionStartedAtRef.current = null;
   };
   const startCoffeeReplay = () => {
     if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
     clearCoffeeLoopTimer();
     abortCoffeeRequests();
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
+    setCoffeeReplayTypewriterLength(0);
     setCoffeeReplayActive(true);
     setCoffeeReplayPlaying(true);
     setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayPlaybackVersion((version) => version + 1);
+    setCoffeeReplayActionPanelBotId(null);
     setCoffeeTurnRhythmState("idle");
   };
   const restartCoffeeReplay = () => {
     if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
+    setCoffeeReplayTypewriterLength(0);
     setCoffeeReplayActive(true);
     setCoffeeReplayPlaying(true);
     setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayPlaybackVersion((version) => version + 1);
+    setCoffeeReplayActionPanelBotId(null);
+  };
+  const finishCoffeeReplayRevealAt = (
+    conversation: CoffeeConversationState,
+    index: number
+  ): number => {
+    const nextIndex = clampCoffeeReplayMessageIndex(conversation.messages.length, index);
+    const message = conversation.messages[nextIndex];
+    if (!message) return nextIndex;
+    const fullLength = coffeeReplayDisplayLengthForMessage(message);
+    coffeeReplayTypewriterMessageKeyRef.current = coffeeReplayMessageKey(message, nextIndex);
+    coffeeReplayTypewriterLengthRef.current = fullLength;
+    setCoffeeReplayTypewriterLength(fullLength);
+    return nextIndex;
+  };
+  const seekCoffeeReplay = (index: number, options: { pause?: boolean } = {}) => {
+    if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    if (options.pause !== false) {
+      setCoffeeReplayPlaying(false);
+    }
+    const nextIndex = finishCoffeeReplayRevealAt(coffeeConversation, index);
+    setCoffeeReplayActive(true);
+    setCoffeeReplayMessageIndex(nextIndex);
+  };
+  const stepCoffeeReplay = (delta: number) => {
+    if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    setCoffeeReplayPlaying(false);
+    setCoffeeReplayActive(true);
+    setCoffeeReplayMessageIndex((index) => {
+      const nextIndex = finishCoffeeReplayRevealAt(coffeeConversation, index + delta);
+      return nextIndex;
+    });
   };
   const exitCoffeeReplay = () => {
     if (coffeeReplayTimerRef.current) {
       clearTimeout(coffeeReplayTimerRef.current);
       coffeeReplayTimerRef.current = null;
     }
+    if (coffeeReplayTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+      coffeeReplayTypewriterRafRef.current = null;
+    }
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
     setCoffeeReplayActive(false);
     setCoffeeReplayPlaying(false);
     setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayTypewriterLength(0);
+    setCoffeeReplayActionPanelBotId(null);
   };
   const returnToCoffeeStart = () => {
     resetCoffeeToPicker();
   };
-  const exitCoffeeToHub = () => {
-    const sessionId = coffeeConversation?.id ?? null;
+  const coffeeSessionShouldDiscardOnExit = (
+    conversation: CoffeeConversationState | null,
+    phase: CoffeeSessionPhase
+  ): boolean => {
+    if (!conversation || phase === "finished" || phase === "preview") return false;
+    if (phase === "topic" || phase === "arriving") return true;
+    if (phase !== "live") return false;
+    const startedAt = coffeeSessionStartedAtRef.current;
+    if (startedAt == null) return false;
+    return Date.now() - startedAt <= COFFEE_DISCARD_ON_EXIT_WINDOW_MS;
+  };
+  const discardCoffeeConversation = async (sessionId: string) => {
+    markCoffeeSessionResumed(sessionId);
+    try {
+      await deleteConversation(sessionId);
+    } catch (err) {
+      console.warn("[coffee] failed to discard short session", err);
+    }
+  };
+  const exitCoffeeToHub = async () => {
+    const conversation = coffeeConversation;
+    const sessionId = conversation?.id ?? null;
+    const shouldDiscard = coffeeSessionShouldDiscardOnExit(conversation, coffeeSessionPhase);
     stopActiveCoffeeSession();
     if (sessionId) {
-      markCoffeeSessionResumed(sessionId);
-      void deleteConversation(sessionId);
+      if (shouldDiscard) {
+        await discardCoffeeConversation(sessionId);
+      } else {
+        markCoffeeSessionResumed(sessionId);
+      }
     }
     navigateToView("hub");
   };
-  const exitCoffeeSessionToSelectedView = () => {
+  const exitCoffeeSessionToSelectedView = async () => {
     if (!coffeeConversation) {
       resetCoffeeToPicker();
       return;
     }
+    const conversation = coffeeConversation;
     const groupIds = coffeeConversation.botGroupIds ?? [];
     const sessionId = coffeeConversation.id;
-    markCoffeeSessionResumed(sessionId);
+    const shouldDiscard = coffeeSessionShouldDiscardOnExit(conversation, coffeeSessionPhase);
+    if (!shouldDiscard) {
+      markCoffeeSessionResumed(sessionId);
+    }
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
     resetCoffeeRhythm();
@@ -38335,7 +38704,10 @@ function HomeContent(): React.JSX.Element {
     setCoffeePollResultsOpen(false);
     setCoffeePollPanelMinimized(false);
     setCoffeeSessionPhase("selecting");
-    void deleteConversation(sessionId);
+    coffeeSessionStartedAtRef.current = null;
+    if (shouldDiscard) {
+      await discardCoffeeConversation(sessionId);
+    }
   };
   const deleteCoffeeSession = async (sessionId: string) => {
     if (coffeeConversation?.id === sessionId || coffeeSelectedSessionId === sessionId) {
@@ -39089,13 +39461,44 @@ function HomeContent(): React.JSX.Element {
       !coffeeBusy &&
       !coffeeAutoBusy;
     const messages = coffeeConversation?.messages ?? [];
+    const clampedReplayMessageIndex = clampCoffeeReplayMessageIndex(
+      messages.length,
+      coffeeReplayMessageIndex
+    );
+    const replayVisibleThreadMessages =
+      coffeeReplayActive && messages.length > 0
+        ? coffeeReplayVisibleMessages(messages, clampedReplayMessageIndex)
+        : [];
     const replayMessage =
       coffeeReplayActive && messages.length > 0
-        ? messages[Math.min(coffeeReplayMessageIndex, messages.length - 1)]
+        ? messages[clampedReplayMessageIndex]
+        : null;
+    const replayMessageDisplayLength = replayMessage
+      ? coffeeReplayDisplayLengthForMessage(replayMessage)
+      : 0;
+    const replayMessageInProgress =
+      coffeeReplayActive &&
+      replayMessage != null &&
+      replayMessageDisplayLength > 0 &&
+      coffeeReplayTypewriterLength < replayMessageDisplayLength;
+    const replayCompletedThreadMessages =
+      coffeeReplayActive && messages.length > 0
+        ? messages.slice(
+            0,
+            replayMessageInProgress
+              ? clampedReplayMessageIndex
+              : clampedReplayMessageIndex + 1
+          )
+        : [];
+    const tableTimelineMessages =
+      coffeeReplayActive && messages.length > 0 ? replayCompletedThreadMessages : messages;
+    const replaySpeakerBot =
+      replayMessage?.role === "assistant" && replayMessage.botName
+        ? coffeeMentionBotPicks.find((bot) => bot.name === replayMessage.botName) ?? null
         : null;
     const latestReadableMessage = (() => {
-      for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const candidate = messages[index];
+      for (let index = tableTimelineMessages.length - 1; index >= 0; index -= 1) {
+        const candidate = tableTimelineMessages[index];
         if (coffeeMessageHasTableText(candidate)) return candidate;
       }
       return null;
@@ -39103,13 +39506,25 @@ function HomeContent(): React.JSX.Element {
     const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
     const pendingLatestMessage =
       pendingMessages.length > 0 ? pendingMessages[pendingMessages.length - 1] : null;
-    const tableTypingBot =
+    const liveTableTypingBot =
       coffeeTurnRhythmState === "tableTyping" &&
       pendingLatestMessage?.role === "assistant"
         ? coffeeBotsById.get(coffeePendingSpeakerBotId ?? "")
         : null;
-    const userLineTyping = coffeeTurnRhythmState === "userTableTyping";
-    const centerMessage = replayMessage
+    const replayTypingBot =
+      replayMessageInProgress && replayMessage?.role === "assistant"
+        ? replaySpeakerBot
+        : null;
+    const tableTypingBot = liveTableTypingBot ?? replayTypingBot;
+    const liveUserLineTyping = coffeeTurnRhythmState === "userTableTyping";
+    const replayUserLineTyping = replayMessageInProgress && replayMessage?.role === "user";
+    const userLineTyping = liveUserLineTyping || replayUserLineTyping;
+    const activeTypewriterLength = replayMessageInProgress
+      ? coffeeReplayTypewriterLength
+      : coffeeTypewriterLength;
+    const centerMessage = replayMessageInProgress
+      ? null
+      : replayMessage
       ? coffeeMessageHasTableText(replayMessage)
         ? replayMessage
         : null
@@ -39131,17 +39546,23 @@ function HomeContent(): React.JSX.Element {
         ? centerMessage.botGlyph
         : null);
     const tableTypingAssistantRawText =
-      pendingLatestMessage?.role === "assistant"
+      liveTableTypingBot && pendingLatestMessage?.role === "assistant"
         ? clampCoffeeTableText(pendingLatestMessage.content)
+        : replayTypingBot && replayMessage?.role === "assistant"
+          ? clampCoffeeTableText(replayMessage.content)
         : "";
     const tableTypingAssistantDisplayText = coffeeTableDisplayText(tableTypingAssistantRawText);
-    const userTypingDisplayText = coffeeTableDisplayText(coffeeUserRevealText);
+    const userTypingDisplayText = liveUserLineTyping
+      ? coffeeTableDisplayText(coffeeUserRevealText)
+      : replayUserLineTyping && replayMessage
+        ? coffeeTableDisplayText(replayMessage.content)
+        : coffeeTableDisplayText(coffeeUserRevealText);
     const centerMessageDisplayText = centerMessage ? coffeeTableDisplayText(centerMessage.content) : "";
     const centerFeedSourceMessages =
       coffeeReplayActive && messages.length > 0
-        ? messages.slice(0, Math.min(coffeeReplayMessageIndex + 1, messages.length))
+        ? replayCompletedThreadMessages
         : messages;
-    const centerFeedLines: CoffeeCenterFeedLine[] = centerFeedSourceMessages
+    const baseCenterFeedLines: CoffeeCenterFeedLine[] = centerFeedSourceMessages
       .filter((message): message is CoffeeConversationMessage => coffeeMessageHasTableText(message))
       .slice(-COFFEE_CENTER_FEED_MAX_LINES)
       .map((message) => {
@@ -39161,8 +39582,49 @@ function HomeContent(): React.JSX.Element {
           text: coffeeTableDisplayText(message.content),
           botGlyph: message.role === "assistant" ? message.botGlyph : undefined,
           botId: assistantBot?.id,
+          botTextColor:
+            message.role === "assistant"
+              ? coffeeBotTranscriptTextColor(assistantBot?.color ?? message.botColor, resolvedTheme)
+              : undefined,
         };
       });
+    const pendingSubmittedUserLineVisible = coffeePendingSubmittedUserLineVisible({
+      state: coffeeTurnRhythmState,
+      userRevealText: coffeeUserRevealText,
+      sessionFinished: coffeeSessionPhase === "finished",
+    });
+    const interruptedCenterLine: CoffeeCenterFeedLine | null =
+      coffeeInterruptedSnippet &&
+      !centerFeedSourceMessages.some(
+        (message) => message.id === coffeeInterruptedSnippet.sourceMessageId
+      )
+        ? (() => {
+            const interruptedBot = coffeeBotsById.get(coffeeInterruptedSnippet.botId);
+            return {
+              id: `coffee-interrupted-${coffeeInterruptedSnippet.sourceMessageId}`,
+              role: "assistant" as const,
+              speaker: interruptedBot?.name ?? "Bot",
+              text: coffeeTableDisplayText(coffeeInterruptedSnippet.snippet),
+              botGlyph: interruptedBot?.glyph ?? undefined,
+              botId: coffeeInterruptedSnippet.botId,
+              botTextColor: coffeeBotTranscriptTextColor(interruptedBot?.color, resolvedTheme),
+            };
+          })()
+        : null;
+    const centerFeedLines: CoffeeCenterFeedLine[] = [
+      ...baseCenterFeedLines,
+      ...(interruptedCenterLine ? [interruptedCenterLine] : []),
+      ...(pendingSubmittedUserLineVisible
+        ? [
+            {
+              id: "coffee-pending-user-line",
+              role: "user" as const,
+              speaker: "You",
+              text: coffeeTableDisplayText(coffeeUserRevealText),
+            },
+          ]
+        : []),
+    ].slice(-COFFEE_CENTER_FEED_MAX_LINES);
     const isLiveCenterTranscript =
       coffeeSessionPhase === "live" || coffeeSessionPhase === "finished";
     const hideCenterSpeakerChrome =
@@ -39192,7 +39654,7 @@ function HomeContent(): React.JSX.Element {
       coffeeTurnRhythmState === "botThinking";
     const thinkingBotId = showThinkingIndicator ? coffeePendingSpeakerBotId : null;
     const activeTableSpeakerBotId =
-      tableTypingBot?.id ?? thinkingBotId;
+      tableTypingBot?.id ?? thinkingBotId ?? replaySpeakerBot?.id ?? null;
     /**
      * Bots referenced by name in the most recently delivered message (or in the
      * line the user is mid-typing). Powers the small `!` "you've been called on"
@@ -39200,9 +39662,14 @@ function HomeContent(): React.JSX.Element {
      */
     const notifiedBotIds = (() => {
       const out = new Set<string>();
-      if (!conversationActive || coffeeSessionPhase === "finished") return out;
+      if (!conversationActive || (coffeeSessionPhase === "finished" && !coffeeReplayActive)) {
+        return out;
+      }
       const sources: string[] = [];
-      if (userLineTyping && coffeeUserRevealText) sources.push(coffeeUserRevealText);
+      if (userLineTyping) {
+        const userSource = liveUserLineTyping ? coffeeUserRevealText : userTypingDisplayText;
+        if (userSource) sources.push(userSource);
+      }
       if (tableTypingBot && tableTypingAssistantRawText) sources.push(tableTypingAssistantRawText);
       if (centerMessageDisplayText) sources.push(centerMessageDisplayText);
       const re = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi");
@@ -39230,11 +39697,11 @@ function HomeContent(): React.JSX.Element {
     })();
     const latestSeatActionsByBotId = (() => {
       const out = new Map<string, string[]>();
-      if (!conversationActive || coffeeSessionPhase === "finished") return out;
+      if (!conversationActive) return out;
       const botIdByName = new Map<string, string>(
         coffeeMentionBotPicks.map((bot) => [bot.name, bot.id])
       );
-      for (const message of messages) {
+      for (const message of tableTimelineMessages) {
         if (message.role !== "assistant" || !message.botName) continue;
         const botId = botIdByName.get(message.botName);
         if (!botId) continue;
@@ -39270,7 +39737,7 @@ function HomeContent(): React.JSX.Element {
       if (cues.length === 0) return out;
       let activeCueIndex = -1;
       for (let index = 0; index < cues.length; index += 1) {
-        if (coffeeTypewriterLength >= cues[index]!.revealAtDisplayLength) {
+        if (activeTypewriterLength >= cues[index]!.revealAtDisplayLength) {
           activeCueIndex = index;
         }
       }
@@ -39368,6 +39835,29 @@ function HomeContent(): React.JSX.Element {
       setCoffeePollPanelMinimized(true);
       setCoffeePollResultsOpen(false);
     };
+    const replayActionReviewEnabled =
+      coffeeReplayActive && !coffeeReplayPlaying && coffeeSessionPhase === "finished";
+    const replayActionPanelBot = coffeeReplayActionPanelBotId
+      ? coffeeBotsById.get(coffeeReplayActionPanelBotId) ?? null
+      : null;
+    const replayActionPanelActions = replayActionPanelBot
+      ? collectCoffeeReplayActionsForBot(
+          replayVisibleThreadMessages,
+          replayActionPanelBot.name
+        )
+          .map((action) => ({
+            ...action,
+            action: normalizeCoffeeSeatActionBadgeText(action.action),
+          }))
+          .filter((action) => action.action.length > 0)
+      : [];
+    const handleCoffeeReplayWheel = (event: React.WheelEvent<HTMLElement>): void => {
+      if (!replayActionReviewEnabled || messages.length === 0) return;
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (delta === 0) return;
+      event.preventDefault();
+      stepCoffeeReplay(delta > 0 ? 1 : -1);
+    };
     return (
       <section
         className={styles.coffeeStage}
@@ -39375,8 +39865,10 @@ function HomeContent(): React.JSX.Element {
         data-compact={compactCoffeeStage ? "true" : undefined}
         data-group-ready={coffeeGroupReadyToStart ? "true" : undefined}
         data-preview={previewingSession ? "true" : undefined}
+        data-replay-active={coffeeReplayActive ? "true" : undefined}
         data-autoplay-dock={coffeeSessionJoinedDock ? "true" : undefined}
         aria-label="Coffee table"
+        onWheel={handleCoffeeReplayWheel}
       >
         <div className={styles.coffeeStageHeader}>
           <div className={styles.coffeeStageStatus} aria-live="polite">
@@ -39430,6 +39922,11 @@ function HomeContent(): React.JSX.Element {
                           className={styles.coffeeCenterFeedLine}
                           data-role={line.role}
                           data-speaker-break={speakerChanged ? "true" : undefined}
+                          style={
+                            line.botTextColor
+                              ? ({ "--coffee-center-line-color": line.botTextColor } as React.CSSProperties)
+                              : undefined
+                          }
                         >
                           {!isLiveCenterTranscript ? (
                             <span className={styles.coffeeCenterFeedSpeaker}>
@@ -39450,6 +39947,16 @@ function HomeContent(): React.JSX.Element {
                       <p
                         className={`${styles.coffeeCenterFeedLine} ${styles.coffeeCenterFeedLineTyping}`}
                         data-role="assistant"
+                        style={
+                          tableTypingBot.color
+                            ? ({
+                                "--coffee-center-line-color": coffeeBotTranscriptTextColor(
+                                  tableTypingBot.color,
+                                  resolvedTheme
+                                ),
+                              } as React.CSSProperties)
+                            : undefined
+                        }
                         data-speaker-break={
                           centerFeedLines.length > 0 &&
                           centerFeedSpeakerKey(centerFeedLines[centerFeedLines.length - 1]!) !==
@@ -39467,16 +39974,19 @@ function HomeContent(): React.JSX.Element {
                           <span className={styles.coffeeTypewriter} aria-hidden="true">
                             {revealPlainTextWithBotMentions(
                               tableTypingAssistantDisplayText,
-                              coffeeTypewriterLength,
+                              activeTypewriterLength,
                               {
-                                keyPrefix: `bot-typing-${tableTypingBot.id}`,
+                                keyPrefix:
+                                  replayMessageInProgress && replayMessage
+                                    ? `replay-bot-typing-${replayMessage.id}`
+                                    : `bot-typing-${tableTypingBot.id}`,
                                 botsById: chatEnabledBotMentionMap,
                                 resolvedTheme,
                                 normalizeAccentForTheme,
                                 speakerBotId: tableTypingBot.id,
                               }
                             )}
-                            {coffeeTypewriterLength <
+                            {activeTypewriterLength <
                             getBotMentionDisplayLength(tableTypingAssistantDisplayText) ? (
                               <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
                                 │
@@ -39505,15 +40015,18 @@ function HomeContent(): React.JSX.Element {
                           <span className={styles.coffeeTypewriter} aria-hidden="true">
                             {revealPlainTextWithBotMentions(
                               userTypingDisplayText,
-                              coffeeTypewriterLength,
+                              activeTypewriterLength,
                               {
-                                keyPrefix: "user-typing",
+                                keyPrefix:
+                                  replayMessageInProgress && replayMessage
+                                    ? `replay-user-typing-${replayMessage.id}`
+                                    : "user-typing",
                                 botsById: chatEnabledBotMentionMap,
                                 resolvedTheme,
                                 normalizeAccentForTheme,
                               }
                             )}
-                            {coffeeTypewriterLength <
+                            {activeTypewriterLength <
                             getBotMentionDisplayLength(
                               extractStageDirections(userTypingDisplayText).mainText
                             ) ? (
@@ -39583,47 +40096,6 @@ function HomeContent(): React.JSX.Element {
                         ? "Replay mode — watching this session back."
                         : "Session ended. Export it, replay it, or open Table talk."}
                     </p>
-                    <div
-                      className={`${styles.coffeeReplayControls} ${styles.coffeeFinishedRecapControls}`}
-                    >
-                      <button
-                        type="button"
-                        onClick={exitCoffeeSessionToSelectedView}
-                        title="Exit Coffee Session and stop autonomous replies"
-                      >
-                        Exit session
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void exportCoffeeSession(coffeeConversation)}
-                      >
-                        Export
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          coffeeReplayActive
-                            ? setCoffeeReplayPlaying((playing) => !playing)
-                            : startCoffeeReplay()
-                        }
-                      >
-                        {coffeeReplayActive
-                          ? coffeeReplayPlaying
-                            ? "Pause replay"
-                            : "Play replay"
-                          : "Replay"}
-                      </button>
-                      {coffeeReplayActive ? (
-                        <>
-                          <button type="button" onClick={restartCoffeeReplay}>
-                            Restart
-                          </button>
-                          <button type="button" onClick={exitCoffeeReplay}>
-                            Exit replay
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
                   </div>
                 )}
               </div>
@@ -39665,13 +40137,7 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
           {visibleCoffeeSeats.map(({ seatIndex, bot }, layoutIndex) => {
-            const interruptedSeatSnippet =
-              coffeeInterruptedSnippet?.botId === bot.id
-                ? coffeeInterruptedSnippet
-                : null;
-            const isTableTypingThisSeat =
-              coffeeTurnRhythmState === "tableTyping" &&
-              coffeePendingSpeakerBotId === bot.id;
+            const isTableTypingThisSeat = tableTypingBot?.id === bot.id;
             const seatTypingActionState = typingSeatActionByBotId.get(bot.id) ?? null;
             const seatLiveActionBadgeText = seatTypingActionState?.current ?? null;
             const seatLastActionHistory = latestSeatActionsByBotId.get(bot.id) ?? [];
@@ -39695,10 +40161,15 @@ function HomeContent(): React.JSX.Element {
                     ? seatLastActionHistory[seatLastActionHistory.length - 2] ?? null
                   : null;
             const pendingAssistantMood =
-              pendingLatestMessage?.role === "assistant"
+              liveTableTypingBot && pendingLatestMessage?.role === "assistant"
                 ? pendingLatestMessage.moodKey
+                : replayTypingBot && replayMessage?.role === "assistant"
+                  ? replayMessage.moodKey
                 : undefined;
-            const lastBotMood = lastCoffeeAssistantMoodKeyForBotName(messages, bot.name);
+            const lastBotMood = lastCoffeeAssistantMoodKeyForBotName(
+              tableTimelineMessages,
+              bot.name
+            );
             const socialSnapshot = coffeeConversation?.coffeeBotSocialById?.[bot.id];
             const heuristicMood = coffeeSeatSocialHeuristicMood(socialSnapshot);
             const moodDevSlot = COFFEE_SEAT_MOOD_DEV_CYCLE[coffeeSeatMoodDevCycleIndex];
@@ -39711,7 +40182,7 @@ function HomeContent(): React.JSX.Element {
                   )
                 : moodDevSlot;
             const mouthOpenWhileTyping = isTableTypingThisSeat
-              ? Math.floor(coffeeTypewriterLength / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE) % 2 ===
+              ? Math.floor(activeTypewriterLength / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE) % 2 ===
                 0
               : false;
             const seatVoicePreset = coffeeSeatVoicePreset(bot);
@@ -39723,6 +40194,7 @@ function HomeContent(): React.JSX.Element {
               layoutIndex,
               seatIndex
             );
+            const seatInteractive = directorTapEnabled || replayActionReviewEnabled;
             const coffeeHeadPlateStyle = isTopHeadSeat
               ? ({
                   ["--coffee-plate-emoji-face-scale-y" as string]:
@@ -39732,10 +40204,12 @@ function HomeContent(): React.JSX.Element {
                         seatCount: visibleCoffeeSeats.length,
                         visibleSeats: coffeeGazeVisibleSeats,
                         headBotId: bot.id,
-                        coffeeTurnRhythmState,
-                        coffeePendingSpeakerBotId,
+                        coffeeTurnRhythmState: tableTypingBot
+                          ? "tableTyping"
+                          : coffeeTurnRhythmState,
+                        coffeePendingSpeakerBotId: tableTypingBot?.id ?? coffeePendingSpeakerBotId,
                         headIsSpeaking: isTableTypingThisSeat,
-                        messages,
+                        messages: tableTimelineMessages,
                         botNameToId: coffeeGazeNameToId,
                       })
                     ),
@@ -39752,6 +40226,7 @@ function HomeContent(): React.JSX.Element {
                 data-seat-count={visibleCoffeeSeats.length}
                 data-prism-mood={prismSeatMood}
                 data-director-enabled={directorTapEnabled ? "true" : undefined}
+                data-replay-review-enabled={replayActionReviewEnabled ? "true" : undefined}
                 data-table-speaking={activeTableSpeakerBotId === bot.id ? "true" : undefined}
                 data-table-dimmed={
                   activeTableSpeakerBotId != null && activeTableSpeakerBotId !== bot.id
@@ -39759,8 +40234,16 @@ function HomeContent(): React.JSX.Element {
                     : undefined
                 }
                 style={coffeeSeatVisualStyle(bot, seatIndex, layoutIndex, visibleCoffeeSeats.length)}
-                disabled={!directorTapEnabled}
-                onClick={() => void triggerDirectedCoffeeTurn(bot.id)}
+                disabled={!seatInteractive}
+                onClick={() => {
+                  if (replayActionReviewEnabled) {
+                    setCoffeeReplayActionPanelBotId((current) =>
+                      current === bot.id ? null : bot.id
+                    );
+                    return;
+                  }
+                  void triggerDirectedCoffeeTurn(bot.id);
+                }}
                 onContextMenu={(event) => {
                   if (shouldAllowNativeContextMenu(event.target)) return;
                   event.preventDefault();
@@ -39770,19 +40253,23 @@ function HomeContent(): React.JSX.Element {
                 aria-label={
                   directorTapEnabled
                     ? `Ask ${bot.name} to speak now`
+                    : replayActionReviewEnabled
+                      ? `Show ${bot.name} actions so far`
                     : `${bot.name} at the coffee table`
                 }
                 title={
                   directorTapEnabled
                     ? `Tap to make ${bot.name} speak`
+                    : replayActionReviewEnabled
+                      ? `Show ${bot.name} actions so far`
                     : "Pause autoplay to direct this bot"
                 }
               >
                 <div className={styles.coffeeSeatCluster}>
                   <div className={styles.coffeeSeatPlate} style={coffeeHeadPlateStyle}>
                     <CoffeeSeatPlateEmoji
-                      key={`${coffeeSessionJoinedDock ? "j" : "p"}-${bot.id}`}
-                      enabled={coffeeSessionJoinedDock}
+                      key={`${coffeeSessionJoinedDock || coffeeReplayActive ? "j" : "p"}-${bot.id}`}
+                      enabled={coffeeSessionJoinedDock || coffeeReplayActive}
                       isTalking={isTableTypingThisSeat}
                       scheduleKey={bot.id}
                       baseText={seatPlateGlyph.text}
@@ -39801,11 +40288,6 @@ function HomeContent(): React.JSX.Element {
                     <div className={styles.coffeeCup} aria-hidden="true" />
                   </div>
                 </div>
-                {interruptedSeatSnippet ? (
-                  <div className={styles.coffeeSeatInterruptedBubble}>
-                    {interruptedSeatSnippet.snippet}
-                  </div>
-                ) : null}
                 {seatActionGhostText ? (
                   <div
                     className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeGhost}`}
@@ -39867,6 +40349,39 @@ function HomeContent(): React.JSX.Element {
               </button>
             );
           })}
+          {replayActionReviewEnabled && replayActionPanelBot ? (
+            <aside
+              className={styles.coffeeReplayActionPanel}
+              style={coffeeBotVisualStyle(replayActionPanelBot)}
+              aria-label={`${replayActionPanelBot.name} actions so far`}
+            >
+              <header>
+                <div>
+                  <span>Actions so far</span>
+                  <strong>{replayActionPanelBot.name}</strong>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCoffeeReplayActionPanelBotId(null)}
+                  aria-label="Close actions panel"
+                >
+                  ×
+                </button>
+              </header>
+              {replayActionPanelActions.length > 0 ? (
+                <ul>
+                  {replayActionPanelActions.map((action, index) => (
+                    <li key={`${action.messageId ?? action.messageIndex}-${index}`}>
+                      <span>{action.action}</span>
+                      <small>{`Line ${action.messageIndex + 1}`}</small>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No actions yet.</p>
+              )}
+            </aside>
+          ) : null}
         </div>
         {coffeeSessionJoinedDock ? (
           <div className={styles.coffeeAutoplayDock}>
@@ -39954,7 +40469,7 @@ function HomeContent(): React.JSX.Element {
                     : "Poll closed with no votes."
                   : coffeeActivePoll.status === "collecting" || coffeePollInFinalizeWindow
                     ? "Last call — any bot still thinking must vote, but minds can still change."
-                    : "Vote anytime — your pick can sway the table. Bots lean while discussing; votes lock in the final 30 seconds."}
+                    : "Vote anytime — bots choose as they arrive, and your pick can still sway the table."}
               </p>
               {coffeeActivePoll.status !== "closed" && coffeeActivePoll.status !== "cancelled" ? (
                 <div className={styles.coffeePollPlayerVoteBlock}>
@@ -40109,7 +40624,7 @@ function HomeContent(): React.JSX.Element {
                 <div>
                   <span>Poll topic</span>
                   <h4>Ask the table first</h4>
-                  <p>Bots discuss and lean first; their votes lock in the final 30 seconds.</p>
+                  <p>Bots choose as they arrive, then may revise while the table argues.</p>
                 </div>
                 <button
                   type="button"
@@ -40440,6 +40955,13 @@ function HomeContent(): React.JSX.Element {
         coffeeSessionPhase === "topic" ||
         coffeeSessionPhase === "arriving");
     const coffeeComposerVisible = coffeeComposerEnabled;
+    const coffeeFinishedControlsVisible =
+      conversationActive && coffeeSessionPhase === "finished";
+    const coffeeFinishedControlMessages = coffeeConversation?.messages ?? [];
+    const coffeeFinishedReplayMessageIndex = clampCoffeeReplayMessageIndex(
+      coffeeFinishedControlMessages.length,
+      coffeeReplayMessageIndex
+    );
     const coffeeComposerPlaceholder =
       coffeeSessionPhase === "finished"
         ? "This Coffee Session has ended."
@@ -40607,15 +41129,17 @@ function HomeContent(): React.JSX.Element {
                 {renderCoffeeProviderModeToggle()}
                 {renderCoffeeHeaderModelPicker()}
               </div>
-              {coffeeSessionJoined ? (
-                <button
-                  type="button"
-                  className={styles.coffeeExitSessionButton}
-                  onClick={exitCoffeeSessionToSelectedView}
-                  title="Exit Coffee Session and stop autonomous replies"
-                >
-                  Exit session
-                </button>
+              {coffeeSessionJoined && coffeeSessionPhase !== "finished" ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.coffeeExitSessionButton}
+                    onClick={() => void exitCoffeeSessionToSelectedView()}
+                    title="Exit Coffee Session and stop autonomous replies"
+                  >
+                    Exit session
+                  </button>
+                </>
               ) : coffeeSessionPhase === "preview" && coffeePreviewCanResume ? (
                 <button
                   type="button"
@@ -40701,7 +41225,7 @@ function HomeContent(): React.JSX.Element {
               <button
                 type="button"
                 className={styles.headerIconButton}
-                onClick={exitCoffeeToHub}
+                onClick={() => void exitCoffeeToHub()}
                 aria-label="Back to Hub"
                 title="Back to Hub"
                 data-glyph-tooltip="Back to Hub"
@@ -40806,6 +41330,151 @@ function HomeContent(): React.JSX.Element {
             {coffeeError}
           </p>
         )}
+
+          {coffeeFinishedControlsVisible && (
+            <section
+              className={`${styles.coffeeComposer} ${styles.coffeeReplayComposerControls}`}
+              aria-label="Coffee replay controls"
+            >
+              <div className={styles.coffeeReplayTimelineRow}>
+                <label className={styles.coffeeReplayScrubber}>
+                  <span className={styles.srOnly}>Replay position</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, coffeeFinishedControlMessages.length - 1)}
+                    value={coffeeFinishedReplayMessageIndex}
+                    disabled={!coffeeReplayActive || coffeeFinishedControlMessages.length <= 1}
+                    onChange={(event) => seekCoffeeReplay(Number(event.currentTarget.value))}
+                  />
+                </label>
+                <span className={styles.coffeeReplayPosition}>
+                  {coffeeFinishedControlMessages.length > 0
+                    ? `${coffeeFinishedReplayMessageIndex + 1} / ${coffeeFinishedControlMessages.length}`
+                    : "0 / 0"}
+                </span>
+              </div>
+              <div className={styles.coffeeReplayControlRail}>
+                <div className={styles.coffeeReplayUtilityControls}>
+                  <button
+                    type="button"
+                    className={styles.coffeeReplayIconButton}
+                    onClick={() => void exitCoffeeSessionToSelectedView()}
+                    aria-label="Exit Coffee Session"
+                    title="Exit Coffee Session"
+                    data-glyph-tooltip="Exit Coffee Session"
+                  >
+                    <LogOut aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.coffeeReplayIconButton}
+                    onClick={() => void exportCoffeeSession(coffeeConversation)}
+                    aria-label="Export Coffee Session"
+                    title="Export Coffee Session"
+                    data-glyph-tooltip="Export Coffee Session"
+                  >
+                    <Download aria-hidden="true" />
+                  </button>
+                </div>
+                <div className={styles.coffeeReplayTransportControls}>
+                  {coffeeReplayActive ? (
+                    <>
+                      <button
+                        type="button"
+                        className={styles.coffeeReplayIconButton}
+                        onClick={restartCoffeeReplay}
+                        disabled={coffeeFinishedControlMessages.length === 0}
+                        aria-label="Restart replay"
+                        title="Restart replay"
+                        data-glyph-tooltip="Restart replay"
+                      >
+                        <RotateCcw aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.coffeeReplayIconButton}
+                        onClick={() => stepCoffeeReplay(-1)}
+                        disabled={coffeeFinishedReplayMessageIndex <= 0}
+                        aria-label="Previous message"
+                        title="Previous message"
+                        data-glyph-tooltip="Previous message"
+                      >
+                        <SkipBack aria-hidden="true" />
+                      </button>
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={`${styles.coffeeReplayIconButton} ${styles.coffeeReplayPrimaryButton}`}
+                    onClick={() =>
+                      coffeeReplayActive
+                        ? setCoffeeReplayPlaying((playing) => !playing)
+                        : startCoffeeReplay()
+                    }
+                    disabled={coffeeFinishedControlMessages.length === 0}
+                    aria-label={
+                      coffeeReplayActive
+                        ? coffeeReplayPlaying
+                          ? "Pause replay"
+                          : "Play replay"
+                        : "Start replay"
+                    }
+                    title={
+                      coffeeReplayActive
+                        ? coffeeReplayPlaying
+                          ? "Pause replay"
+                          : "Play replay"
+                        : "Start replay"
+                    }
+                    data-glyph-tooltip={
+                      coffeeReplayActive
+                        ? coffeeReplayPlaying
+                          ? "Pause replay"
+                          : "Play replay"
+                        : "Start replay"
+                    }
+                  >
+                    {coffeeReplayActive && coffeeReplayPlaying ? (
+                      <Pause aria-hidden="true" />
+                    ) : (
+                      <Play aria-hidden="true" />
+                    )}
+                  </button>
+                  {coffeeReplayActive ? (
+                    <button
+                      type="button"
+                      className={styles.coffeeReplayIconButton}
+                      onClick={() => stepCoffeeReplay(1)}
+                      disabled={
+                        coffeeFinishedReplayMessageIndex >=
+                        coffeeFinishedControlMessages.length - 1
+                      }
+                      aria-label="Next message"
+                      title="Next message"
+                      data-glyph-tooltip="Next message"
+                    >
+                      <SkipForward aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
+                <div className={styles.coffeeReplayUtilityControls} data-align="right">
+                  {coffeeReplayActive ? (
+                    <button
+                      type="button"
+                      className={styles.coffeeReplayIconButton}
+                      onClick={exitCoffeeReplay}
+                      aria-label="Exit replay"
+                      title="Exit replay"
+                      data-glyph-tooltip="Exit replay"
+                    >
+                      <X aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+          )}
 
           {coffeeComposerVisible && (
             <form

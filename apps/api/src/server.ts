@@ -25,6 +25,7 @@ import {
   deleteCoffeeGroup,
   deleteCoffeePreset,
   getCoffeeSessionPoll,
+  generateCoffeeSessionSynopsis,
   listCoffeeGroups,
   listCoffeePresets,
   parseStoredCoffeeSessionSettings,
@@ -1069,9 +1070,9 @@ function buildRoutes(): RouteDefinition[] {
           ...(coffeeSeatBotIdsOut.length > 0 ? { coffeeSeatBotIds: coffeeSeatBotIdsOut } : {}),
           ...(coffeeSettingsOut !== undefined ? { coffeeSettings: coffeeSettingsOut } : {}),
           ...(conversationModeOut === "coffee" &&
-          (conversation.coffee_duration_minutes === 1 ||
-            conversation.coffee_duration_minutes === 5 ||
-            conversation.coffee_duration_minutes === 10)
+          (conversation.coffee_duration_minutes === 2 ||
+            conversation.coffee_duration_minutes === 3 ||
+            conversation.coffee_duration_minutes === 5)
             ? { coffeeSessionDurationMinutes: conversation.coffee_duration_minutes }
             : {}),
           ...(conversationModeOut === "coffee" &&
@@ -1966,6 +1967,38 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         ...result,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/synopsis", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
+      const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const conversation = await generateCoffeeSessionSynopsis(
+        db,
+        userId,
+        ctx.params.id,
+        {
+          preferredProvider: effectiveProvider,
+          openAiApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          userDisplayName: user.display_name,
+          userKey,
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+        }
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
       });
     }),
     route("POST", "/api/coffee/turn", async (ctx) => {

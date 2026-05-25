@@ -488,6 +488,39 @@ describe("extractStageDirections", () => {
     assert.deepEqual(out.actions, ["Darth Vader leans forward, voice low"]);
   });
 
+  it("lifts adverb-led actions before a named direct address", () => {
+    const out = extractStageDirections(
+      "dryly sets his cup down Patrick, you can't net a theory."
+    );
+    assert.equal(out.mainText, "Patrick, you can't net a theory.");
+    assert.deepEqual(out.actions, ["dryly sets his cup down"]);
+  });
+
+  it("lifts softer unmarked action verbs from table text", () => {
+    const out = extractStageDirections(
+      "ponders deeply Maybe there's no crab in there because mystery tastes better."
+    );
+    assert.equal(out.mainText, "Maybe there's no crab in there because mystery tastes better.");
+    assert.deepEqual(out.actions, ["ponders deeply"]);
+  });
+
+  it("lifts remaining transcript-style unmarked action openers", () => {
+    const snickers = extractStageDirections(
+      "snickers Dodging or not, Krabs, what's truly interesting is what makes an instrument stand out!"
+    );
+    assert.equal(
+      snickers.mainText,
+      "Dodging or not, Krabs, what's truly interesting is what makes an instrument stand out!"
+    );
+    assert.deepEqual(snickers.actions, ["snickers"]);
+
+    const pinches = extractStageDirections(
+      "pinches the bridge of his nose A kazoo, Patrick? That's not an instrument."
+    );
+    assert.equal(pinches.mainText, "A kazoo, Patrick? That's not an instrument.");
+    assert.deepEqual(pinches.actions, ["pinches the bridge of his nose"]);
+  });
+
   it("lifts unmarked action clauses before a 'Consider' spoken handoff", () => {
     const out = extractStageDirections(
       "Marcus Aurelius, picks up an acorn from the table Consider this acorn: it already contains the potential of the entire tree."
