@@ -214,6 +214,9 @@ export function createDatabase(): DatabaseSync {
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
       export_hash TEXT,
+      semantic_facets TEXT,
+      semantic_facets_source_hash TEXT,
+      semantic_facets_updated_at TEXT,
       model TEXT,
       local_model TEXT,
       online_model TEXT,
@@ -874,6 +877,24 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotExportHashColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN export_hash TEXT;");
+  }
+  const hasBotSemanticFacetsColumn = botColumns.some(
+    (column) => column.name === "semantic_facets"
+  );
+  if (!hasBotSemanticFacetsColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN semantic_facets TEXT;");
+  }
+  const hasBotSemanticFacetsSourceHashColumn = botColumns.some(
+    (column) => column.name === "semantic_facets_source_hash"
+  );
+  if (!hasBotSemanticFacetsSourceHashColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN semantic_facets_source_hash TEXT;");
+  }
+  const hasBotSemanticFacetsUpdatedAtColumn = botColumns.some(
+    (column) => column.name === "semantic_facets_updated_at"
+  );
+  if (!hasBotSemanticFacetsUpdatedAtColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN semantic_facets_updated_at TEXT;");
   }
   db.exec(`
     UPDATE bots

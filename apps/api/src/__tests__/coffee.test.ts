@@ -40,6 +40,7 @@ import {
   inferCoffeeStarterTopics,
   initializeCoffeeSocialState,
   interruptedSnippetFromTokenCount,
+  loadCoffeeStarterMemoryContext,
   maybeBuildBotInterruptionEvent,
   normalizeCoffeeGroupBotIds,
   normalizeCoffeeSeatBotIds,
@@ -60,6 +61,7 @@ import {
   updateCoffeePreset,
   type CoffeeBotProfile,
 } from "../coffee.ts";
+import { encryptJson } from "../security.ts";
 import {
   DEFAULT_BOT_PROFILE_FIELDS,
   coffeeReplyLengthCaps,
@@ -297,11 +299,31 @@ function createCoffeeTestDb(): DatabaseSync {
       tool_payload TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      bot_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      tier TEXT NOT NULL DEFAULT 'short_term',
+      durability REAL NOT NULL DEFAULT 0.5,
+      source TEXT NOT NULL DEFAULT 'direct',
+      certainty REAL,
+      source_message_ids TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE bots (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
+      semantic_facets TEXT,
+      semantic_facets_source_hash TEXT,
+      semantic_facets_updated_at TEXT,
       color TEXT,
       glyph TEXT,
       model TEXT,
@@ -419,6 +441,40 @@ function seedCoffeeBot(db: DatabaseSync, userId: string, bot: CoffeeBotProfile):
     bot.maxTokens,
     now,
     now
+  );
+}
+
+function seedCoffeeMemory(
+  db: DatabaseSync,
+  userId: string,
+  userKey: Buffer,
+  options: {
+    id: string;
+    text: string;
+    botId?: string | null;
+    source?: "direct" | "inferred" | "compiled" | "about_you";
+    category?: "general" | "user" | "bot_relation";
+    tier?: "short_term" | "long_term";
+    createdAt?: string;
+  }
+): void {
+  const encrypted = encryptJson({ text: options.text } as unknown as Record<string, unknown>, userKey);
+  db.prepare(
+    `INSERT INTO memories
+       (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category,
+        tier, durability, source, certainty, source_message_ids, created_at)
+     VALUES (?, ?, NULL, ?, ?, ?, ?, 0.91, ?, ?, 0.7, ?, 0.91, '[]', ?)`
+  ).run(
+    options.id,
+    userId,
+    options.botId ?? null,
+    encrypted.ciphertext,
+    encrypted.iv,
+    encrypted.tag,
+    options.category ?? "general",
+    options.tier ?? "short_term",
+    options.source ?? "direct",
+    options.createdAt ?? new Date().toISOString()
   );
 }
 
@@ -1335,6 +1391,61 @@ describe("buildRouterPrompt", () => {
   });
 });
 
+describe("loadCoffeeStarterMemoryContext", () => {
+  it("loads recent non-private memories for the seated bots only", () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const userKey = Buffer.alloc(32, 7);
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    seedCoffeeBot(db, userId, CARA);
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-global",
+      botId: null,
+      text: "The user prefers matcha during long work sessions.",
+      createdAt: "2026-01-05T00:00:00.000Z",
+    });
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-about-you",
+      botId: ALICE.id,
+      source: "about_you",
+      text: "Alice knows the user's display name is Jared.",
+      createdAt: "2026-01-04T00:00:00.000Z",
+    });
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-alice",
+      botId: ALICE.id,
+      text: "Alice remembers restoring flooded gardens after storms.",
+      createdAt: "2026-01-03T00:00:00.000Z",
+    });
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-boris",
+      botId: BORIS.id,
+      text: "Boris keeps notes on soup rituals.",
+      createdAt: "2026-01-02T00:00:00.000Z",
+    });
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-cara",
+      botId: CARA.id,
+      text: "Cara tracks incident reviews.",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const context = loadCoffeeStarterMemoryContext({
+      db,
+      userId,
+      userKey,
+      group: [ALICE, BORIS],
+    });
+
+    assert.deepEqual(context.map((entry) => entry.botId), [ALICE.id, BORIS.id]);
+    assert.deepEqual(context[0]?.memories, [
+      "Alice remembers restoring flooded gardens after storms.",
+    ]);
+    assert.deepEqual(context[1]?.memories, ["Boris keeps notes on soup rituals."]);
+  });
+});
+
 describe("inferCoffeeStarterTopics", () => {
   it("feeds structured bot context into the starter-topic inference prompt", async () => {
     const captured: { messages: unknown } = { messages: null };
@@ -1397,6 +1508,53 @@ describe("inferCoffeeStarterTopics", () => {
     assert.match(userMessage!.content, /boundaries=avoid cruelty/);
     assert.match(userMessage!.content, /"label"/);
     assert.match(userMessage!.content, /reflective\/shared curiosity/);
+  });
+
+  it("feeds attending bot memories into the starter-topic inference prompt", async () => {
+    const captured: { messages: unknown } = { messages: null };
+    const provider = {
+      async generateResponse(messages: unknown): Promise<string> {
+        captured.messages = messages;
+        return JSON.stringify({
+          topics: [
+            { label: "Storm repair ethics", kind: "reflective" },
+            { label: "Rituals under pressure", kind: "tension" },
+            { label: "A garden worth saving", kind: "scenario" },
+          ],
+        });
+      },
+    };
+
+    const topics = await inferCoffeeStarterTopics({
+      provider: provider as never,
+      group: [ALICE, BORIS],
+      sessionSettings: normalizeCoffeeSessionSettings(undefined),
+      memoryContext: [
+        {
+          botId: ALICE.id,
+          botName: ALICE.name,
+          memories: ["Alice remembers restoring flooded gardens after storms."],
+        },
+        {
+          botId: BORIS.id,
+          botName: BORIS.name,
+          memories: ["Boris keeps notes on soup rituals."],
+        },
+      ],
+    });
+
+    assert.deepEqual(topics, [
+      "Storm repair ethics",
+      "Rituals under pressure",
+      "A garden worth saving",
+    ]);
+    const userMessage = (captured.messages as Array<{ role: string; content: string }>).find(
+      (message) => message.role === "user"
+    );
+    assert.ok(userMessage);
+    assert.match(userMessage!.content, /Attending bot memory hints/);
+    assert.match(userMessage!.content, /restoring flooded gardens/);
+    assert.match(userMessage!.content, /first-class signal/);
   });
 
   it("keeps legacy starter-topic string arrays compatible", async () => {
@@ -1494,6 +1652,92 @@ describe("inferCoffeeStarterTopics", () => {
     assert.equal(topics.length, 3);
     assert.ok(topics.every((topic) => !/angle on|Alice and Boris|worth unpacking/i.test(topic)));
   });
+
+  it("uses hidden bot facet starter seeds before generic deterministic fallbacks", async () => {
+    const provider = {
+      async generateResponse(): Promise<string> {
+        throw new Error("offline");
+      },
+    };
+    const wizard: CoffeeBotProfile = {
+      ...ALICE,
+      name: "Hidden Wizard",
+      systemPrompt: "",
+      semanticFacets: {
+        version: 1,
+        canonAnchors: ["Hogwarts"],
+        domains: ["wizarding school"],
+        values: ["courage"],
+        tensions: ["rules versus courage"],
+        namingTokens: ["wand"],
+        starterSeeds: ["When rules protect people", "The burden of being chosen"],
+      },
+    };
+
+    const topics = await inferCoffeeStarterTopics({
+      provider: provider as never,
+      group: [wizard, BORIS],
+      sessionSettings: normalizeCoffeeSessionSettings(undefined),
+    });
+
+    assert.deepEqual(topics.slice(0, 2), [
+      "When rules protect people",
+      "The burden of being chosen",
+    ]);
+  });
+
+  it("demotes generic model topics for canon-specific SpongeBob groups", async () => {
+    const provider = {
+      async generateResponse(): Promise<string> {
+        return JSON.stringify({
+          topics: [
+            { label: "Power without cruelty" },
+            { label: "Duty versus forgiveness" },
+            { label: "When mercy has limits" },
+          ],
+        });
+      },
+    };
+    const group: CoffeeBotProfile[] = [
+      {
+        ...ALICE,
+        id: "bot-spongebob",
+        name: "SpongeBob SquarePants",
+        systemPrompt: "Fry cook at the Krusty Krab in Bikini Bottom.",
+      },
+      {
+        ...BORIS,
+        id: "bot-patrick",
+        name: "Patrick Star",
+        systemPrompt: "SpongeBob's best friend who lives under a rock in Bikini Bottom.",
+      },
+      {
+        ...DANTE,
+        id: "bot-squidward",
+        name: "Squidward Tentacles",
+        systemPrompt: "Clarinet player and Krusty Krab cashier who wants quiet.",
+      },
+      MR_KRABS,
+      {
+        ...CARA,
+        id: "bot-sandy",
+        name: "Sandy Cheeks",
+        systemPrompt: "Scientist and karate-loving squirrel living in a treedome under the sea.",
+      },
+    ];
+
+    const topics = await inferCoffeeStarterTopics({
+      provider: provider as never,
+      group,
+      sessionSettings: normalizeCoffeeSessionSettings(undefined),
+    });
+
+    assert.deepEqual(topics, [
+      "Relentless optimism on shift",
+      "Simple wisdom under pressure",
+      "Art versus customer service",
+    ]);
+  });
 });
 
 describe("inferCoffeeGroupName", () => {
@@ -1543,7 +1787,7 @@ describe("inferCoffeeGroupName", () => {
       group: [ALICE, BORIS],
       fallbackName: "Alice & Boris Brew",
     });
-    assert.match(name, /Smart Beans|Roast Council|Brewed Banter Club|Caffeine and Characters/);
+    assert.match(name, /Socratic Soup Club|Kitchen Table Logic|Reasonable Recipe|Dialectic Diner/);
   });
 
   it("rejects roster-style generated names and uses creative fallback instead", async () => {
@@ -1557,7 +1801,7 @@ describe("inferCoffeeGroupName", () => {
       group: [ALICE, BORIS],
       fallbackName: "Alice & Boris Brew",
     });
-    assert.match(name, /Smart Beans|Roast Council|Brewed Banter Club|Caffeine and Characters/);
+    assert.match(name, /Socratic Soup Club|Kitchen Table Logic|Reasonable Recipe|Dialectic Diner/);
   });
 
   it("prefers the best candidate from a generated list", async () => {
@@ -1572,6 +1816,148 @@ describe("inferCoffeeGroupName", () => {
       fallbackName: "Alice & Boris Brew",
     });
     assert.equal(name, "Smart Beans");
+  });
+
+  it("rejects generic generated names when a bot-relevant candidate exists", async () => {
+    const provider = {
+      async generateResponse(): Promise<string> {
+        return `{"names":["Brew Circle","The Coffee Crew","Mercy Meets Empire","Cafe Team","Table Talk","Coffee Group"]}`;
+      },
+    };
+    const vader = withStructuredPrompt(ALICE, {
+      role: "Commander",
+      interests: "ultimate power and order",
+      values: "strength and control",
+    });
+    const jesus = withStructuredPrompt(BORIS, {
+      role: "Teacher",
+      interests: "compassion and forgiveness",
+      values: "love and mercy",
+    });
+    const name = await inferCoffeeGroupName({
+      provider: provider as never,
+      group: [vader, jesus],
+      fallbackName: "Alice & Boris Brew",
+    });
+    assert.equal(name, "Mercy Meets Empire");
+  });
+
+  it("scores unstructured persona text when choosing a relevant group name", async () => {
+    const provider = {
+      async generateResponse(): Promise<string> {
+        return `{"names":["Brewed Banter Club","Socratic Kitchen","Table Club","Cafe Team","Coffee Group","Roast Council"]}`;
+      },
+    };
+    const name = await inferCoffeeGroupName({
+      provider: provider as never,
+      group: [ALICE, BORIS],
+      fallbackName: "Alice & Boris Brew",
+    });
+    assert.equal(name, "Socratic Kitchen");
+  });
+
+  it("falls back to a themed deterministic name when generation is only generic", async () => {
+    const provider = {
+      async generateResponse(): Promise<string> {
+        return `{"names":["Coffee Group","Brew Circle","The Coffee Crew","Cafe Team","Table Club","Roast Council"]}`;
+      },
+    };
+    const vader = withStructuredPrompt(ALICE, {
+      role: "Commander",
+      interests: "ultimate power and order",
+      values: "strength and control",
+    });
+    const jesus = withStructuredPrompt(BORIS, {
+      role: "Teacher",
+      interests: "compassion and forgiveness",
+      values: "love and mercy",
+    });
+    const name = await inferCoffeeGroupName({
+      provider: provider as never,
+      group: [vader, jesus],
+      fallbackName: "Alice & Boris Brew",
+    });
+    assert.match(name, /Mercy Meets Empire|Power and Pardon|Grace Against Command|Mercy Doctrine/);
+  });
+
+  it("uses hidden bot facet naming tokens for generated group names", async () => {
+    const provider = {
+      async generateResponse(): Promise<string> {
+        return `{"names":["Grace Grounds","Gryffindor Grounds","Brew Circle","The Coffee Crew","Cafe Team","Table Talk"]}`;
+      },
+    };
+    const wizard: CoffeeBotProfile = {
+      ...ALICE,
+      name: "Hidden Wizard",
+      systemPrompt: "",
+      semanticFacets: {
+        version: 1,
+        canonAnchors: ["Hogwarts", "Gryffindor"],
+        domains: ["wizarding school"],
+        values: ["courage"],
+        tensions: ["rules versus courage"],
+        namingTokens: ["Gryffindor", "wand"],
+        starterSeeds: ["When rules protect people"],
+      },
+    };
+    const name = await inferCoffeeGroupName({
+      provider: provider as never,
+      group: [wizard, BORIS],
+      fallbackName: "Coffee with Hidden Wizard, Boris",
+    });
+    assert.equal(name, "Gryffindor Grounds");
+  });
+
+  it("prefers wizarding-world names over broad virtue names for Harry Potter rosters", async () => {
+    const provider = {
+      async generateResponse(): Promise<string> {
+        return `{"names":["Grace Grounds","Gryffindor Grounds","Kindness Over Coffee","The Coffee Crew","Brew Circle","Table Talk"]}`;
+      },
+    };
+    const mcgonnigal: CoffeeBotProfile = {
+      ...ALICE,
+      id: "bot-mcgonnigal",
+      name: "Professor McGonnigal",
+      systemPrompt: "Strict Hogwarts professor of Transfiguration and head of Gryffindor.",
+    };
+    const harry: CoffeeBotProfile = {
+      ...BORIS,
+      id: "bot-harry",
+      name: "Harry Potter",
+      systemPrompt: "Young wizard from Gryffindor who survived Voldemort and plays Quidditch.",
+    };
+    const name = await inferCoffeeGroupName({
+      provider: provider as never,
+      group: [mcgonnigal, harry],
+      fallbackName: "Coffee with Professor McGonnigal, Harry Potter",
+    });
+    assert.equal(name, "Gryffindor Grounds");
+  });
+
+  it("does not accept Grace Grounds as a single generated name for Harry Potter rosters", async () => {
+    const provider = {
+      async generateResponse(): Promise<string> {
+        return `{"name":"Grace Grounds"}`;
+      },
+    };
+    const mcgonagall: CoffeeBotProfile = {
+      ...ALICE,
+      id: "bot-mcgonagall",
+      name: "Professor McGonagall",
+      systemPrompt: "Hogwarts professor of Transfiguration and head of Gryffindor.",
+    };
+    const harry: CoffeeBotProfile = {
+      ...BORIS,
+      id: "bot-harry",
+      name: "Harry Potter",
+      systemPrompt: "Young wizard from Gryffindor who survived Voldemort and plays Quidditch.",
+    };
+    const name = await inferCoffeeGroupName({
+      provider: provider as never,
+      group: [mcgonagall, harry],
+      fallbackName: "Coffee with Professor McGonagall, Harry Potter",
+    });
+    assert.match(name, /Gryffindor Grounds|Hogwarts Common Roast|Wands and Wisdom|Transfiguration Table/);
   });
 
   it("uses SpongeBob-themed fallback names for SpongeBob rosters", async () => {

@@ -37,6 +37,7 @@ import {
   extractBotPreferredAddressMemoryCandidates,
   hasAboutYouMemoryForBot,
   persistMemoryCandidates,
+  retrieveRecentBotMemoriesForStarter,
   retrieveRecentMemoriesForStarter,
   restoreMemory,
 } from "./memory.ts";
@@ -94,6 +95,12 @@ import {
   compactPreImageLeadMessage,
   userMessageSuggestsInChatImageRequest,
 } from "./chat.ts";
+import {
+  deriveDeterministicBotSemanticFacets,
+  effectiveBotSemanticFacets,
+  queueBotSemanticFacetsRefresh,
+  type BotSemanticFacets,
+} from "./bot-facets.ts";
 
 /** Coffee groups must have at least 2 and at most 5 bots. */
 export const COFFEE_GROUP_MIN_SIZE = 2;
@@ -175,6 +182,16 @@ export interface CoffeeBotProfile {
   maxTokens: number | null;
   onlineEnabled: boolean;
   flirtEnabled?: boolean;
+  semanticFacets?: BotSemanticFacets | null;
+  semanticFacetsRaw?: string | null;
+  semanticFacetsSourceHash?: string | null;
+  semanticFacetsUpdatedAt?: string | null;
+}
+
+export interface CoffeeStarterMemoryContextEntry {
+  botId: string;
+  botName: string;
+  memories: string[];
 }
 
 const COFFEE_SOCIAL_MIN = 0;
@@ -2154,7 +2171,8 @@ export function loadCoffeeGroupProfiles(
   const rows = db
     .prepare(
       `SELECT id, name, system_prompt, color, glyph, model, local_model, online_model,
-              online_enabled, flirt_enabled, temperature, max_tokens
+              online_enabled, flirt_enabled, temperature, max_tokens,
+              semantic_facets, semantic_facets_source_hash, semantic_facets_updated_at
          FROM bots
         WHERE id IN (${placeholders})
           AND (user_id = ? OR visibility = 'public')`
@@ -2172,6 +2190,9 @@ export function loadCoffeeGroupProfiles(
     flirt_enabled: number | null;
     temperature: number | null;
     max_tokens: number | null;
+    semantic_facets: string | null;
+    semantic_facets_source_hash: string | null;
+    semantic_facets_updated_at: string | null;
   }>;
   const byId = new Map(rows.map((row) => [row.id, row]));
   // Preserve the caller's ordering (matches the picker order).
@@ -2194,9 +2215,40 @@ export function loadCoffeeGroupProfiles(
       maxTokens: typeof row.max_tokens === "number" ? row.max_tokens : null,
       onlineEnabled: row.online_enabled !== 0,
       flirtEnabled: row.flirt_enabled === 1,
+      semanticFacetsRaw: row.semantic_facets ?? null,
+      semanticFacetsSourceHash: row.semantic_facets_source_hash ?? null,
+      semanticFacetsUpdatedAt: row.semantic_facets_updated_at ?? null,
     });
   }
   return profiles;
+}
+
+function attachCoffeeBotSemanticFacets(
+  db: DatabaseSync,
+  userId: string,
+  group: CoffeeBotProfile[],
+  prismDefaultLlmModel?: string | null
+): CoffeeBotProfile[] {
+  return group.map((bot) => {
+    const resolved = effectiveBotSemanticFacets({
+      name: bot.name,
+      systemPrompt: bot.systemPrompt,
+      semanticFacets: bot.semanticFacetsRaw ?? null,
+      semanticFacetsSourceHash: bot.semanticFacetsSourceHash ?? null,
+    });
+    if (resolved.needsRefresh && prismDefaultLlmModel !== undefined) {
+      queueBotSemanticFacetsRefresh({
+        db,
+        userId,
+        botId: bot.id,
+        prismDefaultLlmModel,
+      });
+    }
+    return {
+      ...bot,
+      semanticFacets: resolved.facets,
+    };
+  });
 }
 
 function normalizeCoffeeGroupName(raw: unknown, fallback: string): string {
@@ -2510,7 +2562,12 @@ export function createCoffeeGroup(
 ): CoffeeGroup {
   const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
   const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
-  const group = loadCoffeeGroupProfiles(db, userId, groupIds);
+  const group = attachCoffeeBotSemanticFacets(
+    db,
+    userId,
+    loadCoffeeGroupProfiles(db, userId, groupIds),
+    undefined
+  );
   const now = new Date().toISOString();
   const groupId = randomId(12);
   const settings = normalizeCoffeeSessionSettings(input.coffeeSettings);
@@ -2555,7 +2612,12 @@ export async function createCoffeeGroupWithGeneratedName(
 ): Promise<CoffeeGroup> {
   const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
   const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
-  const group = loadCoffeeGroupProfiles(db, userId, groupIds);
+  const group = attachCoffeeBotSemanticFacets(
+    db,
+    userId,
+    loadCoffeeGroupProfiles(db, userId, groupIds),
+    llm?.prismDefaultLlmModel
+  );
   const requestedName = typeof input.name === "string" ? input.name : null;
   if (!shouldGenerateCoffeeGroupNameFromInput(requestedName, group)) {
     return createCoffeeGroup(db, userId, input);
@@ -2766,8 +2828,12 @@ const COFFEE_STARTER_TOPIC_INFER_TEMPERATURE = 0.55;
 const COFFEE_GROUP_NAME_INFER_MAX_TOKENS = 140;
 const COFFEE_GROUP_NAME_INFER_TEMPERATURE = 0.7;
 const COFFEE_GROUP_NAME_INFER_ATTEMPTS = 2;
+const COFFEE_GROUP_NAME_MIN_RELEVANCE_SCORE = 5;
 const COFFEE_TOPIC_HINT_MAX_WORDS = 5;
 const COFFEE_TOPIC_HINT_MAX_CHARS = 48;
+const COFFEE_STARTER_MEMORY_MAX_PER_BOT = 4;
+const COFFEE_STARTER_MEMORY_LOOKBACK_PER_BOT = 40;
+const COFFEE_STARTER_MEMORY_HINT_MAX_CHARS = 150;
 
 type CoffeeStarterTopicCandidate = {
   label: string;
@@ -2808,7 +2874,9 @@ const COFFEE_STARTER_TOPIC_STOPWORDS = new Set([
   "or",
   "the",
   "to",
+  "versus",
   "when",
+  "without",
   "with",
 ]);
 
@@ -2896,6 +2964,34 @@ function selectCoffeeStarterTopicLabels(
     if (selected.length >= 3) break;
   }
   return selected;
+}
+
+function coffeeStarterTopicRelevanceTokens(texts: readonly string[]): Set<string> {
+  const tokens = new Set<string>();
+  for (const text of texts) {
+    for (const token of text.toLowerCase().match(/[\p{L}\p{N}'-]+/gu) ?? []) {
+      if (token.length <= 2) continue;
+      if (COFFEE_STARTER_TOPIC_STOPWORDS.has(token)) continue;
+      tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
+function coffeeStarterTopicGroupRelevanceScore(
+  label: string,
+  contextTokens: ReadonlySet<string>
+): number {
+  let score = 0;
+  const seen = new Set<string>();
+  for (const token of label.toLowerCase().match(/[\p{L}\p{N}'-]+/gu) ?? []) {
+    if (token.length <= 2) continue;
+    if (COFFEE_STARTER_TOPIC_STOPWORDS.has(token)) continue;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    if (contextTokens.has(token)) score += 1;
+  }
+  return score;
 }
 
 function parseCoffeeStarterTopicsPayload(raw: string, group: CoffeeBotProfile[]): string[] {
@@ -2994,37 +3090,284 @@ function coffeeLooksLikeParticipantListName(name: string, group: CoffeeBotProfil
   return matches >= 2;
 }
 
-function collectCoffeeGroupNameKeywords(group: CoffeeBotProfile[]): Set<string> {
-  const keywords = new Set<string>();
-  const stopwords = new Set([
-    "the",
-    "and",
-    "with",
-    "for",
-    "from",
-    "mode",
-    "coffee",
-    "group",
-    "bot",
-  ]);
-  for (const bot of group) {
-    const nameTokens = bot.name.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
-    for (const token of nameTokens) {
-      if (token.length < 3) continue;
-      if (stopwords.has(token)) continue;
-      keywords.add(token);
-    }
-    const hints = collectCoffeeBotTopicHints(bot);
-    for (const hint of hints) {
-      const hintTokens = hint.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
-      for (const token of hintTokens) {
-        if (token.length < 4) continue;
-        if (stopwords.has(token)) continue;
-        keywords.add(token);
-      }
+type CoffeeGroupNameRelevance = {
+  terms: Map<string, number>;
+  botTerms: Array<Set<string>>;
+};
+
+type CoffeeGroupNameCandidateScore = {
+  score: number;
+  relevanceScore: number;
+};
+
+const COFFEE_GROUP_NAME_RELEVANCE_STOPWORDS = new Set([
+  "about",
+  "after",
+  "also",
+  "because",
+  "being",
+  "bot",
+  "coffee",
+  "from",
+  "group",
+  "have",
+  "into",
+  "mode",
+  "that",
+  "their",
+  "them",
+  "then",
+  "there",
+  "these",
+  "they",
+  "this",
+  "very",
+  "with",
+  "would",
+  "your",
+]);
+
+const COFFEE_GROUP_NAME_GENERIC_WORDS = new Set([
+  "bean",
+  "beans",
+  "brew",
+  "brewed",
+  "cafe",
+  "caffeine",
+  "circle",
+  "club",
+  "coffee",
+  "crew",
+  "cup",
+  "grounds",
+  "group",
+  "java",
+  "koffee",
+  "mocha",
+  "roast",
+  "sips",
+  "society",
+  "table",
+]);
+
+const COFFEE_GROUP_NAME_THEME_RULES: Array<{
+  pattern: RegExp;
+  terms: readonly string[];
+  weight: number;
+}> = [
+  {
+    pattern: /\b(philosoph|socratic|stoic|ethic|wisdom|metaphysic|logic|reason)\b/iu,
+    terms: ["dialectic", "idea", "logic", "philo", "philosophy", "reason", "smart", "socratic", "stoic", "wisdom"],
+    weight: 5,
+  },
+  {
+    pattern: /\b(power|empire|command|control|strategy|strength|order|authority)\b/iu,
+    terms: ["authority", "command", "control", "dark", "doctrine", "empire", "order", "power", "strategy"],
+    weight: 5,
+  },
+  {
+    pattern: /\b(compassion|forgive|forgiveness|mercy|grace|spirit|faith|hope|love|kindness)\b/iu,
+    terms: ["compassion", "faith", "forgiveness", "grace", "hope", "kindness", "love", "mercy", "pardon", "soul"],
+    weight: 5,
+  },
+  {
+    pattern: /\b(engineer|debug|code|system|build|architecture|software|logic)\b/iu,
+    terms: ["architecture", "build", "code", "debug", "engineer", "logic", "systems"],
+    weight: 5,
+  },
+  {
+    pattern: /\b(chef|cook|food|kitchen|recipe|restaurant|menu|diner|meal)\b/iu,
+    terms: ["chef", "diner", "feast", "food", "kitchen", "menu", "recipe", "skillet", "soup"],
+    weight: 5,
+  },
+  {
+    pattern: /\b(theatre|theater|critic|stage|tension|subtext|drama)\b/iu,
+    terms: ["critic", "drama", "stage", "subtext", "theatre", "tension"],
+    weight: 5,
+  },
+  {
+    pattern: /\b(archive|archivist|evidence|record|concrete|receipt)\b/iu,
+    terms: ["archive", "evidence", "ledger", "receipt", "record"],
+    weight: 5,
+  },
+  {
+    pattern: /\b(spongebob|patrick|squidward|krabs|plankton|sandy|gary|krabby|patty|jellyfish|pineapple)\b/iu,
+    terms: ["bikini", "jellyfish", "krabby", "krusty", "patty", "pineapple"],
+    weight: 7,
+  },
+  {
+    pattern: /\b(harry\s+potter|potter|mcgonagall|mcgonnigal|hogwarts|gryffindor|slytherin|ravenclaw|hufflepuff|quidditch|transfiguration|dumbledore|wizard|witch|wand|spell|magic|magical)\b/iu,
+    terms: ["gryffindor", "hogwarts", "magic", "mcgonagall", "potter", "quidditch", "spell", "transfiguration", "wand", "wizard"],
+    weight: 8,
+  },
+];
+
+function coffeeGroupHasWizardingWorldSignal(group: CoffeeBotProfile[]): boolean {
+  const text = group
+    .map((bot) => `${bot.name} ${bot.systemPrompt}`)
+    .join(" ")
+    .toLowerCase();
+  return /\b(harry\s+potter|potter|mcgonagall|mcgonnigal|hogwarts|gryffindor|slytherin|ravenclaw|hufflepuff|quidditch|transfiguration|dumbledore|wizard|witch|wand|spell|magic|magical)\b/u.test(text);
+}
+
+function coffeeNameHasWizardingWorldAnchor(name: string): boolean {
+  return /\b(potter|mcgonagall|mcgonnigal|hogwarts|gryffindor|slytherin|ravenclaw|hufflepuff|quidditch|transfiguration|dumbledore|wizard|witch|wand|spell|magic|magical)\b/iu.test(name);
+}
+
+function coffeeBotSemanticFacets(bot: CoffeeBotProfile): BotSemanticFacets {
+  return bot.semanticFacets ?? deriveDeterministicBotSemanticFacets({
+    name: bot.name,
+    systemPrompt: bot.systemPrompt,
+  });
+}
+
+function coffeeBotFacetTexts(bot: CoffeeBotProfile): string[] {
+  const facets = coffeeBotSemanticFacets(bot);
+  return [
+    ...facets.canonAnchors,
+    ...facets.domains,
+    ...facets.values,
+    ...facets.tensions,
+    ...facets.namingTokens,
+    ...facets.starterSeeds,
+  ];
+}
+
+function coffeeGroupFacetTexts(group: CoffeeBotProfile[]): string[] {
+  return group.flatMap((bot) => coffeeBotFacetTexts(bot));
+}
+
+function coffeeFacetStarterTopicCandidates(group: CoffeeBotProfile[]): string[] {
+  const topics: string[] = [];
+  const seen = new Set<string>();
+  const topicLists = group.map((bot) => {
+    const facets = coffeeBotSemanticFacets(bot);
+    return [...facets.starterSeeds, ...facets.tensions];
+  });
+  const maxLength = Math.max(0, ...topicLists.map((list) => list.length));
+  for (let index = 0; index < maxLength; index += 1) {
+    for (const list of topicLists) {
+      const topic = list[index];
+      if (!topic) continue;
+      const normalized = topic.replace(/\s+/g, " ").trim();
+      if (!normalized) continue;
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      topics.push(normalized);
     }
   }
-  return keywords;
+  return topics;
+}
+
+function coffeeGroupHasCanonFacetSignal(group: CoffeeBotProfile[]): boolean {
+  return group.some((bot) => coffeeBotSemanticFacets(bot).canonAnchors.length > 0);
+}
+
+function formatCoffeeBotFacetSummary(bot: CoffeeBotProfile): string {
+  const facets = coffeeBotSemanticFacets(bot);
+  const parts: string[] = [];
+  const anchors = facets.canonAnchors.slice(0, 4).join(", ");
+  const domains = facets.domains.slice(0, 4).join(", ");
+  const values = facets.values.slice(0, 4).join(", ");
+  const tensions = facets.tensions.slice(0, 4).join(", ");
+  const starters = facets.starterSeeds.slice(0, 4).join(", ");
+  if (anchors) parts.push(`anchors=${anchors}`);
+  if (domains) parts.push(`domains=${domains}`);
+  if (values) parts.push(`values=${values}`);
+  if (tensions) parts.push(`tensions=${tensions}`);
+  if (starters) parts.push(`topic seeds=${starters}`);
+  return parts.join("; ");
+}
+
+function addCoffeeGroupNameRelevanceTerm(
+  relevance: CoffeeGroupNameRelevance,
+  botTerms: Set<string>,
+  term: string,
+  weight: number
+): void {
+  const normalized = term.toLowerCase().replace(/[^a-z0-9'-]/gi, "").trim();
+  if (normalized.length < 3) return;
+  if (COFFEE_GROUP_NAME_RELEVANCE_STOPWORDS.has(normalized)) return;
+  relevance.terms.set(normalized, Math.max(relevance.terms.get(normalized) ?? 0, weight));
+  botTerms.add(normalized);
+}
+
+function addCoffeeGroupNameRelevanceFromText(
+  relevance: CoffeeGroupNameRelevance,
+  botTerms: Set<string>,
+  text: string,
+  weight: number
+): void {
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+  if (!normalizedText) return;
+  const tokens = normalizedText.toLowerCase().match(/[\p{L}\p{N}'-]+/gu) ?? [];
+  for (const token of tokens) {
+    if (token.length < 4) continue;
+    if (COFFEE_GROUP_NAME_GENERIC_WORDS.has(token)) continue;
+    addCoffeeGroupNameRelevanceTerm(relevance, botTerms, token, weight);
+  }
+  for (const rule of COFFEE_GROUP_NAME_THEME_RULES) {
+    if (!rule.pattern.test(normalizedText)) continue;
+    for (const term of rule.terms) {
+      addCoffeeGroupNameRelevanceTerm(relevance, botTerms, term, rule.weight);
+    }
+  }
+}
+
+function collectCoffeeGroupNameRelevance(group: CoffeeBotProfile[]): CoffeeGroupNameRelevance {
+  const relevance: CoffeeGroupNameRelevance = { terms: new Map(), botTerms: [] };
+  for (const bot of group) {
+    const botTerms = new Set<string>();
+    relevance.botTerms.push(botTerms);
+    addCoffeeGroupNameRelevanceFromText(relevance, botTerms, bot.name, 4);
+    const { fields } = parseStoredBotPrompt(bot.systemPrompt);
+    const profileTexts = [
+      fields.identity.role,
+      fields.purpose.statement,
+      fields.core.interests,
+      fields.core.traits,
+      fields.core.boundaries,
+      fields.worldview.values,
+    ];
+    for (const text of profileTexts) {
+      addCoffeeGroupNameRelevanceFromText(relevance, botTerms, text, 6);
+    }
+    const fallbackPersona = summarizePersonaForRouter(bot.systemPrompt).replace(/^"|"$/g, "");
+    addCoffeeGroupNameRelevanceFromText(relevance, botTerms, fallbackPersona, 4);
+    for (const facetText of coffeeBotFacetTexts(bot)) {
+      addCoffeeGroupNameRelevanceFromText(relevance, botTerms, facetText, 8);
+    }
+  }
+  return relevance;
+}
+
+function scoreCoffeeGroupNameRelevance(
+  name: string,
+  relevance: CoffeeGroupNameRelevance
+): CoffeeGroupNameCandidateScore {
+  const normalized = name.toLowerCase();
+  let relevanceScore = 0;
+  let matchedBotCount = 0;
+  for (const [term, weight] of relevance.terms) {
+    if (normalized.includes(term)) relevanceScore += weight;
+  }
+  for (const botTerms of relevance.botTerms) {
+    let matched = false;
+    for (const term of botTerms) {
+      if (normalized.includes(term)) {
+        matched = true;
+        break;
+      }
+    }
+    if (matched) matchedBotCount += 1;
+  }
+  if (matchedBotCount >= 2) relevanceScore += 8;
+  else if (matchedBotCount === 1) relevanceScore += 2;
+  return {
+    relevanceScore,
+    score: relevanceScore,
+  };
 }
 
 function coffeeNameLooksPlaceholder(name: string): boolean {
@@ -3039,21 +3382,17 @@ function coffeeNameLooksPlaceholder(name: string): boolean {
 function scoreCoffeeGroupNameCandidate(
   name: string,
   group: CoffeeBotProfile[],
-  keywords: ReadonlySet<string>
-): number {
-  if (coffeeLooksLikeParticipantListName(name, group)) return -100;
-  if (coffeeNameLooksPlaceholder(name)) return -20;
-  const normalized = name.toLowerCase();
-  let score = 0;
-  for (const keyword of keywords) {
-    if (normalized.includes(keyword)) score += 4;
-  }
-  if (/\b(philo|smart|bean|bikini|krusty|jellyfish|stoic|mercy|power|debug)\b/i.test(normalized)) {
-    score += 6;
-  }
+  relevance: CoffeeGroupNameRelevance
+): CoffeeGroupNameCandidateScore {
+  if (coffeeLooksLikeParticipantListName(name, group)) return { score: -100, relevanceScore: 0 };
+  if (coffeeNameLooksPlaceholder(name)) return { score: -20, relevanceScore: 0 };
+  const base = scoreCoffeeGroupNameRelevance(name, relevance);
+  let score = base.score;
+  if (coffeeGroupHasWizardingWorldSignal(group) && !coffeeNameHasWizardingWorldAnchor(name)) score -= 32;
+  if (base.relevanceScore < COFFEE_GROUP_NAME_MIN_RELEVANCE_SCORE) score -= 24;
   if (name.split(/\s+/).length <= 4) score += 2;
   if (/[^a-z0-9\s'-]/i.test(name)) score += 1;
-  return score;
+  return { score, relevanceScore: base.relevanceScore };
 }
 
 function normalizeCoffeePromptSnippet(raw: string, maxChars: number): string {
@@ -3077,6 +3416,12 @@ function compactCoffeeTopicHint(raw: string): string {
   );
 }
 
+function normalizeCoffeeStarterMemoryHint(raw: string): string {
+  return normalizeCoffeePromptSnippet(raw, COFFEE_STARTER_MEMORY_HINT_MAX_CHARS)
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/gu, "")
+    .trim();
+}
+
 function collectCoffeeBotTopicHints(bot: CoffeeBotProfile): string[] {
   const { fields } = parseStoredBotPrompt(bot.systemPrompt);
   const candidates = [
@@ -3089,6 +3434,11 @@ function collectCoffeeBotTopicHints(bot: CoffeeBotProfile): string[] {
   const unique = new Set<string>();
   for (const candidate of candidates) {
     const normalized = compactCoffeeTopicHint(candidate);
+    if (normalized) unique.add(normalized);
+  }
+  if (unique.size === 0) {
+    const fallbackPersona = summarizePersonaForRouter(bot.systemPrompt).replace(/^"|"$/g, "");
+    const normalized = compactCoffeeTopicHint(fallbackPersona);
     if (normalized) unique.add(normalized);
   }
   return [...unique];
@@ -3122,20 +3472,54 @@ function buildDeterministicCoffeeGroupName(group: CoffeeBotProfile[]): string {
     return themed[hashCoffeeNameSeed(namesJoined) % themed.length]!;
   }
   const hints = group
-    .flatMap((bot) => collectCoffeeBotTopicHints(bot))
+    .flatMap((bot) => [
+      ...collectCoffeeBotTopicHints(bot),
+      ...coffeeBotFacetTexts(bot),
+    ])
     .join(" ")
     .toLowerCase();
   const seed = group.map((bot) => bot.name).join("|") || hints || "coffee";
   const pick = (options: readonly string[]): string => options[hashCoffeeNameSeed(seed) % options.length]!;
-  if (/\b(philosoph|stoic|ethic|wisdom|metaphysic|logic|reason)\b/.test(hints)) {
+  const hasWizarding = coffeeGroupHasWizardingWorldSignal(group) ||
+    /\b(harry\s+potter|potter|mcgonagall|mcgonnigal|hogwarts|gryffindor|slytherin|ravenclaw|hufflepuff|quidditch|transfiguration|dumbledore|wizard|witch|wand|spell|magic|magical)\b/.test(hints);
+  const hasPhilosophy = /\b(philosoph|socratic|stoic|ethic|wisdom|metaphysic|logic|reason)\b/.test(hints);
+  const hasPower = /\b(power|empire|command|control|strategy|strength|order|authority)\b/.test(hints);
+  const hasMercy = /\b(compassion|forgive|forgiveness|mercy|grace|spirit|faith|hope|love|kindness)\b/.test(hints);
+  const hasEngineering = /\b(engineer|debug|code|system|build|logic)\b/.test(hints);
+  const hasFood = /\b(chef|cook|food|kitchen|recipe|restaurant|menu|diner|meal)\b/.test(hints);
+  if (hasWizarding) {
+    return pick([
+      "Gryffindor Grounds",
+      "Hogwarts Common Roast",
+      "Wands and Wisdom",
+      "Transfiguration Table",
+    ]);
+  }
+  if (hasPower && hasMercy) {
+    return pick([
+      "Mercy Meets Empire",
+      "Power and Pardon",
+      "Grace Against Command",
+      "The Mercy Doctrine",
+    ]);
+  }
+  if (hasPhilosophy && hasFood) {
+    return pick([
+      "Socratic Soup Club",
+      "Kitchen Table Logic",
+      "The Reasonable Recipe",
+      "Dialectic Diner",
+    ]);
+  }
+  if (hasPhilosophy) {
     return pick([
       "Philosophicoffee",
-      "Smart Beans",
+      "Socratic Sips",
       "Idea Roast Society",
       "The Smart Guys",
     ]);
   }
-  if (/\b(power|empire|command|control|strategy)\b/.test(hints)) {
+  if (hasPower) {
     return pick([
       "Power Pour Society",
       "Dark Roast Doctrine",
@@ -3143,7 +3527,7 @@ function buildDeterministicCoffeeGroupName(group: CoffeeBotProfile[]): string {
       "The Authority Blend",
     ]);
   }
-  if (/\b(compassion|forgive|mercy|grace|spirit|faith|hope|love)\b/.test(hints)) {
+  if (hasMercy) {
     return pick([
       "Grace Grounds",
       "Mercy Mocha Circle",
@@ -3151,7 +3535,7 @@ function buildDeterministicCoffeeGroupName(group: CoffeeBotProfile[]): string {
       "Soulful Sips Society",
     ]);
   }
-  if (/\b(engineer|debug|code|system|build|logic)\b/.test(hints)) {
+  if (hasEngineering) {
     return pick([
       "Smart Beans",
       "Debug and Decaf",
@@ -3186,7 +3570,74 @@ function formatCoffeeBotContextSummary(bot: CoffeeBotProfile): string {
     const fallbackPersona = summarizePersonaForRouter(bot.systemPrompt).replace(/^"|"$/g, "");
     if (fallbackPersona) summaryParts.push(`persona=${fallbackPersona}`);
   }
+  const facetSummary = formatCoffeeBotFacetSummary(bot);
+  if (facetSummary) summaryParts.push(`facets=${facetSummary}`);
   return summaryParts.join("; ");
+}
+
+export function loadCoffeeStarterMemoryContext(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey?: Buffer | null;
+  group: readonly Pick<CoffeeBotProfile, "id" | "name">[];
+  memoriesPerBot?: number;
+}): CoffeeStarterMemoryContextEntry[] {
+  const { db, userId, userKey, group } = args;
+  if (!userKey) return [];
+  const limit = Math.max(1, Math.min(8, args.memoriesPerBot ?? COFFEE_STARTER_MEMORY_MAX_PER_BOT));
+  const context: CoffeeStarterMemoryContextEntry[] = [];
+  for (const bot of group) {
+    const seen = new Set<string>();
+    let memories: string[] = [];
+    try {
+      memories = retrieveRecentBotMemoriesForStarter(
+        db,
+        userId,
+        userKey,
+        bot.id,
+        COFFEE_STARTER_MEMORY_LOOKBACK_PER_BOT
+      )
+        .filter((memory) => memory.botId === bot.id && memory.source !== "about_you")
+        .map((memory) => normalizeCoffeeStarterMemoryHint(memory.text))
+        .filter((memory) => {
+          if (!memory) return false;
+          const key = memory.toLocaleLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, limit);
+    } catch {
+      memories = [];
+    }
+    if (memories.length > 0) {
+      context.push({ botId: bot.id, botName: bot.name, memories });
+    }
+  }
+  return context;
+}
+
+function formatCoffeeStarterMemoryContext(
+  memoryContext: readonly CoffeeStarterMemoryContextEntry[] | undefined
+): string[] {
+  const active = (memoryContext ?? []).filter((entry) => entry.memories.length > 0);
+  if (active.length === 0) {
+    return ["Attending bot memory hints: none available; use bot profiles and session tuning."];
+  }
+  const lines = ["Attending bot memory hints (recent, bot-scoped):"];
+  for (const entry of active) {
+    lines.push(`- ${entry.botName}: ${entry.memories.join(" / ")}`);
+  }
+  return lines;
+}
+
+function formatCoffeeStarterFacetContext(group: CoffeeBotProfile[]): string[] {
+  const lines = ["Hidden bot facets (cached semantic ingredients):"];
+  for (const bot of group) {
+    const summary = formatCoffeeBotFacetSummary(bot);
+    if (summary) lines.push(`- ${bot.name}: ${summary}`);
+  }
+  return lines.length > 1 ? lines : ["Hidden bot facets: deterministic fallback only."];
 }
 
 export async function inferCoffeeGroupName(args: {
@@ -3196,7 +3647,7 @@ export async function inferCoffeeGroupName(args: {
 }): Promise<string> {
   const { provider, group, fallbackName } = args;
   const deterministicFallback = buildDeterministicCoffeeGroupName(group);
-  const keywords = collectCoffeeGroupNameKeywords(group);
+  const relevance = collectCoffeeGroupNameRelevance(group);
   const botLines = group.map((bot) => {
     const contextSummary = formatCoffeeBotContextSummary(bot);
     return `- ${bot.name}${contextSummary ? ` — ${contextSummary}` : ""}`;
@@ -3214,7 +3665,8 @@ export async function inferCoffeeGroupName(args: {
         "Keep it warm, playful, and human-readable. Be witty and creative.",
         "Max 1-4 words and avoid long participant lists.",
         "Do NOT list participant names or output titles like 'Coffee with ...'.",
-        "Avoid generic names like 'Coffee Group' unless there is no signal.",
+        "Every candidate must include a recognizable role, value, interest, canon detail, or tension from these specific bots.",
+        "Avoid generic names like 'Coffee Group', 'Brew Circle', or 'The Coffee Crew'.",
         'Examples of good style: "Philosophicoffee", "Smart Beans", "The Smart Guys".',
         "Seated bots:",
         ...botLines,
@@ -3235,18 +3687,24 @@ export async function inferCoffeeGroupName(args: {
       const ranked = candidates
         .map((candidate) => ({
           candidate,
-          score: scoreCoffeeGroupNameCandidate(candidate, group, keywords),
+          ...scoreCoffeeGroupNameCandidate(candidate, group, relevance),
         }))
         .sort((a, b) => b.score - a.score);
       const winner = ranked[0];
-      if (winner && winner.score >= 0) {
+      if (winner && winner.score >= 0 && winner.relevanceScore >= COFFEE_GROUP_NAME_MIN_RELEVANCE_SCORE) {
         return normalizeCoffeeGroupName(winner.candidate, fallbackName);
       }
       const parsedSingle = parseCoffeeGroupNamePayload(raw);
+      const parsedScore = parsedSingle
+        ? scoreCoffeeGroupNameCandidate(parsedSingle, group, relevance)
+        : null;
       if (
         parsedSingle &&
         !coffeeLooksLikeParticipantListName(parsedSingle, group) &&
-        !coffeeNameLooksPlaceholder(parsedSingle)
+        !coffeeNameLooksPlaceholder(parsedSingle) &&
+        parsedScore &&
+        parsedScore.score >= 0 &&
+        parsedScore.relevanceScore >= COFFEE_GROUP_NAME_MIN_RELEVANCE_SCORE
       ) {
         return normalizeCoffeeGroupName(parsedSingle, fallbackName);
       }
@@ -3259,15 +3717,35 @@ export async function inferCoffeeGroupName(args: {
 
 function buildDeterministicCoffeeStarterTopics(
   group: CoffeeBotProfile[],
-  sessionSettings: CoffeeSessionSettings
+  sessionSettings: CoffeeSessionSettings,
+  memoryContext: readonly CoffeeStarterMemoryContextEntry[] = []
 ): string[] {
-  const hints = group
-    .flatMap((bot) => collectCoffeeBotTopicHints(bot))
+  const hints = [
+    ...group.flatMap((bot) => collectCoffeeBotTopicHints(bot)),
+    ...coffeeGroupFacetTexts(group),
+    ...memoryContext.flatMap((entry) => entry.memories),
+  ]
     .join(" ")
     .toLowerCase();
-  const fallback =
+  const hasWizarding = /\b(harry\s+potter|potter|mcgonagall|mcgonnigal|hogwarts|gryffindor|slytherin|ravenclaw|hufflepuff|quidditch|transfiguration|dumbledore|wizard|witch|wand|spell|magic|magical)\b/u.test(hints);
+  const hasSpongeBob = /\b(spongebob|squarepants|patrick|squidward|krabs|plankton|sandy|gary|krabby|patty|jellyfish|pineapple|bikini\s+bottom|krusty\s+krab)\b/u.test(hints);
+  const hasPowerAndMercy =
     /\b(power|empire|command|control|strategy)\b/u.test(hints) &&
-    /\b(compassion|forgive|forgiveness|mercy|grace|love|service)\b/u.test(hints)
+    /\b(compassion|forgive|forgiveness|mercy|grace|love|service)\b/u.test(hints);
+  const fallback =
+    hasWizarding
+      ? [
+          "When rules protect people",
+          "The burden of being chosen",
+          "Courage under supervision",
+        ]
+      : hasSpongeBob
+      ? [
+          "Krusty Krab closing shift",
+          "Jellyfish Fields after work",
+          "Bikini Bottom rumor mill",
+        ]
+      : hasPowerAndMercy
       ? [
           "Power without cruelty",
           "Duty versus forgiveness",
@@ -3314,8 +3792,18 @@ function buildDeterministicCoffeeStarterTopics(
                       "When kindness backfires",
                       "A rule worth breaking",
                     ];
+  const facetTopics = coffeeFacetStarterTopicCandidates(group);
+  const topicCandidates = hasWizarding || (hasPowerAndMercy && !hasSpongeBob)
+    ? [
+        ...fallback.map((label) => ({ label })),
+        ...facetTopics.map((label) => ({ label })),
+      ]
+    : [
+        ...facetTopics.map((label) => ({ label })),
+        ...fallback.map((label) => ({ label })),
+      ];
   return selectCoffeeStarterTopicLabels(
-    fallback.map((label) => ({ label })),
+    topicCandidates,
     group
   );
 }
@@ -3323,12 +3811,43 @@ function buildDeterministicCoffeeStarterTopics(
 function completeCoffeeStarterTopics(
   parsedTopics: readonly string[],
   group: CoffeeBotProfile[],
-  sessionSettings: CoffeeSessionSettings
+  sessionSettings: CoffeeSessionSettings,
+  memoryContext: readonly CoffeeStarterMemoryContextEntry[] = []
 ): string[] {
+  if (coffeeGroupHasCanonFacetSignal(group)) {
+    const contextTokens = coffeeStarterTopicRelevanceTokens([
+      ...group.flatMap((bot) => collectCoffeeBotTopicHints(bot)),
+      ...coffeeGroupFacetTexts(group),
+      ...memoryContext.flatMap((entry) => entry.memories),
+    ]);
+    const parsedWithRelevance = parsedTopics.map((label) => ({
+      label,
+      score: coffeeStarterTopicGroupRelevanceScore(label, contextTokens),
+    }));
+    const relevantParsed = parsedWithRelevance
+      .filter((topic) => topic.score > 0)
+      .map(({ label }) => ({ label }));
+    const weakParsed = parsedWithRelevance
+      .filter((topic) => topic.score <= 0)
+      .map(({ label }) => ({ label }));
+    return selectCoffeeStarterTopicLabels(
+      [
+        ...relevantParsed,
+        ...coffeeFacetStarterTopicCandidates(group).map((label) => ({ label })),
+        ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext).map((label) => ({ label })),
+        ...weakParsed,
+        { label: "The cost of being right" },
+        { label: "When kindness backfires" },
+        { label: "A rule worth breaking" },
+      ],
+      group
+    ).slice(0, 3);
+  }
+
   return selectCoffeeStarterTopicLabels(
     [
       ...parsedTopics.map((label) => ({ label })),
-      ...buildDeterministicCoffeeStarterTopics(group, sessionSettings).map((label) => ({ label })),
+      ...buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext).map((label) => ({ label })),
       { label: "The cost of being right" },
       { label: "When kindness backfires" },
       { label: "A rule worth breaking" },
@@ -3346,8 +3865,9 @@ export async function inferCoffeeStarterTopics(args: {
   group: CoffeeBotProfile[];
   sessionSettings: CoffeeSessionSettings;
   presetLabel?: string | null;
+  memoryContext?: readonly CoffeeStarterMemoryContextEntry[];
 }): Promise<string[]> {
-  const { provider, group, sessionSettings, presetLabel } = args;
+  const { provider, group, sessionSettings, presetLabel, memoryContext } = args;
   const botLines = group.map((bot) => {
     const contextSummary = formatCoffeeBotContextSummary(bot);
     return `- ${bot.name}${contextSummary ? ` — ${contextSummary}` : ""}`;
@@ -3376,14 +3896,20 @@ export async function inferCoffeeStarterTopics(args: {
         "Seated bots:",
         ...botLines,
         "",
+        ...formatCoffeeStarterFacetContext(group),
+        "",
+        ...formatCoffeeStarterMemoryContext(memoryContext),
+        "",
         'Respond with compact JSON exactly in this shape: {"topics":[{"label":"...","kind":"reflective","rationale":"..."},{"label":"...","kind":"tension","rationale":"..."},{"label":"...","kind":"scenario","rationale":"..."}]}',
         "Include exactly three candidate objects in this order: reflective/shared curiosity, productive disagreement or tension, concrete dilemma/scenario.",
         "Each label is a TOPIC THE GROUP EXPLORES together (not a user quick-reply, not a question directed only at the player).",
         "Each label must be 2–8 words, concrete, safe, single-line UTF-8; no numbering or prefixes inside strings.",
-        "Ground every topic in the seated bots' stated interests, values, purpose, roles, or productive contrasts between them.",
+        "Ground every topic in the seated bots' stated interests, values, purpose, roles, memories, or productive contrasts between them.",
+        "When memory hints exist, treat them as first-class signal; prefer fresh labels inspired by recent memories, recurring interests, unresolved tensions, or contrasts between attendees.",
+        "Do not quote memory text verbatim or make labels about memories.",
         "Do not usually name participants in labels; capture the underlying idea instead.",
         "Avoid generic filler like 'check-in', 'worth unpacking', or bland universal agreement phrasing.",
-        "Good label style: \"The cost of being right\", \"Power without cruelty\", \"When kindness backfires\", \"A rule worth breaking\".",
+        "Example label shape only; do not reuse these verbatim: \"A formula worth guarding\", \"When certainty becomes arrogance\", \"Jellyfish Fields after work\", \"The quiet part of duty\".",
       ].join("\n"),
     },
   ];
@@ -3393,12 +3919,12 @@ export async function inferCoffeeStarterTopics(args: {
       maxTokens: COFFEE_STARTER_TOPIC_INFER_MAX_TOKENS,
     });
     const parsed = parseCoffeeStarterTopicsPayload(raw, group);
-    const topics = completeCoffeeStarterTopics(parsed, group, sessionSettings);
+    const topics = completeCoffeeStarterTopics(parsed, group, sessionSettings, memoryContext);
     if (topics.length === 3) return topics;
   } catch {
     // Non-fatal — deterministic fallback below.
   }
-  return buildDeterministicCoffeeStarterTopics(group, sessionSettings);
+  return buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext);
 }
 
 function coffeeTranscriptContainsPrismBotMention(
@@ -5720,11 +6246,16 @@ export async function createCoffeeConversation(
   db: DatabaseSync,
   userId: string,
   input: CoffeeSessionCreateInput,
-  llm?: { prismDefaultLlmModel?: string | null; autoPickStarterTopic?: boolean } | null
+  llm?: { prismDefaultLlmModel?: string | null; autoPickStarterTopic?: boolean; userKey?: Buffer } | null
 ): Promise<CoffeeSessionCreateResponse> {
   const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
   const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
-  const group = loadCoffeeGroupProfiles(db, userId, groupIds);
+  const group = attachCoffeeBotSemanticFacets(
+    db,
+    userId,
+    loadCoffeeGroupProfiles(db, userId, groupIds),
+    llm?.prismDefaultLlmModel
+  );
   const now = new Date().toISOString();
   const conversationId = randomId(12);
   const initialSocialByBotId = initializeCoffeeSocialState(group, {});
@@ -5761,11 +6292,18 @@ export async function createCoffeeConversation(
   );
   upsertCoffeeBotSocialState(db, userId, conversationId, initialSocialByBotId, now);
   const provider = getAuxiliaryProvider(llm?.prismDefaultLlmModel ?? undefined);
+  const starterMemoryContext = loadCoffeeStarterMemoryContext({
+    db,
+    userId,
+    userKey: llm?.userKey,
+    group,
+  });
   let coffeeStarterTopics = await inferCoffeeStarterTopics({
     provider,
     group,
     sessionSettings,
     presetLabel,
+    memoryContext: starterMemoryContext,
   });
   let persistedTopic: string | null = null;
   if (llm?.autoPickStarterTopic === true && coffeeStarterTopics.length > 0) {
@@ -5807,7 +6345,7 @@ export async function createCoffeeConversationFromGroup(
   userId: string,
   groupId: string,
   input: CoffeeGroupSessionCreateInput = {},
-  llm?: { prismDefaultLlmModel?: string | null } | null
+  llm?: { prismDefaultLlmModel?: string | null; userKey?: Buffer } | null
 ): Promise<CoffeeSessionCreateResponse> {
   const row = loadCoffeeGroupRow(db, userId, groupId);
   if (!row) throw new Error("Coffee group not found.");

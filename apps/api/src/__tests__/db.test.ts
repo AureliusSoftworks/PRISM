@@ -77,6 +77,9 @@ describe("createDatabase bot export hash migration", () => {
         .all() as Array<{ name: string }>;
       assert.ok(columns.some((column) => column.name === "export_hash"));
       assert.ok(columns.some((column) => column.name === "flirt_enabled"));
+      assert.ok(columns.some((column) => column.name === "semantic_facets"));
+      assert.ok(columns.some((column) => column.name === "semantic_facets_source_hash"));
+      assert.ok(columns.some((column) => column.name === "semantic_facets_updated_at"));
       const opinionColumns = reopened
         .prepare("PRAGMA table_info(session_opinions)")
         .all() as Array<{ name: string }>;

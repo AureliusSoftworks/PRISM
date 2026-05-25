@@ -69,6 +69,7 @@ import {
   normalizeBotExportHash,
   resolveBotExportHashForCreate,
 } from "./bots.ts";
+import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
 import {
   normalizeComfyUiHostForStatusCheck,
   normalizeOllamaHostForStatusCheck,
@@ -1736,6 +1737,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/groups/:id/sessions", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const initialPoll =
         body.initialPoll && typeof body.initialPoll === "object" && !Array.isArray(body.initialPoll)
@@ -1754,7 +1756,7 @@ function buildRoutes(): RouteDefinition[] {
           presetId: body.presetId,
           initialPoll,
         },
-        { prismDefaultLlmModel: user.prism_default_llm_model }
+        { prismDefaultLlmModel: user.prism_default_llm_model, userKey }
       );
       json(ctx.res, 201, {
         ok: true,
@@ -1764,6 +1766,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/sessions", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
@@ -1783,7 +1786,7 @@ function buildRoutes(): RouteDefinition[] {
           coffeeSettings: body.coffeeSettings,
           initialPoll,
         },
-        { prismDefaultLlmModel: user.prism_default_llm_model }
+        { prismDefaultLlmModel: user.prism_default_llm_model, userKey }
       );
       json(ctx.res, 200, {
         ok: true,
@@ -3256,6 +3259,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
       const name = readString(body.name, "name");
       const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : "";
@@ -3318,6 +3322,12 @@ function buildRoutes(): RouteDefinition[] {
         now,
         now
       );
+      queueBotSemanticFacetsRefresh({
+        db,
+        userId,
+        botId,
+        prismDefaultLlmModel: user.prism_default_llm_model,
+      });
       json(ctx.res, 201, {
         ok: true,
         bot: {
@@ -3350,6 +3360,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("PATCH", "/api/bots/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const botId = ctx.params.id;
       const existing = db.prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?").get(botId, userId) as { id?: string } | undefined;
       if (!existing?.id) {
@@ -3358,8 +3369,17 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const fields: string[] = [];
       const values: Array<string | number | null> = [];
-      if (typeof body.name === "string") { fields.push("name = ?"); values.push(body.name); }
-      if (typeof body.systemPrompt === "string") { fields.push("system_prompt = ?"); values.push(body.systemPrompt); }
+      let shouldRefreshFacets = false;
+      if (typeof body.name === "string") {
+        fields.push("name = ?");
+        values.push(body.name);
+        shouldRefreshFacets = true;
+      }
+      if (typeof body.systemPrompt === "string") {
+        fields.push("system_prompt = ?");
+        values.push(body.systemPrompt);
+        shouldRefreshFacets = true;
+      }
       if (typeof body.model === "string") { fields.push("model = ?"); values.push(body.model); }
       if (typeof body.localModel === "string") {
         fields.push("local_model = ?");
@@ -3432,10 +3452,23 @@ function buildRoutes(): RouteDefinition[] {
         values.push(normalizedExportHash);
       }
       if (fields.length > 0) {
+        if (shouldRefreshFacets) {
+          fields.push("semantic_facets = NULL");
+          fields.push("semantic_facets_source_hash = NULL");
+          fields.push("semantic_facets_updated_at = NULL");
+        }
         fields.push("updated_at = ?");
         values.push(new Date().toISOString());
         values.push(botId, userId);
         db.prepare(`UPDATE bots SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).run(...values);
+      }
+      if (shouldRefreshFacets) {
+        queueBotSemanticFacetsRefresh({
+          db,
+          userId,
+          botId,
+          prismDefaultLlmModel: user.prism_default_llm_model,
+        });
       }
       json(ctx.res, 200, { ok: true });
     }),

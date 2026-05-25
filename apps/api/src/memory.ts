@@ -1414,3 +1414,34 @@ export function retrieveRecentMemoriesForStarter(
     .slice(0, limit)
     .map(({ score: _unused, embedding: _embedding, ...memory }) => memory);
 }
+
+export function retrieveRecentBotMemoriesForStarter(
+  db: DatabaseSync,
+  userId: string,
+  userKey: Buffer,
+  botId: string,
+  limit = 4
+): UserMemory[] {
+  const normalizedBotId = botId.trim();
+  if (!normalizedBotId) return [];
+  const rows = db
+    .prepare(
+      `SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+       FROM memories
+       WHERE user_id = ?
+         AND bot_id = ?
+         AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
+       ORDER BY created_at DESC
+       LIMIT 100`
+    )
+    .all(userId, normalizedBotId) as MemoryRow[];
+
+  return filterConflictingMemories(
+    rows.map((row) => ({
+      ...decryptMemoryRow(row, userKey),
+      score: 0,
+    }))
+  )
+    .slice(0, limit)
+    .map(({ score: _unused, embedding: _embedding, ...memory }) => memory);
+}
