@@ -76,10 +76,15 @@ import {
   resolveAutoModel,
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
+  PRISM_DEFAULT_STORY_THEME,
   COFFEE_POLL_FINALIZE_REMAINING_MS,
   COFFEE_POLL_OPTION_COUNT_MAX,
   COFFEE_POLL_OPTION_COUNT_MIN,
   COFFEE_POLL_PLAYER_VOTER_ID,
+  STORY_BOT_COUNT_MAX,
+  STORY_BOT_COUNT_MIN,
+  getStoryCurrentScene,
+  getStoryLocation,
   type BotCustomFact,
   type BotBirthEra,
   type CoffeeBotSocialSnapshot,
@@ -91,6 +96,13 @@ import {
   type BotMoodKey,
   type ComfyUiWorkflowRegistration,
   type SentGeneratedImagePayload,
+  type StoryEpisodeManifest,
+  type StoryInventoryItem,
+  type StoryLocation,
+  type StoryScene,
+  type StorySessionDetail,
+  type StorySessionSummary,
+  type StoryTranscriptEntry,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
@@ -2357,7 +2369,7 @@ const VIEW_SWITCH_OVERLAY_FADE_OUT_MS = 280;
 // screen shown after login; each mode tile navigates to a specific
 // experience. Future modes can be advertised as disabled Hub tiles
 // without entering this route union until their shells actually exist.
-type View = "hub" | "chat" | "sandbox" | "coffee";
+type View = "hub" | "chat" | "sandbox" | "coffee" | "story";
 
 // Coffee mode group-size bounds — intentionally duplicated from the
 // server-side `COFFEE_GROUP_MIN_SIZE`/`MAX_SIZE` (see `apps/api/src/coffee.ts`)
@@ -2375,6 +2387,54 @@ const COFFEE_ARRIVAL_STEP_MS = 850;
 const COFFEE_ARRIVAL_SETTLE_MS = 900;
 const COFFEE_POLL_REFRESH_MS = 4_000;
 const COFFEE_POLL_OPTION_PLACEHOLDERS = ["Choice A", "Choice B", "Choice C", "Choice D"] as const;
+const STORY_SESSION_POLL_MS = 1_500;
+const STORY_PROJECTION_FALLBACK_ASSET_ID = "projection_fallback";
+const STORY_SPRITE_FALLBACK_ASSET_ID = "sprite_fallback_silhouette";
+const PRISM_STORY_THEME_ASSET_BY_ID = new Map(
+  PRISM_DEFAULT_STORY_THEME.assets.map((asset) => [asset.id, asset])
+);
+
+function storyThemeAssetUrl(
+  assetId: string | null | undefined,
+  fallbackId: string
+): string {
+  return (
+    PRISM_STORY_THEME_ASSET_BY_ID.get(assetId ?? "")?.url ??
+    PRISM_STORY_THEME_ASSET_BY_ID.get(fallbackId)?.url ??
+    ""
+  );
+}
+
+function storyItemGlyph(item: StoryInventoryItem): string {
+  if (item.glyph?.trim()) return item.glyph.trim();
+  switch (item.category) {
+    case "weapon":
+      return "†";
+    case "potion":
+      return "◒";
+    case "key":
+      return "◇";
+    case "clue":
+      return "?";
+    case "document":
+      return "▤";
+    case "relic":
+      return "◈";
+    case "tool":
+      return "⌁";
+    case "collectible":
+      return "✦";
+    default:
+      return "•";
+  }
+}
+
+function storySessionStatusLabel(status: StorySessionSummary["status"]): string {
+  if (status === "generating") return "Generating";
+  if (status === "complete") return "Complete";
+  if (status === "failed") return "Failed";
+  return "Playing";
+}
 
 function buildDefaultCoffeePollOptionDraft(): string[] {
   return Array.from({ length: COFFEE_POLL_OPTION_COUNT_MIN }, () => "");
@@ -14478,14 +14538,15 @@ function HomeContent(): React.JSX.Element {
   const requestedAuthMode = searchParams.get("mode") === "login" ? "login" : "register";
   // Post-auth surface is derived from the URL so refreshes preserve the
   // current mode and browser back/forward walk naturally between Hub,
-  // Chat, Sandbox, and Coffee. Anything unrecognised (missing param,
+  // Chat, Sandbox, Coffee, and Story. Anything unrecognised (missing param,
   // stale values) resolves to the Hub.
   const viewParam = searchParams.get("view");
   const view: View =
     viewParam === "chat" ? "chat"
       : viewParam === "sandbox" ? "sandbox"
         : viewParam === "coffee" ? "coffee"
-          : "hub";
+          : viewParam === "story" ? "story"
+            : "hub";
   const [viewSwitchTarget, setViewSwitchTarget] = useState<View | null>(null);
   const [viewSwitchOverlayPhase, setViewSwitchOverlayPhase] =
     useState<"hidden" | "entering" | "visible" | "fading">("hidden");
@@ -14581,6 +14642,7 @@ function HomeContent(): React.JSX.Element {
     if (viewSwitchTarget === "chat") return "Opening Zen";
     if (viewSwitchTarget === "sandbox") return "Opening Chat";
     if (viewSwitchTarget === "coffee") return "Opening Coffee";
+    if (viewSwitchTarget === "story") return "Opening Story";
     if (viewSwitchTarget === "hub") return "Returning to Hub";
     return "Switching modes";
   }, [viewSwitchTarget]);
@@ -18665,6 +18727,18 @@ function HomeContent(): React.JSX.Element {
   );
   const coffeeSessionSettingsRef = useRef<CoffeeSessionSettings>(loadCoffeeSettingsFromBrowser());
   const coffeeInterruptionCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [storySessions, setStorySessions] = useState<StorySessionSummary[]>([]);
+  const [storySessionsLoading, setStorySessionsLoading] = useState(false);
+  const [storySelectedSessionId, setStorySelectedSessionId] = useState<string | null>(null);
+  const [storySession, setStorySession] = useState<StorySessionDetail | null>(null);
+  const [storySelectedBotIds, setStorySelectedBotIds] = useState<string[]>([]);
+  const [storyPremise, setStoryPremise] = useState("");
+  const [storySearch, setStorySearch] = useState("");
+  const [storyBusy, setStoryBusy] = useState(false);
+  const [storyError, setStoryError] = useState<string | null>(null);
+  const [storyMapOpen, setStoryMapOpen] = useState(false);
+  const [storyInventoryOpen, setStoryInventoryOpen] = useState(false);
+  const [storyTranscriptOpen, setStoryTranscriptOpen] = useState(false);
   const clearCoffeeTranscriptCloseTimer = (): void => {
     if (coffeeTranscriptCloseTimerRef.current) {
       clearTimeout(coffeeTranscriptCloseTimerRef.current);
@@ -19301,6 +19375,256 @@ function HomeContent(): React.JSX.Element {
     void refreshCoffeeGroups();
     void refreshCoffeePresets();
   }, [view, refreshCoffeeGroups, refreshCoffeePresets]);
+  const storyBotsLibrary = useMemo(
+    () =>
+      [...bots]
+        .filter((bot) => bot.chat_enabled === 1)
+        .sort((a, b) =>
+          compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
+        ),
+    [bots, resolvedTheme, panelColorHarmonyActive]
+  );
+  const storyBotsById = useMemo(
+    () => new Map(storyBotsLibrary.map((bot) => [bot.id, bot])),
+    [storyBotsLibrary]
+  );
+  const storyFilteredBots = useMemo(() => {
+    const query = storySearch.trim().toLowerCase();
+    if (!query) return storyBotsLibrary;
+    return storyBotsLibrary.filter((bot) => bot.name.toLowerCase().includes(query));
+  }, [storyBotsLibrary, storySearch]);
+  const storySelectedBots = useMemo(
+    () =>
+      storySelectedBotIds
+        .map((botId) => storyBotsById.get(botId))
+        .filter((bot): bot is Bot => Boolean(bot)),
+    [storySelectedBotIds, storyBotsById]
+  );
+  const storySelectionValid =
+    storySelectedBotIds.length >= STORY_BOT_COUNT_MIN &&
+    storySelectedBotIds.length <= STORY_BOT_COUNT_MAX;
+  const storyAnyOfflineProtected = storySelectedBots.some((bot) => bot.online_enabled === 0);
+  const storyPreferredProvider: Provider =
+    storyAnyOfflineProtected
+      ? "local"
+      : settings?.preferredProvider === "openai" || user?.preferredProvider === "openai"
+        ? "openai"
+        : "local";
+  const storyCurrentScene = useMemo<StoryScene | null>(() => {
+    if (!storySession?.episode || !storySession.progress) return null;
+    try {
+      return getStoryCurrentScene(storySession.episode, storySession.progress);
+    } catch {
+      return null;
+    }
+  }, [storySession]);
+  const storyCurrentLocation = useMemo<StoryLocation | null>(() => {
+    if (!storySession?.episode || !storyCurrentScene) return null;
+    return getStoryLocation(storySession.episode, storyCurrentScene.locationId) ?? null;
+  }, [storySession?.episode, storyCurrentScene]);
+  const storyDiscoveredLocationIds = useMemo(
+    () => new Set(storySession?.progress?.discoveredLocationIds ?? []),
+    [storySession?.progress?.discoveredLocationIds]
+  );
+  const storyInventoryItems = useMemo<StoryInventoryItem[]>(() => {
+    if (!storySession?.episode || !storySession.progress) return [];
+    const byId = new Map(storySession.episode.items.map((item) => [item.id, item]));
+    return storySession.progress.inventoryItemIds
+      .map((itemId) => byId.get(itemId))
+      .filter((item): item is StoryInventoryItem => Boolean(item));
+  }, [storySession]);
+
+  const refreshStorySessions = useCallback(async (): Promise<StorySessionSummary[]> => {
+    setStorySessionsLoading(true);
+    try {
+      const response = await api<{ ok: true; sessions: StorySessionSummary[] }>(
+        "/api/story/sessions"
+      );
+      setStorySessions(response.sessions);
+      return response.sessions;
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to load Story sessions.");
+      return [];
+    } finally {
+      setStorySessionsLoading(false);
+    }
+  }, []);
+  const openStorySession = useCallback(async (sessionId: string): Promise<void> => {
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        `/api/story/sessions/${encodeURIComponent(sessionId)}`
+      );
+      setStorySelectedSessionId(response.session.id);
+      setStorySession(response.session);
+      setStoryMapOpen(false);
+      setStoryInventoryOpen(false);
+      setStoryTranscriptOpen(false);
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to open Story session.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, []);
+  const resetStoryToSetup = useCallback(() => {
+    setStorySelectedSessionId(null);
+    setStorySession(null);
+    setStoryError(null);
+    setStoryMapOpen(false);
+    setStoryInventoryOpen(false);
+    setStoryTranscriptOpen(false);
+  }, []);
+  const createStorySessionFromDraft = useCallback(async (): Promise<void> => {
+    if (!storySelectionValid || storyBusy) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        "/api/story/sessions",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            botIds: storySelectedBotIds,
+            premise: storyPremise.trim() || undefined,
+            preferredProvider: storyPreferredProvider,
+          }),
+        }
+      );
+      setStorySelectedSessionId(response.session.id);
+      setStorySession(response.session);
+      setStoryPremise("");
+      setStoryMapOpen(false);
+      setStoryInventoryOpen(false);
+      setStoryTranscriptOpen(false);
+      void refreshStorySessions();
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to start Story session.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [
+    storyBusy,
+    storyPremise,
+    storyPreferredProvider,
+    storySelectedBotIds,
+    storySelectionValid,
+    refreshStorySessions,
+  ]);
+  const chooseStoryChoice = useCallback(async (choiceId: string): Promise<void> => {
+    if (!storySession || storyBusy) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        `/api/story/sessions/${encodeURIComponent(storySession.id)}/choices`,
+        {
+          method: "POST",
+          body: JSON.stringify({ choiceId }),
+        }
+      );
+      setStorySession(response.session);
+      void refreshStorySessions();
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to apply Story choice.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [storyBusy, storySession, refreshStorySessions]);
+  const travelStoryLocation = useCallback(async (locationId: string): Promise<void> => {
+    if (!storySession || storyBusy) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        `/api/story/sessions/${encodeURIComponent(storySession.id)}/travel`,
+        {
+          method: "POST",
+          body: JSON.stringify({ locationId }),
+        }
+      );
+      setStorySession(response.session);
+      setStoryMapOpen(false);
+      void refreshStorySessions();
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to travel.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [storyBusy, storySession, refreshStorySessions]);
+  const deleteStorySessionById = useCallback(async (session: StorySessionSummary): Promise<void> => {
+    if (storyBusy) return;
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(`Delete "${session.title}"? This only removes the saved Story session.`);
+    if (!confirmed) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      await api<{ ok: true }>(
+        `/api/story/sessions/${encodeURIComponent(session.id)}`,
+        { method: "DELETE" }
+      );
+      setStorySessions((current) => current.filter((row) => row.id !== session.id));
+      if (storySelectedSessionId === session.id) {
+        resetStoryToSetup();
+      }
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to delete Story session.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [resetStoryToSetup, storyBusy, storySelectedSessionId]);
+  useEffect(() => {
+    if (view !== "story") return;
+    void refreshStorySessions();
+  }, [view, refreshStorySessions]);
+  useEffect(() => {
+    if (view !== "story" || storySession || storySelectedSessionId || storySessionsLoading) {
+      return;
+    }
+    const candidate =
+      storySessions.find((session) => session.status === "playing") ??
+      storySessions.find((session) => session.status === "generating") ??
+      storySessions[0];
+    if (!candidate) return;
+    void openStorySession(candidate.id);
+  }, [
+    view,
+    storySession,
+    storySelectedSessionId,
+    storySessions,
+    storySessionsLoading,
+    openStorySession,
+  ]);
+  useEffect(() => {
+    if (view !== "story" || storySession?.status !== "generating") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await api<{ ok: true; session: StorySessionDetail }>(
+          `/api/story/sessions/${encodeURIComponent(storySession.id)}`
+        );
+        if (cancelled) return;
+        setStorySession(response.session);
+        if (response.session.status !== "generating") {
+          void refreshStorySessions();
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setStoryError(err instanceof Error ? err.message : "Failed to refresh Story session.");
+        }
+      }
+    };
+    void poll();
+    const timer = setInterval(() => {
+      void poll();
+    }, STORY_SESSION_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [view, storySession?.id, storySession?.status, refreshStorySessions]);
   const coffeeSelectedBotIds = useMemo(
     () => coffeeSelectedSeatBotIds.filter((id): id is string => typeof id === "string"),
     [coffeeSelectedSeatBotIds]
@@ -41565,6 +41889,486 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const renderStorySessionRow = (session: StorySessionSummary): React.JSX.Element => {
+    const active = storySelectedSessionId === session.id;
+    return (
+      <li key={session.id} className={styles.storySessionItem}>
+        <button
+          type="button"
+          className={styles.storySessionButton}
+          data-active={active ? "true" : undefined}
+          onClick={() => void openStorySession(session.id)}
+        >
+          <span className={styles.storySessionTitle}>{session.title}</span>
+          <span className={styles.storySessionMeta}>
+            {storySessionStatusLabel(session.status)}
+            {session.model ? ` · ${session.model}` : ""}
+          </span>
+        </button>
+        <button
+          type="button"
+          className={styles.storySessionDelete}
+          onClick={() => void deleteStorySessionById(session)}
+          aria-label={`Delete ${session.title}`}
+          title={`Delete ${session.title}`}
+          disabled={storyBusy}
+        >
+          <IconTrash />
+        </button>
+      </li>
+    );
+  };
+
+  const renderStorySetup = (): React.JSX.Element => {
+    const selectedCount = storySelectedBotIds.length;
+    const offlineNames = storySelectedBots
+      .filter((bot) => bot.online_enabled === 0)
+      .map((bot) => bot.name);
+    return (
+      <section className={styles.storySetup} aria-label="Create Story session">
+        <div className={styles.storySetupIntro}>
+          <p className={styles.storyEyebrow}>New Story</p>
+          <h2>Choose the cast</h2>
+          <p>
+            Select {STORY_BOT_COUNT_MIN}-{STORY_BOT_COUNT_MAX} chat-enabled bots,
+            add an optional premise, then PRISM builds the episode before play starts.
+          </p>
+        </div>
+        <div className={styles.storyThemeBadge}>
+          <span>Theme</span>
+          <strong>{PRISM_DEFAULT_STORY_THEME.label}</strong>
+          <small>Bundled · immutable</small>
+        </div>
+        {offlineNames.length > 0 ? (
+          <p className={styles.storyNotice} role="status">
+            Local provider locked for {offlineNames.join(", ")}.
+          </p>
+        ) : null}
+        <label className={styles.storySearchBar}>
+          <span aria-hidden="true">⌕</span>
+          <input
+            value={storySearch}
+            onChange={(event) => setStorySearch(event.target.value)}
+            placeholder="Search bots..."
+            aria-label="Search bots for Story Mode"
+          />
+        </label>
+        {storyBotsLibrary.length === 0 ? (
+          <p className={styles.storyEmpty}>
+            No chat-enabled bots are available yet. Create one from the Bots panel.
+          </p>
+        ) : (
+          <ul
+            className={styles.storyBotGrid}
+            role="listbox"
+            aria-label="Bots available for Story Mode"
+          >
+            {storyFilteredBots.map((bot) => {
+              const selected = storySelectedBotIds.includes(bot.id);
+              const disabled = !selected && selectedCount >= STORY_BOT_COUNT_MAX;
+              return (
+                <li key={bot.id}>
+                  <button
+                    type="button"
+                    className={styles.storyBotPill}
+                    data-selected={selected ? "true" : undefined}
+                    disabled={disabled}
+                    style={botAccentStyle(bot.color, resolvedTheme)}
+                    onClick={() => {
+                      setStorySelectedBotIds((current) => {
+                        if (current.includes(bot.id)) {
+                          return current.filter((id) => id !== bot.id);
+                        }
+                        if (current.length >= STORY_BOT_COUNT_MAX) return current;
+                        return [...current, bot.id];
+                      });
+                    }}
+                    aria-selected={selected}
+                  >
+                    <span className={styles.storyBotGlyph} aria-hidden="true">
+                      <BotGlyph name={bot.glyph} />
+                    </span>
+                    <span>
+                      <strong>{bot.name}</strong>
+                      <small>{bot.online_enabled === 0 ? "LOCAL only" : "Chat-enabled"}</small>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <label className={styles.storyPremiseField}>
+          <span>Premise</span>
+          <textarea
+            value={storyPremise}
+            onChange={(event) => setStoryPremise(event.target.value)}
+            placeholder="Blank means surprise me."
+            maxLength={900}
+          />
+        </label>
+        <div className={styles.storySetupFooter}>
+          <span>
+            {selectedCount}/{STORY_BOT_COUNT_MAX} bots · {storyPreferredProvider.toUpperCase()}
+          </span>
+          <button
+            type="button"
+            className={styles.storyPrimaryButton}
+            disabled={!storySelectionValid || storyBusy}
+            onClick={() => void createStorySessionFromDraft()}
+          >
+            {storyBusy ? "Starting..." : "Generate Episode"}
+          </button>
+        </div>
+      </section>
+    );
+  };
+
+  const renderStoryLoading = (): React.JSX.Element => (
+    <section className={styles.storyStage} aria-label="Generating Story episode">
+      <img
+        src={storyThemeAssetUrl(null, STORY_PROJECTION_FALLBACK_ASSET_ID)}
+        alt=""
+        aria-hidden="true"
+        className={styles.storyProjectedImage}
+      />
+      <div className={styles.storyProjectionMask} aria-hidden="true" />
+      <div className={styles.storyLoadingPanel} role="status" aria-live="polite">
+        <span className={styles.storyLoadingPulse} aria-hidden="true" />
+        <p className={styles.storyEyebrow}>Projecting Episode</p>
+        <h2>{storySession?.title ?? "Story Mode"}</h2>
+        <p>PRISM is generating the full manifest before play begins.</p>
+      </div>
+    </section>
+  );
+
+  const renderStoryFailed = (): React.JSX.Element => (
+    <section className={styles.storySetup} aria-label="Story generation failed">
+      <div className={styles.storySetupIntro}>
+        <p className={styles.storyEyebrow}>Generation Failed</p>
+        <h2>{storySession?.title ?? "Story Mode"}</h2>
+        <p>{storySession?.error ?? storyError ?? "The model did not return a valid Story manifest."}</p>
+      </div>
+      <div className={styles.storySetupFooter}>
+        <button
+          type="button"
+          className={styles.storySecondaryButton}
+          onClick={() => {
+            setStorySelectedBotIds(storySession?.botIds ?? []);
+            setStoryPremise(storySession?.premise ?? "");
+            resetStoryToSetup();
+          }}
+        >
+          Retry Setup
+        </button>
+      </div>
+    </section>
+  );
+
+  const renderStoryMapPanel = (episode: StoryEpisodeManifest): React.JSX.Element | null => {
+    if (!storyMapOpen) return null;
+    return (
+      <aside className={styles.storyOverlayPanel} aria-label="Story map">
+        <div className={styles.storyOverlayHeader}>
+          <div>
+            <p className={styles.storyEyebrow}>Map</p>
+            <h2>Regional Sketch</h2>
+          </div>
+          <button
+            type="button"
+            className={styles.storyIconButton}
+            onClick={() => setStoryMapOpen(false)}
+            aria-label="Close map"
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
+        <div className={styles.storyMapCanvas}>
+          {episode.locations.map((location) => {
+            const discovered = storyDiscoveredLocationIds.has(location.id);
+            return (
+              <button
+                key={location.id}
+                type="button"
+                className={styles.storyMapNode}
+                data-discovered={discovered ? "true" : undefined}
+                style={{
+                  left: `${location.x * 100}%`,
+                  top: `${location.y * 100}%`,
+                }}
+                disabled={!discovered || storyBusy}
+                onClick={() => void travelStoryLocation(location.id)}
+              >
+                {discovered ? location.name : "???"}
+              </button>
+            );
+          })}
+        </div>
+      </aside>
+    );
+  };
+
+  const renderStoryInventoryPanel = (): React.JSX.Element | null => {
+    if (!storyInventoryOpen) return null;
+    return (
+      <aside className={styles.storyOverlayPanel} aria-label="Story inventory">
+        <div className={styles.storyOverlayHeader}>
+          <div>
+            <p className={styles.storyEyebrow}>Inventory</p>
+            <h2>Items</h2>
+          </div>
+          <button
+            type="button"
+            className={styles.storyIconButton}
+            onClick={() => setStoryInventoryOpen(false)}
+            aria-label="Close inventory"
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
+        {storyInventoryItems.length === 0 ? (
+          <p className={styles.storyEmpty}>No items collected.</p>
+        ) : (
+          <ul className={styles.storyInventoryGrid}>
+            {storyInventoryItems.map((item) => (
+              <li key={item.id} className={styles.storyItemCard}>
+                <span className={styles.storyItemGlyph}>{storyItemGlyph(item)}</span>
+                <strong>{item.name}</strong>
+                <small>{item.description}</small>
+              </li>
+            ))}
+          </ul>
+        )}
+      </aside>
+    );
+  };
+
+  const renderStoryTranscriptPanel = (
+    transcript: readonly StoryTranscriptEntry[]
+  ): React.JSX.Element | null => {
+    if (!storyTranscriptOpen) return null;
+    return (
+      <aside className={styles.storyOverlayPanel} aria-label="Story transcript">
+        <div className={styles.storyOverlayHeader}>
+          <div>
+            <p className={styles.storyEyebrow}>Log</p>
+            <h2>Transcript</h2>
+          </div>
+          <button
+            type="button"
+            className={styles.storyIconButton}
+            onClick={() => setStoryTranscriptOpen(false)}
+            aria-label="Close transcript"
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
+        <ol className={styles.storyTranscriptList}>
+          {transcript.map((entry) => (
+            <li key={entry.id} data-kind={entry.kind}>
+              <span>{entry.kind}</span>
+              <p>{entry.text}</p>
+            </li>
+          ))}
+        </ol>
+      </aside>
+    );
+  };
+
+  const renderStoryPlay = (session: StorySessionDetail): React.JSX.Element => {
+    if (!session.episode || !session.progress || !storyCurrentScene) {
+      return renderStoryLoading();
+    }
+    const scene = storyCurrentScene;
+    const speakerBot = scene.speakerBotId ? storyBotsById.get(scene.speakerBotId) : null;
+    const speakerName = scene.speakerName ?? speakerBot?.name ?? "Narrator";
+    const backgroundUrl = storyThemeAssetUrl(
+      scene.cutsceneAssetId ?? scene.backgroundAssetId ?? storyCurrentLocation?.backgroundAssetId,
+      STORY_PROJECTION_FALLBACK_ASSET_ID
+    );
+    const spriteUrl = storyThemeAssetUrl(null, STORY_SPRITE_FALLBACK_ASSET_ID);
+    const inventory = new Set(session.progress.inventoryItemIds);
+    const complete = session.status === "complete" || session.progress.status === "complete";
+    return (
+      <section className={styles.storyStage} aria-label="Story play scene">
+        <img
+          src={backgroundUrl}
+          alt=""
+          aria-hidden="true"
+          className={styles.storyProjectedImage}
+        />
+        <div className={styles.storyProjectionMask} aria-hidden="true" />
+        <div className={styles.storySceneTopline}>
+          <span>{storyCurrentLocation?.name ?? scene.title}</span>
+          <span>{session.provider.toUpperCase()} {session.model ?? ""}</span>
+        </div>
+        <div className={styles.storySpriteWrap} style={botAccentStyle(speakerBot?.color, resolvedTheme)}>
+          <img src={spriteUrl} alt="" aria-hidden="true" className={styles.storySprite} />
+          {speakerBot ? (
+            <span className={styles.storySpriteFace} aria-hidden="true">
+              {speakerBot.glyph ? <BotGlyph name={speakerBot.glyph} size={30} /> : ":|"}
+            </span>
+          ) : null}
+        </div>
+        <div className={styles.storyDialogueBox}>
+          <div className={styles.storyDialogueHeader}>
+            <span>{speakerName}</span>
+            <small>{scene.spritePose ?? "idle"}</small>
+          </div>
+          <p>{scene.narration}</p>
+          {complete ? (
+            <div className={styles.storyCompleteActions}>
+              <span>Episode complete</span>
+              <button type="button" onClick={resetStoryToSetup}>
+                New Story
+              </button>
+            </div>
+          ) : (
+            <div className={styles.storyChoiceGrid}>
+              {scene.choices.map((choice) => {
+                const missingItem = (choice.requireItemIds ?? []).find((itemId) => !inventory.has(itemId));
+                return (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    className={styles.storyChoiceButton}
+                    disabled={storyBusy || Boolean(missingItem)}
+                    onClick={() => void chooseStoryChoice(choice.id)}
+                    title={missingItem ? `Requires ${missingItem}` : undefined}
+                  >
+                    {choice.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {renderStoryMapPanel(session.episode)}
+        {renderStoryInventoryPanel()}
+        {renderStoryTranscriptPanel(session.transcript)}
+      </section>
+    );
+  };
+
+  const renderStoryShell = (): React.JSX.Element => {
+    const activeEpisode = storySession?.episode ?? null;
+    return (
+      <main
+        className={`${styles.appLayout} ${themeClass} ${styles.storyShell}`}
+        data-accent-active={appShellStyle ? "true" : undefined}
+        style={appShellStyle ?? undefined}
+      >
+        <aside className={styles.storySidebar}>
+          <button
+            type="button"
+            className={styles.storyHomeButton}
+            onClick={() => navigateToView("hub")}
+            aria-label="Back to Hub"
+            title="Back to Hub"
+          >
+            <PrismWordmarkWithVersion size="sm" className={styles.hubHomeWordmark} />
+          </button>
+          <div className={styles.storySidebarHeader}>
+            <span className={styles.sectionLabel}>Stories</span>
+            <button
+              type="button"
+              className={styles.storyNewButton}
+              onClick={resetStoryToSetup}
+              aria-label="New Story"
+            >
+              +
+            </button>
+          </div>
+          <ul className={styles.storySessionList}>
+            {storySessions.map(renderStorySessionRow)}
+            {storySessionsLoading ? (
+              <li className={styles.storySessionEmpty}>Loading Stories...</li>
+            ) : storySessions.length === 0 ? (
+              <li className={styles.storySessionEmpty}>No saved Stories yet.</li>
+            ) : null}
+          </ul>
+        </aside>
+        <section className={styles.storyMain}>
+          <header className={styles.storyHeader}>
+            <div>
+              <p className={styles.storyEyebrow}>Story Mode</p>
+              <h1>{storySession?.title ?? "Start a Story"}</h1>
+              <p>
+                {storySession
+                  ? storySessionStatusLabel(storySession.status)
+                  : `Pick ${STORY_BOT_COUNT_MIN}-${STORY_BOT_COUNT_MAX} bots for a fixed-choice episode.`}
+              </p>
+            </div>
+            <div className={styles.storyHeaderActions}>
+              <button
+                type="button"
+                className={styles.storyIconButton}
+                onClick={() => setStoryMapOpen((open) => !open)}
+                disabled={!activeEpisode || storySession?.status === "generating"}
+                aria-pressed={storyMapOpen}
+                aria-label="Map"
+                title="Map"
+              >
+                <span aria-hidden="true">⌖</span>
+              </button>
+              <button
+                type="button"
+                className={styles.storyIconButton}
+                onClick={() => setStoryInventoryOpen((open) => !open)}
+                disabled={!activeEpisode}
+                aria-pressed={storyInventoryOpen}
+                aria-label="Inventory"
+                title="Inventory"
+              >
+                <span aria-hidden="true">▣</span>
+              </button>
+              <button
+                type="button"
+                className={styles.storyIconButton}
+                onClick={() => setStoryTranscriptOpen((open) => !open)}
+                disabled={!storySession}
+                aria-pressed={storyTranscriptOpen}
+                aria-label="Transcript"
+                title="Transcript"
+              >
+                <MessageBubbleGlyph />
+              </button>
+              <button
+                type="button"
+                className={styles.storyIconButton}
+                onClick={() => navigateToView("hub")}
+                aria-label="Back to Hub"
+                title="Back to Hub"
+              >
+                <HomeGlyph />
+              </button>
+            </div>
+          </header>
+          {storyError ? (
+            <p className={styles.storyError} role="alert">
+              {storyError}
+            </p>
+          ) : null}
+          {!storySession
+            ? renderStorySetup()
+            : storySession.status === "generating"
+              ? renderStoryLoading()
+              : storySession.status === "failed"
+                ? renderStoryFailed()
+                : renderStoryPlay(storySession)}
+        </section>
+        {renderDevToolsButton()}
+        {renderSharedPanels()}
+        {renderViewSwitchOverlay()}
+        {renderDeleteAllModal()}
+        {renderSelectedBotDeleteModal()}
+        {renderImagesDeleteAllModal()}
+        {renderDevToolsPanel()}
+        <GlyphTooltipLayer />
+      </main>
+    );
+  };
+
   // ── Hub ──
   // Landing screen shown immediately after login. Reuses the auth
   // background verbatim so the visual transition from login to hub feels
@@ -41572,6 +42376,7 @@ function HomeContent(): React.JSX.Element {
   // mode; Chat stays disabled in Phase 1 and lights up once the mode is
   // built out.
   if (view === "coffee") return renderCoffeeShell();
+  if (view === "story") return renderStoryShell();
   if (view === "hub") return (
     <main
       className={`${styles.authLayout} ${themeClass}`}
@@ -41758,15 +42563,14 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={styles.hubTile}
-            disabled
-            title="Story mode is not available yet."
+            onClick={() => navigateToView("story")}
           >
             <div className={styles.hubTileGlyph}>
               <GlyphStory size={88} />
             </div>
             <div className={styles.hubTileLabel}>Story</div>
             <div className={styles.hubTileTagline}>
-              A door into somewhere else. The shape is still forming.
+              Generated visual-novel episodes with bots, choices, and maps.
             </div>
           </button>
           <button

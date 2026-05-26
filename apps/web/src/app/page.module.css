@@ -83,6 +83,807 @@
   --mode-toggle-track: #ffffff;
 }
 
+/* Story Mode MVP */
+.storyShell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  background:
+    linear-gradient(135deg, rgba(246, 244, 238, 0.82), rgba(35, 34, 38, 0.68)),
+    var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+.storySidebar {
+  min-height: 100vh;
+  border-right: 1px solid rgba(124, 108, 255, 0.24);
+  background: color-mix(in srgb, var(--bg-surface) 78%, rgba(255, 255, 255, 0.28));
+  backdrop-filter: blur(18px);
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 14px;
+  padding: 22px 18px;
+}
+
+.storyHomeButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  width: fit-content;
+  padding: 0;
+  cursor: pointer;
+}
+
+.storySidebarHeader,
+.storyHeader,
+.storyOverlayHeader,
+.storySetupFooter,
+.storyDialogueHeader,
+.storyCompleteActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.storySidebarHeader {
+  padding-top: 6px;
+}
+
+.storyNewButton,
+.storyIconButton,
+.storySessionDelete {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.themeLight .storyNewButton,
+.themeLight .storyIconButton,
+.themeLight .storySessionDelete {
+  border-color: rgba(32, 30, 35, 0.14);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.storyNewButton:hover,
+.storyIconButton:hover,
+.storySessionDelete:hover {
+  border-color: color-mix(in srgb, var(--accent, #7c6cff) 58%, rgba(255, 255, 255, 0.26));
+}
+
+.storyIconButton:disabled,
+.storySessionDelete:disabled,
+.storyNewButton:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.storyIconButton svg,
+.storySessionDelete svg {
+  width: 18px;
+  height: 18px;
+}
+
+.storySessionList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  overflow: auto;
+}
+
+.storySessionItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.storySessionButton {
+  min-width: 0;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  cursor: pointer;
+}
+
+.themeLight .storySessionButton {
+  border-color: rgba(42, 38, 48, 0.12);
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.storySessionButton[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent, #7c6cff) 62%, rgba(255, 255, 255, 0.2));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #7c6cff) 28%, transparent);
+}
+
+.storySessionTitle,
+.storySessionMeta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storySessionTitle {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.storySessionMeta {
+  margin-top: 3px;
+  font-size: 0.72rem;
+  opacity: 0.68;
+}
+
+.storySessionEmpty,
+.storyEmpty {
+  margin: 0;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 0.86rem;
+  opacity: 0.78;
+}
+
+.themeLight .storySessionEmpty,
+.themeLight .storyEmpty {
+  border-color: rgba(32, 30, 35, 0.16);
+}
+
+.storyMain {
+  min-width: 0;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  padding: 22px;
+  overflow: hidden;
+}
+
+.storyHeader {
+  min-height: 74px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  padding-bottom: 16px;
+}
+
+.themeLight .storyHeader {
+  border-bottom-color: rgba(32, 30, 35, 0.12);
+}
+
+.storyHeader h1,
+.storySetupIntro h2,
+.storyOverlayHeader h2,
+.storyLoadingPanel h2 {
+  margin: 0;
+  font-size: 1.55rem;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+.storyHeader p,
+.storySetupIntro p,
+.storyLoadingPanel p {
+  margin: 5px 0 0;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  max-width: 70ch;
+}
+
+.storyEyebrow {
+  margin: 0 0 5px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: color-mix(in srgb, var(--accent, #7c6cff) 68%, currentColor);
+  font-weight: 800;
+}
+
+.storyHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.storyError,
+.storyNotice {
+  margin: 0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.86rem;
+}
+
+.storyError {
+  border: 1px solid rgba(255, 92, 124, 0.38);
+  background: rgba(255, 92, 124, 0.1);
+}
+
+.storyNotice {
+  border: 1px solid rgba(82, 201, 180, 0.32);
+  background: rgba(82, 201, 180, 0.1);
+}
+
+.storySetup {
+  align-self: start;
+  width: min(980px, 100%);
+  display: grid;
+  gap: 16px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.storySetupIntro,
+.storyThemeBadge,
+.storySearchBar,
+.storyPremiseField {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.themeLight .storySetupIntro,
+.themeLight .storyThemeBadge,
+.themeLight .storySearchBar,
+.themeLight .storyPremiseField {
+  border-color: rgba(32, 30, 35, 0.13);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.storySetupIntro {
+  padding: 18px;
+}
+
+.storyThemeBadge {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.storyThemeBadge span,
+.storyThemeBadge small,
+.storyPremiseField span,
+.storyBotPill small {
+  font-size: 0.74rem;
+  opacity: 0.7;
+}
+
+.storySearchBar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+}
+
+.storySearchBar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.storyBotGrid,
+.storyInventoryGrid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.storyBotGrid {
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+}
+
+.storyBotPill {
+  width: 100%;
+  min-height: 64px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: inherit;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.themeLight .storyBotPill {
+  border-color: rgba(32, 30, 35, 0.13);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.storyBotPill[data-selected="true"] {
+  border-color: var(--bot-color, var(--accent, #7c6cff));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bot-color, #7c6cff) 35%, transparent);
+}
+
+.storyBotPill:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+}
+
+.storyBotPill strong,
+.storyItemCard strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storyBotGlyph {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  color: var(--bot-color, var(--accent, #7c6cff));
+  background: color-mix(in srgb, var(--bot-color, #7c6cff) 14%, transparent);
+  display: grid;
+  place-items: center;
+}
+
+.storyPremiseField {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.storyPremiseField textarea {
+  min-height: 96px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.storyPrimaryButton,
+.storySecondaryButton,
+.storyChoiceButton,
+.storyCompleteActions button {
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 0 16px;
+  color: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.storyPrimaryButton {
+  color: #0f1012;
+  background: linear-gradient(90deg, #f4f1e9, #a7f1e8, #c8bcff, #f1b3c5);
+}
+
+.storySecondaryButton,
+.storyChoiceButton,
+.storyCompleteActions button {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.themeLight .storySecondaryButton,
+.themeLight .storyChoiceButton,
+.themeLight .storyCompleteActions button {
+  border-color: rgba(32, 30, 35, 0.13);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.storyPrimaryButton:disabled,
+.storyChoiceButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.storyStage {
+  position: relative;
+  min-height: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background:
+    linear-gradient(110deg, rgba(82, 201, 180, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(232, 230, 222, 0.72), rgba(38, 38, 42, 0.72));
+  isolation: isolate;
+}
+
+.storyProjectedImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.58;
+  filter: saturate(0.82) contrast(0.98);
+}
+
+.storyProjectionMask {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at center, transparent 36%, rgba(0, 0, 0, 0.54) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(0, 0, 0, 0.18));
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.52);
+}
+
+.storyLoadingPanel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(420px, calc(100% - 36px));
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(20, 20, 22, 0.58);
+  backdrop-filter: blur(16px);
+  padding: 22px;
+  text-align: center;
+}
+
+.themeLight .storyLoadingPanel {
+  color: #19181d;
+  background: rgba(255, 255, 255, 0.64);
+  border-color: rgba(32, 30, 35, 0.16);
+}
+
+.storyLoadingPulse {
+  display: block;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  margin: 0 auto 14px;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-top-color: #9de7dd;
+  animation: storySpin 1s linear infinite;
+}
+
+@keyframes storySpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.storySceneTopline {
+  position: absolute;
+  z-index: 2;
+  left: 18px;
+  right: 18px;
+  top: 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.55);
+}
+
+.storySpriteWrap {
+  position: absolute;
+  z-index: 2;
+  left: clamp(18px, 5vw, 66px);
+  bottom: 176px;
+  width: min(28vw, 250px);
+  min-width: 150px;
+  aspect-ratio: 2 / 3;
+  color: var(--bot-color, #ffffff);
+}
+
+.storySprite {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 24px 28px rgba(0, 0, 0, 0.45));
+}
+
+.storySpriteFace {
+  position: absolute;
+  left: 50%;
+  top: 13%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--bot-color, #ffffff);
+  opacity: 0.95;
+}
+
+.storyDialogueBox {
+  position: absolute;
+  z-index: 3;
+  left: clamp(16px, 4vw, 44px);
+  right: clamp(16px, 4vw, 44px);
+  bottom: 22px;
+  min-height: 136px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(25, 25, 27, 0.74);
+  backdrop-filter: blur(18px);
+  padding: 18px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+}
+
+.themeLight .storyDialogueBox {
+  color: #19181d;
+  background: rgba(248, 246, 239, 0.78);
+  border-color: rgba(32, 30, 35, 0.16);
+}
+
+.storyDialogueHeader {
+  margin-bottom: 9px;
+  color: color-mix(in srgb, var(--accent, #9de7dd) 72%, currentColor);
+  font-weight: 900;
+}
+
+.storyDialogueHeader small {
+  opacity: 0.65;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+.storyDialogueBox p {
+  margin: 0;
+  line-height: 1.48;
+}
+
+.storyChoiceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.storyChoiceButton {
+  min-height: 48px;
+  text-align: left;
+}
+
+.storyCompleteActions {
+  margin-top: 16px;
+  color: color-mix(in srgb, currentColor 70%, transparent);
+}
+
+.storyOverlayPanel {
+  position: absolute;
+  z-index: 5;
+  top: 18px;
+  right: 18px;
+  bottom: 18px;
+  width: min(410px, calc(100% - 36px));
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(24, 24, 27, 0.76);
+  backdrop-filter: blur(18px);
+  padding: 16px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  overflow: hidden;
+}
+
+.themeLight .storyOverlayPanel {
+  color: #19181d;
+  background: rgba(250, 247, 240, 0.82);
+  border-color: rgba(32, 30, 35, 0.16);
+}
+
+.storyMapCanvas {
+  position: relative;
+  min-height: 360px;
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    linear-gradient(30deg, transparent 47%, rgba(255, 255, 255, 0.07) 50%, transparent 53%),
+    linear-gradient(145deg, rgba(230, 226, 214, 0.16), rgba(63, 62, 68, 0.18));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.storyMapCanvas::before {
+  content: "";
+  position: absolute;
+  inset: 11%;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-radius: 46% 54% 49% 51% / 38% 46% 54% 62%;
+  transform: rotate(-7deg);
+}
+
+.storyMapCanvas::after {
+  content: "";
+  position: absolute;
+  inset: 22% 18% 18% 28%;
+  border: 1px dashed rgba(157, 231, 221, 0.35);
+  border-radius: 54% 46% 58% 42% / 48% 58% 42% 52%;
+  transform: rotate(11deg);
+}
+
+.storyMapNode {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  min-width: 78px;
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(21, 21, 24, 0.74);
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.themeLight .storyMapNode {
+  background: rgba(255, 255, 255, 0.76);
+  border-color: rgba(32, 30, 35, 0.15);
+}
+
+.storyMapNode[data-discovered="true"] {
+  border-color: rgba(157, 231, 221, 0.72);
+  box-shadow: 0 0 18px rgba(157, 231, 221, 0.2);
+}
+
+.storyMapNode:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.storyInventoryGrid {
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  overflow: auto;
+}
+
+.storyItemCard {
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  padding: 13px;
+  min-height: 138px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.themeLight .storyItemCard {
+  border-color: rgba(32, 30, 35, 0.13);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.storyItemGlyph {
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: rgba(157, 231, 221, 0.13);
+  color: color-mix(in srgb, var(--accent, #9de7dd) 68%, currentColor);
+  font-size: 1.45rem;
+}
+
+.storyItemCard small {
+  line-height: 1.35;
+  opacity: 0.72;
+}
+
+.storyTranscriptList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+  overflow: auto;
+}
+
+.storyTranscriptList li {
+  border-left: 2px solid rgba(157, 231, 221, 0.45);
+  padding: 6px 0 6px 10px;
+}
+
+.storyTranscriptList span {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  opacity: 0.58;
+}
+
+.storyTranscriptList p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+@media (max-width: 860px) {
+  .storyShell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .storySidebar {
+    min-height: auto;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    border-right: 0;
+    border-bottom: 1px solid rgba(124, 108, 255, 0.2);
+    padding: 14px;
+  }
+
+  .storySidebarHeader {
+    justify-self: end;
+    padding-top: 0;
+  }
+
+  .storySessionList {
+    grid-column: 1 / -1;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(210px, 260px);
+    overflow-x: auto;
+  }
+
+  .storyMain {
+    min-height: 0;
+    padding: 14px;
+  }
+
+  .storyHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .storyStage {
+    min-height: 620px;
+  }
+
+  .storySpriteWrap {
+    left: 18px;
+    bottom: 218px;
+    width: min(44vw, 190px);
+    min-width: 128px;
+  }
+
+  .storyDialogueBox {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    max-height: 220px;
+    overflow: auto;
+  }
+
+  .storyChoiceGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .storyOverlayPanel {
+    inset: 12px;
+    width: auto;
+  }
+
+  .storyThemeBadge {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+}
+
 .themeLight {
   /* Light theme layers:
      - bg: the page under everything (warm paper, not blue-white).
