@@ -14898,6 +14898,10 @@ function HomeContent(): React.JSX.Element {
     x: number;
     y: number;
   } | null>(null);
+  const [storyShellContextMenu, setStoryShellContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [contextFocusedMessageId, setContextFocusedMessageId] = useState<string | null>(null);
   const [mobileFocusedMessageId, setMobileFocusedMessageId] = useState<string | null>(null);
   /** Message-actions popover (`role="menu"`) root for tap-outside + touch dismiss. */
@@ -14907,6 +14911,7 @@ function HomeContent(): React.JSX.Element {
   const canvasToolsContextMenuRef = useRef<HTMLDivElement | null>(null);
   const coffeeShellContextMenuRef = useRef<HTMLDivElement | null>(null);
   const coffeeBotContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const storyShellContextMenuRef = useRef<HTMLDivElement | null>(null);
   const botContextLongPressRef = useRef<{
     pointerId: number;
     botId: string;
@@ -14994,6 +14999,10 @@ function HomeContent(): React.JSX.Element {
 
   const closeCoffeeBotContextMenu = useCallback(() => {
     setCoffeeBotContextMenu(null);
+  }, []);
+
+  const closeStoryShellContextMenu = useCallback(() => {
+    setStoryShellContextMenu(null);
   }, []);
 
   const cancelBotContextLongPress = useCallback((pointerId?: number) => {
@@ -18739,6 +18748,20 @@ function HomeContent(): React.JSX.Element {
   const [storyMapOpen, setStoryMapOpen] = useState(false);
   const [storyInventoryOpen, setStoryInventoryOpen] = useState(false);
   const [storyTranscriptOpen, setStoryTranscriptOpen] = useState(false);
+  const [storyProvider, setStoryProvider] = useState<Provider>("local");
+  const [storyProviderTouched, setStoryProviderTouched] = useState(false);
+  const [storyModelChoiceByProvider, setStoryModelChoiceByProvider] =
+    useState<Record<Provider, string>>(createDefaultChatModelChoiceByProvider());
+  useEffect(() => {
+    if (storyProviderTouched) return;
+    if (user?.preferredProvider === "openai" || user?.preferredProvider === "local") {
+      setStoryProvider(user.preferredProvider);
+      return;
+    }
+    if (settings?.preferredProvider === "openai" || settings?.preferredProvider === "local") {
+      setStoryProvider(settings.preferredProvider);
+    }
+  }, [settings?.preferredProvider, storyProviderTouched, user?.preferredProvider]);
   const clearCoffeeTranscriptCloseTimer = (): void => {
     if (coffeeTranscriptCloseTimerRef.current) {
       clearTimeout(coffeeTranscriptCloseTimerRef.current);
@@ -19404,12 +19427,24 @@ function HomeContent(): React.JSX.Element {
     storySelectedBotIds.length >= STORY_BOT_COUNT_MIN &&
     storySelectedBotIds.length <= STORY_BOT_COUNT_MAX;
   const storyAnyOfflineProtected = storySelectedBots.some((bot) => bot.online_enabled === 0);
-  const storyPreferredProvider: Provider =
-    storyAnyOfflineProtected
-      ? "local"
-      : settings?.preferredProvider === "openai" || user?.preferredProvider === "openai"
-        ? "openai"
-        : "local";
+  const storyEffectiveProvider: Provider = storyAnyOfflineProtected ? "local" : storyProvider;
+  const storyModelProvider: Provider = storyEffectiveProvider === "openai" ? "openai" : "local";
+  const storyVisibleModelChoice = visibleModelChoiceForProvider(
+    settings,
+    storyModelChoiceByProvider[storyModelProvider]
+  );
+  const storyModelOptions = includeSelectedModelOption(
+    availableModelOptionsForProvider(modelCatalog, settings, storyModelProvider),
+    storyVisibleModelChoice,
+    storyModelProvider
+  );
+  const storyModelOverride =
+    storyVisibleModelChoice !== AUTO_MODEL_CHOICE ? storyVisibleModelChoice : undefined;
+  useEffect(() => {
+    if (storyAnyOfflineProtected && storyProvider !== "local") {
+      setStoryProvider("local");
+    }
+  }, [storyAnyOfflineProtected, storyProvider]);
   const storyCurrentScene = useMemo<StoryScene | null>(() => {
     if (!storySession?.episode || !storySession.progress) return null;
     try {
@@ -19458,6 +19493,9 @@ function HomeContent(): React.JSX.Element {
       );
       setStorySelectedSessionId(response.session.id);
       setStorySession(response.session);
+      setStorySelectedBotIds(response.session.botIds);
+      setStoryProvider(response.session.provider);
+      setStoryProviderTouched(true);
       setStoryMapOpen(false);
       setStoryInventoryOpen(false);
       setStoryTranscriptOpen(false);
@@ -19487,7 +19525,8 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify({
             botIds: storySelectedBotIds,
             premise: storyPremise.trim() || undefined,
-            preferredProvider: storyPreferredProvider,
+            preferredProvider: storyEffectiveProvider,
+            ...(storyModelOverride ? { modelOverride: storyModelOverride } : {}),
           }),
         }
       );
@@ -19505,8 +19544,9 @@ function HomeContent(): React.JSX.Element {
     }
   }, [
     storyBusy,
+    storyEffectiveProvider,
+    storyModelOverride,
     storyPremise,
-    storyPreferredProvider,
     storySelectedBotIds,
     storySelectionValid,
     refreshStorySessions,
@@ -24921,6 +24961,33 @@ function HomeContent(): React.JSX.Element {
     };
   }, [coffeeBotContextMenu, closeCoffeeBotContextMenu]);
 
+  useEffect(() => {
+    if (!storyShellContextMenu) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!isPrimaryPointerDismissal(event)) return;
+      const target = event.target;
+      if (target instanceof Node && storyShellContextMenuRef.current?.contains(target)) {
+        return;
+      }
+      closeStoryShellContextMenu();
+    }
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        closeStoryShellContextMenu();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [storyShellContextMenu, closeStoryShellContextMenu]);
+
   // Keep the dim backdrop visual, but let pointer events hit underlying
   // messages so right-click/tap can immediately retarget the context menu.
   // Dismissal is handled centrally by outside-click capture.
@@ -26439,6 +26506,25 @@ function HomeContent(): React.JSX.Element {
       setCoffeeShellContextMenu(null);
       setBotContextMenu(null);
       setCanvasToolsContextMenu(null);
+      setConversationGroupContextMenu(null);
+    },
+    []
+  );
+
+  const handleStoryShellContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      const clamped = clampContextMenuPosition(
+        event.clientX,
+        event.clientY,
+        CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
+        260
+      );
+      setStoryShellContextMenu({ x: clamped.x, y: clamped.y });
+      setCoffeeShellContextMenu(null);
+      setCoffeeBotContextMenu(null);
+      setCanvasToolsContextMenu(null);
+      setBotContextMenu(null);
       setConversationGroupContextMenu(null);
     },
     []
@@ -32603,6 +32689,109 @@ function HomeContent(): React.JSX.Element {
           <span className={styles.contextMenuItemLabel}>
             <span className={styles.contextMenuGlyph} aria-hidden="true">◉</span>
             <span>{bot.name}&apos;s memories</span>
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  function renderStoryShellContextMenu(): React.JSX.Element | null {
+    if (!storyShellContextMenu) return null;
+    const activeEpisode = storySession?.episode ?? null;
+    const accentColor =
+      storySelectedBots[0]?.color ??
+      storySession?.botIds
+        .map((botId) => storyBotsById.get(botId)?.color)
+        .find((color): color is string => Boolean(color)) ??
+      PRISM_DEFAULT_ACCENT;
+    const menuStyle = {
+      left: `${storyShellContextMenu.x}px`,
+      top: `${storyShellContextMenu.y}px`,
+      "--bot-color": normalizeAccentForTheme(accentColor, resolvedTheme),
+    } as React.CSSProperties;
+    const runAndClose = (fn: () => void) => {
+      closeStoryShellContextMenu();
+      fn();
+    };
+    const storyToolsDisabled = !activeEpisode || storySession?.status === "generating";
+    return (
+      <div
+        ref={storyShellContextMenuRef}
+        className={`${styles.messageContextMenu} ${styles.botContextMenu} ${styles.canvasToolsContextMenu}`}
+        style={menuStyle}
+        role="menu"
+        aria-label="Story tools"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runAndClose(resetStoryToSetup)}
+        >
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">✦</span>
+            <span>New Story</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={storyToolsDisabled}
+          onClick={() => {
+            if (storyToolsDisabled) return;
+            runAndClose(() => {
+              setStoryMapOpen(true);
+              setStoryInventoryOpen(false);
+              setStoryTranscriptOpen(false);
+            });
+          }}
+        >
+          Map
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!activeEpisode}
+          onClick={() => {
+            if (!activeEpisode) return;
+            runAndClose(() => {
+              setStoryInventoryOpen(true);
+              setStoryMapOpen(false);
+              setStoryTranscriptOpen(false);
+            });
+          }}
+        >
+          Inventory
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!storySession}
+          onClick={() => {
+            if (!storySession) return;
+            runAndClose(() => {
+              setStoryTranscriptOpen(true);
+              setStoryMapOpen(false);
+              setStoryInventoryOpen(false);
+            });
+          }}
+        >
+          Transcript
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runAndClose(() => openRightPanel("settings"))}
+        >
+          Settings
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runAndClose(() => navigateToView("hub"))}
+        >
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">⌂</span>
+            <span>Back to Hub</span>
           </span>
         </button>
       </div>
@@ -41889,6 +42078,101 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const renderStoryProviderModeToggle = (): React.ReactNode => {
+    const lockedByProtectedBot = storyAnyOfflineProtected;
+    const isLocal = storyEffectiveProvider === "local";
+    const providerDisabled =
+      !settings || storyBusy || storySession?.status === "generating" || lockedByProtectedBot;
+    const lockTitle = lockedByProtectedBot
+      ? "Locked to LOCAL — at least one selected bot is set to Offline only."
+      : !settings
+        ? "Loading settings."
+        : null;
+    return (
+      <div
+        className={`${styles.modeControl} ${
+          providerDisabled ? styles.modeControlLocked : ""
+        } ${styles.chatHeaderModeToggle}`}
+        data-protected={lockedByProtectedBot ? "true" : undefined}
+      >
+        <button
+          type="button"
+          className={`${styles.modeToggleTrack} ${
+            providerDisabled ? styles.modeToggleTrackLocked : ""
+          }`}
+          data-response-mode={isLocal ? "local" : "online"}
+          data-protected={lockedByProtectedBot ? "true" : undefined}
+          onClick={() => {
+            if (providerDisabled) return;
+            setStoryProvider(isLocal ? "openai" : "local");
+            setStoryProviderTouched(true);
+          }}
+          aria-label={
+            lockTitle
+              ? `${lockTitle} Toggle disabled.`
+              : isLocal
+                ? "Story generation mode: Local. Click to switch to Online."
+                : "Story generation mode: Online. Click to switch to Local."
+          }
+          aria-pressed={!isLocal}
+          aria-disabled={providerDisabled}
+          title={lockTitle ?? (isLocal ? "Switch Story generation to Online" : "Switch Story generation to Local")}
+          disabled={providerDisabled}
+        >
+          <span
+            className={`${styles.modeThumb} ${
+              isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
+            }`}
+          >
+            {lockedByProtectedBot ? (
+              <span className={styles.modeThumbLockGlyph} aria-hidden="true">
+                🔒
+              </span>
+            ) : (
+              <span
+                className={`${styles.providerDot} ${
+                  isLocal ? styles.providerDotLocal : styles.providerDotOnline
+                }`}
+                aria-hidden="true"
+              />
+            )}
+            <span className={styles.modeThumbLabel}>{isLocal ? "LOCAL" : "ONLINE"}</span>
+          </span>
+        </button>
+      </div>
+    );
+  };
+
+  const renderStoryGenerationControls = (): React.ReactNode => (
+    <div className={`${styles.chatHeaderModelPicker} ${styles.storyGenerationControls}`}>
+      {renderStoryProviderModeToggle()}
+      <ComposerModelPicker
+        value={storyVisibleModelChoice}
+        onChange={(nextChoice) => {
+          setStoryModelChoiceByProvider((previous) => ({
+            ...previous,
+            [storyModelProvider]: nextChoice,
+          }));
+        }}
+        options={storyModelOptions}
+        provider={storyModelProvider}
+        disabled={!settings || storyBusy || storySession?.status === "generating"}
+        title={`Story model (${storyEffectiveProvider === "local" ? "LOCAL" : "ONLINE"})`}
+        ariaLabel={`Story generation model for ${
+          storyEffectiveProvider === "local" ? "local" : "online"
+        } episodes`}
+        placement="down"
+        minMenuWidthPx={180}
+        autoOptionMetaOverride={
+          storyModelProvider === "local"
+            ? "Story uses selected bots' local defaults when Auto"
+            : "Story uses selected bots' online defaults when Auto"
+        }
+        settingsDefaultModelId={chatSettingsSavedDefaultModelId(settings, storyModelProvider)}
+      />
+    </div>
+  );
+
   const renderStorySessionRow = (session: StorySessionSummary): React.JSX.Element => {
     const active = storySelectedSessionId === session.id;
     return (
@@ -41939,11 +42223,15 @@ function HomeContent(): React.JSX.Element {
           <strong>{PRISM_DEFAULT_STORY_THEME.label}</strong>
           <small>Bundled · immutable</small>
         </div>
-        {offlineNames.length > 0 ? (
-          <p className={styles.storyNotice} role="status">
-            Local provider locked for {offlineNames.join(", ")}.
-          </p>
-        ) : null}
+        <div className={styles.storyProviderBar}>
+          <span>
+            Generation
+            {offlineNames.length > 0 ? (
+              <small>Local locked for {offlineNames.join(", ")}</small>
+            ) : null}
+          </span>
+          {renderStoryGenerationControls()}
+        </div>
         <label className={styles.storySearchBar}>
           <span aria-hidden="true">⌕</span>
           <input
@@ -42009,7 +42297,8 @@ function HomeContent(): React.JSX.Element {
         </label>
         <div className={styles.storySetupFooter}>
           <span>
-            {selectedCount}/{STORY_BOT_COUNT_MAX} bots · {storyPreferredProvider.toUpperCase()}
+            {selectedCount}/{STORY_BOT_COUNT_MAX} bots · {storyEffectiveProvider.toUpperCase()}
+            {storyModelOverride ? ` · ${storyModelOverride}` : " · Auto model"}
           </span>
           <button
             type="button"
@@ -42048,6 +42337,10 @@ function HomeContent(): React.JSX.Element {
         <p className={styles.storyEyebrow}>Generation Failed</p>
         <h2>{storySession?.title ?? "Story Mode"}</h2>
         <p>{storySession?.error ?? storyError ?? "The model did not return a valid Story manifest."}</p>
+      </div>
+      <div className={styles.storyProviderBar}>
+        <span>Retry with</span>
+        {renderStoryGenerationControls()}
       </div>
       <div className={styles.storySetupFooter}>
         <button
@@ -42257,6 +42550,7 @@ function HomeContent(): React.JSX.Element {
         className={`${styles.appLayout} ${themeClass} ${styles.storyShell}`}
         data-accent-active={appShellStyle ? "true" : undefined}
         style={appShellStyle ?? undefined}
+        onContextMenu={handleStoryShellContextMenu}
       >
         <aside className={styles.storySidebar}>
           <button
@@ -42310,6 +42604,7 @@ function HomeContent(): React.JSX.Element {
                 title="Map"
               >
                 <span aria-hidden="true">⌖</span>
+                <span className={styles.storyActionLabel}>Map</span>
               </button>
               <button
                 type="button"
@@ -42321,6 +42616,7 @@ function HomeContent(): React.JSX.Element {
                 title="Inventory"
               >
                 <span aria-hidden="true">▣</span>
+                <span className={styles.storyActionLabel}>Items</span>
               </button>
               <button
                 type="button"
@@ -42332,6 +42628,7 @@ function HomeContent(): React.JSX.Element {
                 title="Transcript"
               >
                 <MessageBubbleGlyph />
+                <span className={styles.storyActionLabel}>Log</span>
               </button>
               <button
                 type="button"
@@ -42341,6 +42638,7 @@ function HomeContent(): React.JSX.Element {
                 title="Back to Hub"
               >
                 <HomeGlyph />
+                <span className={styles.storyActionLabel}>Hub</span>
               </button>
             </div>
           </header>
@@ -42364,6 +42662,7 @@ function HomeContent(): React.JSX.Element {
         {renderSelectedBotDeleteModal()}
         {renderImagesDeleteAllModal()}
         {renderDevToolsPanel()}
+        {renderStoryShellContextMenu()}
         <GlyphTooltipLayer />
       </main>
     );

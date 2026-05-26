@@ -134,7 +134,7 @@
 .storyNewButton,
 .storyIconButton,
 .storySessionDelete {
-  width: 36px;
+  min-width: 36px;
   height: 36px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -143,6 +143,20 @@
   display: inline-grid;
   place-items: center;
   cursor: pointer;
+}
+
+.storyIconButton {
+  width: auto;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  gap: 7px;
+  padding: 0 11px;
+}
+
+.storyActionLabel {
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .themeLight .storyNewButton,
@@ -246,6 +260,7 @@
 .storyMain {
   min-width: 0;
   min-height: 100vh;
+  max-height: 100vh;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
@@ -317,14 +332,18 @@
 .storySetup {
   align-self: start;
   width: min(980px, 100%);
+  max-height: 100%;
+  min-height: 0;
   display: grid;
+  grid-template-rows: auto auto auto auto minmax(170px, 1fr) auto auto;
   gap: 16px;
-  overflow: auto;
+  overflow: hidden;
   padding-right: 4px;
 }
 
 .storySetupIntro,
 .storyThemeBadge,
+.storyProviderBar,
 .storySearchBar,
 .storyPremiseField {
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -334,6 +353,7 @@
 
 .themeLight .storySetupIntro,
 .themeLight .storyThemeBadge,
+.themeLight .storyProviderBar,
 .themeLight .storySearchBar,
 .themeLight .storyPremiseField {
   border-color: rgba(32, 30, 35, 0.13);
@@ -355,10 +375,38 @@
 
 .storyThemeBadge span,
 .storyThemeBadge small,
+.storyProviderBar > span,
 .storyPremiseField span,
 .storyBotPill small {
   font-size: 0.74rem;
   opacity: 0.7;
+}
+
+.storyProviderBar > span {
+  display: grid;
+  gap: 3px;
+}
+
+.storyProviderBar > span small {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.storyProviderBar {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.storyGenerationControls {
+  flex-shrink: 0;
+}
+
+.chatHeaderModelPicker.storyGenerationControls .composeControlLabel {
+  display: inline;
 }
 
 .storySearchBar {
@@ -390,6 +438,9 @@
 
 .storyBotGrid {
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .storyBotPill {
@@ -449,7 +500,8 @@
 }
 
 .storyPremiseField textarea {
-  min-height: 96px;
+  min-height: 58px;
+  max-height: 96px;
   resize: vertical;
   border: 0;
   outline: 0;
@@ -842,7 +894,35 @@
 
   .storyMain {
     min-height: 0;
+    max-height: none;
     padding: 14px;
+  }
+
+  .storySetup {
+    max-height: none;
+    overflow: visible;
+    grid-template-rows: none;
+  }
+
+  .storyProviderBar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .storyGenerationControls {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .storyBotGrid {
+    max-height: 360px;
+  }
+
+  .storyHeaderActions {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
   }
 
   .storyHeader {
