@@ -14,6 +14,8 @@ apps/api/data/
 .qdrant-initialized
 apps/api/.qdrant-initialized
 runtime/
+.codex/output/
+.codex/.DS_Store
 
 # Local Overseer operational artifacts
 .cursor/agents/
