@@ -613,6 +613,34 @@ describe("image persona context", () => {
     assert.match(full, /Optional persona guidance/);
   });
 
+  it("removes sexualized identity details from image persona context", () => {
+    const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+    fields.purpose.statement = "a girl from Toronto who recently acquired her nursing degree";
+    fields.identity.role = "B-cup, large butt";
+    fields.facts.birthYear = "2002";
+    fields.appearance.description = [
+      "Heart-shaped face with hazel eyes and dark wavy hair.",
+      "Body and build: curvy hips and large butt.",
+    ].join("\n\n");
+    fields.facts.customFacts = [
+      { label: "fatal flaw", value: "very horny", rowId: "test-fact" },
+    ];
+    const stored = serializeStoredBotPrompt(fields, "Kendall");
+    const context = buildImagePersonaContext({
+      botName: "Kendall",
+      systemPrompt: stored,
+      maxChars: 700,
+    });
+
+    assert.match(context, /Character: Kendall/);
+    assert.match(context, /Age cue: adult/);
+    assert.match(context, /Heart-shaped face/);
+    assert.doesNotMatch(context, /B-cup/i);
+    assert.doesNotMatch(context, /butt/i);
+    assert.doesNotMatch(context, /horny/i);
+    assert.doesNotMatch(context, /curvy hips/i);
+  });
+
   it("prefers canonical likeness when facts flag says this is a known person/character", () => {
     const fields = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
     fields.appearance.description = "old man with round glasses";

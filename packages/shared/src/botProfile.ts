@@ -983,6 +983,58 @@ function truncateImagePersonaProse(s: string, max: number): string {
   return `${t.slice(0, Math.max(0, max - 1))}…`;
 }
 
+const IMAGE_PERSONA_SEXUALIZED_DETAIL_PATTERNS: readonly RegExp[] = [
+  /\b(?:horny|aroused|sexual|erotic|sexy|seductive|nude|naked|topless|bottomless)\b/i,
+  /\b(?:lingerie|underwear|panties|bra|bikini|thong)\b/i,
+  /\b(?:cleavage|breasts?|boobs?|busty|cup\s*size|[a-h]\s*[- ]?\s*cup)\b/i,
+  /\b(?:butt|ass|booty|curves?|curvy|hips?|thighs?)\b/i,
+  /\b(?:fetish|kink|orgasm|moan|lust)\b/i,
+];
+
+function imagePersonaChunkLooksSexualized(text: string): boolean {
+  return IMAGE_PERSONA_SEXUALIZED_DETAIL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function cleanImagePersonaText(raw: string): string {
+  const normalized = raw
+    .replace(/\r\n?/g, "\n")
+    .split(/\n{2,}/)
+    .flatMap((block) => {
+      const trimmed = block.trim();
+      if (!trimmed) return [];
+      if (/^\s*[-*]\s+/.test(trimmed)) return [trimmed];
+      return trimmed
+        .split(/(?<=[.!?])\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+    })
+    .filter((chunk) => !imagePersonaChunkLooksSexualized(chunk))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized;
+}
+
+function inferAdultImageCue(fields: BotProfileFields): string {
+  const currentYear = new Date().getUTCFullYear();
+  const yearRaw = fields.facts.birthEra === "ad" ? fields.facts.birthYear.trim() : "";
+  const parsedYear = /^\d{4}$/.test(yearRaw) ? Number.parseInt(yearRaw, 10) : NaN;
+  if (Number.isFinite(parsedYear) && currentYear - parsedYear >= 18) {
+    return "Age cue: adult.";
+  }
+
+  const ageText = fields.identity.age.trim();
+  if (!ageText) return "";
+  if (/\b(?:adult|grown|mature|20s|30s|40s|50s|60s|70s|80s|90s)\b/i.test(ageText)) {
+    return "Age cue: adult.";
+  }
+  const numericAge = ageText.match(/\b(\d{2,3})\b/);
+  if (numericAge?.[1] && Number.parseInt(numericAge[1], 10) >= 18) {
+    return "Age cue: adult.";
+  }
+  return "";
+}
+
 /**
  * Builds a short, image-model-safe persona prefix from a bot's stored profile.
  * Pulls identity + appearance fields and a capped prose slice — not the full system prompt.
@@ -995,19 +1047,21 @@ export function buildImagePersonaContext(options: {
   const maxChars = options.maxChars ?? DEFAULT_IMAGE_PERSONA_CONTEXT_MAX_CHARS;
   const { fields } = parseStoredBotPrompt(options.systemPrompt);
   const name = options.botName.trim() || "Assistant";
-  const role = fields.identity.role.trim();
-  const background = fields.identity.background.trim();
+  const role = cleanImagePersonaText(fields.identity.role);
+  const background = cleanImagePersonaText(fields.identity.background);
+  const adultCue = inferAdultImageCue(fields);
   const identityBits = [
     background ? `Background: ${background}.` : "",
     role ? `Role: ${role}.` : "",
+    adultCue,
   ]
     .filter(Boolean)
     .join(" ");
 
   const appearanceBits = [
-    fields.appearance.description.trim(),
-    fields.appearance.style.trim(),
-    fields.appearance.presence.trim(),
+    cleanImagePersonaText(fields.appearance.description),
+    cleanImagePersonaText(fields.appearance.style),
+    cleanImagePersonaText(fields.appearance.presence),
   ]
     .filter(Boolean)
     .join("; ");
@@ -1016,8 +1070,8 @@ export function buildImagePersonaContext(options: {
       ? `Use the widely recognized canonical likeness of ${name} for appearance and visual traits. Ignore user-authored appearance descriptors when they conflict with canon.`
       : "";
 
-  const prosePurpose = fields.purpose.statement.trim();
-  const legacy = fields.purpose.legacyNotes.trim();
+  const prosePurpose = cleanImagePersonaText(fields.purpose.statement);
+  const legacy = cleanImagePersonaText(fields.purpose.legacyNotes);
   const voiceOrPersona = prosePurpose || legacy;
   const proseCap = Math.min(280, maxChars);
   const clippedVoice = voiceOrPersona

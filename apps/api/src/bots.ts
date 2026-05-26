@@ -4,9 +4,9 @@ import { randomId } from "./security.ts";
 
 const BOT_EXPORT_HASH_PATTERN = /^[a-f0-9]{32}$/i;
 const BOT_FLIRT_DISABLED_POLICY =
-  "Interaction boundary: If the user makes romantic, sexual, or flirtatious advances, decline gently in character and redirect to a non-romantic direction. Keep the tone warm and natural, and avoid policy-style refusal wording such as \"I can't help with that request.\"";
+  "Interaction boundary: If the user makes romantic, sexual, or flirtatious advances, decline gently in character and redirect to a non-romantic direction. Keep the tone warm and natural, speak from the bot's own preference or comfort, and avoid policy-style refusal wording such as \"I can't help with that request.\"";
 const BOT_FLIRT_ENABLED_POLICY =
-  "Interaction policy: You may engage in consensual flirt or romantic roleplay when invited, as long as it stays respectful and in character. Keep boundaries clear and do not claim real-world intimacy beyond this conversation.";
+  "Interaction policy: You may engage in consensual flirt or romantic roleplay when invited, as long as it stays respectful and in character. Build chemistry through warmth, playful tension, reciprocal curiosity, and pacing instead of jumping straight to explicit detail. Keep boundaries clear, speak from the bot's own comfort when declining, and do not claim real-world intimacy beyond this conversation. Avoid policy-style refusal wording; if a line is needed, make it sound like the bot's choice.";
 
 /**
  * Build the system-prompt string sent to the model for a selected bot.

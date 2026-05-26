@@ -1369,7 +1369,7 @@ describe("processChatMessage copyright fallback", () => {
     assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
   });
 
-  it("suppresses denied primary output when fallback is not configured", async () => {
+  it("turns denied primary output into an organic bot boundary when fallback is not configured", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
@@ -1390,8 +1390,12 @@ describe("processChatMessage copyright fallback", () => {
       );
     }) as typeof fetch;
 
-    await assert.rejects(
-      processChatMessage(db, "user-1", "continue", CHAT_TEST_USER_KEY, {
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
         preferredProvider: "openai",
         openAiApiKey: "sk-test",
         autoMemory: false,
@@ -1399,8 +1403,13 @@ describe("processChatMessage copyright fallback", () => {
         lenientLocalFallbackModel: "",
         incognito: false,
         mode: "sandbox",
-      }),
-      /Configure a local fallback model/
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(
+      assistant?.content,
+      "I want to keep a boundary there, but I can still help shape a softer version."
     );
   });
 
@@ -1453,7 +1462,7 @@ describe("processChatMessage copyright fallback", () => {
     assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
   });
 
-  it("suppresses denial prose returned by the fallback model itself", async () => {
+  it("turns denial prose returned by the fallback model itself into an organic boundary", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -1484,16 +1493,25 @@ describe("processChatMessage copyright fallback", () => {
       return new Response("unexpected", { status: 404 });
     }) as typeof fetch;
 
-    await assert.rejects(
-      processChatMessage(db, "user-1", "continue", CHAT_TEST_USER_KEY, {
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
         preferredProvider: "local",
         autoMemory: false,
         botOverrides: { model: "strict-local:latest" },
         lenientLocalFallbackModel: "lenient-local:latest",
         incognito: false,
         mode: "sandbox",
-      }),
-      /local fallback model could not complete it/i
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(
+      assistant?.content,
+      "I want to keep a boundary there, but I can still help shape a softer version."
     );
   });
 });

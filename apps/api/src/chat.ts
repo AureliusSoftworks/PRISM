@@ -25,6 +25,7 @@ import {
   LocalOllamaProvider,
   selectProvider,
   OPENAI_DEFAULT_MODEL,
+  resolveAuxiliaryOllamaModel,
   type GenerateOptions,
   type LlmProvider,
   type ProviderMessage,
@@ -649,23 +650,6 @@ function isLikelyDenialErrorNeedingFallback(error: unknown): boolean {
   return !obviouslyNonDenialReasons.some((marker) => message.includes(marker));
 }
 
-function createDeniedReplySuppressedError(args: {
-  fallbackConfigured: boolean;
-  fallbackFailed?: boolean;
-}): Error {
-  if (args.fallbackConfigured) {
-    if (args.fallbackFailed) {
-      return new Error(
-        "The primary model denied this request, and the local fallback model could not complete it."
-      );
-    }
-    return new Error("The primary model denied this request.");
-  }
-  return new Error(
-    "The primary model denied this request. Configure a local fallback model to continue automatically."
-  );
-}
-
 function shouldSuppressAssistantReply(raw: string): boolean {
   const normalized = raw.trim().toLowerCase();
   if (!normalized) return false;
@@ -699,6 +683,82 @@ function normalizeModelValue(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+const ORGANIC_TEXT_BOUNDARY_FALLBACK =
+  "I want to keep a boundary there, but I can still help shape a softer version.";
+
+function clampBoundaryContext(text: string, max = 1800): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max)}...`;
+}
+
+function normalizeOrganicBoundaryReply(raw: string, fallback: string): string {
+  const line = raw.replace(/\s+/g, " ").trim();
+  if (!line) return fallback;
+  if (line.length > 420) return fallback;
+  if (shouldSuppressAssistantReply(line)) return fallback;
+  return line;
+}
+
+async function generateOrganicTextBoundaryReply(args: {
+  boundaryProvider?: LlmProvider;
+  boundaryModel?: string;
+  botSystemPrompt?: string;
+  userMessage?: string;
+}): Promise<{
+  assistantReplyRaw: string;
+  providerNameUsed: "local" | "openai";
+  modelUsed: string;
+}> {
+  const provider = args.boundaryProvider;
+  const model = args.boundaryModel?.trim() || config.ollamaAuxiliaryModel || config.ollamaModel;
+  if (!provider) {
+    return {
+      assistantReplyRaw: ORGANIC_TEXT_BOUNDARY_FALLBACK,
+      providerNameUsed: "local",
+      modelUsed: model,
+    };
+  }
+  const persona = clampBoundaryContext(args.botSystemPrompt ?? "");
+  const messages: ProviderMessage[] = [
+    {
+      role: "system",
+      content: [
+        "You write one short in-character boundary after a chat model could not continue the exact request.",
+        persona ? `Bot persona excerpt:\n${persona}` : "",
+        "Reply as the bot, in first person.",
+        "Do not mention policy, safety systems, model refusal, fallback, moderation, or errors.",
+        "Do not start with an apology. Avoid phrases like \"I can't\" or \"I cannot\".",
+        "State the bot's own preference or comfort, then offer a softer alternative.",
+        "Return 1-2 sentences only. No markdown, JSON, or tool calls.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    },
+    {
+      role: "user",
+      content: `User request to boundary gracefully:\n${clampBoundaryContext(args.userMessage ?? "")}`,
+    },
+  ];
+  try {
+    const raw = await provider.generateResponse(messages, {
+      temperature: 0.7,
+      maxTokens: 90,
+    });
+    return {
+      assistantReplyRaw: normalizeOrganicBoundaryReply(raw, ORGANIC_TEXT_BOUNDARY_FALLBACK),
+      providerNameUsed: provider.name,
+      modelUsed: model,
+    };
+  } catch {
+    return {
+      assistantReplyRaw: ORGANIC_TEXT_BOUNDARY_FALLBACK,
+      providerNameUsed: provider.name,
+      modelUsed: model,
+    };
+  }
 }
 
 /**
@@ -881,6 +941,10 @@ async function generateWithLenientLocalFallback(args: {
   botOverrides: GenerateOptions | undefined;
   secondaryOllamaHost?: string | null;
   lenientLocalFallbackModel?: string | null;
+  denialBoundaryProvider?: LlmProvider;
+  denialBoundaryModel?: string;
+  botSystemPrompt?: string;
+  userMessage?: string;
 }): Promise<{
   assistantReplyRaw: string;
   providerNameUsed: "local" | "openai";
@@ -906,6 +970,14 @@ async function generateWithLenientLocalFallback(args: {
     fallbackModel !== null &&
     !(args.provider.name === "local" && requestedModel === fallbackModel);
 
+  const runOrganicBoundary = () =>
+    generateOrganicTextBoundaryReply({
+      boundaryProvider: args.denialBoundaryProvider,
+      boundaryModel: args.denialBoundaryModel,
+      botSystemPrompt: args.botSystemPrompt,
+      userMessage: args.userMessage,
+    });
+
   const runLenientFallback = async (
     trigger:
       | "copyright_refusal_text"
@@ -915,9 +987,9 @@ async function generateWithLenientLocalFallback(args: {
       | "generic_refusal_soft_error"
   ): Promise<{
     assistantReplyRaw: string;
-    providerNameUsed: "local";
+    providerNameUsed: "local" | "openai";
     modelUsed: string;
-    fallbackInvocation: {
+    fallbackInvocation?: {
       trigger:
         | "copyright_refusal_text"
         | "copyright_refusal_error"
@@ -941,17 +1013,18 @@ async function generateWithLenientLocalFallback(args: {
         ...args.botOverrides,
         model: fallbackModel,
       });
-    } catch {
-      throw createDeniedReplySuppressedError({
-        fallbackConfigured: true,
-        fallbackFailed: true,
-      });
+    } catch (error) {
+      if (
+        isCopyrightRefusalError(error) ||
+        isGenericRefusalError(error) ||
+        isLikelyDenialErrorNeedingFallback(error)
+      ) {
+        return runOrganicBoundary();
+      }
+      throw error;
     }
-    if (isCopyrightRefusalText(reply) || isGenericRefusalText(reply)) {
-      throw createDeniedReplySuppressedError({
-        fallbackConfigured: true,
-        fallbackFailed: true,
-      });
+    if (shouldSuppressAssistantReply(reply)) {
+      return runOrganicBoundary();
     }
     return {
       assistantReplyRaw: reply,
@@ -971,13 +1044,12 @@ async function generateWithLenientLocalFallback(args: {
       args.promptMessages,
       args.botOverrides
     );
-    if (isCopyrightRefusalText(assistantReplyRaw)) {
-      if (canAttemptFallback) return runLenientFallback("copyright_refusal_text");
-      throw createDeniedReplySuppressedError({ fallbackConfigured: false });
-    }
-    if (isGenericRefusalText(assistantReplyRaw)) {
-      if (canAttemptFallback) return runLenientFallback("generic_refusal_text");
-      throw createDeniedReplySuppressedError({ fallbackConfigured: false });
+    if (shouldSuppressAssistantReply(assistantReplyRaw)) {
+      const trigger = isCopyrightRefusalText(assistantReplyRaw)
+        ? "copyright_refusal_text"
+        : "generic_refusal_text";
+      if (canAttemptFallback) return runLenientFallback(trigger);
+      return runOrganicBoundary();
     }
     return {
       assistantReplyRaw,
@@ -995,7 +1067,7 @@ async function generateWithLenientLocalFallback(args: {
         if (isGenericRefusalError(error)) return runLenientFallback("generic_refusal_error");
         return runLenientFallback("generic_refusal_soft_error");
       }
-      throw createDeniedReplySuppressedError({ fallbackConfigured: false });
+      return runOrganicBoundary();
     }
     throw error;
   }
@@ -3378,7 +3450,7 @@ export async function processChatMessage(
       )}; imageToolRoute=${primaryProvider === provider ? "normal" : "rerouted"}`
     );
 
-    const {
+    let {
       assistantReplyRaw,
       providerNameUsed,
       modelUsed,
@@ -3389,6 +3461,10 @@ export async function processChatMessage(
       botOverrides: primaryBotOverrides,
       secondaryOllamaHost: settings.secondaryOllamaHost,
       lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+      denialBoundaryProvider: auxiliaryProvider,
+      denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+      botSystemPrompt: settings.botSystemPrompt,
+      userMessage: message,
     });
     pushBackendEvent(
       "model",
@@ -3399,9 +3475,15 @@ export async function processChatMessage(
       shouldSuppressAssistantReply(assistantReplyRaw) &&
       !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
     ) {
-      throw createDeniedReplySuppressedError({
-        fallbackConfigured: normalizeModelValue(settings.lenientLocalFallbackModel) !== null,
+      const boundary = await generateOrganicTextBoundaryReply({
+        boundaryProvider: auxiliaryProvider,
+        boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+        botSystemPrompt: settings.botSystemPrompt,
+        userMessage: message,
       });
+      assistantReplyRaw = boundary.assistantReplyRaw;
+      providerNameUsed = boundary.providerNameUsed;
+      modelUsed = boundary.modelUsed;
     }
     const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
     const shouldBackfillAskQuestion =
@@ -3805,7 +3887,7 @@ export async function processChatMessage(
     )}; imageToolRoute=${primaryProvider === provider ? "normal" : "rerouted"}`
   );
 
-  const {
+  let {
     assistantReplyRaw,
     providerNameUsed,
     modelUsed,
@@ -3816,6 +3898,10 @@ export async function processChatMessage(
     botOverrides: primaryBotOverrides,
     secondaryOllamaHost: settings.secondaryOllamaHost,
     lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+    denialBoundaryProvider: auxiliaryProvider,
+    denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+    botSystemPrompt: settings.botSystemPrompt,
+    userMessage: message,
   });
   pushBackendEvent(
     "model",
@@ -3826,9 +3912,15 @@ export async function processChatMessage(
     shouldSuppressAssistantReply(assistantReplyRaw) &&
     !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
   ) {
-    throw createDeniedReplySuppressedError({
-      fallbackConfigured: normalizeModelValue(settings.lenientLocalFallbackModel) !== null,
+    const boundary = await generateOrganicTextBoundaryReply({
+      boundaryProvider: auxiliaryProvider,
+      boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+      botSystemPrompt: settings.botSystemPrompt,
+      userMessage: message,
     });
+    assistantReplyRaw = boundary.assistantReplyRaw;
+    providerNameUsed = boundary.providerNameUsed;
+    modelUsed = boundary.modelUsed;
   }
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const shouldBackfillAskQuestion =
