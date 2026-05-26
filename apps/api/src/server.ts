@@ -61,6 +61,17 @@ import {
   undoLatestConversationSweep,
 } from "./conversations.ts";
 import {
+  chooseStorySessionChoice,
+  createStorySession,
+  deleteStorySession,
+  generateStorySessionEpisode,
+  getStorySessionDetail,
+  listStorySessions,
+  loadStoryBotProfiles,
+  normalizeStoryCreateBotIds,
+  travelStorySession,
+} from "./story.ts";
+import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
@@ -855,6 +866,94 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         conversations: listConversationSummaries(db, userId)
       });
+    }),
+    route("GET", "/api/story/sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        sessions: listStorySessions(db, userId),
+      });
+    }),
+    route("POST", "/api/story/sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const botIds = normalizeStoryCreateBotIds(body.botIds);
+      const storyBots = loadStoryBotProfiles(db, userId, botIds);
+      const user = getUserRow(userId);
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
+      const anyOfflineProtected = storyBots.some((bot) => !bot.onlineEnabled);
+      let effectiveProvider: "local" | "openai" =
+        anyOfflineProtected ? "local" : requestedProvider ?? user.preferred_provider;
+      const explicitModelOverride = anyOfflineProtected ? null : readOptionalString(body.modelOverride);
+      const userKey = decryptUserKey(userId);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
+      const resolvedAuto = resolveAutoModel({
+        provider: effectiveProvider,
+        explicitModelOverride,
+        botPreferredModel:
+          effectiveProvider === "local"
+            ? readOptionalString(user.preferred_local_model)
+            : readOptionalString(user.preferred_online_model),
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+      });
+      effectiveProvider = resolvedAuto.provider;
+      const provider = selectProvider(
+        effectiveProvider,
+        openAiApiKey,
+        user.secondary_ollama_host
+      );
+      const session = createStorySession(db, userId, {
+        botIds,
+        premise: readOptionalString(body.premise),
+        provider: effectiveProvider,
+        model: resolvedAuto.model,
+      });
+      void generateStorySessionEpisode(db, userId, session.id, {
+        provider,
+        providerName: effectiveProvider,
+        model: resolvedAuto.model,
+        bots: storyBots,
+        premise: readOptionalString(body.premise),
+      }).catch((error) => {
+        console.warn("[story] generation job failed", error);
+      });
+      json(ctx.res, 200, { ok: true, session });
+    }),
+    route("GET", "/api/story/sessions/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        session: getStorySessionDetail(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/story/sessions/:id/choices", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const choiceId = readString(body.choiceId, "choiceId");
+      json(ctx.res, 200, {
+        ok: true,
+        session: chooseStorySessionChoice(db, userId, ctx.params.id, choiceId),
+      });
+    }),
+    route("POST", "/api/story/sessions/:id/travel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const locationId = readString(body.locationId, "locationId");
+      json(ctx.res, 200, {
+        ok: true,
+        session: travelStorySession(db, userId, ctx.params.id, locationId),
+      });
+    }),
+    route("DELETE", "/api/story/sessions/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      deleteStorySession(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true });
     }),
     route("GET", "/api/conversations/sweep/state", async (ctx) => {
       const userId = requireAuth(ctx);

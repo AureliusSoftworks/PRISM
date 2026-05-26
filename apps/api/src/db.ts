@@ -208,6 +208,24 @@ export function createDatabase(): DatabaseSync {
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS story_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      theme_id TEXT NOT NULL DEFAULT 'prism_default',
+      status TEXT NOT NULL DEFAULT 'generating',
+      provider TEXT NOT NULL DEFAULT 'local',
+      model TEXT,
+      bot_ids TEXT NOT NULL DEFAULT '[]',
+      premise TEXT,
+      episode_json TEXT,
+      progress_json TEXT,
+      transcript_json TEXT NOT NULL DEFAULT '[]',
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS bots (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -904,6 +922,12 @@ export function createDatabase(): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_conversations_coffee_group ON conversations (user_id, coffee_group_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_story_sessions_user_updated ON story_sessions (user_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_story_sessions_user_status ON story_sessions (user_id, status, updated_at DESC);"
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_polls_session_updated ON coffee_polls (user_id, conversation_id, updated_at DESC);"
