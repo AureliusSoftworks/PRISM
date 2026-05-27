@@ -1,6 +1,7 @@
-import type { StoryChoice, StoryInventoryItem, StoryScene } from "@localai/shared";
+import type { BotMoodKey, StoryChoice, StoryInventoryItem, StoryScene } from "@localai/shared";
 
 export type StoryDialogActorRole = "scene" | "npc";
+export type StoryNpcFaceExpression = BotMoodKey;
 
 export interface StoryDialogBeat {
   id: string;
@@ -28,6 +29,24 @@ export interface StoryInventoryViewState {
 }
 
 const STORY_DIALOG_BEAT_MAX_CHARS = 140;
+const STORY_DIALOG_POSE_SEQUENCE = [
+  "speaking",
+  "thinking",
+  "action",
+  "idle",
+] as const satisfies readonly NonNullable<StoryScene["spritePose"]>[];
+
+export function storyDialogPoseForBeat(
+  scenePose: StoryScene["spritePose"],
+  beatIndex: number
+): StoryScene["spritePose"] {
+  const startPose = scenePose ?? "speaking";
+  const startIndex = STORY_DIALOG_POSE_SEQUENCE.indexOf(startPose);
+  const baseIndex = startIndex >= 0 ? startIndex : 0;
+  return STORY_DIALOG_POSE_SEQUENCE[
+    (baseIndex + Math.max(0, Math.trunc(beatIndex))) % STORY_DIALOG_POSE_SEQUENCE.length
+  ];
+}
 
 function splitStoryDialogueParagraph(paragraph: string): string[] {
   const sentences =
@@ -79,7 +98,7 @@ export function buildStoryDialogBeats(scene: StoryScene): StoryDialogBeat[] {
     actorRole,
     speakerBotId: scene.speakerBotId ?? null,
     speakerName,
-    spritePose: scene.spritePose,
+    spritePose: scene.speakerBotId ? storyDialogPoseForBeat(scene.spritePose, index) : scene.spritePose,
     text,
   }));
 }
@@ -105,6 +124,41 @@ export function createStoryDialogState(
     canAdvance: !isComplete,
     isComplete,
   };
+}
+
+export function storyNpcFaceExpressionForPose(
+  pose: StoryScene["spritePose"]
+): StoryNpcFaceExpression {
+  switch (pose) {
+    case "speaking":
+      return "warm";
+    case "thinking":
+      return "strained";
+    case "action":
+      return "guarded";
+    case "idle":
+    default:
+      return "neutral";
+  }
+}
+
+export function storyNpcFaceTextForExpression(
+  expression: StoryNpcFaceExpression,
+  isTalking: boolean
+): string {
+  switch (expression) {
+    case "joyful":
+      return isTalking ? ":D" : ":)";
+    case "warm":
+      return isTalking ? ":0" : ":]";
+    case "guarded":
+      return isTalking ? ":V" : ":[";
+    case "strained":
+      return isTalking ? ";0" : ";(";
+    case "neutral":
+    default:
+      return isTalking ? ":o" : ":|";
+  }
 }
 
 export function createStoryInventoryViewState(

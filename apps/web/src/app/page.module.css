@@ -642,6 +642,20 @@
   min-width: 150px;
   aspect-ratio: 2 / 3;
   color: var(--bot-color, #ffffff);
+  transform-origin: 50% 86%;
+  transition: transform 180ms ease;
+}
+
+.storySpriteWrap[data-pose="idle"] {
+  transform: translateY(2px) scale(0.985);
+}
+
+.storySpriteWrap[data-pose="thinking"] {
+  transform: translateX(-2px) rotate(-2deg);
+}
+
+.storySpriteWrap[data-pose="action"] {
+  transform: translate(3px, -4px) rotate(2deg) scale(1.025);
 }
 
 .storySprite {
@@ -653,57 +667,95 @@
 
 .storySpriteFacePlate {
   position: absolute;
-  left: 50%;
-  top: 34%;
+  left: 50.55%;
+  top: 33.82%;
   transform: translate(-50%, -50%);
-  width: 32px;
-  height: 22px;
+  width: 34px;
+  height: 28px;
   display: grid;
-  place-items: center;
-  gap: 3px;
+  grid-template-rows: 6px 20px;
+  align-content: center;
+  justify-items: center;
+  gap: 0;
   color: var(--bot-color, #ffffff);
   filter: drop-shadow(0 0 8px color-mix(in srgb, var(--bot-color, #ffffff) 52%, transparent));
 }
 
-.storySpriteEyes {
-  width: 20px;
+.storySpriteBrows {
+  width: 24px;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 7px;
+  gap: 6px;
   align-items: center;
 }
 
-.storySpriteEyes i {
+.storySpriteBrows i {
   display: block;
-  width: 5px;
-  height: 5px;
+  width: 8px;
+  height: 2px;
   border-radius: 999px;
   background: currentColor;
-  box-shadow: 0 0 8px currentColor;
-}
-
-.storySpriteMouth {
-  width: 13px;
-  height: 3px;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: 0.82;
+  opacity: 0.72;
   transform-origin: center;
-  box-shadow: 0 0 8px currentColor;
+  box-shadow: 0 0 7px currentColor;
 }
 
-.storySpriteWrap[data-speaking="true"] .storySpriteMouth {
-  animation: storyNpcMouthTalk 0.56s ease-in-out infinite;
+.storySpriteAsciiFace {
+  position: relative;
+  top: -2px;
+  left: 2px;
+  display: block;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 1.28rem;
+  line-height: 1;
+  font-weight: 750;
+  letter-spacing: 0;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  opacity: 0.9;
+  text-shadow: 0 0 8px currentColor;
+  transform: rotate(90deg) translateX(1px);
+  transform-origin: center center;
 }
 
-@keyframes storyNpcMouthTalk {
+.storySpriteWrap[data-expression="joyful"] .storySpriteBrows i:first-child,
+.storySpriteWrap[data-expression="warm"] .storySpriteBrows i:first-child {
+  transform: rotate(-8deg) translateY(1px);
+}
+
+.storySpriteWrap[data-expression="joyful"] .storySpriteBrows i:last-child,
+.storySpriteWrap[data-expression="warm"] .storySpriteBrows i:last-child {
+  transform: rotate(8deg) translateY(1px);
+}
+
+.storySpriteWrap[data-expression="guarded"] .storySpriteBrows i:first-child {
+  transform: rotate(18deg);
+}
+
+.storySpriteWrap[data-expression="guarded"] .storySpriteBrows i:last-child {
+  transform: rotate(-18deg);
+}
+
+.storySpriteWrap[data-expression="strained"] .storySpriteBrows i:first-child {
+  transform: rotate(-13deg) translateY(1px);
+}
+
+.storySpriteWrap[data-expression="strained"] .storySpriteBrows i:last-child {
+  transform: rotate(13deg) translateY(1px);
+}
+
+.storySpriteWrap[data-speaking="true"] .storySpriteAsciiFace {
+  animation: storyNpcAsciiTalk 0.56s ease-in-out infinite;
+}
+
+@keyframes storyNpcAsciiTalk {
   0%,
   100% {
-    transform: scaleX(0.74);
-    opacity: 0.58;
+    transform: rotate(90deg) translateX(1px) scaleX(0.94);
+    opacity: 0.72;
   }
   50% {
-    transform: scaleX(1.25);
+    transform: rotate(90deg) translateX(1px) scaleX(1.08);
     opacity: 0.94;
   }
 }
@@ -711,17 +763,15 @@
 .storySpriteChestGlyph {
   position: absolute;
   left: 50%;
-  top: 43%;
+  top: 50%;
   transform: translate(-50%, -50%);
-  width: 46px;
-  height: 46px;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--bot-color, #ffffff) 54%, rgba(255, 255, 255, 0.3));
-  background:
-    radial-gradient(circle at 35% 28%, rgba(255, 255, 255, 0.28), transparent 42%),
-    rgba(18, 18, 20, 0.66);
+  background: #050505;
   box-shadow:
-    0 8px 18px rgba(0, 0, 0, 0.24),
+    0 8px 18px rgba(0, 0, 0, 0.28),
     0 0 18px color-mix(in srgb, var(--bot-color, #ffffff) 32%, transparent);
   display: grid;
   place-items: center;
@@ -750,7 +800,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .storySpriteWrap[data-speaking="true"] .storySpriteMouth,
+  .storySpriteWrap[data-speaking="true"] .storySpriteAsciiFace,
   .storySpriteWrap[data-speaking="true"] .storySpriteChestGlyph {
     animation: none;
   }
@@ -825,6 +875,10 @@
 .storyDialogueBox p {
   margin: 0;
   line-height: 1.48;
+}
+
+.storyDialogueBox[data-actor-role="npc"] .storyDialogueTextPanel p {
+  color: var(--bot-color, currentColor);
 }
 
 .storyDialogueTextPanel {

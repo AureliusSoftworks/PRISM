@@ -5,6 +5,9 @@ import {
   createStoryDialogState,
   createStoryInventoryViewState,
   splitStoryDialogueText,
+  storyDialogPoseForBeat,
+  storyNpcFaceExpressionForPose,
+  storyNpcFaceTextForExpression,
   storyChoiceMissingItemId,
 } from "./story-mode-dialog.ts";
 
@@ -37,13 +40,23 @@ describe("Story Mode dialog helpers", () => {
     assert.equal(first.activeBeat.text, beats[0]);
     assert.equal(first.activeBeat.actorRole, "npc");
     assert.equal(first.activeBeat.speakerBotId, "bot-nova");
+    assert.equal(first.activeBeat.spritePose, "speaking");
     assert.equal(first.canAdvance, true);
     assert.equal(first.isComplete, false);
 
     const last = createStoryDialogState(npcScene, 99);
     assert.equal(last.activeBeat.text, beats[1]);
+    assert.equal(last.activeBeat.spritePose, "thinking");
     assert.equal(last.canAdvance, false);
     assert.equal(last.isComplete, true);
+  });
+
+  it("cycles NPC poses for click-through dialog beats", () => {
+    assert.equal(storyDialogPoseForBeat("speaking", 0), "speaking");
+    assert.equal(storyDialogPoseForBeat("speaking", 1), "thinking");
+    assert.equal(storyDialogPoseForBeat("speaking", 2), "action");
+    assert.equal(storyDialogPoseForBeat("speaking", 3), "idle");
+    assert.equal(storyDialogPoseForBeat("thinking", 1), "action");
   });
 
   it("keeps inventory view state separate from scene pickups", () => {
@@ -80,5 +93,26 @@ describe("Story Mode dialog helpers", () => {
     const choice = npcScene.choices[0]!;
     assert.equal(storyChoiceMissingItemId(choice, new Set()), "glass-key");
     assert.equal(storyChoiceMissingItemId(choice, new Set(["glass-key"])), null);
+  });
+
+  it("maps Story sprite poses onto the Coffee-style face expressions", () => {
+    assert.equal(storyNpcFaceExpressionForPose("speaking"), "warm");
+    assert.equal(storyNpcFaceExpressionForPose("thinking"), "strained");
+    assert.equal(storyNpcFaceExpressionForPose("action"), "guarded");
+    assert.equal(storyNpcFaceExpressionForPose("idle"), "neutral");
+    assert.equal(storyNpcFaceExpressionForPose(undefined), "neutral");
+  });
+
+  it("uses Coffee Mode ASCII face text for NPC expressions", () => {
+    assert.equal(storyNpcFaceTextForExpression("joyful", false), ":)");
+    assert.equal(storyNpcFaceTextForExpression("joyful", true), ":D");
+    assert.equal(storyNpcFaceTextForExpression("warm", false), ":]");
+    assert.equal(storyNpcFaceTextForExpression("warm", true), ":0");
+    assert.equal(storyNpcFaceTextForExpression("neutral", false), ":|");
+    assert.equal(storyNpcFaceTextForExpression("neutral", true), ":o");
+    assert.equal(storyNpcFaceTextForExpression("guarded", false), ":[");
+    assert.equal(storyNpcFaceTextForExpression("guarded", true), ":V");
+    assert.equal(storyNpcFaceTextForExpression("strained", false), ";(");
+    assert.equal(storyNpcFaceTextForExpression("strained", true), ";0");
   });
 });

@@ -45,6 +45,8 @@ import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
 import {
   createStoryDialogState,
   createStoryInventoryViewState,
+  storyNpcFaceExpressionForPose,
+  storyNpcFaceTextForExpression,
   storyChoiceMissingItemId,
 } from "./story-mode-dialog";
 import {
@@ -42598,14 +42600,22 @@ function HomeContent(): React.JSX.Element {
     const dialogBeat = dialogState.activeBeat;
     const speakerBot = dialogBeat.speakerBotId ? storyBotsById.get(dialogBeat.speakerBotId) : null;
     const hasNpcSpeaker = dialogBeat.actorRole === "npc";
+    const npcPose = dialogBeat.spritePose ?? (hasNpcSpeaker ? "speaking" : "idle");
     const npcActor = speakerBot
       ? {
           bot: speakerBot,
           displayName: dialogBeat.speakerName || speakerBot.name,
-          pose: dialogBeat.spritePose ?? "speaking",
-          isSpeaking: hasNpcSpeaker,
+          expression: storyNpcFaceExpressionForPose(npcPose),
+          pose: npcPose,
+          isSpeaking: hasNpcSpeaker && npcPose === "speaking",
         }
       : null;
+    const npcFaceText = npcActor
+      ? storyNpcFaceTextForExpression(npcActor.expression, npcActor.isSpeaking)
+      : "";
+    const npcAccentStyle = npcActor
+      ? botAccentStyle(npcActor.bot.color, resolvedTheme)
+      : undefined;
     const speakerName = hasNpcSpeaker
       ? npcActor?.displayName ?? dialogBeat.speakerName ?? "NPC"
       : scene.title;
@@ -42656,24 +42666,29 @@ function HomeContent(): React.JSX.Element {
         {npcActor ? (
           <div
             className={styles.storySpriteWrap}
-            style={botAccentStyle(npcActor.bot.color, resolvedTheme)}
+            style={npcAccentStyle}
             data-speaking={npcActor.isSpeaking ? "true" : undefined}
             data-pose={npcActor.pose}
+            data-expression={npcActor.expression}
           >
             <img src={spriteUrl} alt="" aria-hidden="true" className={styles.storySprite} />
             <span className={styles.storySpriteFacePlate} aria-hidden="true">
-              <span className={styles.storySpriteEyes}>
+              <span className={styles.storySpriteBrows}>
                 <i />
                 <i />
               </span>
-              <span className={styles.storySpriteMouth} />
+              <span className={styles.storySpriteAsciiFace}>{npcFaceText}</span>
             </span>
             <span className={styles.storySpriteChestGlyph} aria-hidden="true">
-              {npcActor.bot.glyph ? <BotGlyph name={npcActor.bot.glyph} size={26} /> : "•"}
+              {npcActor.bot.glyph ? <BotGlyph name={npcActor.bot.glyph} size={17} /> : "•"}
             </span>
           </div>
         ) : null}
-        <div className={styles.storyDialogueBox}>
+        <div
+          className={styles.storyDialogueBox}
+          data-actor-role={hasNpcSpeaker ? "npc" : "scene"}
+          style={npcAccentStyle}
+        >
           <div
             className={styles.storyDialogueHeader}
             data-actor-role={hasNpcSpeaker ? "npc" : "scene"}
