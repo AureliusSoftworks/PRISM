@@ -43,6 +43,11 @@ import {
 } from "./coffee-replay";
 import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
 import {
+  createStoryDialogState,
+  createStoryInventoryViewState,
+  storyChoiceMissingItemId,
+} from "./story-mode-dialog";
+import {
   Download,
   Image as ImageGlyph,
   LogOut,
@@ -2370,6 +2375,11 @@ const VIEW_SWITCH_OVERLAY_FADE_OUT_MS = 280;
 // experience. Future modes can be advertised as disabled Hub tiles
 // without entering this route union until their shells actually exist.
 type View = "hub" | "chat" | "sandbox" | "coffee" | "story";
+type StoryDialogCursor = {
+  sessionId: string | null;
+  sceneId: string | null;
+  beatIndex: number;
+};
 
 // Coffee mode group-size bounds — intentionally duplicated from the
 // server-side `COFFEE_GROUP_MIN_SIZE`/`MAX_SIZE` (see `apps/api/src/coffee.ts`)
@@ -18762,6 +18772,11 @@ function HomeContent(): React.JSX.Element {
   const [storyMapOpen, setStoryMapOpen] = useState(false);
   const [storyInventoryOpen, setStoryInventoryOpen] = useState(false);
   const [storyTranscriptOpen, setStoryTranscriptOpen] = useState(false);
+  const [storyDialogCursor, setStoryDialogCursor] = useState<StoryDialogCursor>({
+    sessionId: null,
+    sceneId: null,
+    beatIndex: 0,
+  });
   const [storySetupPinned, setStorySetupPinned] = useState(false);
   const [storyProvider, setStoryProvider] = useState<Provider>("local");
   const [storyProviderTouched, setStoryProviderTouched] = useState(false);
@@ -19494,10 +19509,10 @@ function HomeContent(): React.JSX.Element {
   );
   const storyInventoryItems = useMemo<StoryInventoryItem[]>(() => {
     if (!storySession?.episode || !storySession.progress) return [];
-    const byId = new Map(storySession.episode.items.map((item) => [item.id, item]));
-    return storySession.progress.inventoryItemIds
-      .map((itemId) => byId.get(itemId))
-      .filter((item): item is StoryInventoryItem => Boolean(item));
+    return createStoryInventoryViewState(
+      storySession.episode.items,
+      storySession.progress.inventoryItemIds
+    ).collectedItems;
   }, [storySession]);
 
   const refreshStorySessions = useCallback(async (): Promise<StorySessionSummary[]> => {
@@ -19531,6 +19546,11 @@ function HomeContent(): React.JSX.Element {
       setStoryMapOpen(false);
       setStoryInventoryOpen(false);
       setStoryTranscriptOpen(false);
+      setStoryDialogCursor({
+        sessionId: response.session.id,
+        sceneId: response.session.progress?.currentSceneId ?? null,
+        beatIndex: 0,
+      });
     } catch (err) {
       setStoryError(err instanceof Error ? err.message : "Failed to open Story session.");
     } finally {
@@ -19545,6 +19565,7 @@ function HomeContent(): React.JSX.Element {
     setStoryMapOpen(false);
     setStoryInventoryOpen(false);
     setStoryTranscriptOpen(false);
+    setStoryDialogCursor({ sessionId: null, sceneId: null, beatIndex: 0 });
   }, []);
   const createStorySessionFromDraft = useCallback(async (): Promise<void> => {
     if (!storySelectionValid || storyBusy) return;
@@ -19570,6 +19591,11 @@ function HomeContent(): React.JSX.Element {
       setStoryMapOpen(false);
       setStoryInventoryOpen(false);
       setStoryTranscriptOpen(false);
+      setStoryDialogCursor({
+        sessionId: response.session.id,
+        sceneId: response.session.progress?.currentSceneId ?? null,
+        beatIndex: 0,
+      });
       void refreshStorySessions();
     } catch (err) {
       setStoryError(err instanceof Error ? err.message : "Failed to start Story session.");
@@ -19598,6 +19624,11 @@ function HomeContent(): React.JSX.Element {
         }
       );
       setStorySession(response.session);
+      setStoryDialogCursor({
+        sessionId: response.session.id,
+        sceneId: response.session.progress?.currentSceneId ?? null,
+        beatIndex: 0,
+      });
       void refreshStorySessions();
     } catch (err) {
       setStoryError(err instanceof Error ? err.message : "Failed to apply Story choice.");
@@ -19618,6 +19649,11 @@ function HomeContent(): React.JSX.Element {
         }
       );
       setStorySession(response.session);
+      setStoryDialogCursor({
+        sessionId: response.session.id,
+        sceneId: response.session.progress?.currentSceneId ?? null,
+        beatIndex: 0,
+      });
       setStoryMapOpen(false);
       void refreshStorySessions();
     } catch (err) {
@@ -19646,6 +19682,22 @@ function HomeContent(): React.JSX.Element {
       setStoryBusy(false);
     }
   }, [storyBusy, storySession, refreshStorySessions]);
+  const advanceStoryDialog = useCallback(
+    (sessionId: string, sceneId: string, beatCount: number): void => {
+      setStoryDialogCursor((current) => {
+        const currentBeatIndex =
+          current.sessionId === sessionId && current.sceneId === sceneId
+            ? current.beatIndex
+            : 0;
+        return {
+          sessionId,
+          sceneId,
+          beatIndex: Math.min(currentBeatIndex + 1, Math.max(0, beatCount - 1)),
+        };
+      });
+    },
+    []
+  );
   const deleteStorySessionById = useCallback(async (session: StorySessionSummary): Promise<void> => {
     if (storyBusy) return;
     const confirmed =
@@ -42275,9 +42327,9 @@ function HomeContent(): React.JSX.Element {
       <section className={styles.storySetup} aria-label="Create Story session">
         <div className={styles.storySetupIntro}>
           <p className={styles.storyEyebrow}>New Story</p>
-          <h2>Choose the cast</h2>
+          <h2>Choose the NPC cast</h2>
           <p>
-            Select {STORY_BOT_COUNT_MIN}-{STORY_BOT_COUNT_MAX} chat-enabled bots,
+            Select {STORY_BOT_COUNT_MIN}-{STORY_BOT_COUNT_MAX} chat-enabled bots as NPCs,
             add an optional premise, then PRISM builds the episode before play starts.
           </p>
         </div>
@@ -42538,20 +42590,42 @@ function HomeContent(): React.JSX.Element {
       return renderStoryLoading();
     }
     const scene = storyCurrentScene;
-    const speakerBot = scene.speakerBotId ? storyBotsById.get(scene.speakerBotId) : null;
-    const hasSpeaker = Boolean(speakerBot);
-    const speakerName = hasSpeaker ? scene.speakerName ?? speakerBot?.name ?? "Narrator" : scene.title;
+    const dialogBeatIndex =
+      storyDialogCursor.sessionId === session.id && storyDialogCursor.sceneId === scene.id
+        ? storyDialogCursor.beatIndex
+        : 0;
+    const dialogState = createStoryDialogState(scene, dialogBeatIndex);
+    const dialogBeat = dialogState.activeBeat;
+    const speakerBot = dialogBeat.speakerBotId ? storyBotsById.get(dialogBeat.speakerBotId) : null;
+    const hasNpcSpeaker = dialogBeat.actorRole === "npc";
+    const npcActor = speakerBot
+      ? {
+          bot: speakerBot,
+          displayName: dialogBeat.speakerName || speakerBot.name,
+          pose: dialogBeat.spritePose ?? "speaking",
+          isSpeaking: hasNpcSpeaker,
+        }
+      : null;
+    const speakerName = hasNpcSpeaker
+      ? npcActor?.displayName ?? dialogBeat.speakerName ?? "NPC"
+      : scene.title;
     const backgroundUrl = storyThemeAssetUrl(
       scene.cutsceneAssetId ?? scene.backgroundAssetId ?? storyCurrentLocation?.backgroundAssetId,
       STORY_PROJECTION_FALLBACK_ASSET_ID
     );
     const spriteUrl = storyThemeAssetUrl(null, STORY_SPRITE_FALLBACK_ASSET_ID);
-    const inventory = new Set(session.progress.inventoryItemIds);
-    const sceneItems =
+    const playerInventoryState = createStoryInventoryViewState(
+      session.episode.items,
+      session.progress.inventoryItemIds,
       scene.itemIds
-        ?.map((itemId) => session.episode?.items.find((item) => item.id === itemId) ?? null)
-        .filter((item): item is StoryInventoryItem => item !== null && !inventory.has(item.id)) ?? [];
+    );
+    const inventory = playerInventoryState.inventoryItemIds;
+    const sceneItems = playerInventoryState.availableSceneItems;
     const complete = session.status === "complete" || session.progress.status === "complete";
+    const handleDialogAdvance = (): void => {
+      if (!dialogState.canAdvance) return;
+      advanceStoryDialog(session.id, scene.id, dialogState.beatCount);
+    };
     return (
       <section className={styles.storyStage} aria-label="Story play scene">
         <img
@@ -42579,46 +42653,96 @@ function HomeContent(): React.JSX.Element {
             <span aria-hidden="true">{storyItemGlyph(item)}</span>
           </button>
         ))}
-        {speakerBot ? (
-          <div className={styles.storySpriteWrap} style={botAccentStyle(speakerBot?.color, resolvedTheme)}>
+        {npcActor ? (
+          <div
+            className={styles.storySpriteWrap}
+            style={botAccentStyle(npcActor.bot.color, resolvedTheme)}
+            data-speaking={npcActor.isSpeaking ? "true" : undefined}
+            data-pose={npcActor.pose}
+          >
             <img src={spriteUrl} alt="" aria-hidden="true" className={styles.storySprite} />
-            <span className={styles.storySpriteFace} aria-hidden="true">
-              {speakerBot.glyph ? <BotGlyph name={speakerBot.glyph} size={30} /> : ":|"}
+            <span className={styles.storySpriteFacePlate} aria-hidden="true">
+              <span className={styles.storySpriteEyes}>
+                <i />
+                <i />
+              </span>
+              <span className={styles.storySpriteMouth} />
+            </span>
+            <span className={styles.storySpriteChestGlyph} aria-hidden="true">
+              {npcActor.bot.glyph ? <BotGlyph name={npcActor.bot.glyph} size={26} /> : "•"}
             </span>
           </div>
         ) : null}
         <div className={styles.storyDialogueBox}>
-          <div className={styles.storyDialogueHeader}>
+          <div
+            className={styles.storyDialogueHeader}
+            data-actor-role={hasNpcSpeaker ? "npc" : "scene"}
+          >
             <span>{speakerName}</span>
-            <small>{hasSpeaker ? scene.spritePose ?? "speaking" : "narration"}</small>
+            <small>{hasNpcSpeaker ? `NPC · ${npcActor?.pose ?? "speaking"}` : "scene"}</small>
           </div>
-          <p>{scene.narration}</p>
-          {complete ? (
+          <div
+            className={styles.storyDialogueTextPanel}
+            data-advanceable={dialogState.canAdvance ? "true" : undefined}
+            role={dialogState.canAdvance ? "button" : undefined}
+            tabIndex={dialogState.canAdvance ? 0 : undefined}
+            onClick={handleDialogAdvance}
+            onKeyDown={(event) => {
+              if (!dialogState.canAdvance) return;
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              handleDialogAdvance();
+            }}
+          >
+            <p aria-live="polite">{dialogBeat.text}</p>
+          </div>
+          <div className={styles.storyDialogueFooter}>
+            {dialogState.beatCount > 1 ? (
+              <span className={styles.storyDialogueProgress}>
+                {dialogState.activeBeatIndex + 1}/{dialogState.beatCount}
+              </span>
+            ) : (
+              <span />
+            )}
+            {dialogState.canAdvance ? (
+              <button
+                type="button"
+                className={styles.storyDialogueAdvanceButton}
+                onClick={handleDialogAdvance}
+              >
+                Continue
+              </button>
+            ) : null}
+          </div>
+          {dialogState.isComplete && complete ? (
             <div className={styles.storyCompleteActions}>
               <span>Episode complete</span>
               <button type="button" onClick={resetStoryToSetup}>
                 New Story
               </button>
             </div>
-          ) : (
-            <div className={styles.storyChoiceGrid}>
-              {scene.choices.map((choice) => {
-                const missingItem = (choice.requireItemIds ?? []).find((itemId) => !inventory.has(itemId));
-                return (
-                  <button
-                    key={choice.id}
-                    type="button"
-                    className={styles.storyChoiceButton}
-                    disabled={storyBusy || Boolean(missingItem)}
-                    onClick={() => void chooseStoryChoice(choice.id)}
-                    title={missingItem ? `Requires ${missingItem}` : undefined}
-                  >
-                    {choice.label}
-                  </button>
-                );
-              })}
+          ) : dialogState.isComplete ? (
+            <div className={styles.storyChoiceBlock}>
+              <span className={styles.storyChoiceLabel}>Your response</span>
+              <div className={styles.storyChoiceGrid}>
+                {scene.choices.map((choice) => {
+                  const missingItem = storyChoiceMissingItemId(choice, inventory);
+                  return (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      className={styles.storyChoiceButton}
+                      disabled={storyBusy || Boolean(missingItem)}
+                      onClick={() => void chooseStoryChoice(choice.id)}
+                      title={missingItem ? `Requires ${missingItem}` : undefined}
+                    >
+                      {choice.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          )}
+          ) : null}
         </div>
         {renderStoryMapPanel(session.episode)}
         {renderStoryInventoryPanel()}
