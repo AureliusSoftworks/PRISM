@@ -312,6 +312,50 @@ describe("LocalOllamaProvider secondary routing", () => {
     assert.equal(response, "final answer via thinking field");
   });
 
+  it("asks Ollama for JSON object output when jsonMode is enabled", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: '{"ok":true}' } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    await provider.generateResponse([{ role: "user", content: "json" }], {
+      model: "llama3.2",
+      jsonMode: true,
+    });
+
+    assert.equal(requestedBody.format, "json");
+  });
+
+  it("sends JSON Schema to Ollama when provided", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    const schema = {
+      type: "object",
+      properties: { ok: { type: "boolean" } },
+      required: ["ok"],
+    };
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: '{"ok":true}' } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    await provider.generateResponse([{ role: "user", content: "json" }], {
+      model: "llama3.2",
+      jsonMode: true,
+      jsonSchema: schema,
+    });
+
+    assert.deepEqual(requestedBody.format, schema);
+  });
+
   it("throws a clear error when the model returns only tool_calls", async () => {
     globalThis.fetch = (async () =>
       new Response(
@@ -617,6 +661,59 @@ describe("OpenAiProvider request shape", () => {
     });
 
     assert.equal(body.temperature, 0.91);
+  });
+
+  it("requests JSON object output when jsonMode is enabled", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "json" }], {
+      model: "gpt-4o-mini",
+      jsonMode: true,
+    });
+
+    assert.deepEqual(body.response_format, { type: "json_object" });
+  });
+
+  it("requests JSON Schema output when a schema is provided", async () => {
+    let body: Record<string, unknown> = {};
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["ok"],
+      properties: { ok: { type: "boolean" } },
+    };
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "json" }], {
+      model: "gpt-4o-mini",
+      jsonMode: true,
+      jsonSchema: schema,
+      jsonSchemaName: "test_schema",
+    });
+
+    assert.deepEqual(body.response_format, {
+      type: "json_schema",
+      json_schema: {
+        name: "test_schema",
+        strict: true,
+        schema,
+      },
+    });
   });
 });
 

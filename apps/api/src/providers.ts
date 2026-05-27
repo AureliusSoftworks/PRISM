@@ -16,6 +16,11 @@ export interface GenerateOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /** Ask providers that support it to constrain the visible reply to a JSON object. */
+  jsonMode?: boolean;
+  /** Optional JSON Schema for providers that support structured JSON output. */
+  jsonSchema?: Record<string, unknown>;
+  jsonSchemaName?: string;
 }
 
 export interface ModelCatalogEntry {
@@ -485,6 +490,11 @@ export class LocalOllamaProvider implements LlmProvider {
       // which breaks Prism chat (and any follow-up like sendGeneratedImage / Comfy).
       think: false,
     };
+    if (options?.jsonSchema) {
+      requestBody.format = options.jsonSchema;
+    } else if (options?.jsonMode) {
+      requestBody.format = "json";
+    }
     if (Object.keys(ollamaOptions).length > 0) {
       requestBody.options = ollamaOptions;
     }
@@ -551,6 +561,18 @@ export class OpenAiProvider implements LlmProvider {
       model: modelId,
       messages
     };
+    if (options?.jsonSchema) {
+      requestBody.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: options.jsonSchemaName?.trim() || "structured_response",
+          strict: true,
+          schema: options.jsonSchema,
+        },
+      };
+    } else if (options?.jsonMode) {
+      requestBody.response_format = { type: "json_object" };
+    }
     if (
       typeof options?.temperature === "number" &&
       !openAiModelUsesFixedDefaultTemperature(modelId)

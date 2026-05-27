@@ -69,6 +69,7 @@ import {
   listStorySessions,
   loadStoryBotProfiles,
   normalizeStoryCreateBotIds,
+  pickupStorySessionItem,
   travelStorySession,
 } from "./story.ts";
 import {
@@ -888,16 +889,18 @@ function buildRoutes(): RouteDefinition[] {
       let effectiveProvider: "local" | "openai" =
         anyOfflineProtected ? "local" : requestedProvider ?? user.preferred_provider;
       const explicitModelOverride = anyOfflineProtected ? null : readOptionalString(body.modelOverride);
+      const storyModelOverride =
+        effectiveProvider === "local" ? REQUIRED_PRIMARY_LOCAL_MODEL_ID : explicitModelOverride;
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
-        explicitModelOverride,
+        explicitModelOverride: storyModelOverride,
         botPreferredModel:
           effectiveProvider === "local"
-            ? readOptionalString(user.preferred_local_model)
+            ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
             : readOptionalString(user.preferred_online_model),
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
@@ -948,6 +951,15 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         session: travelStorySession(db, userId, ctx.params.id, locationId),
+      });
+    }),
+    route("POST", "/api/story/sessions/:id/items", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const itemId = readString(body.itemId, "itemId");
+      json(ctx.res, 200, {
+        ok: true,
+        session: pickupStorySessionItem(db, userId, ctx.params.id, itemId),
       });
     }),
     route("DELETE", "/api/story/sessions/:id", async (ctx) => {

@@ -2,7 +2,7 @@ import type { StoryItemGlyphCategory, StorySpritePose } from "./storyThemes.js";
 
 export type StorySessionStatus = "generating" | "playing" | "complete" | "failed";
 export type StoryProgressStatus = "playing" | "complete";
-export type StoryTranscriptEntryKind = "scene" | "choice" | "travel" | "system";
+export type StoryTranscriptEntryKind = "scene" | "choice" | "travel" | "item" | "system";
 
 export const STORY_BOT_COUNT_MIN = 1;
 export const STORY_BOT_COUNT_MAX = 3;
@@ -41,6 +41,7 @@ export interface StoryLocation {
   y: number;
   discovered: boolean;
   backgroundAssetId?: string;
+  arrivalSceneId?: string;
 }
 
 export interface StoryInventoryItem {
@@ -70,6 +71,7 @@ export interface StoryScene {
   spritePose?: StorySpritePose;
   backgroundAssetId?: string;
   cutsceneAssetId?: string;
+  itemIds?: string[];
   ending?: boolean;
   choices: StoryChoice[];
 }
@@ -152,6 +154,10 @@ export interface StorySessionChoiceRequest {
 
 export interface StorySessionTravelRequest {
   locationId: string;
+}
+
+export interface StorySessionItemRequest {
+  itemId: string;
 }
 
 export interface StorySessionMutationResponse {
@@ -239,6 +245,9 @@ function parseLocations(raw: unknown): StoryLocation[] {
       ...(readOptionalString(row.backgroundAssetId)
         ? { backgroundAssetId: readOptionalString(row.backgroundAssetId) }
         : {}),
+      ...(readOptionalString(row.arrivalSceneId)
+        ? { arrivalSceneId: readOptionalString(row.arrivalSceneId) }
+        : {}),
     };
   });
   if (locations.length < STORY_LOCATION_COUNT_MIN || locations.length > STORY_LOCATION_COUNT_MAX) {
@@ -299,6 +308,7 @@ function parseScenes(raw: unknown): StoryScene[] {
     const row = readObject(entry, `scenes[${index}]`);
     const field = `scenes[${index}]`;
     const spritePose = readOptionalString(row.spritePose);
+    const itemIds = readOptionalStringArray(row.itemIds, `${field}.itemIds`);
     if (spritePose && !STORY_SPRITE_POSE_SET.has(spritePose)) {
       throw new Error(`Unknown story sprite pose "${spritePose}".`);
     }
@@ -319,6 +329,7 @@ function parseScenes(raw: unknown): StoryScene[] {
       ...(readOptionalString(row.cutsceneAssetId)
         ? { cutsceneAssetId: readOptionalString(row.cutsceneAssetId) }
         : {}),
+      ...(itemIds && itemIds.length > 0 ? { itemIds } : {}),
       ending: row.ending === true,
       choices: parseChoices(row.choices, field),
     };
@@ -349,10 +360,29 @@ export function validateStoryEpisodeManifest(raw: unknown): StoryEpisodeManifest
     throw new Error(`startSceneId "${startSceneId}" does not exist.`);
   }
 
+  for (const location of locations) {
+    if (!location.arrivalSceneId) continue;
+    const arrivalScene = scenes.find((scene) => scene.id === location.arrivalSceneId);
+    if (!arrivalScene) {
+      throw new Error(`Location "${location.id}" references unknown arrival scene "${location.arrivalSceneId}".`);
+    }
+    if (arrivalScene.locationId !== location.id) {
+      throw new Error(`Location "${location.id}" arrival scene must be in the same location.`);
+    }
+    if (arrivalScene.ending) {
+      throw new Error(`Location "${location.id}" arrival scene cannot be an ending.`);
+    }
+  }
+
   let endingCount = 0;
   for (const scene of scenes) {
     if (!locationIds.has(scene.locationId)) {
       throw new Error(`Scene "${scene.id}" references unknown location "${scene.locationId}".`);
+    }
+    for (const itemId of scene.itemIds ?? []) {
+      if (!itemIds.has(itemId)) {
+        throw new Error(`Scene "${scene.id}" references unknown pickup item "${itemId}".`);
+      }
     }
     if (scene.ending) {
       endingCount += 1;
@@ -554,8 +584,21 @@ function findTravelSceneForLocation(
   locationId: string,
   progress: StorySessionProgress
 ): StoryScene | undefined {
+  const location = getStoryLocation(episode, locationId);
+  if (location?.arrivalSceneId) {
+    const arrivalScene = getStoryScene(episode, location.arrivalSceneId);
+    if (arrivalScene && !arrivalScene.ending) return arrivalScene;
+  }
   const scenesAtLocation = episode.scenes.filter((scene) => scene.locationId === locationId);
   return (
+    scenesAtLocation.find(
+      (scene) =>
+        !scene.ending &&
+        !scene.speakerBotId &&
+        scene.id !== progress.currentSceneId &&
+        !progress.completedSceneIds.includes(scene.id)
+    ) ??
+    scenesAtLocation.find((scene) => !scene.ending && !scene.speakerBotId) ??
     scenesAtLocation.find(
       (scene) =>
         !scene.ending &&
@@ -606,6 +649,47 @@ export function applyStoryTravel(
         createdAt: now,
       },
       createStorySceneTranscriptEntry(episode, targetScene, entryIdFactory(), now),
+    ],
+  };
+}
+
+export function applyStoryItemPickup(
+  episode: StoryEpisodeManifest,
+  progress: StorySessionProgress,
+  itemId: string,
+  entryIdFactory: () => string,
+  now = new Date().toISOString()
+): StoryTransitionResult {
+  if (progress.status === "complete") {
+    throw new Error("This Story session is already complete.");
+  }
+  if (progress.inventoryItemIds.includes(itemId)) {
+    throw new Error(`Item "${itemId}" is already in the inventory.`);
+  }
+  const scene = getStoryCurrentScene(episode, progress);
+  if (!scene.itemIds?.includes(itemId)) {
+    throw new Error(`Item "${itemId}" is not available in the current scene.`);
+  }
+  const item = episode.items.find((candidate) => candidate.id === itemId);
+  if (!item) {
+    throw new Error(`Item "${itemId}" does not exist.`);
+  }
+  const nextProgress: StorySessionProgress = {
+    ...progress,
+    inventoryItemIds: uniqueStrings([...progress.inventoryItemIds, item.id]),
+    updatedAt: now,
+  };
+  return {
+    progress: nextProgress,
+    transcriptEntries: [
+      {
+        id: entryIdFactory(),
+        kind: "item",
+        sceneId: scene.id,
+        locationId: scene.locationId,
+        text: `Picked up ${item.name}.`,
+        createdAt: now,
+      },
     ],
   };
 }

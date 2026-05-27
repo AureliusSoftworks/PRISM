@@ -2429,6 +2429,20 @@ function storyItemGlyph(item: StoryInventoryItem): string {
   }
 }
 
+function storySceneItemStyle(index: number): React.CSSProperties {
+  const positions = [
+    [64, 48],
+    [76, 42],
+    [53, 54],
+    [84, 50],
+  ] as const;
+  const [x, y] = positions[index % positions.length]!;
+  return {
+    "--story-item-x": `${x}%`,
+    "--story-item-y": `${y}%`,
+  } as React.CSSProperties;
+}
+
 function storySessionStatusLabel(status: StorySessionSummary["status"]): string {
   if (status === "generating") return "Generating";
   if (status === "complete") return "Complete";
@@ -18748,6 +18762,7 @@ function HomeContent(): React.JSX.Element {
   const [storyMapOpen, setStoryMapOpen] = useState(false);
   const [storyInventoryOpen, setStoryInventoryOpen] = useState(false);
   const [storyTranscriptOpen, setStoryTranscriptOpen] = useState(false);
+  const [storySetupPinned, setStorySetupPinned] = useState(false);
   const [storyProvider, setStoryProvider] = useState<Provider>("local");
   const [storyProviderTouched, setStoryProviderTouched] = useState(false);
   const [storyModelChoiceByProvider, setStoryModelChoiceByProvider] =
@@ -19429,17 +19444,33 @@ function HomeContent(): React.JSX.Element {
   const storyAnyOfflineProtected = storySelectedBots.some((bot) => bot.online_enabled === 0);
   const storyEffectiveProvider: Provider = storyAnyOfflineProtected ? "local" : storyProvider;
   const storyModelProvider: Provider = storyEffectiveProvider === "openai" ? "openai" : "local";
+  const storyBaselineLocalModelOption =
+    modelCatalog?.local.find((model) => model.id === REQUIRED_PRIMARY_LOCAL_MODEL_ID) ?? {
+      id: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+      label: modelLabelFromId(REQUIRED_PRIMARY_LOCAL_MODEL_ID),
+      provider: "local" as const,
+      isDefault: true,
+    };
   const storyVisibleModelChoice = visibleModelChoiceForProvider(
     settings,
     storyModelChoiceByProvider[storyModelProvider]
   );
-  const storyModelOptions = includeSelectedModelOption(
-    availableModelOptionsForProvider(modelCatalog, settings, storyModelProvider),
-    storyVisibleModelChoice,
-    storyModelProvider
-  );
+  const storyEffectiveModelChoice =
+    storyModelProvider === "local" ? REQUIRED_PRIMARY_LOCAL_MODEL_ID : storyVisibleModelChoice;
+  const storyModelOptions =
+    storyModelProvider === "local"
+      ? [storyBaselineLocalModelOption]
+      : includeSelectedModelOption(
+          availableModelOptionsForProvider(modelCatalog, settings, storyModelProvider),
+          storyVisibleModelChoice,
+          storyModelProvider
+        );
   const storyModelOverride =
-    storyVisibleModelChoice !== AUTO_MODEL_CHOICE ? storyVisibleModelChoice : undefined;
+    storyModelProvider === "local"
+      ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
+      : storyVisibleModelChoice !== AUTO_MODEL_CHOICE
+        ? storyVisibleModelChoice
+        : undefined;
   useEffect(() => {
     if (storyAnyOfflineProtected && storyProvider !== "local") {
       setStoryProvider("local");
@@ -19491,6 +19522,7 @@ function HomeContent(): React.JSX.Element {
       const response = await api<{ ok: true; session: StorySessionDetail }>(
         `/api/story/sessions/${encodeURIComponent(sessionId)}`
       );
+      setStorySetupPinned(false);
       setStorySelectedSessionId(response.session.id);
       setStorySession(response.session);
       setStorySelectedBotIds(response.session.botIds);
@@ -19506,6 +19538,7 @@ function HomeContent(): React.JSX.Element {
     }
   }, []);
   const resetStoryToSetup = useCallback(() => {
+    setStorySetupPinned(true);
     setStorySelectedSessionId(null);
     setStorySession(null);
     setStoryError(null);
@@ -19530,6 +19563,7 @@ function HomeContent(): React.JSX.Element {
           }),
         }
       );
+      setStorySetupPinned(false);
       setStorySelectedSessionId(response.session.id);
       setStorySession(response.session);
       setStoryPremise("");
@@ -19592,6 +19626,26 @@ function HomeContent(): React.JSX.Element {
       setStoryBusy(false);
     }
   }, [storyBusy, storySession, refreshStorySessions]);
+  const pickupStoryItem = useCallback(async (itemId: string): Promise<void> => {
+    if (!storySession || storyBusy) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        `/api/story/sessions/${encodeURIComponent(storySession.id)}/items`,
+        {
+          method: "POST",
+          body: JSON.stringify({ itemId }),
+        }
+      );
+      setStorySession(response.session);
+      void refreshStorySessions();
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to pick up item.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [storyBusy, storySession, refreshStorySessions]);
   const deleteStorySessionById = useCallback(async (session: StorySessionSummary): Promise<void> => {
     if (storyBusy) return;
     const confirmed =
@@ -19620,7 +19674,13 @@ function HomeContent(): React.JSX.Element {
     void refreshStorySessions();
   }, [view, refreshStorySessions]);
   useEffect(() => {
-    if (view !== "story" || storySession || storySelectedSessionId || storySessionsLoading) {
+    if (
+      view !== "story" ||
+      storySetupPinned ||
+      storySession ||
+      storySelectedSessionId ||
+      storySessionsLoading
+    ) {
       return;
     }
     const candidate =
@@ -19631,6 +19691,7 @@ function HomeContent(): React.JSX.Element {
     void openStorySession(candidate.id);
   }, [
     view,
+    storySetupPinned,
     storySession,
     storySelectedSessionId,
     storySessions,
@@ -42147,8 +42208,9 @@ function HomeContent(): React.JSX.Element {
     <div className={`${styles.chatHeaderModelPicker} ${styles.storyGenerationControls}`}>
       {renderStoryProviderModeToggle()}
       <ComposerModelPicker
-        value={storyVisibleModelChoice}
+        value={storyEffectiveModelChoice}
         onChange={(nextChoice) => {
+          if (storyModelProvider === "local") return;
           setStoryModelChoiceByProvider((previous) => ({
             ...previous,
             [storyModelProvider]: nextChoice,
@@ -42163,9 +42225,10 @@ function HomeContent(): React.JSX.Element {
         } episodes`}
         placement="down"
         minMenuWidthPx={180}
+        showAutoOption={storyModelProvider !== "local"}
         autoOptionMetaOverride={
           storyModelProvider === "local"
-            ? "Story uses selected bots' local defaults when Auto"
+            ? "Story local generation is pinned to llama3.2"
             : "Story uses selected bots' online defaults when Auto"
         }
         settingsDefaultModelId={chatSettingsSavedDefaultModelId(settings, storyModelProvider)}
@@ -42379,17 +42442,19 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.storyMapCanvas}>
           {episode.locations.map((location) => {
             const discovered = storyDiscoveredLocationIds.has(location.id);
+            const current = location.id === storyCurrentLocation?.id;
             return (
               <button
                 key={location.id}
                 type="button"
                 className={styles.storyMapNode}
                 data-discovered={discovered ? "true" : undefined}
+                data-current={current ? "true" : undefined}
                 style={{
                   left: `${location.x * 100}%`,
                   top: `${location.y * 100}%`,
                 }}
-                disabled={!discovered || storyBusy}
+                disabled={!discovered || storyBusy || current}
                 onClick={() => void travelStoryLocation(location.id)}
               >
                 {discovered ? location.name : "???"}
@@ -42474,13 +42539,18 @@ function HomeContent(): React.JSX.Element {
     }
     const scene = storyCurrentScene;
     const speakerBot = scene.speakerBotId ? storyBotsById.get(scene.speakerBotId) : null;
-    const speakerName = scene.speakerName ?? speakerBot?.name ?? "Narrator";
+    const hasSpeaker = Boolean(speakerBot);
+    const speakerName = hasSpeaker ? scene.speakerName ?? speakerBot?.name ?? "Narrator" : scene.title;
     const backgroundUrl = storyThemeAssetUrl(
       scene.cutsceneAssetId ?? scene.backgroundAssetId ?? storyCurrentLocation?.backgroundAssetId,
       STORY_PROJECTION_FALLBACK_ASSET_ID
     );
     const spriteUrl = storyThemeAssetUrl(null, STORY_SPRITE_FALLBACK_ASSET_ID);
     const inventory = new Set(session.progress.inventoryItemIds);
+    const sceneItems =
+      scene.itemIds
+        ?.map((itemId) => session.episode?.items.find((item) => item.id === itemId) ?? null)
+        .filter((item): item is StoryInventoryItem => item !== null && !inventory.has(item.id)) ?? [];
     const complete = session.status === "complete" || session.progress.status === "complete";
     return (
       <section className={styles.storyStage} aria-label="Story play scene">
@@ -42495,18 +42565,32 @@ function HomeContent(): React.JSX.Element {
           <span>{storyCurrentLocation?.name ?? scene.title}</span>
           <span>{session.provider.toUpperCase()} {session.model ?? ""}</span>
         </div>
-        <div className={styles.storySpriteWrap} style={botAccentStyle(speakerBot?.color, resolvedTheme)}>
-          <img src={spriteUrl} alt="" aria-hidden="true" className={styles.storySprite} />
-          {speakerBot ? (
+        {sceneItems.map((item, index) => (
+          <button
+            key={item.id}
+            type="button"
+            className={styles.storySceneItemButton}
+            style={storySceneItemStyle(index)}
+            onClick={() => void pickupStoryItem(item.id)}
+            disabled={storyBusy}
+            aria-label={`Pick up ${item.name}`}
+            title={`Pick up ${item.name}`}
+          >
+            <span aria-hidden="true">{storyItemGlyph(item)}</span>
+          </button>
+        ))}
+        {speakerBot ? (
+          <div className={styles.storySpriteWrap} style={botAccentStyle(speakerBot?.color, resolvedTheme)}>
+            <img src={spriteUrl} alt="" aria-hidden="true" className={styles.storySprite} />
             <span className={styles.storySpriteFace} aria-hidden="true">
               {speakerBot.glyph ? <BotGlyph name={speakerBot.glyph} size={30} /> : ":|"}
             </span>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
         <div className={styles.storyDialogueBox}>
           <div className={styles.storyDialogueHeader}>
             <span>{speakerName}</span>
-            <small>{scene.spritePose ?? "idle"}</small>
+            <small>{hasSpeaker ? scene.spritePose ?? "speaking" : "narration"}</small>
           </div>
           <p>{scene.narration}</p>
           {complete ? (

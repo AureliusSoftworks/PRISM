@@ -653,7 +653,7 @@
 .storySpriteFace {
   position: absolute;
   left: 50%;
-  top: 13%;
+  top: 22%;
   transform: translateX(-50%);
   width: 44px;
   height: 34px;
@@ -661,6 +661,39 @@
   place-items: center;
   color: var(--bot-color, #ffffff);
   opacity: 0.95;
+}
+
+.storySceneItemButton {
+  position: absolute;
+  z-index: 2;
+  left: var(--story-item-x, 64%);
+  top: var(--story-item-y, 64%);
+  width: 54px;
+  height: 54px;
+  transform: translate(-50%, -50%);
+  border-radius: 8px;
+  border: 1px solid rgba(245, 241, 231, 0.62);
+  background: rgba(22, 22, 24, 0.42);
+  color: #f2ead9;
+  display: grid;
+  place-items: center;
+  font-size: 1.45rem;
+  font-weight: 900;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.24),
+    0 0 22px color-mix(in srgb, var(--accent, #9de7dd) 24%, transparent);
+}
+
+.storySceneItemButton:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent, #9de7dd) 72%, #ffffff);
+  background: rgba(35, 35, 38, 0.68);
+}
+
+.storySceneItemButton:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .storyDialogueBox {
@@ -794,6 +827,13 @@
 .storyMapNode[data-discovered="true"] {
   border-color: rgba(157, 231, 221, 0.72);
   box-shadow: 0 0 18px rgba(157, 231, 221, 0.2);
+}
+
+.storyMapNode[data-current="true"] {
+  border-color: rgba(245, 241, 231, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(245, 241, 231, 0.28),
+    0 0 22px rgba(245, 241, 231, 0.18);
 }
 
 .storyMapNode:disabled {

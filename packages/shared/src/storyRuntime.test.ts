@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyStoryChoice,
+  applyStoryItemPickup,
   applyStoryTravel,
   createInitialStoryProgress,
   validateStoryEpisodeManifest,
@@ -23,6 +24,7 @@ function validEpisode(): StoryEpisodeManifest {
         x: 0.2,
         y: 0.4,
         discovered: true,
+        arrivalSceneId: "scene-1",
       },
       {
         id: "archive",
@@ -31,6 +33,7 @@ function validEpisode(): StoryEpisodeManifest {
         x: 0.55,
         y: 0.3,
         discovered: false,
+        arrivalSceneId: "scene-2",
       },
       {
         id: "gate",
@@ -39,6 +42,7 @@ function validEpisode(): StoryEpisodeManifest {
         x: 0.76,
         y: 0.72,
         discovered: false,
+        arrivalSceneId: "scene-7",
       },
     ],
     items: [
@@ -67,6 +71,7 @@ function validEpisode(): StoryEpisodeManifest {
         locationId: "archive",
         narration: "The archive opens.",
         spritePose: "speaking",
+        itemIds: ["glass-key"],
         choices: [
           { id: "take-key", label: "Take the glass key.", targetSceneId: "scene-4", grantItemIds: ["glass-key"] },
           { id: "read-wall", label: "Read the wall marks.", targetSceneId: "scene-5" },
@@ -182,6 +187,34 @@ describe("story runtime", () => {
     assert.deepEqual(second.progress.inventoryItemIds, ["glass-key"]);
   });
 
+  it("picks up visible scene items without advancing the scene", () => {
+    const episode = validateStoryEpisodeManifest(validEpisode());
+    const progress = createInitialStoryProgress(episode, "2026-05-26T00:00:00.000Z");
+    const arrived = applyStoryChoice(
+      episode,
+      progress,
+      "go-archive",
+      (() => {
+        let n = 0;
+        return () => `entry-${++n}`;
+      })(),
+      "2026-05-26T00:00:01.000Z"
+    );
+    const pickedUp = applyStoryItemPickup(
+      episode,
+      arrived.progress,
+      "glass-key",
+      (() => {
+        let n = 10;
+        return () => `item-${++n}`;
+      })(),
+      "2026-05-26T00:00:02.000Z"
+    );
+    assert.equal(pickedUp.progress.currentSceneId, "scene-2");
+    assert.deepEqual(pickedUp.progress.inventoryItemIds, ["glass-key"]);
+    assert.equal(pickedUp.transcriptEntries[0]?.kind, "item");
+  });
+
   it("rejects locked travel and accepts discovered map nodes", () => {
     const episode = validateStoryEpisodeManifest(validEpisode());
     const progress = createInitialStoryProgress(episode, "2026-05-26T00:00:00.000Z");
@@ -202,4 +235,3 @@ describe("story runtime", () => {
     assert.equal(traveled.transcriptEntries[0]?.kind, "travel");
   });
 });
-
