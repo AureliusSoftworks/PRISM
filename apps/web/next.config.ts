@@ -37,6 +37,7 @@ const extraDevOrigins =
     .filter(Boolean) ?? [];
 
 const nextConfig: NextConfig = {
+  devIndicators: false,
   output: "standalone",
   turbopack: {
     root: MONOREPO_ROOT,
