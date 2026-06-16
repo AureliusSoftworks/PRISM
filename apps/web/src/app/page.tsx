@@ -11066,6 +11066,9 @@ function ColorGlyphPicker({
   // both together if the popover's footprint ever moves.
   const POPOVER_WIDTH_PX = 320;
   const POPOVER_GAP_FROM_SWATCH_PX = 32;
+  const POPOVER_VIEWPORT_MARGIN_PX = 20;
+  // Matches `.colorGlyphPopover { max-height: calc(100dvh - 96px); }`.
+  const POPOVER_VERTICAL_RESERVE_PX = 96;
 
   // ── Drag state for the color square ───────────────────────────────
   // Pointer drag wiring (mouse / touch / stylus, unified via the
@@ -11285,8 +11288,19 @@ function ColorGlyphPicker({
       const wrapper = wrapperRef.current;
       if (!wrapper) return;
       const rect = wrapper.getBoundingClientRect();
+      const maxPopoverHeight = Math.max(
+        0,
+        window.innerHeight - POPOVER_VERTICAL_RESERVE_PX
+      );
+      const maxTop = Math.max(
+        POPOVER_VIEWPORT_MARGIN_PX,
+        window.innerHeight - maxPopoverHeight - POPOVER_VIEWPORT_MARGIN_PX
+      );
       setPopoverAnchor({
-        top: rect.top,
+        top: Math.min(
+          Math.max(rect.top, POPOVER_VIEWPORT_MARGIN_PX),
+          maxTop
+        ),
         left: rect.left - POPOVER_WIDTH_PX - POPOVER_GAP_FROM_SWATCH_PX,
       });
     }
@@ -34969,128 +34983,534 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
           {settings && (
-            <form className={styles.form} onSubmit={saveSettings}>
+            <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveSettings}>
               {/* Preferred name omitted: bots learn the user’s name organically; avoid a separate “override” field. */}
-              <button
-                type="button"
-                className={styles.settingsInfoButton}
-                aria-haspopup="dialog"
-                aria-expanded={settingsHostsModalOpen ? "true" : undefined}
-                onClick={() => setSettingsHostsModalOpen(true)}
-              >
-                <strong>API keys &amp; servers</strong>
-                <span>OpenAI, Anthropic, second Ollama host, and ComfyUI URL.</span>
-              </button>
-              <button
-                type="button"
-                className={styles.settingsInfoButton}
-                aria-haspopup="dialog"
-                aria-expanded={settingsDefaultsModalOpen ? "true" : undefined}
-                onClick={() => setSettingsDefaultsModalOpen(true)}
-              >
-                <strong>Defaults &amp; fallbacks</strong>
-                <span>
-                  Preferred offline/online chat models, copyright text fallback, and image defaults.
-                </span>
-              </button>
-              <section className={styles.settingsTutorialCard}>
-                <strong>Mode tutorials</strong>
-                <span>Reset guided walkthroughs for Chat, Sandbox, and Coffee.</span>
-                <div className={styles.settingsTutorialActions}>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={resetAllModeTutorials}
-                  >
-                    Reset all tutorials
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => resetSingleModeTutorial("chat")}
-                  >
-                    Reset Chat
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => resetSingleModeTutorial("sandbox")}
-                  >
-                    Reset Sandbox
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => resetSingleModeTutorial("coffee")}
-                  >
-                    Reset Coffee
-                  </button>
+              <section className={styles.settingsOverview} aria-label="Settings overview">
+                <div>
+                  <span className={styles.settingsEyebrow}>Workspace settings</span>
+                  <h4>Prism Control Room</h4>
+                  <p>
+                    Connections, model routing, memory behavior, and account controls in one place.
+                  </p>
+                </div>
+                <div className={styles.settingsStatusPills} aria-label="Connection status">
+                  <span data-status={settings.hasOpenAiApiKey ? "ready" : "idle"}>
+                    OpenAI {settings.hasOpenAiApiKey ? "saved" : "unset"}
+                  </span>
+                  <span data-status={settings.hasAnthropicApiKey ? "ready" : "idle"}>
+                    Anthropic {settings.hasAnthropicApiKey ? "saved" : "unset"}
+                  </span>
+                  <span data-status={secondaryOllamaUiStatus}>{secondaryOllamaStatusText}</span>
+                  <span data-status={comfyUiUiStatus}>{comfyUiStatusText}</span>
                 </div>
               </section>
-              <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
-              <label
-                className={styles.checkbox}
-                title="Uses your browser's built-in spell check, grammar hints, and autocorrect when available."
-              >
-                <input
-                  type="checkbox"
-                  checked={settings.composerWritingAssist}
-                  onChange={e =>
-                    setSettings(p => p ? { ...p, composerWritingAssist: e.target.checked } : p)
-                  }
-                />
-                Composer spelling & grammar
-              </label>
-              <button
-                type="button"
-                className={styles.settingsInfoButton}
-                aria-haspopup="dialog"
-                aria-expanded={settingsAboutModalOpen ? "true" : undefined}
-                onClick={() => setSettingsAboutModalOpen(true)}
-              >
-                <strong>App info</strong>
-                <span>What Prism is, how it works, and what you control.</span>
-              </button>
-              <details className={styles.settingsModelDropdown}>
-                <summary>
-                  <span>Bot customizer models</span>
-                  <small>
-                    {settings.hiddenBotModelIds.length === 0
-                      ? "All model choices visible"
-                      : `${settings.hiddenBotModelIds.length} hidden`}
-                  </small>
-                </summary>
-                <div className={styles.settingsModelList}>
-                  {allBotCustomizerModelOptions(modelCatalog, settings).map((model) => {
-                    const required = isRequiredPrimaryLocalModel(model);
-                    const visible = required || !settings.hiddenBotModelIds.includes(model.id);
-                    return (
-                      <label key={model.id} className={styles.settingsModelToggle}>
+
+              <div className={styles.settingsSectionGrid}>
+                <section className={styles.settingsSection} aria-labelledby="settings-connections-title">
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Connections</span>
+                      <h4 id="settings-connections-title">API Keys &amp; Servers</h4>
+                    </div>
+                    <small>Saved with Settings.</small>
+                  </header>
+                  <div className={styles.settingsFieldGrid}>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>OpenAI key</span>
+                      <input
+                        type="password"
+                        placeholder={
+                          settings.hasOpenAiApiKey
+                            ? "Saved - type to replace"
+                            : "sk-..."
+                        }
+                        value={openAiKey}
+                        onChange={(event) => setOpenAiKey(event.target.value)}
+                        autoComplete="off"
+                      />
+                      {settings.hasOpenAiApiKey && (
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => void clearSavedKey("openai")}
+                          disabled={busy}
+                        >
+                          Clear saved key
+                        </button>
+                      )}
+                    </label>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>Anthropic key</span>
+                      <input
+                        type="password"
+                        placeholder={
+                          settings.hasAnthropicApiKey
+                            ? "Saved - type to replace"
+                            : "sk-ant-..."
+                        }
+                        value={anthropicKey}
+                        onChange={(event) => setAnthropicKey(event.target.value)}
+                        autoComplete="off"
+                      />
+                      {settings.hasAnthropicApiKey && (
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => void clearSavedKey("anthropic")}
+                          disabled={busy}
+                        >
+                          Clear saved key
+                        </button>
+                      )}
+                    </label>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>Second Ollama host</span>
+                      <span
+                        className={styles.settingsHostInputWrap}
+                        data-status={secondaryOllamaUiStatus}
+                      >
                         <input
-                          type="checkbox"
-                          checked={visible}
-                          disabled={required}
-                          onChange={(event) =>
-                            setBotCustomizerModelVisible(model.id, event.currentTarget.checked)
+                          type="text"
+                          placeholder="192.168.1.50:11434"
+                          value={settings.secondaryOllamaHost ?? ""}
+                          onChange={e =>
+                            setSettings(p => (p ? { ...p, secondaryOllamaHost: e.target.value } : p))
                           }
                         />
-                        <span>{model.label}</span>
-                        <small>
-                          {required
-                            ? "Required"
-                            : model.provider === "local"
-                            ? `Offline${model.hostLabel ? ` · ${model.hostLabel}` : ""}`
-                            : providerDisplayLabel(model.provider)}
-                        </small>
-                      </label>
-                    );
-                  })}
-                </div>
-              </details>
-              <button type="submit" disabled={busy}>Save</button>
-              <p className={styles.muted} style={{ marginTop: 12 }}>
-                Prism {PRISM_APP_VERSION}
-              </p>
+                        <span className={styles.settingsHostStatus} aria-live="polite">
+                          {secondaryOllamaStatusText}
+                        </span>
+                      </span>
+                    </label>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>ComfyUI server</span>
+                      <span className={styles.settingsHostInputWrap} data-status={comfyUiUiStatus}>
+                        <input
+                          type="text"
+                          placeholder="127.0.0.1:8188"
+                          value={settings.comfyUiHost ?? ""}
+                          onChange={e =>
+                            setSettings(p => (p ? { ...p, comfyUiHost: e.target.value } : p))
+                          }
+                        />
+                        <span className={styles.settingsHostStatus} aria-live="polite">
+                          {comfyUiStatusText}
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </section>
+
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  aria-labelledby="settings-models-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Models</span>
+                      <h4 id="settings-models-title">Defaults &amp; Fallbacks</h4>
+                    </div>
+                    <small>Some image choices save immediately.</small>
+                  </header>
+                  <div className={styles.settingsFieldGrid}>
+                    <label>
+                      Prism internal LLM
+                      <select
+                        value={(settings.prismDefaultLlmModel ?? "").trim()}
+                        onChange={(event) => {
+                          const next = event.target.value.trim();
+                          setSettings((previous) =>
+                            previous ? { ...previous, prismDefaultLlmModel: next } : previous
+                          );
+                        }}
+                      >
+                        <option value="">
+                          Auto - server auxiliary ({(settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"})
+                        </option>
+                        {prismInternalLlmCallOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                            {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Image-request LLM
+                      <select
+                        value={(settings.prismImageToolLlmModel ?? "").trim()}
+                        onChange={(event) => {
+                          const next = event.target.value.trim();
+                          setSettings((previous) =>
+                            previous ? { ...previous, prismImageToolLlmModel: next } : previous
+                          );
+                          void persistPrismImageToolLlmModelField(next);
+                        }}
+                      >
+                        <option value="">Auto - hub chat model</option>
+                        {prismImageToolLlmCallOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                            {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      LOCAL hub model
+                      <select
+                        value={normalizeModelChoice(settings.preferredLocalModel)}
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          setSettings((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  preferredLocalModel:
+                                    next === AUTO_MODEL_CHOICE ? "" : next,
+                                }
+                              : previous
+                          );
+                        }}
+                      >
+                        <option value={AUTO_MODEL_CHOICE}>Auto - first visible local model</option>
+                        {hubPreferredLocalOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                            {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Online hub model
+                      <select
+                        value={normalizeModelChoice(settings.preferredOnlineModel)}
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          setSettings((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  preferredOnlineModel:
+                                    next === AUTO_MODEL_CHOICE ? "" : next,
+                                }
+                              : previous
+                          );
+                        }}
+                      >
+                        <option value={AUTO_MODEL_CHOICE}>Auto - first visible online model</option>
+                        {hubPreferredOnlineOptions.map((model) => (
+                          <option key={`${model.provider}:${model.id}`} value={model.id}>
+                            {model.label} · {providerDisplayLabel(model.provider)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Text copyright fallback
+                      <select
+                        value={settings.lenientLocalFallbackModel ?? ""}
+                        onChange={(event) =>
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, lenientLocalFallbackModel: event.target.value }
+                              : previous
+                          )
+                        }
+                      >
+                        <option value="">Disabled</option>
+                        {includeSelectedModelOption(
+                          modelOptionsForProvider(modelCatalog, settings, "local"),
+                          settings.lenientLocalFallbackModel ?? "",
+                          "local"
+                        ).map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Image copyright fallback
+                      <select
+                        value={settings.lenientLocalImageFallbackModel ?? ""}
+                        onChange={(event) =>
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, lenientLocalImageFallbackModel: event.target.value }
+                              : previous
+                          )
+                        }
+                      >
+                        <option value="">Disabled</option>
+                        {includeSelectedModelOption(
+                          localImageModelCatalogEntries,
+                          settings.lenientLocalImageFallbackModel ?? "",
+                          "local"
+                        ).map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Local image default
+                      <select
+                        value={settings.preferredLocalImageModel?.trim() ?? ""}
+                        disabled={localImageModelCatalogEntries.length === 0}
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          setSettings((previous) =>
+                            previous ? { ...previous, preferredLocalImageModel: next } : previous
+                          );
+                          void persistAccountImageDefaultModelField(
+                            "preferredLocalImageModel",
+                            next
+                          );
+                        }}
+                      >
+                        <option value="">Auto - first detected local image model</option>
+                        {(
+                          (settings.preferredLocalImageModel?.trim() ?? "").length > 0
+                            ? includeSelectedModelOption(
+                                localImageModelCatalogEntries,
+                                settings.preferredLocalImageModel?.trim() ?? "",
+                                "local"
+                              )
+                            : localImageModelCatalogEntries
+                        ).map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Online image API model
+                      <select
+                        value={
+                          (settings.preferredOpenAiImageModel ?? "").trim().length > 0
+                            ? normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel)
+                            : ""
+                        }
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          const stored =
+                            next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, preferredOpenAiImageModel: stored }
+                              : previous
+                          );
+                          void persistAccountImageDefaultModelField(
+                            "preferredOpenAiImageModel",
+                            next
+                          );
+                        }}
+                      >
+                        <option value="">Auto - {DEFAULT_OPENAI_IMAGE_MODEL_ID}</option>
+                        {(
+                          (settings.preferredOpenAiImageModel ?? "").trim().length > 0
+                            ? includeSelectedModelOption(
+                                openAiImageModelCatalogEntries,
+                                normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel),
+                                "openai"
+                              )
+                            : openAiImageModelCatalogEntries
+                        ).map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                    <input
+                      type="checkbox"
+                      checked={settings.fallbackModelMessageStripe !== false}
+                      onChange={(event) =>
+                        setSettings((previous) =>
+                          previous
+                            ? { ...previous, fallbackModelMessageStripe: event.target.checked }
+                            : previous
+                        )
+                      }
+                    />
+                    Mark fallback replies
+                  </label>
+                  <details className={styles.settingsModelDropdown}>
+                    <summary>
+                      <span>Bot customizer model list</span>
+                      <small>
+                        {settings.hiddenBotModelIds.length === 0
+                          ? "All visible"
+                          : `${settings.hiddenBotModelIds.length} hidden`}
+                      </small>
+                    </summary>
+                    <div className={styles.settingsModelList}>
+                      {allBotCustomizerModelOptions(modelCatalog, settings).map((model) => {
+                        const required = isRequiredPrimaryLocalModel(model);
+                        const visible = required || !settings.hiddenBotModelIds.includes(model.id);
+                        return (
+                          <label key={model.id} className={styles.settingsModelToggle}>
+                            <input
+                              type="checkbox"
+                              checked={visible}
+                              disabled={required}
+                              onChange={(event) =>
+                                setBotCustomizerModelVisible(model.id, event.currentTarget.checked)
+                              }
+                            />
+                            <span>{model.label}</span>
+                            <small>
+                              {required
+                                ? "Required"
+                                : model.provider === "local"
+                                ? `Offline${model.hostLabel ? ` · ${model.hostLabel}` : ""}`
+                                : providerDisplayLabel(model.provider)}
+                            </small>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </details>
+                </section>
+
+                <section className={styles.settingsSection} aria-labelledby="settings-behavior-title">
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Behavior</span>
+                      <h4 id="settings-behavior-title">Memory &amp; Writing</h4>
+                    </div>
+                  </header>
+                  <div className={styles.settingsToggleStack}>
+                    <label className={styles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={settings.autoMemory}
+                        onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)}
+                      />
+                      Auto memory
+                    </label>
+                    <label className={styles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={settings.composerWritingAssist}
+                        onChange={e =>
+                          setSettings(p => p ? { ...p, composerWritingAssist: e.target.checked } : p)
+                        }
+                      />
+                      Composer spelling &amp; grammar
+                    </label>
+                  </div>
+                  <div className={styles.settingsTutorialCard}>
+                    <strong>Mode tutorials</strong>
+                    <div className={styles.settingsTutorialActions}>
+                      <button type="button" className={styles.linkButton} onClick={resetAllModeTutorials}>
+                        Reset all
+                      </button>
+                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("chat")}>
+                        Zen
+                      </button>
+                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("sandbox")}>
+                        Chat
+                      </button>
+                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("coffee")}>
+                        Coffee
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section className={styles.settingsSection} aria-labelledby="settings-about-title">
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>About</span>
+                      <h4 id="settings-about-title">Prism {PRISM_APP_VERSION}</h4>
+                    </div>
+                  </header>
+                  <p className={styles.settingsCompactCopy}>
+                    Personal AI workspace with offline-first controls, per-bot personality,
+                    memory management, and optional online model routing.
+                  </p>
+                  <button
+                    type="button"
+                    className={styles.settingsInfoButton}
+                    aria-haspopup="dialog"
+                    aria-expanded={settingsAboutModalOpen ? "true" : undefined}
+                    onClick={() => setSettingsAboutModalOpen(true)}
+                  >
+                    <strong>App details</strong>
+                    <span>Version notes and control model.</span>
+                  </button>
+                </section>
+
+                <section
+                  className={styles.settingsSection}
+                  aria-labelledby="settings-account-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Account</span>
+                      <h4 id="settings-account-title">Data &amp; Security</h4>
+                    </div>
+                  </header>
+                  <p className={styles.settingsCompactCopy}>
+                    Export and import live in the header. Pairing codes are disabled in the standalone app.
+                  </p>
+                  <div className={styles.accountActionsButtonRow}>
+                    <button
+                      type="button"
+                      className={styles.accountLogoutButton}
+                      onClick={() => void logout()}
+                      disabled={busy}
+                    >
+                      Log out
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.accountLogoutButton}
+                      onClick={() => {
+                        setPanelError(null);
+                        setChangePasswordNew("");
+                        setChangePasswordConfirm("");
+                        setChangePasswordModalOpen(true);
+                      }}
+                      disabled={busy}
+                    >
+                      Change password
+                    </button>
+                    <button
+                      type="button"
+                      className={[
+                        styles.dangerButton,
+                        deleteAccountArmed ? styles.dangerButtonArmed : "",
+                      ].filter(Boolean).join(" ")}
+                      onClick={deleteAccount}
+                      disabled={busy}
+                      title={
+                        deleteAccountArmed
+                          ? "Click again to confirm permanent account deletion."
+                          : "Click once to arm account deletion."
+                      }
+                    >
+                      {deleteAccountArmed ? "Confirm delete account" : "Delete account"}
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+
+              <div className={styles.settingsSaveDock}>
+                <span>Changes to keys, chat defaults, and account behavior use Save.</span>
+                <button type="submit" disabled={busy}>
+                  {busy ? "Saving..." : "Save settings"}
+                </button>
+              </div>
             </form>
           )}
           {settingsHostsModalOpen &&
@@ -35628,64 +36048,6 @@ function HomeContent(): React.JSX.Element {
             </div>,
             document.body
           )}
-          <div className={styles.pairingActions}>
-            <h4>Legacy pairing (disabled)</h4>
-            <p className={styles.muted}>
-              Pairing codes are no longer required in the standalone desktop app.
-            </p>
-            <div className={styles.pairingButtonRow}>
-              <button
-                type="button"
-                className={styles.accountLogoutButton}
-                disabled={true}
-              >
-                Pairing disabled
-              </button>
-            </div>
-          </div>
-          <div className={styles.accountActions}>
-            <h4>Account</h4>
-            <p className={styles.muted}>Sign out, change your password, or permanently delete this account.</p>
-            <div className={styles.accountActionsButtonRow}>
-              <button
-                type="button"
-                className={styles.accountLogoutButton}
-                onClick={() => void logout()}
-                disabled={busy}
-              >
-                Log out
-              </button>
-              <button
-                type="button"
-                className={styles.accountLogoutButton}
-                onClick={() => {
-                  setPanelError(null);
-                  setChangePasswordNew("");
-                  setChangePasswordConfirm("");
-                  setChangePasswordModalOpen(true);
-                }}
-                disabled={busy}
-              >
-                Change password
-              </button>
-              <button
-                type="button"
-                className={[
-                  styles.dangerButton,
-                  deleteAccountArmed ? styles.dangerButtonArmed : "",
-                ].filter(Boolean).join(" ")}
-                onClick={deleteAccount}
-                disabled={busy}
-                title={
-                  deleteAccountArmed
-                    ? "Click again to confirm permanent account deletion."
-                    : "Click once to arm account deletion."
-                }
-              >
-                {deleteAccountArmed ? "Confirm delete account" : "Delete account"}
-              </button>
-            </div>
-          </div>
           {changePasswordModalOpen &&
             typeof document !== "undefined" &&
             createPortal(
@@ -35752,12 +36114,6 @@ function HomeContent(): React.JSX.Element {
             </div>,
             document.body
           )}
-          {/* Scoped to panelError so a chat-send 401 doesn't render a
-              duplicate error on top of the Settings drawer. The legacy
-              in-settings memory list was removed once the dedicated
-              memories panel (with the cinematic directory transitions)
-              became the canonical management surface. */}
-          {panelError && <p className={styles.error} role="alert">{panelError}</p>}
         </div>
       )}
 
