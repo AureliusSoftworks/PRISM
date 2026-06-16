@@ -23825,6 +23825,271 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+/* Mobile launcher + Zen layout reset.
+   The earlier phone pass made Hub full-viewport, but twelve mode tiles need
+   a scrollable launcher rhythm. Zen also works better on phones as a real
+   header/messages/composer stack instead of three overlapping fixed layers. */
+@media (max-width: 720px) {
+  .authLayout:has(.hubCard) {
+    overflow: hidden;
+  }
+
+  .hubCard {
+    height: 100dvh;
+    min-height: 0;
+    align-content: start;
+    grid-template-rows: auto auto auto;
+    gap: 12px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    padding:
+      calc(env(safe-area-inset-top) + 14px)
+      max(14px, calc(env(safe-area-inset-right) + 12px))
+      calc(env(safe-area-inset-bottom) + 16px)
+      max(14px, calc(env(safe-area-inset-left) + 12px));
+  }
+
+  .hubBrandLockup {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 6px 12px;
+    margin: 0;
+  }
+
+  .hubCard .brandIconShell {
+    width: 42px;
+    height: 42px;
+  }
+
+  .hubCard .brandIcon {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+  }
+
+  .hubCard .brandIconLight {
+    width: 26px;
+    height: 26px;
+  }
+
+  .hubCard .brandWordmark {
+    height: 22px;
+    max-width: 100%;
+  }
+
+  .hubFooter {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    margin: -2px 0 0;
+    justify-content: space-between;
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  .hubUtilityActions {
+    min-width: 0;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    padding-bottom: 1px;
+  }
+
+  .hubNavButton {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding-inline: 11px;
+  }
+
+  .hubGreeting {
+    font-size: clamp(17px, 5vw, 20px);
+  }
+
+  .hubTiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: auto;
+    align-content: start;
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .hubTile {
+    min-height: 134px;
+    border-radius: 14px;
+    padding: 12px 10px;
+    gap: 6px;
+  }
+
+  .hubTileGlyph {
+    width: 44px;
+    height: 44px;
+  }
+
+  .hubTileLabel {
+    font-size: 14px;
+  }
+
+  .hubTileTagline {
+    max-width: none;
+    font-size: 11px;
+    line-height: 1.28;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] {
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .chatPane {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100dvh;
+    min-height: 0;
+    position: relative;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .chatHeader {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    z-index: 40;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame {
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame[data-chat-focus="true"] .messages[data-chat-ephemeral="true"] {
+    max-height: none;
+    margin-block: 0;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"] {
+    position: relative;
+    inset: auto;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    padding-top: 18px;
+    padding-bottom: max(32px, calc(env(safe-area-inset-bottom) + 24px));
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+    padding-bottom: max(32dvh, calc(env(safe-area-inset-bottom) + 24px));
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .compose {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    z-index: 40;
+    border-top: 1px solid var(--line);
+    background:
+      radial-gradient(
+        ellipse 72% 42% at var(--lens-thumb-x, 50%) 0%,
+        color-mix(in srgb, var(--accent) 10%, transparent) 0%,
+        transparent 74%
+      ),
+      var(--bg-surface);
+    padding-top: 8px;
+    box-shadow:
+      0 -8px 24px -22px color-mix(in srgb, var(--accent) 34%, transparent);
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .conversationStarterRail,
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock {
+    position: absolute;
+    bottom: 0;
+    z-index: 12;
+  }
+}
+
+@media (max-width: 560px) {
+  .appLayout[data-chat-sidebar-hidden="true"] .chatHeader {
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    padding:
+      calc(env(safe-area-inset-top) + 8px)
+      max(56px, calc(env(safe-area-inset-right) + 52px))
+      8px
+      max(56px, calc(env(safe-area-inset-left) + 52px));
+    min-height: 0;
+    max-height: none;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .chatHeaderIdentityGroup {
+    max-width: 100%;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .chatHeader .chatHubWordmarkStack {
+    max-width: min(58vw, 230px);
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .chatHeaderModelPicker {
+    width: 100%;
+    max-width: min(320px, 100%);
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .chatHeaderModelPicker .composeModelControl {
+    max-width: min(9rem, 42vw);
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .chatHeaderModelPicker .composeModelTrigger {
+    min-width: 0;
+    padding-inline: 9px;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"] {
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+}
+
+@media (max-width: 380px) {
+  .hubNavButton span {
+    display: none;
+  }
+
+  .hubNavButton {
+    width: 34px;
+    padding: 0;
+  }
+
+  .hubTiles {
+    grid-template-columns: 1fr;
+  }
+
+  .hubTile {
+    min-height: 76px;
+    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    justify-items: start;
+    text-align: left;
+    align-content: center;
+    column-gap: 12px;
+  }
+
+  .hubTileGlyph {
+    grid-row: 1 / span 2;
+  }
+}
+
 /* Phones and narrow panes — `:hover` is unreliable/sticky; strip hover-only
    chrome while preserving active/focus/`[aria-selected]`. Scoped to ≤720px. */
 @media (max-width: 720px) {
