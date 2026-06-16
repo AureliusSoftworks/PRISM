@@ -23,10 +23,12 @@ export interface GenerateOptions {
   jsonSchemaName?: string;
 }
 
+export type ProviderName = "local" | "openai" | "anthropic";
+
 export interface ModelCatalogEntry {
   id: string;
   label: string;
-  provider: "local" | "openai";
+  provider: ProviderName;
   isDefault?: boolean;
   localHost?: "primary" | "secondary";
   hostLabel?: string;
@@ -50,7 +52,7 @@ export interface LocalModelHostStatus {
 }
 
 export interface LlmProvider {
-  name: "local" | "openai";
+  name: ProviderName;
   generateResponse(
     messages: ProviderMessage[],
     options?: GenerateOptions
@@ -62,15 +64,26 @@ interface OpenAiConfig {
   apiKey: string;
 }
 
+interface AnthropicConfig {
+  apiKey: string;
+}
+
 const config = getAppConfig();
 export const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
 
 export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
+export const ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6";
 const OPENAI_FALLBACK_MODELS = [
   OPENAI_DEFAULT_MODEL,
   "gpt-4o",
   "gpt-4.1-mini",
   "gpt-4.1",
+] as const;
+const ANTHROPIC_FALLBACK_MODELS = [
+  ANTHROPIC_DEFAULT_MODEL,
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-sonnet-4-5-20250929",
 ] as const;
 const OPENAI_CHAT_MODEL_PREFIXES = [
   "gpt-",
@@ -78,6 +91,8 @@ const OPENAI_CHAT_MODEL_PREFIXES = [
   "o3",
   "o4",
 ] as const;
+const ANTHROPIC_API_VERSION = "2023-06-01";
+const ANTHROPIC_CHAT_MODEL_PREFIXES = ["claude-"] as const;
 
 /**
  * Chat models whose API shape differs from classic GPT-4: completion token
@@ -267,7 +282,7 @@ export function parseSecondaryOllamaModelId(id: string): string | null {
 
 function toCatalogEntry(
   id: string,
-  provider: "local" | "openai",
+  provider: ProviderName,
   defaultId: string,
   options: {
     label?: string;
@@ -301,6 +316,12 @@ function isAllowedOpenAiChatModel(id: string): boolean {
     return false;
   }
   return OPENAI_CHAT_MODEL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function isAllowedAnthropicChatModel(id: string): boolean {
+  const normalized = id.trim().toLowerCase();
+  if (!normalized) return false;
+  return ANTHROPIC_CHAT_MODEL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 async function discoverLocalModelIds(ollamaHost: string): Promise<string[]> {
@@ -411,14 +432,46 @@ async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> 
   }
 }
 
+async function discoverAnthropicModelIds(anthropicApiKey?: string): Promise<string[]> {
+  if (!anthropicApiKey) return [];
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/models", {
+      headers: {
+        "x-api-key": anthropicApiKey,
+        "anthropic-version": ANTHROPIC_API_VERSION,
+      },
+      signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
+    });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: unknown }>;
+    };
+    return uniqueModelIds(
+      (payload.data ?? [])
+        .map((model) => (typeof model.id === "string" ? model.id : ""))
+        .filter(isAllowedAnthropicChatModel)
+        .sort((a, b) => a.localeCompare(b))
+    );
+  } catch {
+    return [];
+  }
+}
+
 export async function buildModelCatalog(
   openAiApiKey?: string,
-  secondaryOllamaHost?: string | null
+  secondaryOllamaHost?: string | null,
+  anthropicApiKey?: string
 ): Promise<ModelCatalog> {
-  const [discoveredLocal, discoveredSecondaryLocal, discoveredOnline] = await Promise.all([
+  const [
+    discoveredLocal,
+    discoveredSecondaryLocal,
+    discoveredOpenAi,
+    discoveredAnthropic,
+  ] = await Promise.all([
     discoverLocalModelIds(config.ollamaHost),
     secondaryOllamaHost ? discoverLocalModelIds(secondaryOllamaHost) : Promise.resolve([]),
     discoverOpenAiModelIds(openAiApiKey),
+    discoverAnthropicModelIds(anthropicApiKey),
   ]);
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
   const secondaryLocalIds = removeModelIdsWithLabels(
@@ -427,8 +480,13 @@ export async function buildModelCatalog(
   );
   const onlineIds = uniqueModelIds([
     OPENAI_DEFAULT_MODEL,
-    ...discoveredOnline,
+    ...discoveredOpenAi,
     ...OPENAI_FALLBACK_MODELS,
+  ]);
+  const anthropicIds = uniqueModelIds([
+    ANTHROPIC_DEFAULT_MODEL,
+    ...discoveredAnthropic,
+    ...ANTHROPIC_FALLBACK_MODELS,
   ]);
   return {
     local: [
@@ -446,7 +504,10 @@ export async function buildModelCatalog(
         })
       ),
     ],
-    online: onlineIds.map((id) => toCatalogEntry(id, "openai", OPENAI_DEFAULT_MODEL)),
+    online: [
+      ...onlineIds.map((id) => toCatalogEntry(id, "openai", OPENAI_DEFAULT_MODEL)),
+      ...anthropicIds.map((id) => toCatalogEntry(id, "anthropic", ANTHROPIC_DEFAULT_MODEL)),
+    ],
     defaults: {
       local: config.ollamaModel,
       online: OPENAI_DEFAULT_MODEL,
@@ -637,6 +698,87 @@ export class OpenAiProvider implements LlmProvider {
   }
 }
 
+export class AnthropicProvider implements LlmProvider {
+  public readonly name = "anthropic" as const;
+  private readonly anthropicConfig: AnthropicConfig;
+
+  public constructor(anthropicConfig: AnthropicConfig) {
+    this.anthropicConfig = anthropicConfig;
+  }
+
+  public async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions
+  ): Promise<string> {
+    const modelId = options?.model?.trim() || ANTHROPIC_DEFAULT_MODEL;
+    const systemMessages = messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content.trim())
+      .filter(Boolean);
+    const conversationMessages = messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({
+        role: message.role as "user" | "assistant",
+        content: message.content,
+      }));
+    const requestBody: Record<string, unknown> = {
+      model: modelId,
+      max_tokens: options?.maxTokens ?? 2048,
+      messages: conversationMessages.length > 0
+        ? conversationMessages
+        : [{ role: "user", content: "" }],
+    };
+    if (systemMessages.length > 0) {
+      requestBody.system = systemMessages.join("\n\n");
+    }
+    if (options?.jsonSchema || options?.jsonMode) {
+      const jsonInstruction = options.jsonSchema
+        ? `Return only a JSON object matching this JSON Schema: ${JSON.stringify(options.jsonSchema)}`
+        : "Return only a JSON object.";
+      requestBody.system =
+        typeof requestBody.system === "string" && requestBody.system.length > 0
+          ? `${requestBody.system}\n\n${jsonInstruction}`
+          : jsonInstruction;
+    }
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": this.anthropicConfig.apiKey,
+        "anthropic-version": ANTHROPIC_API_VERSION,
+      },
+      body: JSON.stringify(requestBody),
+    });
+    if (!response.ok) {
+      const detail = await readOpenAiErrorMessage(response);
+      console.error(
+        `[anthropic] messages failed status=${response.status} model=${modelId} detail=${
+          detail || "<empty body>"
+        }`
+      );
+      throw new Error(formatOpenAiError("Anthropic request failed", response.status, detail));
+    }
+    const payload = (await response.json()) as {
+      content?: Array<{ type?: string; text?: unknown }>;
+      stop_reason?: string | null;
+    };
+    const content = (payload.content ?? [])
+      .map((block) => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
+      .join("")
+      .trim();
+    if (content) return content;
+    if (payload.stop_reason === "refusal") {
+      return "I cannot help with that request.";
+    }
+    throw new Error("Anthropic returned an empty response.");
+  }
+
+  public async embedText(text: string): Promise<number[]> {
+    return embedTextLocal(text);
+  }
+}
+
 /**
  * Resolved local model for Prism-only lanes (titles, summarization, memory
  * inference, Coffee router, image prompt suggestions). Per-user Settings
@@ -699,9 +841,10 @@ function formatOpenAiError(
  * mislabelling the reply.
  */
 export function selectProvider(
-  preferredProvider: "local" | "openai",
+  preferredProvider: ProviderName,
   openAiApiKey?: string,
-  secondaryOllamaHost?: string | null
+  secondaryOllamaHost?: string | null,
+  anthropicApiKey?: string
 ): LlmProvider {
   if (preferredProvider === "openai") {
     if (!openAiApiKey) {
@@ -710,6 +853,14 @@ export function selectProvider(
       );
     }
     return new OpenAiProvider({ apiKey: openAiApiKey });
+  }
+  if (preferredProvider === "anthropic") {
+    if (!anthropicApiKey) {
+      throw new Error(
+        "Anthropic is selected but no API key is available. Save a key in Settings or set ANTHROPIC_API_KEY in the server environment."
+      );
+    }
+    return new AnthropicProvider({ apiKey: anthropicApiKey });
   }
   return new LocalOllamaProvider({ secondaryOllamaHost });
 }

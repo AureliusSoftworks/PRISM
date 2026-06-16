@@ -95,7 +95,7 @@ import {
   getAuxiliaryProvider,
   selectProvider,
 } from "./providers.ts";
-import type { GenerateOptions } from "./providers.ts";
+import type { GenerateOptions, ProviderName } from "./providers.ts";
 import { resolveAutoModel, REQUIRED_PRIMARY_LOCAL_MODEL_ID } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import {
@@ -223,7 +223,7 @@ interface UserDbRow {
   wrapped_user_key_iv: string;
   wrapped_user_key_tag: string;
   theme: "light" | "dark" | "system";
-  preferred_provider: "local" | "openai";
+  preferred_provider: ProviderName;
   provider_locked: number;
   auto_memory: number;
   composer_writing_assist: number;
@@ -246,6 +246,9 @@ interface UserDbRow {
   openai_key_ciphertext: string | null;
   openai_key_iv: string | null;
   openai_key_tag: string | null;
+  anthropic_key_ciphertext: string | null;
+  anthropic_key_iv: string | null;
+  anthropic_key_tag: string | null;
   created_at: string;
   last_active_at: string;
 }
@@ -341,7 +344,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -389,6 +392,27 @@ function getOpenAiApiKeyForUser(userId: string, userKey: Buffer): string | undef
     },
     userKey
   );
+}
+
+function getAnthropicApiKeyForUser(userId: string, userKey: Buffer): string | undefined {
+  const user = getUserRow(userId);
+  if (!user.anthropic_key_ciphertext || !user.anthropic_key_iv || !user.anthropic_key_tag) {
+    return undefined;
+  }
+  return decryptText(
+    {
+      ciphertext: user.anthropic_key_ciphertext,
+      iv: user.anthropic_key_iv,
+      tag: user.anthropic_key_tag,
+    },
+    userKey
+  );
+}
+
+function readProvider(value: unknown): ProviderName | undefined {
+  return value === "local" || value === "openai" || value === "anthropic"
+    ? value
+    : undefined;
 }
 
 function readString(value: unknown, fieldName: string): string {
@@ -881,12 +905,9 @@ function buildRoutes(): RouteDefinition[] {
       const botIds = normalizeStoryCreateBotIds(body.botIds);
       const storyBots = loadStoryBotProfiles(db, userId, botIds);
       const user = getUserRow(userId);
-      const requestedProvider =
-        body.preferredProvider === "openai" || body.preferredProvider === "local"
-          ? body.preferredProvider
-          : undefined;
+      const requestedProvider = readProvider(body.preferredProvider);
       const anyOfflineProtected = storyBots.some((bot) => !bot.onlineEnabled);
-      let effectiveProvider: "local" | "openai" =
+      let effectiveProvider: ProviderName =
         anyOfflineProtected ? "local" : requestedProvider ?? user.preferred_provider;
       const explicitModelOverride = anyOfflineProtected ? null : readOptionalString(body.modelOverride);
       const storyModelOverride =
@@ -894,7 +915,13 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey
+      );
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
         explicitModelOverride: storyModelOverride,
@@ -909,7 +936,8 @@ function buildRoutes(): RouteDefinition[] {
       const provider = selectProvider(
         effectiveProvider,
         openAiApiKey,
-        user.secondary_ollama_host
+        user.secondary_ollama_host,
+        anthropicApiKey
       );
       const session = createStorySession(db, userId, {
         botIds,
@@ -1472,8 +1500,14 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       let effectiveProvider = forceLocal ? "local" : user.preferred_provider;
-      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey
+      );
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
         explicitModelOverride: null,
@@ -1489,7 +1523,8 @@ function buildRoutes(): RouteDefinition[] {
       const provider = selectProvider(
         effectiveProvider,
         openAiApiKey,
-        user.secondary_ollama_host
+        user.secondary_ollama_host,
+        anthropicApiKey
       );
       const maxTokens = Math.min(1800, Math.max(160, Math.ceil(text.length / 2)));
       try {
@@ -1556,10 +1591,10 @@ function buildRoutes(): RouteDefinition[] {
       // Per-request provider override so a fresh sidebar switch takes effect
       // immediately, even if the settings PATCH is still in flight.
       const explicitModelOverride = readOptionalString(body.modelOverride);
+      const providerOverride = readProvider(body.preferredProvider);
       const requestedProvider =
-        (mode === "sandbox" || incognito || explicitModelOverride) &&
-        (body.preferredProvider === "openai" || body.preferredProvider === "local")
-          ? body.preferredProvider
+        (mode === "sandbox" || incognito || explicitModelOverride) && providerOverride
+          ? providerOverride
           : undefined;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -1613,7 +1648,7 @@ function buildRoutes(): RouteDefinition[] {
             bot.system_prompt,
             bot.flirt_enabled === 1
           );
-          if (bot.online_enabled === 0 && effectiveProvider === "openai") {
+          if (bot.online_enabled === 0 && effectiveProvider !== "local") {
             effectiveProvider = "local";
             botForcesLocalProvider = true;
           }
@@ -1636,7 +1671,13 @@ function buildRoutes(): RouteDefinition[] {
       // single OPENAI_API_KEY in .env makes chat work without double-entry.
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey
+      );
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
         explicitModelOverride: botForcesLocalProvider ? null : explicitModelOverride,
@@ -1666,6 +1707,7 @@ function buildRoutes(): RouteDefinition[] {
             preferredProvider: effectiveProvider,
             autoMemory: !incognito && Boolean(user.auto_memory),
             openAiApiKey,
+            anthropicApiKey,
             userDisplayName: user.display_name,
             starterPrompt,
             starterPromptWarrantsIntro,
@@ -1955,10 +1997,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/sessions/:id/polls/:pollId/collect", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const requestedProvider =
-        body.preferredProvider === "openai" || body.preferredProvider === "local"
-          ? body.preferredProvider
-          : undefined;
+      const requestedProvider = readProvider(body.preferredProvider);
       const sessionRemainingMs =
         typeof body.sessionRemainingMs === "number" &&
         Number.isFinite(body.sessionRemainingMs)
@@ -1978,6 +2017,8 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
       const sessionSpeakerModel = readOptionalString(body.modelOverride);
       const result = await collectCoffeePollVotes(
@@ -1988,6 +2029,7 @@ function buildRoutes(): RouteDefinition[] {
         {
           preferredProvider: effectiveProvider,
           openAiApiKey,
+          anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           userDisplayName: user.display_name,
           userKey,
@@ -2033,10 +2075,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/sessions/:id/continue", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const requestedProvider =
-        body.preferredProvider === "openai" || body.preferredProvider === "local"
-          ? body.preferredProvider
-          : undefined;
+      const requestedProvider = readProvider(body.preferredProvider);
       const directedSpeakerBotId =
         typeof body.directedSpeakerBotId === "string"
           ? body.directedSpeakerBotId
@@ -2052,6 +2091,8 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
       const result = await processCoffeeAutonomousTurn(
         db,
@@ -2060,6 +2101,7 @@ function buildRoutes(): RouteDefinition[] {
         {
           preferredProvider: effectiveProvider,
           openAiApiKey,
+          anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           userDisplayName: user.display_name,
           userKey,
@@ -2086,15 +2128,14 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/sessions/:id/synopsis", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const requestedProvider =
-        body.preferredProvider === "openai" || body.preferredProvider === "local"
-          ? body.preferredProvider
-          : undefined;
+      const requestedProvider = readProvider(body.preferredProvider);
       const sessionSpeakerModel = readOptionalString(body.modelOverride);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
       const conversation = await generateCoffeeSessionSynopsis(
         db,
@@ -2103,6 +2144,7 @@ function buildRoutes(): RouteDefinition[] {
         {
           preferredProvider: effectiveProvider,
           openAiApiKey,
+          anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           userDisplayName: user.display_name,
           userKey,
@@ -2154,14 +2196,13 @@ function buildRoutes(): RouteDefinition[] {
       // the client toggle wins over the user's saved preferred_provider for
       // this single turn. Anything else (including absent or malformed)
       // falls back to the saved preference.
-      const requestedProvider =
-        body.preferredProvider === "openai" || body.preferredProvider === "local"
-          ? body.preferredProvider
-          : undefined;
+      const requestedProvider = readProvider(body.preferredProvider);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
       const sessionSpeakerModel = readOptionalString(body.modelOverride);
       const result = await processCoffeeTurn(
@@ -2177,6 +2218,7 @@ function buildRoutes(): RouteDefinition[] {
         {
           preferredProvider: effectiveProvider,
           openAiApiKey,
+          anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           userDisplayName: user.display_name,
           userKey,
@@ -2603,6 +2645,7 @@ function buildRoutes(): RouteDefinition[] {
           prismDefaultLlmModel: user.prism_default_llm_model ?? "",
           prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
+          hasAnthropicApiKey: Boolean(user.anthropic_key_ciphertext),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
           ollamaModel: config.ollamaModel,
@@ -2623,7 +2666,13 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host);
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey
+      );
       // Prefer draft URL from query (matches Settings status probe before save); else persisted column.
       const comfyHostFromQuery = normalizeComfyUiHostForStatusCheck(
         ctx.query.get("comfyUiHost")
@@ -2745,6 +2794,9 @@ function buildRoutes(): RouteDefinition[] {
       let openAiCipher = user.openai_key_ciphertext;
       let openAiIv = user.openai_key_iv;
       let openAiTag = user.openai_key_tag;
+      let anthropicCipher = user.anthropic_key_ciphertext;
+      let anthropicIv = user.anthropic_key_iv;
+      let anthropicTag = user.anthropic_key_tag;
       if (next.openAiKeyIntent.action === "replace") {
         const encrypted = encryptText(next.openAiKeyIntent.plaintext, userKey);
         openAiCipher = encrypted.ciphertext;
@@ -2754,6 +2806,16 @@ function buildRoutes(): RouteDefinition[] {
         openAiCipher = null;
         openAiIv = null;
         openAiTag = null;
+      }
+      if (next.anthropicKeyIntent.action === "replace") {
+        const encrypted = encryptText(next.anthropicKeyIntent.plaintext, userKey);
+        anthropicCipher = encrypted.ciphertext;
+        anthropicIv = encrypted.iv;
+        anthropicTag = encrypted.tag;
+      } else if (next.anthropicKeyIntent.action === "clear") {
+        anthropicCipher = null;
+        anthropicIv = null;
+        anthropicTag = null;
       }
 
       // `auto_switch_model` is intentionally not updated here. The old
@@ -2766,7 +2828,8 @@ function buildRoutes(): RouteDefinition[] {
             preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
-            openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?
+            openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
+            anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?
         WHERE id = ?
       `).run(
         next.displayName,
@@ -2793,6 +2856,9 @@ function buildRoutes(): RouteDefinition[] {
         openAiCipher,
         openAiIv,
         openAiTag,
+        anthropicCipher,
+        anthropicIv,
+        anthropicTag,
         userId
       );
       json(ctx.res, 200, { ok: true });
@@ -2901,7 +2967,8 @@ function buildRoutes(): RouteDefinition[] {
         body.preferredProvider === "openai" || body.preferredProvider === "local"
           ? body.preferredProvider
           : undefined;
-      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const effectiveProvider =
+        requestedProvider ?? (user.preferred_provider === "local" ? "local" : "openai");
 
       const persistence = resolveImageGeneratePersistence({
         db,

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseHiddenBotModelIds,
   resolveNextSettings,
+  sanitizeAnthropicKeyInput,
   sanitizeOpenAiKeyInput,
   type CurrentSettings,
 } from "../settings.ts";
@@ -93,7 +94,7 @@ describe("resolveNextSettings — displayName", () => {
 });
 
 describe("resolveNextSettings — preferredProvider", () => {
-  it("accepts 'local' and 'openai'", () => {
+  it("accepts 'local', 'openai', and 'anthropic'", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "local" }, baseline()).preferredProvider,
       "local"
@@ -102,13 +103,17 @@ describe("resolveNextSettings — preferredProvider", () => {
       resolveNextSettings({ preferredProvider: "openai" }, baseline()).preferredProvider,
       "openai"
     );
+    assert.equal(
+      resolveNextSettings({ preferredProvider: "anthropic" }, baseline()).preferredProvider,
+      "anthropic"
+    );
   });
 
   it("keeps the stored provider when the field is missing or invalid", () => {
     const current = baseline({ preferredProvider: "openai" });
     assert.equal(resolveNextSettings({}, current).preferredProvider, "openai");
     assert.equal(
-      resolveNextSettings({ preferredProvider: "anthropic" }, current).preferredProvider,
+      resolveNextSettings({ preferredProvider: "azure" }, current).preferredProvider,
       "openai"
     );
   });
@@ -536,6 +541,37 @@ describe("resolveNextSettings — openAiApiKey", () => {
   });
 });
 
+describe("resolveNextSettings — anthropicApiKey", () => {
+  it("non-empty string is a replace", () => {
+    const next = resolveNextSettings({ anthropicApiKey: "sk-ant-abc" }, baseline());
+    assert.deepEqual(next.anthropicKeyIntent, {
+      action: "replace",
+      plaintext: "sk-ant-abc",
+    });
+  });
+
+  it("whitespace keeps the stored key", () => {
+    const next = resolveNextSettings({ anthropicApiKey: "   " }, baseline());
+    assert.deepEqual(next.anthropicKeyIntent, { action: "keep" });
+  });
+
+  it("explicit null clears the stored key", () => {
+    const next = resolveNextSettings({ anthropicApiKey: null }, baseline());
+    assert.deepEqual(next.anthropicKeyIntent, { action: "clear" });
+  });
+
+  it("strips a pasted `ANTHROPIC_API_KEY=` prefix", () => {
+    const next = resolveNextSettings(
+      { anthropicApiKey: "ANTHROPIC_API_KEY=\"sk-ant-api03-abc\"" },
+      baseline()
+    );
+    assert.deepEqual(next.anthropicKeyIntent, {
+      action: "replace",
+      plaintext: "sk-ant-api03-abc",
+    });
+  });
+});
+
 describe("sanitizeOpenAiKeyInput", () => {
   it("pass-through for a clean key", () => {
     assert.equal(sanitizeOpenAiKeyInput("sk-proj-abc123"), "sk-proj-abc123");
@@ -595,6 +631,15 @@ describe("sanitizeOpenAiKeyInput", () => {
   it("returns empty string for all-whitespace / pure quotes", () => {
     assert.equal(sanitizeOpenAiKeyInput("   "), "");
     assert.equal(sanitizeOpenAiKeyInput('""'), "");
+  });
+});
+
+describe("sanitizeAnthropicKeyInput", () => {
+  it("uses the same env-line stripping behavior as OpenAI keys", () => {
+    assert.equal(
+      sanitizeAnthropicKeyInput("ANTHROPIC_API_KEY='sk-ant-api03-abc'"),
+      "sk-ant-api03-abc"
+    );
   });
 });
 

@@ -31,6 +31,7 @@ import {
   type GenerateOptions,
   type LlmProvider,
   type ProviderMessage,
+  type ProviderName,
 } from "./providers.ts";
 import {
   buildInitialAboutYouMemoryText,
@@ -1662,8 +1663,9 @@ export async function kickoffCoffeeMeetingSummaryRefresh(args: {
 
 /** Settings forwarded from the HTTP route. */
 export interface CoffeeTurnSettings {
-  preferredProvider: "local" | "openai";
+  preferredProvider: ProviderName;
   openAiApiKey?: string;
+  anthropicApiKey?: string;
   secondaryOllamaHost?: string | null;
   userDisplayName?: string;
   userKey?: Buffer;
@@ -1780,7 +1782,8 @@ async function maybeQueueCoffeeImageJob(args: {
   startChatImageBackgroundJob({
     db: args.db,
     job: acq.job,
-    preferredProvider: args.settings.preferredProvider,
+    preferredProvider:
+      args.settings.preferredProvider === "local" ? "local" : "openai",
     openAiApiKey: args.settings.openAiApiKey,
     prefs: assistantImagePrefsForCoffeeTurn(args.settings),
     prismDefaultLlmModel: args.settings.prismDefaultLlmModel,
@@ -1899,14 +1902,14 @@ function normalizeCoffeeTopicSelectionMode(raw: unknown): CoffeeTopicSelectionMo
 
 /**
  * Normalize a free-form `model_choice` value into a sanitized
- * `{ local?, openai? }` map. Drops empty/`auto` strings so picker hydration on
+ * `{ local?, openai?, anthropic? }` map. Drops empty/`auto` strings so picker hydration on
  * the client treats those as "Auto".
  */
 export function normalizeCoffeeGroupModelChoice(raw: unknown): CoffeeGroupModelChoice {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const source = raw as Record<string, unknown>;
   const out: CoffeeGroupModelChoice = {};
-  for (const provider of ["local", "openai"] as const) {
+  for (const provider of ["local", "openai", "anthropic"] as const) {
     const value = source[provider];
     if (typeof value !== "string") continue;
     const trimmed = value.trim();
@@ -2681,7 +2684,7 @@ export function updateCoffeeGroup(
     } as Record<string, string>;
     // Drop blanks from caller-supplied overrides (lets the client clear back to Auto).
     const provided = (input.modelChoiceByProvider ?? {}) as Record<string, unknown>;
-    for (const provider of ["local", "openai"] as const) {
+    for (const provider of ["local", "openai", "anthropic"] as const) {
       if (Object.prototype.hasOwnProperty.call(provided, provider)) {
         const raw = provided[provider];
         if (typeof raw !== "string" || raw.trim().length === 0 || raw.trim().toLowerCase() === "auto") {
@@ -6177,9 +6180,9 @@ export function setCoffeePollPlayerVote(
  */
 export function effectiveCoffeeSpeakerProvider(
   speakerOnlineEnabled: boolean,
-  preferred: "local" | "openai"
-): "local" | "openai" {
-  if (preferred === "openai" && !speakerOnlineEnabled) return "local";
+  preferred: ProviderName
+): ProviderName {
+  if (preferred !== "local" && !speakerOnlineEnabled) return "local";
   return preferred;
 }
 
@@ -6189,18 +6192,24 @@ export function effectiveCoffeeSpeakerProvider(
  */
 function pickSpeakerProvider(
   speaker: CoffeeBotProfile,
-  preferred: "local" | "openai",
+  preferred: ProviderName,
   openAiApiKey: string | undefined,
-  secondaryOllamaHost: string | null | undefined
-): { provider: LlmProvider; effectiveProvider: "local" | "openai" } {
+  secondaryOllamaHost: string | null | undefined,
+  anthropicApiKey: string | undefined
+): { provider: LlmProvider; effectiveProvider: ProviderName } {
   const effective = effectiveCoffeeSpeakerProvider(speaker.onlineEnabled, preferred);
-  const provider = selectProvider(effective, openAiApiKey, secondaryOllamaHost);
+  const provider = selectProvider(
+    effective,
+    openAiApiKey,
+    secondaryOllamaHost,
+    anthropicApiKey
+  );
   return { provider, effectiveProvider: effective };
 }
 
 function pickSpeakerModel(
   speaker: CoffeeBotProfile,
-  effectiveProvider: "local" | "openai",
+  effectiveProvider: ProviderName,
   sessionOverride?: string | null
 ): string | undefined {
   const trimmed =
@@ -6596,7 +6605,8 @@ async function generateCoffeeBotReply(args: {
     speaker,
     settings.preferredProvider,
     settings.openAiApiKey,
-    settings.secondaryOllamaHost
+    settings.secondaryOllamaHost,
+    settings.anthropicApiKey
   );
   const speakerOptions: GenerateOptions = {};
   const speakerModel = pickSpeakerModel(
@@ -6972,7 +6982,8 @@ export async function generateCoffeeSessionSynopsis(
   const provider = selectProvider(
     effectiveProvider,
     settings.openAiApiKey,
-    settings.secondaryOllamaHost
+    settings.secondaryOllamaHost,
+    settings.anthropicApiKey
   );
   const options: GenerateOptions = {
     maxTokens: COFFEE_SESSION_SYNOPSIS_MAX_TOKENS,

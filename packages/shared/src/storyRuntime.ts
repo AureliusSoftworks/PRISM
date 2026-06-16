@@ -1,3 +1,4 @@
+import type { LlmProviderName } from "./index.js";
 import type { StoryItemGlyphCategory, StorySpritePose } from "./storyThemes.js";
 
 export type StorySessionStatus = "generating" | "playing" | "complete" | "failed";
@@ -113,7 +114,7 @@ export interface StorySessionSummary {
   title: string;
   themeId: string;
   status: StorySessionStatus;
-  provider: "local" | "openai";
+  provider: LlmProviderName;
   model: string | null;
   botIds: string[];
   premise: string | null;
@@ -132,7 +133,7 @@ export interface StorySessionDetail extends StorySessionSummary {
 export interface StorySessionCreateRequest {
   botIds: string[];
   premise?: string | null;
-  preferredProvider?: "local" | "openai";
+  preferredProvider?: LlmProviderName;
   modelOverride?: string | null;
 }
 

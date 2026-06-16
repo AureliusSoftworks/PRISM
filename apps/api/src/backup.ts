@@ -1,10 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, decryptText, encryptJson, encryptText } from "./security.ts";
 import { normalizeMemoryTier } from "./memory.ts";
+import type { ProviderName } from "./providers.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
-  preferredProvider: "local" | "openai";
+  preferredProvider: ProviderName;
   providerLocked: boolean;
   autoMemory: boolean;
   composerWritingAssist: boolean;
@@ -24,6 +25,7 @@ export interface BackupUserSettings {
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
   openAiApiKey?: string;
+  anthropicApiKey?: string;
 }
 
 export interface BackupBotSnapshot {
@@ -65,7 +67,7 @@ export interface BackupSnapshot {
       content: string;
       createdAt: string;
       /** Optional; older v1 snapshots omit this. */
-      provider?: "local" | "openai";
+      provider?: ProviderName;
       /** Optional; older v1 snapshots (pre-model tracking) omit this. */
       model?: string;
       /** Optional; older v1 snapshots (pre-per-message bot tracking) omit this. */
@@ -140,14 +142,17 @@ export function exportUserSnapshot(
          dev_memories_text,
          openai_key_ciphertext,
          openai_key_iv,
-         openai_key_tag
+         openai_key_tag,
+         anthropic_key_ciphertext,
+         anthropic_key_iv,
+         anthropic_key_tag
        FROM users
        WHERE id = ?`
     )
     .get(userId) as
     | {
         theme: "light" | "dark" | "system";
-        preferred_provider: "local" | "openai";
+        preferred_provider: ProviderName;
         provider_locked: number;
         auto_memory: number;
         composer_writing_assist: number;
@@ -169,6 +174,9 @@ export function exportUserSnapshot(
         openai_key_ciphertext: string | null;
         openai_key_iv: string | null;
         openai_key_tag: string | null;
+        anthropic_key_ciphertext: string | null;
+        anthropic_key_iv: string | null;
+        anthropic_key_tag: string | null;
       }
     | undefined;
   const settings: BackupUserSettings | undefined = user
@@ -200,6 +208,20 @@ export function exportUserSnapshot(
                   ciphertext: user.openai_key_ciphertext,
                   iv: user.openai_key_iv,
                   tag: user.openai_key_tag,
+                },
+                userKey
+              ),
+            }
+          : {}),
+        ...(user.anthropic_key_ciphertext &&
+        user.anthropic_key_iv &&
+        user.anthropic_key_tag
+          ? {
+              anthropicApiKey: decryptText(
+                {
+                  ciphertext: user.anthropic_key_ciphertext,
+                  iv: user.anthropic_key_iv,
+                  tag: user.anthropic_key_tag,
                 },
                 userKey
               ),
@@ -289,8 +311,10 @@ export function exportUserSnapshot(
       createdAt: conversation.created_at,
       updatedAt: conversation.updated_at,
       messages: messages.map((message) => {
-        const provider: "local" | "openai" | undefined =
-          message.provider === "local" || message.provider === "openai"
+        const provider: ProviderName | undefined =
+          message.provider === "local" ||
+          message.provider === "openai" ||
+          message.provider === "anthropic"
             ? message.provider
             : undefined;
         const botId: string | undefined = message.bot_id ?? undefined;
@@ -391,7 +415,14 @@ export function importUserSnapshot(
       typeof settings.openAiApiKey === "string" && settings.openAiApiKey.length > 0
         ? settings.openAiApiKey
         : null;
+    const anthropicApiKey =
+      typeof settings.anthropicApiKey === "string" && settings.anthropicApiKey.length > 0
+        ? settings.anthropicApiKey
+        : null;
     const encryptedOpenAiKey = openAiApiKey ? encryptText(openAiApiKey, userKey) : null;
+    const encryptedAnthropicKey = anthropicApiKey
+      ? encryptText(anthropicApiKey, userKey)
+      : null;
     db.prepare(`
       UPDATE users
       SET
@@ -417,11 +448,16 @@ export function importUserSnapshot(
         dev_memories_text = ?,
         openai_key_ciphertext = ?,
         openai_key_iv = ?,
-        openai_key_tag = ?
+        openai_key_tag = ?,
+        anthropic_key_ciphertext = ?,
+        anthropic_key_iv = ?,
+        anthropic_key_tag = ?
       WHERE id = ?
     `).run(
       settings.theme === "light" || settings.theme === "dark" ? settings.theme : "system",
-      settings.preferredProvider === "openai" ? "openai" : "local",
+      settings.preferredProvider === "openai" || settings.preferredProvider === "anthropic"
+        ? settings.preferredProvider
+        : "local",
       settings.providerLocked ? 1 : 0,
       settings.autoMemory ? 1 : 0,
       settings.composerWritingAssist ? 1 : 0,
@@ -449,6 +485,9 @@ export function importUserSnapshot(
       encryptedOpenAiKey?.ciphertext ?? null,
       encryptedOpenAiKey?.iv ?? null,
       encryptedOpenAiKey?.tag ?? null,
+      encryptedAnthropicKey?.ciphertext ?? null,
+      encryptedAnthropicKey?.iv ?? null,
+      encryptedAnthropicKey?.tag ?? null,
       userId
     );
   }
@@ -541,7 +580,9 @@ export function importUserSnapshot(
     );
     for (const message of conversation.messages) {
       const providerValue =
-        message.provider === "local" || message.provider === "openai"
+        message.provider === "local" ||
+        message.provider === "openai" ||
+        message.provider === "anthropic"
           ? message.provider
           : null;
       const botIdValue =

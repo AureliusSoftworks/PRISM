@@ -5,6 +5,7 @@ import {
   checkLocalModelHostStatus,
   embedTextLocal,
   getAuxiliaryProvider,
+  AnthropicProvider,
   LocalOllamaProvider,
   OpenAiProvider,
   openAiModelUsesMaxCompletionTokens,
@@ -71,6 +72,21 @@ describe("selectProvider", () => {
       const provider = selectProvider("openai", "sk-test-key");
       assert.ok(provider instanceof OpenAiProvider);
       assert.equal(provider.name, "openai");
+    });
+  });
+
+  describe("ANTHROPIC mode", () => {
+    it("throws with a clear message when no key is available", () => {
+      assert.throws(
+        () => selectProvider("anthropic"),
+        /Anthropic is selected but no API key is available/
+      );
+    });
+
+    it("returns AnthropicProvider when a key is present", () => {
+      const provider = selectProvider("anthropic", undefined, undefined, "sk-ant-test-key");
+      assert.ok(provider instanceof AnthropicProvider);
+      assert.equal(provider.name, "anthropic");
     });
   });
 });

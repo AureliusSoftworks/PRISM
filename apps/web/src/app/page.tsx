@@ -2364,7 +2364,25 @@ function selectedRowTextColor(
   return ensureContrast(rowAccent, selectedFill, 4.5);
 }
 
-type Provider = "local" | "openai";
+type Provider = "local" | "openai" | "anthropic";
+function isProvider(value: unknown): value is Provider {
+  return value === "local" || value === "openai" || value === "anthropic";
+}
+const PROVIDER_SEQUENCE: readonly Provider[] = ["local", "openai", "anthropic"];
+function nextProvider(provider: Provider): Provider {
+  const index = PROVIDER_SEQUENCE.indexOf(provider);
+  return PROVIDER_SEQUENCE[(index + 1) % PROVIDER_SEQUENCE.length] ?? "local";
+}
+function providerShortLabel(provider: Provider): string {
+  if (provider === "local") return "LOCAL";
+  if (provider === "anthropic") return "CLAUDE";
+  return "OPENAI";
+}
+function providerDisplayLabel(provider: Provider): string {
+  if (provider === "local") return "Local";
+  if (provider === "anthropic") return "Anthropic";
+  return "OpenAI";
+}
 type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images" | "memories" | "command-center";
 type MemoryPanelScope = "bot" | "default" | "session" | "all";
@@ -2892,7 +2910,7 @@ interface CoffeeGroupState {
   /** When `auto`, new sessions pick a random generated topic server-side. */
   topicSelectionMode?: CoffeeTopicSelectionMode;
   /** Server-persisted Coffee model picker per provider. Empty/missing = Auto. */
-  modelChoiceByProvider?: { local?: string; openai?: string };
+  modelChoiceByProvider?: { local?: string; openai?: string; anthropic?: string };
   moodSummary?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -3285,10 +3303,9 @@ const CHAT_MODE_USER_ANCHOR_FADE_CONTINUE_MS = 5200;
 const CHAT_MODE_USER_ANCHOR_FADE_FINAL_OPACITY = 0.05;
 const CHAT_MODE_INTERRUPTION_FOLLOWUP_DELAY_MS = 700;
 const CHAT_MODE_EPHEMERAL_TICK_MS = 120;
-// Significantly slower reveal cadence to keep the typing effect readable.
-const CHAT_MODE_WORD_REVEAL_MS = 600;
-const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 1000;
-const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_DOT_STEP_MS * 3;
+const CHAT_MODE_WORD_REVEAL_MS = 140;
+const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 140;
+const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_DOT_STEP_MS * 4;
 const CHAT_MODE_ELLIPSIS_TOKEN_PATTERN = /^(?:\.\.\.|…)\s*$/;
 const CHAT_MODE_FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/;
 const CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN = /```[^\n\r]*\r?\n([\s\S]*?)```/g;
@@ -3320,11 +3337,11 @@ const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_P
 const CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT = 0.6;
 const CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE = 34;
 const CHAT_MODE_MOOD_WORD_REVEAL_MS: Record<MessageMoodKey, number> = {
-  joyful: 420,
-  warm: 520,
+  joyful: 95,
+  warm: 115,
   neutral: CHAT_MODE_WORD_REVEAL_MS,
-  guarded: 720,
-  strained: 860,
+  guarded: 170,
+  strained: 210,
 };
 const DEFAULT_CHAT_STARTUP_SUMMARY = "Type a message below to start the conversation.";
 const CHAT_MODE_LINE_DISSOLVE_STAGGER_MS = 140;
@@ -3924,7 +3941,7 @@ const STATUS_LABEL: Record<StatusTag, string> = {
 
 function getMessageStatus(msg: Message): StatusTag | null {
   if (msg.role === "user") return "human";
-  if (msg.provider === "openai") return "online";
+  if (msg.provider === "openai" || msg.provider === "anthropic") return "online";
   if (msg.provider === "local") return "local";
   // Pre-existing assistant messages without a provider record: no indicator.
   return null;
@@ -4528,6 +4545,7 @@ interface UserSettings {
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
   hasOpenAiApiKey: boolean;
+  hasAnthropicApiKey: boolean;
   ollamaModel: string;
   /** Server OLLAMA_AUXILIARY_MODEL — Prism internal LLM when not overridden below. */
   ollamaAuxiliaryModel: string;
@@ -5137,11 +5155,16 @@ function coffeeModelScopeKey(
 }
 
 function createDefaultChatModelChoiceByProvider(): Record<Provider, string> {
-  return { local: AUTO_MODEL_CHOICE, openai: AUTO_MODEL_CHOICE };
+  return {
+    local: AUTO_MODEL_CHOICE,
+    openai: AUTO_MODEL_CHOICE,
+    anthropic: AUTO_MODEL_CHOICE,
+  };
 }
 
 const NO_LOCAL_IMAGE_MODEL_CHOICE = "__prism_no_local_image__";
 const ONLINE_MODEL_FALLBACK_ID = "gpt-4o-mini";
+const ANTHROPIC_MODEL_FALLBACK_ID = "claude-sonnet-4-6";
 const BOT_TEMPERATURE_DEFAULT = 0.7;
 const BOT_TEMPERATURE_MIN = 0;
 const BOT_TEMPERATURE_MAX = 1.2;
@@ -5417,7 +5440,7 @@ function parseCommandCenterModelChoice(
   const providerRaw = normalized.slice(0, separatorIndex).trim().toLowerCase();
   const modelId = normalized.slice(separatorIndex + 1).trim();
   if (!modelId) return null;
-  if (providerRaw !== "local" && providerRaw !== "openai") return null;
+  if (!isProvider(providerRaw)) return null;
   return {
     provider: providerRaw,
     modelId,
@@ -5533,8 +5556,19 @@ function modelOptionsForProvider(
       ? preferPrimaryLocalModelEntries(catalog.local)
       : [{ id: fallbackId, label: fallbackId, provider: "local", isDefault: true }];
   }
-  return catalog?.online.length
-    ? catalog.online
+  const onlineOptions = (catalog?.online ?? []).filter(
+    (model) => model.provider === provider
+  );
+  if (onlineOptions.length > 0) {
+    return onlineOptions;
+  }
+  return provider === "anthropic"
+    ? [{
+        id: ANTHROPIC_MODEL_FALLBACK_ID,
+        label: "Claude Sonnet 4.6",
+        provider: "anthropic",
+        isDefault: true,
+      }]
     : [{
         id: ONLINE_MODEL_FALLBACK_ID,
         label: "GPT 4o Mini",
@@ -5621,7 +5655,7 @@ function allBotCustomizerModelOptions(
   settings: UserSettings | null
 ): ModelCatalogEntry[] {
   const seen = new Set<string>();
-  return (["local", "openai"] as const)
+  return (["local", "openai", "anthropic"] as const)
     .flatMap((provider) => modelOptionsForProvider(catalog, settings, provider))
     .filter((model) => {
       if (seen.has(model.id)) return false;
@@ -5642,6 +5676,20 @@ function includeSelectedModelOption(
     ...options,
     { id: choice, label: choice, provider },
   ];
+}
+
+function uniqueModelOptions(options: ModelCatalogEntry[]): ModelCatalogEntry[] {
+  const seen = new Set<string>();
+  return options.filter((model) => {
+    const key = `${model.provider}:${model.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function inferOnlineProviderForModelId(modelId: string): Provider {
+  return modelId.trim().toLowerCase().startsWith("claude-") ? "anthropic" : "openai";
 }
 
 function blendToward(value: number, target: number, amount: number): number {
@@ -10397,9 +10445,11 @@ function ComposerModelPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const autoOptionLabel = "Auto";
   const autoOptionMeta =
-    provider === "openai"
-      ? "Bot default online model"
-      : "Bot default local model";
+    provider === "local"
+      ? "Bot default local model"
+      : provider === "anthropic"
+        ? "Bot default Anthropic model"
+        : "Bot default online model";
   const autoMetaShown = autoOptionMetaOverride ?? autoOptionMeta;
   const selectedModel =
     (value === AUTO_MODEL_CHOICE
@@ -14737,6 +14787,7 @@ function HomeContent(): React.JSX.Element {
     prompts: string[];
   } | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [anthropicKey, setAnthropicKey] = useState("");
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [comfyUiModelsPayload, setComfyUiModelsPayload] = useState<{
     configured: boolean;
@@ -15073,6 +15124,7 @@ function HomeContent(): React.JSX.Element {
     useState<Record<Provider, string>>({
       local: AUTO_MODEL_CHOICE,
       openai: AUTO_MODEL_CHOICE,
+      anthropic: AUTO_MODEL_CHOICE,
     });
   /** Per-session Coffee header model picks (LOCAL + ONLINE slots). */
   const [coffeeModelChoiceByProvider, setCoffeeModelChoiceByProvider] =
@@ -15105,6 +15157,7 @@ function HomeContent(): React.JSX.Element {
     useState<Record<Provider, string>>({
       local: AUTO_MODEL_CHOICE,
       openai: AUTO_MODEL_CHOICE,
+      anthropic: AUTO_MODEL_CHOICE,
     });
   // Do not sync this from `settings.preferred*ImageModel`: "Auto" in the header means
   // "follow the chain" (picker → bot → account default in Settings → catalog). Copying
@@ -16021,6 +16074,8 @@ function HomeContent(): React.JSX.Element {
     setSettingsAboutModalOpen(false);
     setSettingsHostsModalOpen(false);
     setSettingsDefaultsModalOpen(false);
+    setOpenAiKey("");
+    setAnthropicKey("");
     setChangePasswordModalOpen(false);
     setChangePasswordNew("");
     setChangePasswordConfirm("");
@@ -16817,7 +16872,7 @@ function HomeContent(): React.JSX.Element {
    */
   const effectivePreferredProvider = useMemo<Provider>(() => {
     if (activeBot?.online_enabled === 0) return "local";
-    return settings?.preferredProvider === "openai" ? "openai" : "local";
+    return settings?.preferredProvider ?? "local";
   }, [activeBot, settings?.preferredProvider]);
   /** Chat Images panel: visual bot is often null for Prism-default chats; use conversation locks instead. */
   const chatScopedGalleryBotId = useMemo(() => {
@@ -16928,7 +16983,7 @@ function HomeContent(): React.JSX.Element {
       : 0;
   const imageGenLocalInflight =
     activeImageGenInflightCount > 0 &&
-    (activeImageGenUiContext?.provider ?? effectivePreferredProvider) !== "openai";
+    (activeImageGenUiContext?.provider ?? effectivePreferredProvider) === "local";
 
   useEffect(() => {
     if (activeImageGenInflightCount <= 0) {
@@ -17102,8 +17157,7 @@ function HomeContent(): React.JSX.Element {
       const sandboxTitle = detail?.title?.trim();
       return sandboxTitle && sandboxTitle.length > 0 ? sandboxTitle : null;
     }
-    const modelProvider: Provider =
-      effectivePreferredProvider === "openai" ? "openai" : "local";
+    const modelProvider: Provider = effectivePreferredProvider;
     const rawModelChoice = chatModelChoiceByProvider[modelProvider];
     const visibleModelChoice = visibleModelChoiceForProvider(
       settings,
@@ -17126,6 +17180,7 @@ function HomeContent(): React.JSX.Element {
     detail?.title,
     modelCatalog,
     settings,
+    effectivePreferredProvider,
     view,
   ]);
   const shouldShowHeaderConversationTitle = Boolean(headerConversationTitle);
@@ -17161,12 +17216,17 @@ function HomeContent(): React.JSX.Element {
     [modelCatalog, settings]
   );
   const hubPreferredOnlineOptions = useMemo(
-    () =>
-      includeSelectedModelOption(
-        availableModelOptionsForProvider(modelCatalog, settings, "openai"),
-        normalizeModelChoice(settings?.preferredOnlineModel),
-        "openai"
-      ),
+    () => {
+      const choice = normalizeModelChoice(settings?.preferredOnlineModel);
+      return includeSelectedModelOption(
+        uniqueModelOptions([
+          ...availableModelOptionsForProvider(modelCatalog, settings, "openai"),
+          ...availableModelOptionsForProvider(modelCatalog, settings, "anthropic"),
+        ]),
+        choice,
+        inferOnlineProviderForModelId(choice)
+      );
+    },
     [modelCatalog, settings]
   );
   const prismInternalLlmCallOptions = useMemo(
@@ -17195,6 +17255,8 @@ function HomeContent(): React.JSX.Element {
     const lockedByActiveBot = activeBot?.online_enabled === 0;
     const isLocal = effectivePreferredProvider === "local";
     const providerDisabled = !settings || lockedByActiveBot;
+    const activeProviderLabel = providerDisplayLabel(effectivePreferredProvider);
+    const nextProviderLabel = providerDisplayLabel(nextProvider(effectivePreferredProvider));
     const lockTitle = lockedByActiveBot
       ? `🔒 Locked to LOCAL — ${activeBot?.name ?? "this bot"} is set to Offline only.`
       : null;
@@ -17214,18 +17276,16 @@ function HomeContent(): React.JSX.Element {
           data-protected={lockedByActiveBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
-            void switchProvider(isLocal ? "openai" : "local");
+            void switchProvider(nextProvider(effectivePreferredProvider));
           }}
           aria-label={
             lockTitle
               ? `${lockTitle} Toggle disabled.`
-              : isLocal
-                ? "Response mode: Local. Click to switch to Online."
-                : "Response mode: Online. Click to switch to Local."
+              : `Response mode: ${activeProviderLabel}. Click to switch to ${nextProviderLabel}.`
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={lockTitle ?? (isLocal ? "Switch to Online" : "Switch to Local")}
+          title={lockTitle ?? `Switch to ${nextProviderLabel}`}
           disabled={providerDisabled}
         >
           <span
@@ -17249,7 +17309,7 @@ function HomeContent(): React.JSX.Element {
               />
             )}
             <span className={styles.modeThumbLabel}>
-              {isLocal ? "LOCAL" : "ONLINE"}
+              {providerShortLabel(effectivePreferredProvider)}
             </span>
           </span>
         </button>
@@ -17267,6 +17327,9 @@ function HomeContent(): React.JSX.Element {
   const renderCoffeeProviderModeToggle = (): React.ReactNode => {
     const lockedByProtectedBot = coffeeAnyOfflineProtected;
     const isLocal = lockedByProtectedBot ? true : coffeeProvider === "local";
+    const effectiveCoffeeProvider = lockedByProtectedBot ? "local" : coffeeProvider;
+    const activeProviderLabel = providerDisplayLabel(effectiveCoffeeProvider);
+    const nextProviderLabel = providerDisplayLabel(nextProvider(effectiveCoffeeProvider));
     const providerDisabled = !settings || lockedByProtectedBot;
     const lockTitle = lockedByProtectedBot
       ? "🔒 Locked to LOCAL — at least one seated bot is set to Offline only."
@@ -17287,19 +17350,17 @@ function HomeContent(): React.JSX.Element {
           data-protected={lockedByProtectedBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
-            setCoffeeProvider(isLocal ? "openai" : "local");
+            setCoffeeProvider(nextProvider(effectiveCoffeeProvider));
             setCoffeeProviderTouched(true);
           }}
           aria-label={
             lockTitle
               ? `${lockTitle} Toggle disabled.`
-              : isLocal
-                ? "Response mode: Local. Click to switch to Online."
-                : "Response mode: Online. Click to switch to Local."
+              : `Response mode: ${activeProviderLabel}. Click to switch to ${nextProviderLabel}.`
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={lockTitle ?? (isLocal ? "Switch to Online" : "Switch to Local")}
+          title={lockTitle ?? `Switch to ${nextProviderLabel}`}
           disabled={providerDisabled}
         >
           <span
@@ -17323,7 +17384,7 @@ function HomeContent(): React.JSX.Element {
               />
             )}
             <span className={styles.modeThumbLabel}>
-              {isLocal ? "LOCAL" : "ONLINE"}
+              {providerShortLabel(effectiveCoffeeProvider)}
             </span>
           </span>
         </button>
@@ -17333,8 +17394,8 @@ function HomeContent(): React.JSX.Element {
   const renderCoffeeHeaderModelPicker = (): React.ReactNode => {
     if (!settings) return null;
     const lockedByProtectedBot = coffeeAnyOfflineProtected;
-    const isLocal = lockedByProtectedBot ? true : coffeeProvider === "local";
-    const modelProvider: Provider = isLocal ? "local" : "openai";
+    const modelProvider: Provider = lockedByProtectedBot ? "local" : coffeeProvider;
+    const isLocal = modelProvider === "local";
     const rawModelChoice = coffeeModelChoiceByProvider[modelProvider];
     const visibleModelChoice = visibleModelChoiceForProvider(
       settings,
@@ -17358,14 +17419,16 @@ function HomeContent(): React.JSX.Element {
         options={modelOptions}
         provider={modelProvider}
         disabled={coffeeBusy || coffeeAutoBusy}
-        title={`Coffee model (${isLocal ? "LOCAL" : "ONLINE"} — overrides each seated bot)`}
-        ariaLabel={`Coffee session model for ${isLocal ? "local" : "online"} replies`}
+        title={`Coffee model (${providerShortLabel(modelProvider)} — overrides each seated bot)`}
+        ariaLabel={`Coffee session model for ${
+          isLocal ? "local" : providerDisplayLabel(modelProvider)
+        } replies`}
         placement="down"
         minMenuWidthPx={180}
         autoOptionMetaOverride={
           modelProvider === "local"
             ? "Per-bot default local model when Auto"
-            : "Per-bot default online model when Auto"
+            : `Per-bot default ${providerDisplayLabel(modelProvider)} model when Auto`
         }
         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
           settings,
@@ -17378,8 +17441,8 @@ function HomeContent(): React.JSX.Element {
     // Use the effective provider so the picker shows local options whenever
     // the active bot is locked offline-only — even if the user's saved
     // global preference is online.
-    const isLocal = effectivePreferredProvider !== "openai";
-    const modelProvider: Provider = isLocal ? "local" : "openai";
+    const modelProvider: Provider = effectivePreferredProvider;
+    const isLocal = modelProvider === "local";
     const rawModelChoice = chatModelChoiceByProvider[modelProvider];
     const visibleModelChoice = visibleModelChoiceForProvider(
       settings,
@@ -17408,8 +17471,10 @@ function HomeContent(): React.JSX.Element {
           options={modelOptions}
           provider={modelProvider}
           disabled={!settings || pendingReplyVisible}
-          title={`Model for ${isLocal ? "LOCAL" : "ONLINE"} replies`}
-          ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
+          title={`Model for ${providerShortLabel(modelProvider)} replies`}
+          ariaLabel={`Model for ${
+            isLocal ? "local" : providerDisplayLabel(modelProvider)
+          } replies`}
           placement="down"
           minMenuWidthPx={180}
           autoOptionMetaOverride={composeAutoOptionMetaLine(
@@ -17457,7 +17522,7 @@ function HomeContent(): React.JSX.Element {
     // on `imagePanelBot` independently when scope === "bot"; for now the
     // chat-context lock covers the common case (user opens Images while
     // chatting with a protected bot).
-    const isLocal = effectivePreferredProvider !== "openai";
+    const isLocal = effectivePreferredProvider === "local";
     const modelProvider: Provider = isLocal ? "local" : "openai";
     const rawChoice = imageGenModelChoiceByProvider[modelProvider];
     const trimmedChoice = rawChoice?.trim() ?? "";
@@ -18786,11 +18851,11 @@ function HomeContent(): React.JSX.Element {
     useState<Record<Provider, string>>(createDefaultChatModelChoiceByProvider());
   useEffect(() => {
     if (storyProviderTouched) return;
-    if (user?.preferredProvider === "openai" || user?.preferredProvider === "local") {
+    if (isProvider(user?.preferredProvider)) {
       setStoryProvider(user.preferredProvider);
       return;
     }
-    if (settings?.preferredProvider === "openai" || settings?.preferredProvider === "local") {
+    if (isProvider(settings?.preferredProvider)) {
       setStoryProvider(settings.preferredProvider);
     }
   }, [settings?.preferredProvider, storyProviderTouched, user?.preferredProvider]);
@@ -19125,11 +19190,11 @@ function HomeContent(): React.JSX.Element {
   // global setting; once they manually toggle, we stop syncing from
   // their saved preference for the rest of the session so a global
   // change made elsewhere doesn't quietly stomp the in-shell choice.
-  const [coffeeProvider, setCoffeeProvider] = useState<"local" | "openai">("local");
+  const [coffeeProvider, setCoffeeProvider] = useState<Provider>("local");
   const [coffeeProviderTouched, setCoffeeProviderTouched] = useState<boolean>(false);
   useEffect(() => {
     if (coffeeProviderTouched) return;
-    if (user?.preferredProvider === "openai" || user?.preferredProvider === "local") {
+    if (isProvider(user?.preferredProvider)) {
       setCoffeeProvider(user.preferredProvider);
     }
   }, [user?.preferredProvider, coffeeProviderTouched]);
@@ -19460,7 +19525,7 @@ function HomeContent(): React.JSX.Element {
     storySelectedBotIds.length <= STORY_BOT_COUNT_MAX;
   const storyAnyOfflineProtected = storySelectedBots.some((bot) => bot.online_enabled === 0);
   const storyEffectiveProvider: Provider = storyAnyOfflineProtected ? "local" : storyProvider;
-  const storyModelProvider: Provider = storyEffectiveProvider === "openai" ? "openai" : "local";
+  const storyModelProvider: Provider = storyEffectiveProvider;
   const storyBaselineLocalModelOption =
     modelCatalog?.local.find((model) => model.id === REQUIRED_PRIMARY_LOCAL_MODEL_ID) ?? {
       id: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
@@ -19891,8 +19956,12 @@ function HomeContent(): React.JSX.Element {
       const payload = {
         local: choice.local && choice.local !== AUTO_MODEL_CHOICE ? choice.local : "",
         openai: choice.openai && choice.openai !== AUTO_MODEL_CHOICE ? choice.openai : "",
+        anthropic:
+          choice.anthropic && choice.anthropic !== AUTO_MODEL_CHOICE
+            ? choice.anthropic
+            : "",
       };
-      const dedupeKey = `${groupId}|${payload.local}|${payload.openai}`;
+      const dedupeKey = `${groupId}|${payload.local}|${payload.openai}|${payload.anthropic}`;
       if (lastPersistedCoffeeModelChoiceRef.current === dedupeKey) return;
       lastPersistedCoffeeModelChoiceRef.current = dedupeKey;
       void api(`/api/coffee/groups/${encodeURIComponent(groupId)}`, {
@@ -19969,10 +20038,11 @@ function HomeContent(): React.JSX.Element {
     // and the previous "coffee:none" carry-over so swapping groups never leaks.
     if (groupId) {
       const fromGroup = coffeeGroups.find((g) => g.id === groupId)?.modelChoiceByProvider;
-      if (fromGroup && (fromGroup.local || fromGroup.openai)) {
+      if (fromGroup && (fromGroup.local || fromGroup.openai || fromGroup.anthropic)) {
         stored = {
           local: fromGroup.local ?? AUTO_MODEL_CHOICE,
           openai: fromGroup.openai ?? AUTO_MODEL_CHOICE,
+          anthropic: fromGroup.anthropic ?? AUTO_MODEL_CHOICE,
         };
         coffeeModelChoiceByScopeRef.current.set(nextKey, { ...stored });
       }
@@ -20003,7 +20073,7 @@ function HomeContent(): React.JSX.Element {
     if (!settings) return undefined;
     const locked = coffeeAnyOfflineProtected;
     const effectiveProv = locked ? "local" : coffeeProvider;
-    const modelProvider: Provider = effectiveProv === "openai" ? "openai" : "local";
+    const modelProvider: Provider = effectiveProv;
     const visible = visibleModelChoiceForProvider(
       settings,
       coffeeModelChoiceByProvider[modelProvider]
@@ -21438,6 +21508,8 @@ function HomeContent(): React.JSX.Element {
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
         : [],
+      hasOpenAiApiKey: d.settings.hasOpenAiApiKey === true,
+      hasAnthropicApiKey: d.settings.hasAnthropicApiKey === true,
       secondaryOllamaHost: secondaryHost,
       comfyUiHost,
       preferredLocalModel:
@@ -24463,8 +24535,13 @@ function HomeContent(): React.JSX.Element {
       if (trimmedKey.length > 0) {
         body.openAiApiKey = trimmedKey;
       }
+      const trimmedAnthropicKey = anthropicKey.trim();
+      if (trimmedAnthropicKey.length > 0) {
+        body.anthropicApiKey = trimmedAnthropicKey;
+      }
       await api("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
       setOpenAiKey("");
+      setAnthropicKey("");
       const { comfyUiHost: savedComfyHost } = await refreshSettings();
       await refreshModels(savedComfyHost);
       await refreshSecondaryOllamaStatus();
@@ -24553,9 +24630,10 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function clearSavedKey() {
+  async function clearSavedKey(provider: "openai" | "anthropic") {
+    const providerName = provider === "openai" ? "OpenAI" : "Anthropic";
     const confirmed = window.confirm(
-      "Remove the saved OpenAI API key from this account? Chat will fall back to the server default if one is configured."
+      `Remove the saved ${providerName} API key from this account? Chat will fall back to the server default if one is configured.`
     );
     if (!confirmed) return;
     setBusy(true);
@@ -24563,9 +24641,17 @@ function HomeContent(): React.JSX.Element {
     try {
       await api("/api/settings", {
         method: "PATCH",
-        body: JSON.stringify({ openAiApiKey: null }),
+        body: JSON.stringify(
+          provider === "openai"
+            ? { openAiApiKey: null }
+            : { anthropicApiKey: null }
+        ),
       });
-      setOpenAiKey("");
+      if (provider === "openai") {
+        setOpenAiKey("");
+      } else {
+        setAnthropicKey("");
+      }
       await refreshSettings();
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Clear failed.");
@@ -29900,11 +29986,11 @@ function HomeContent(): React.JSX.Element {
         body.botId = scopeBotId;
       }
       const { localModelId, openAiModelId } = resolveImagesPanelImageModels();
-      // Match Images panel + chat header: anything other than explicit "openai"
-      // counts as LOCAL for routing (same as `preferredProvider !== "openai"`).
+      // Image generation has only LOCAL/OpenAI lanes. Anthropic chat mode maps
+      // to the OpenAI image lane while keeping chat replies on Anthropic.
       // Uses the EFFECTIVE provider so the body honors the offline-only lock
       // when the active chat bot is protected.
-      if (effectivePreferredProvider === "openai") {
+      if (effectivePreferredProvider !== "local") {
         body.preferredProvider = "openai";
         body.model = openAiModelId;
       } else if (settings) {
@@ -30241,7 +30327,9 @@ function HomeContent(): React.JSX.Element {
     const ollamaState = desktopFirstRunHealth?.services?.ollama ?? "unknown";
     const qdrantReady = qdrantState === "ready" || qdrantState === "configured";
     const ollamaReady = ollamaState === "ready" || ollamaState === "configured";
-    const openAiConfigured = Boolean(settings?.hasOpenAiApiKey);
+    const onlineKeyConfigured = Boolean(
+      settings?.hasOpenAiApiKey || settings?.hasAnthropicApiKey
+    );
     const backupConfigured = Boolean(
       settings?.secondaryOllamaHost?.trim() || settings?.comfyUiHost?.trim()
     );
@@ -30265,10 +30353,10 @@ function HomeContent(): React.JSX.Element {
         state: qdrantReady ? "done" : "pending",
       },
       {
-        id: "openai",
-        title: "OpenAI key (optional)",
-        subtitle: "Add your key for online models if you want them.",
-        state: openAiConfigured ? "done" : "optional",
+        id: "api-keys",
+        title: "API key (optional)",
+        subtitle: "Add an OpenAI or Anthropic key for online models.",
+        state: onlineKeyConfigured ? "done" : "optional",
       },
       {
         id: "extras",
@@ -30327,7 +30415,7 @@ function HomeContent(): React.JSX.Element {
             <h4>{activeStep.title}</h4>
             <p>{activeStep.subtitle}</p>
             <div className={styles.desktopChecklistStepActions}>
-              {activeStep.id === "openai" || activeStep.id === "extras" ? (
+              {activeStep.id === "api-keys" || activeStep.id === "extras" ? (
                 <button
                   type="button"
                   className={styles.linkButton}
@@ -34464,8 +34552,8 @@ function HomeContent(): React.JSX.Element {
                     </option>
                   ))}
                   {onlineModelOptions.map((model) => (
-                    <option key={`openai:${model.id}`} value={`openai:${model.id}`}>
-                      {`ONLINE - ${model.label}`}
+                    <option key={`${model.provider}:${model.id}`} value={`${model.provider}:${model.id}`}>
+                      {`${providerShortLabel(model.provider)} - ${model.label}`}
                     </option>
                   ))}
                 </select>
@@ -34883,7 +34971,6 @@ function HomeContent(): React.JSX.Element {
           {settings && (
             <form className={styles.form} onSubmit={saveSettings}>
               {/* Preferred name omitted: bots learn the user’s name organically; avoid a separate “override” field. */}
-              <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
               <button
                 type="button"
                 className={styles.settingsInfoButton}
@@ -34891,8 +34978,8 @@ function HomeContent(): React.JSX.Element {
                 aria-expanded={settingsHostsModalOpen ? "true" : undefined}
                 onClick={() => setSettingsHostsModalOpen(true)}
               >
-                <strong>Extra servers</strong>
-                <span>Second Ollama host and ComfyUI URL for local image workflows.</span>
+                <strong>API keys &amp; servers</strong>
+                <span>OpenAI, Anthropic, second Ollama host, and ComfyUI URL.</span>
               </button>
               <button
                 type="button"
@@ -34940,16 +35027,6 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 </div>
               </section>
-              {settings.hasOpenAiApiKey && (
-                <button
-                  type="button"
-                  className={styles.linkButton}
-                  onClick={() => void clearSavedKey()}
-                  disabled={busy}
-                >
-                  Clear saved key
-                </button>
-              )}
               <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
               <label
                 className={styles.checkbox}
@@ -35003,7 +35080,7 @@ function HomeContent(): React.JSX.Element {
                             ? "Required"
                             : model.provider === "local"
                             ? `Offline${model.hostLabel ? ` · ${model.hostLabel}` : ""}`
-                            : "Online"}
+                            : providerDisplayLabel(model.provider)}
                         </small>
                       </label>
                     );
@@ -35028,19 +35105,19 @@ function HomeContent(): React.JSX.Element {
                 className={styles.settingsAboutModal}
                 role="dialog"
                 aria-modal="true"
-                aria-label="Extra servers"
+                aria-label="API keys and servers"
                 onClick={(event) => event.stopPropagation()}
               >
                 <header className={styles.settingsAboutModalHeader}>
                   <div>
                     <span>Connection setup</span>
-                    <h4>Extra servers</h4>
-                    <p>Add optional backup compute hosts for local responses and image workflows.</p>
+                    <h4>API keys &amp; servers</h4>
+                    <p>Add online model keys and optional backup compute hosts.</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setSettingsHostsModalOpen(false)}
-                    aria-label="Close extra servers"
+                    aria-label="Close API keys and servers"
                   >
                     ×
                   </button>
@@ -35049,9 +35126,57 @@ function HomeContent(): React.JSX.Element {
                   {settings && (
                     <div className={`${styles.form} ${styles.formInModal}`}>
                       <p className={styles.settingsHostsLead}>
-                        Prism works without these fields. Add them only when you want a fallback Ollama
-                        endpoint or an external ComfyUI image server.
+                        Prism works without these fields. Add keys for online text models, or add
+                        hosts for a fallback Ollama endpoint and external ComfyUI image server.
                       </p>
+                      <label className={styles.settingsHostField}>
+                        <span className={styles.settingsHostLabel}>OpenAI API key</span>
+                        <input
+                          type="password"
+                          placeholder={
+                            settings.hasOpenAiApiKey
+                              ? "Saved (leave blank to keep; type to replace)"
+                              : "sk-..."
+                          }
+                          value={openAiKey}
+                          onChange={(event) => setOpenAiKey(event.target.value)}
+                          autoComplete="off"
+                        />
+                        {settings.hasOpenAiApiKey && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => void clearSavedKey("openai")}
+                            disabled={busy}
+                          >
+                            Clear saved OpenAI key
+                          </button>
+                        )}
+                      </label>
+                      <label className={styles.settingsHostField}>
+                        <span className={styles.settingsHostLabel}>Anthropic API key</span>
+                        <input
+                          type="password"
+                          placeholder={
+                            settings.hasAnthropicApiKey
+                              ? "Saved (leave blank to keep; type to replace)"
+                              : "sk-ant-..."
+                          }
+                          value={anthropicKey}
+                          onChange={(event) => setAnthropicKey(event.target.value)}
+                          autoComplete="off"
+                        />
+                        {settings.hasAnthropicApiKey && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => void clearSavedKey("anthropic")}
+                            disabled={busy}
+                          >
+                            Clear saved Anthropic key
+                          </button>
+                        )}
+                      </label>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>Second Ollama host</span>
                         <span
@@ -35231,7 +35356,7 @@ function HomeContent(): React.JSX.Element {
                           </select>
                         </label>
                         <label>
-                          Preferred online model (ONLINE hub)
+                          Preferred online model (OpenAI / Anthropic hub)
                           <select
                             value={normalizeModelChoice(settings.preferredOnlineModel)}
                             onChange={(event) => {
@@ -35251,8 +35376,8 @@ function HomeContent(): React.JSX.Element {
                               Auto — first visible model in your catalog
                             </option>
                             {hubPreferredOnlineOptions.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
+                              <option key={`${model.provider}:${model.id}`} value={model.id}>
+                                {model.label} · {providerDisplayLabel(model.provider)}
                               </option>
                             ))}
                           </select>
@@ -35742,9 +35867,12 @@ function HomeContent(): React.JSX.Element {
           "local"
         );
         const onlineModelOptions = includeSelectedModelOption(
-          botCustomizerModelOptionsForProvider(modelCatalog, settings, "openai"),
+          uniqueModelOptions([
+            ...botCustomizerModelOptionsForProvider(modelCatalog, settings, "openai"),
+            ...botCustomizerModelOptionsForProvider(modelCatalog, settings, "anthropic"),
+          ]),
           visibleOnlineModelChoice,
-          "openai"
+          inferOnlineProviderForModelId(visibleOnlineModelChoice)
         );
         const visibleLocalImageModelChoice = (() => {
           if (newBotLocalImageModel !== AUTO_MODEL_CHOICE && newBotLocalImageModel.trim()) {
@@ -36309,8 +36437,9 @@ function HomeContent(): React.JSX.Element {
                                 disabled={!newBotOnlineEnabled}
                               >
                                 {onlineModelOptions.map((model) => (
-                                  <option key={model.id} value={model.id}>
-                                    {model.label}{model.isDefault ? " (default)" : ""}
+                                  <option key={`${model.provider}:${model.id}`} value={model.id}>
+                                    {model.label} · {providerDisplayLabel(model.provider)}
+                                    {model.isDefault ? " (default)" : ""}
                                   </option>
                                 ))}
                               </select>
@@ -36528,8 +36657,9 @@ function HomeContent(): React.JSX.Element {
                               disabled={!newBotOnlineEnabled}
                             >
                               {onlineModelOptions.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.label}{model.isDefault ? " (default)" : ""}
+                                <option key={`${model.provider}:${model.id}`} value={model.id}>
+                                  {model.label} · {providerDisplayLabel(model.provider)}
+                                  {model.isDefault ? " (default)" : ""}
                                 </option>
                               ))}
                             </select>
@@ -37030,8 +37160,9 @@ function HomeContent(): React.JSX.Element {
         const hasLocalImageModels = localImageModelCatalogEntries.length > 0;
         // Honors the offline-only lock — when the active chat bot is
         // protected, we evaluate "can generate?" against LOCAL only.
+        const imageGenerationUsesOpenAi = effectivePreferredProvider !== "local";
         const canGenerate =
-          effectivePreferredProvider === "openai" ||
+          imageGenerationUsesOpenAi ||
           (effectivePreferredProvider === "local" && hasLocalImageModels);
         const imageKeywordEditorLayout =
           viewportWidth >= IMAGE_KEYWORD_EDITOR_SIDE_LAYOUT_MIN_VIEWPORT_PX &&
@@ -37187,13 +37318,13 @@ function HomeContent(): React.JSX.Element {
             } as React.CSSProperties)
           : undefined;
         const genOverlayPrimary =
-          effectivePreferredProvider === "openai"
+          imageGenerationUsesOpenAi
             ? "Creating image…"
             : imageGenLocalInflight && imageGenWarmupHintVisible
               ? "Warming up…"
               : "Generating…";
         const genOverlaySecondary =
-          effectivePreferredProvider === "openai"
+          imageGenerationUsesOpenAi
             ? "Contacting OpenAI…"
             : imageGenLocalInflight && imageGenWarmupHintVisible
               ? "The image engine may still be loading the model into GPU memory — first runs after idle often take 1–5 minutes."
@@ -37201,7 +37332,7 @@ function HomeContent(): React.JSX.Element {
         const genModelLine = (() => {
           if (!settings) return null;
           const { localModelId, openAiModelId } = resolveImagesPanelImageModels();
-          const useOpenAi = effectivePreferredProvider === "openai";
+          const useOpenAi = imageGenerationUsesOpenAi;
           const headerPick = useOpenAi
             ? imageGenModelChoiceByProvider.openai?.trim() ?? ""
             : imageGenModelChoiceByProvider.local?.trim() ?? "";
@@ -42196,6 +42327,8 @@ function HomeContent(): React.JSX.Element {
   const renderStoryProviderModeToggle = (): React.ReactNode => {
     const lockedByProtectedBot = storyAnyOfflineProtected;
     const isLocal = storyEffectiveProvider === "local";
+    const activeProviderLabel = providerDisplayLabel(storyEffectiveProvider);
+    const nextProviderLabel = providerDisplayLabel(nextProvider(storyEffectiveProvider));
     const providerDisabled =
       !settings || storyBusy || storySession?.status === "generating" || lockedByProtectedBot;
     const lockTitle = lockedByProtectedBot
@@ -42219,19 +42352,17 @@ function HomeContent(): React.JSX.Element {
           data-protected={lockedByProtectedBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
-            setStoryProvider(isLocal ? "openai" : "local");
+            setStoryProvider(nextProvider(storyEffectiveProvider));
             setStoryProviderTouched(true);
           }}
           aria-label={
             lockTitle
               ? `${lockTitle} Toggle disabled.`
-              : isLocal
-                ? "Story generation mode: Local. Click to switch to Online."
-                : "Story generation mode: Online. Click to switch to Local."
+              : `Story generation mode: ${activeProviderLabel}. Click to switch to ${nextProviderLabel}.`
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={lockTitle ?? (isLocal ? "Switch Story generation to Online" : "Switch Story generation to Local")}
+          title={lockTitle ?? `Switch Story generation to ${nextProviderLabel}`}
           disabled={providerDisabled}
         >
           <span
@@ -42251,7 +42382,7 @@ function HomeContent(): React.JSX.Element {
                 aria-hidden="true"
               />
             )}
-            <span className={styles.modeThumbLabel}>{isLocal ? "LOCAL" : "ONLINE"}</span>
+            <span className={styles.modeThumbLabel}>{providerShortLabel(storyEffectiveProvider)}</span>
           </span>
         </button>
       </div>
@@ -42273,9 +42404,9 @@ function HomeContent(): React.JSX.Element {
         options={storyModelOptions}
         provider={storyModelProvider}
         disabled={!settings || storyBusy || storySession?.status === "generating"}
-        title={`Story model (${storyEffectiveProvider === "local" ? "LOCAL" : "ONLINE"})`}
+        title={`Story model (${providerShortLabel(storyEffectiveProvider)})`}
         ariaLabel={`Story generation model for ${
-          storyEffectiveProvider === "local" ? "local" : "online"
+          storyEffectiveProvider === "local" ? "local" : providerDisplayLabel(storyEffectiveProvider)
         } episodes`}
         placement="down"
         minMenuWidthPx={180}
@@ -43302,8 +43433,8 @@ function HomeContent(): React.JSX.Element {
                   // Use the effective provider so this picker also reflects
                   // the offline-only lock when the active chat bot is
                   // protected (matches what `renderProviderModeToggle` shows).
-                  const isLocal = effectivePreferredProvider !== "openai";
-                  const modelProvider: Provider = isLocal ? "local" : "openai";
+                  const modelProvider: Provider = effectivePreferredProvider;
+                  const isLocal = modelProvider === "local";
                   const rawModelChoice = chatModelChoiceByProvider[modelProvider];
                   const visibleModelChoice = visibleModelChoiceForProvider(
                     settings,
@@ -43328,8 +43459,10 @@ function HomeContent(): React.JSX.Element {
                         options={modelOptions}
                         provider={modelProvider}
                         disabled={!settings || pendingReply}
-                        title={`Model for ${isLocal ? "LOCAL" : "ONLINE"} replies`}
-                        ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
+                        title={`Model for ${providerShortLabel(modelProvider)} replies`}
+                        ariaLabel={`Model for ${
+                          isLocal ? "local" : providerDisplayLabel(modelProvider)
+                        } replies`}
                         autoOptionMetaOverride={composeAutoOptionMetaLine(
                           modelCatalog,
                           settings,

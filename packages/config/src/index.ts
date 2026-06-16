@@ -148,6 +148,7 @@ export interface AppConfig {
   ollamaAuxiliaryModel: string;
   ollamaEmbeddingModel: string;
   openAiApiKey?: string;
+  anthropicApiKey?: string;
   qdrantUrl: string;
   /** Optional default ComfyUI base URL from env (per-user setting overrides in practice). */
   comfyUiHost: string;
@@ -171,6 +172,7 @@ export function getAppConfig(): AppConfig {
     ollamaAuxiliaryModel: process.env.OLLAMA_AUXILIARY_MODEL ?? "llama3.2",
     ollamaEmbeddingModel: process.env.OLLAMA_EMBEDDING_MODEL ?? "nomic-embed-text",
     openAiApiKey: process.env.OPENAI_API_KEY,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     qdrantUrl: normalizeQdrantUrl(process.env.QDRANT_URL),
     comfyUiHost: normalizeComfyUiHost(process.env.COMFYUI_HOST),
   };

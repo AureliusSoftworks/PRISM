@@ -10,12 +10,12 @@ export const REQUIRED_LOCAL_MODELS = {
 export const REQUIRED_PRIMARY_LOCAL_MODEL_ID = REQUIRED_LOCAL_MODELS.chat;
 const REQUIRED_LOCAL_MODEL_ID_SET = new Set<string>(Object.values(REQUIRED_LOCAL_MODELS));
 
-export type AutoModelProvider = "local" | "openai";
+export type AutoModelProvider = "local" | "openai" | "anthropic";
 
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
   local: readonly { id: string }[];
-  online: readonly { id: string }[];
+  online: readonly { id: string; provider?: AutoModelProvider }[];
 }
 
 export interface ResolveAutoModelInput {
@@ -48,9 +48,12 @@ function firstVisibleModelId(ids: string[], hidden: Set<string>): string | null 
 }
 
 function providerCatalogIds(catalog: CatalogShapeForAuto, provider: AutoModelProvider): string[] {
-  return provider === "local"
-    ? catalog.local.map((model) => model.id)
-    : catalog.online.map((model) => model.id);
+  if (provider === "local") {
+    return catalog.local.map((model) => model.id);
+  }
+  return catalog.online
+    .filter((model) => (model.provider ?? "openai") === provider)
+    .map((model) => model.id);
 }
 
 export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoModel {

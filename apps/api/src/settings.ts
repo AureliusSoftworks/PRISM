@@ -19,7 +19,7 @@ import { sanitizeHiddenModelIds } from "./model-routing.ts";
  * client) cannot happen again.
  */
 export type Theme = "light" | "dark" | "system";
-export type Provider = "local" | "openai";
+export type Provider = "local" | "openai" | "anthropic";
 
 const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
   "localhost",
@@ -87,6 +87,7 @@ export interface NextSettings {
    *     leave the stored key alone
    */
   openAiKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
+  anthropicKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
 }
 
 function isTheme(value: unknown): value is Theme {
@@ -94,7 +95,7 @@ function isTheme(value: unknown): value is Theme {
 }
 
 function isProvider(value: unknown): value is Provider {
-  return value === "local" || value === "openai";
+  return value === "local" || value === "openai" || value === "anthropic";
 }
 
 function normalizeOllamaHostValue(input: string): string {
@@ -310,6 +311,10 @@ export function sanitizeOpenAiKeyInput(input: string): string {
   return value;
 }
 
+export function sanitizeAnthropicKeyInput(input: string): string {
+  return sanitizeOpenAiKeyInput(input);
+}
+
 function isWrappedInMatchedQuotes(value: string): boolean {
   if (value.length < 2) return false;
   const first = value[0];
@@ -421,6 +426,16 @@ export function resolveNextSettings(
     openAiKeyIntent = { action: "clear" };
   }
 
+  let anthropicKeyIntent: NextSettings["anthropicKeyIntent"] = { action: "keep" };
+  if (typeof body.anthropicApiKey === "string") {
+    const sanitized = sanitizeAnthropicKeyInput(body.anthropicApiKey);
+    if (sanitized.length > 0) {
+      anthropicKeyIntent = { action: "replace", plaintext: sanitized };
+    }
+  } else if (body.anthropicApiKey === null) {
+    anthropicKeyIntent = { action: "clear" };
+  }
+
   return {
     displayName,
     theme,
@@ -442,5 +457,6 @@ export function resolveNextSettings(
     prismDefaultLlmModel,
     prismImageToolLlmModel,
     openAiKeyIntent,
+    anthropicKeyIntent,
   };
 }

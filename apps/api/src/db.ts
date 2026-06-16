@@ -22,7 +22,7 @@ export interface DbUserRecord {
   wrappedUserKeyIv: string;
   wrappedUserKeyTag: string;
   theme: "light" | "dark" | "system";
-  preferredProvider: "local" | "openai";
+  preferredProvider: "local" | "openai" | "anthropic";
   providerLocked: number;
   autoMemory: number;
   autoSwitchModel: number;
@@ -35,6 +35,9 @@ export interface DbUserRecord {
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
   openAiKeyTag: string | null;
+  anthropicKeyCiphertext: string | null;
+  anthropicKeyIv: string | null;
+  anthropicKeyTag: string | null;
   createdAt: string;
   lastActiveAt: string;
 }
@@ -111,6 +114,9 @@ export function createDatabase(): DatabaseSync {
       openai_key_ciphertext TEXT,
       openai_key_iv TEXT,
       openai_key_tag TEXT,
+      anthropic_key_ciphertext TEXT,
+      anthropic_key_iv TEXT,
+      anthropic_key_tag TEXT,
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
     );
@@ -502,6 +508,24 @@ export function createDatabase(): DatabaseSync {
     db.exec(
       "ALTER TABLE users ADD COLUMN fallback_model_message_stripe INTEGER NOT NULL DEFAULT 1;"
     );
+  }
+  const hasAnthropicKeyCiphertext = userColumns.some(
+    (column) => column.name === "anthropic_key_ciphertext"
+  );
+  if (!hasAnthropicKeyCiphertext) {
+    db.exec("ALTER TABLE users ADD COLUMN anthropic_key_ciphertext TEXT;");
+  }
+  const hasAnthropicKeyIv = userColumns.some(
+    (column) => column.name === "anthropic_key_iv"
+  );
+  if (!hasAnthropicKeyIv) {
+    db.exec("ALTER TABLE users ADD COLUMN anthropic_key_iv TEXT;");
+  }
+  const hasAnthropicKeyTag = userColumns.some(
+    (column) => column.name === "anthropic_key_tag"
+  );
+  if (!hasAnthropicKeyTag) {
+    db.exec("ALTER TABLE users ADD COLUMN anthropic_key_tag TEXT;");
   }
   db.exec(`
     UPDATE users

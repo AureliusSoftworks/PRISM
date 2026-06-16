@@ -191,6 +191,7 @@ import type { AskQuestionPayload, SentGeneratedImagePayload } from "./prismTool.
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 
 export type UserRole = "user";
+export type LlmProviderName = "local" | "openai" | "anthropic";
 
 export interface UserProfile {
   id: string;
@@ -199,7 +200,7 @@ export interface UserProfile {
   role: UserRole;
   createdAt: string;
   theme: "light" | "dark" | "system";
-  preferredProvider: "local" | "openai";
+  preferredProvider: LlmProviderName;
 }
 
 export interface AuthSession {
@@ -214,7 +215,7 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
   /** Provider that generated the message (assistant only; undefined for user/system). */
-  provider?: "local" | "openai";
+  provider?: LlmProviderName;
   /** Concrete model id used for this assistant reply, when recorded. */
   model?: string;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
@@ -373,6 +374,7 @@ export interface CoffeeGroupEvent {
 export interface CoffeeGroupModelChoice {
   local?: string;
   openai?: string;
+  anthropic?: string;
 }
 
 export interface CoffeeGroup {
@@ -605,7 +607,7 @@ export interface ChatCompanionPreferences {
  * explicit model choice while keeping the rest of the companion contract stable.
  */
 export interface SandboxRuntimeControls {
-  preferredProvider?: "local" | "openai";
+  preferredProvider?: LlmProviderName;
   modelOverride?: string;
   botId?: string | null;
 }
@@ -622,7 +624,7 @@ export interface ChatRequestPayload {
   /** Advanced controls for runtime routing. */
   sandboxControls?: SandboxRuntimeControls;
   /** Back-compat top-level advanced knobs. Chat honors explicit modelOverride only. */
-  preferredProvider?: "local" | "openai";
+  preferredProvider?: LlmProviderName;
   modelOverride?: string;
   botId?: string | null;
   /**
@@ -768,7 +770,7 @@ export interface CoffeeContinueRequest {
    * Per-request provider override for the next bot reply. Per-bot online
    * gating still wins — a bot with `online_enabled=0` falls back to local.
    */
-  preferredProvider?: "local" | "openai";
+  preferredProvider?: LlmProviderName;
   /**
    * Optional director-mode pick. When present, the server asks this seated bot
    * to speak instead of running the automatic speaker router.
@@ -800,7 +802,7 @@ export interface CoffeeTurnRequest {
    * saved preference for this turn only. Per-bot online gating still
    * wins — a bot with `online_enabled=0` always falls back to local.
    */
-  preferredProvider?: "local" | "openai";
+  preferredProvider?: LlmProviderName;
   /** The user's outgoing message. */
   message: string;
   /** Optional player-interruption metadata from the live table reveal state. */
@@ -836,7 +838,7 @@ export interface CoffeePollCreateResponse {
 
 /** Request body for `POST /api/coffee/sessions/:id/polls/:pollId/collect`. */
 export interface CoffeePollCollectVotesRequest {
-  preferredProvider?: "local" | "openai";
+  preferredProvider?: LlmProviderName;
   sessionRemainingMs?: number | null;
   /** Optional player vote to record before bot deliberation is advanced. */
   optionIndex?: number;

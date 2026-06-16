@@ -23,7 +23,7 @@ import {
   type StoryTranscriptEntry,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
-import type { GenerateOptions, LlmProvider } from "./providers.ts";
+import type { GenerateOptions, LlmProvider, ProviderName } from "./providers.ts";
 
 export interface StoryBotProfile {
   id: string;
@@ -42,13 +42,13 @@ export interface StoryBotProfile {
 export interface CreateStorySessionInput {
   botIds: string[];
   premise?: string | null;
-  provider: "local" | "openai";
+  provider: ProviderName;
   model?: string | null;
 }
 
 export interface StoryGenerationInput {
   provider: LlmProvider;
-  providerName: "local" | "openai";
+  providerName: ProviderName;
   model: string;
   bots: StoryBotProfile[];
   premise?: string | null;

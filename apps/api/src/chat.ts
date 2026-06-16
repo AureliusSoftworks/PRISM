@@ -24,11 +24,13 @@ import {
   getAuxiliaryProvider,
   LocalOllamaProvider,
   selectProvider,
+  ANTHROPIC_DEFAULT_MODEL,
   OPENAI_DEFAULT_MODEL,
   resolveAuxiliaryOllamaModel,
   type GenerateOptions,
   type LlmProvider,
   type ProviderMessage,
+  type ProviderName,
 } from "./providers.ts";
 import {
   RECENT_WINDOW_SIZE,
@@ -143,7 +145,7 @@ export interface ProcessChatMessageResult {
       | "generic_refusal_text"
       | "generic_refusal_error"
       | "generic_refusal_soft_error";
-    primaryProvider: "local" | "openai";
+    primaryProvider: ProviderName;
     primaryModel: string;
     fallbackModel: string;
   };
@@ -276,7 +278,15 @@ function describePromptMessages(messages: ProviderMessage[]): string {
 
 function describeRequestedModel(provider: LlmProvider, botOverrides?: GenerateOptions): string {
   return normalizeModelValue(botOverrides?.model) ??
-    (provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
+    (provider.name === "local"
+      ? config.ollamaModel
+      : provider.name === "anthropic"
+        ? ANTHROPIC_DEFAULT_MODEL
+        : OPENAI_DEFAULT_MODEL);
+}
+
+function imagePreferredProviderForTextProvider(provider: ProviderName): "local" | "openai" {
+  return provider === "local" ? "local" : "openai";
 }
 
 const NEGATIVE_PHRASES = [
@@ -709,7 +719,7 @@ async function generateOrganicTextBoundaryReply(args: {
   userMessage?: string;
 }): Promise<{
   assistantReplyRaw: string;
-  providerNameUsed: "local" | "openai";
+  providerNameUsed: ProviderName;
   modelUsed: string;
 }> {
   const provider = args.boundaryProvider;
@@ -947,7 +957,7 @@ async function generateWithLenientLocalFallback(args: {
   userMessage?: string;
 }): Promise<{
   assistantReplyRaw: string;
-  providerNameUsed: "local" | "openai";
+  providerNameUsed: ProviderName;
   modelUsed: string;
   fallbackInvocation?: {
     trigger:
@@ -956,7 +966,7 @@ async function generateWithLenientLocalFallback(args: {
       | "generic_refusal_text"
       | "generic_refusal_error"
       | "generic_refusal_soft_error";
-    primaryProvider: "local" | "openai";
+    primaryProvider: ProviderName;
     primaryModel: string;
     fallbackModel: string;
   };
@@ -964,7 +974,7 @@ async function generateWithLenientLocalFallback(args: {
   const requestedModel = normalizeModelValue(args.botOverrides?.model);
   const primaryModel =
     requestedModel ??
-    (args.provider.name === "local" ? config.ollamaModel : OPENAI_DEFAULT_MODEL);
+    describeRequestedModel(args.provider, args.botOverrides);
   const fallbackModel = normalizeModelValue(args.lenientLocalFallbackModel);
   const canAttemptFallback =
     fallbackModel !== null &&
@@ -987,7 +997,7 @@ async function generateWithLenientLocalFallback(args: {
       | "generic_refusal_soft_error"
   ): Promise<{
     assistantReplyRaw: string;
-    providerNameUsed: "local" | "openai";
+    providerNameUsed: ProviderName;
     modelUsed: string;
     fallbackInvocation?: {
       trigger:
@@ -996,7 +1006,7 @@ async function generateWithLenientLocalFallback(args: {
         | "generic_refusal_text"
         | "generic_refusal_error"
         | "generic_refusal_soft_error";
-      primaryProvider: "local" | "openai";
+      primaryProvider: ProviderName;
       primaryModel: string;
       fallbackModel: string;
     };
@@ -1526,9 +1536,10 @@ export async function refreshConversationTitle(
 }
 
 export interface UserChatSettings {
-  preferredProvider: "local" | "openai";
+  preferredProvider: ProviderName;
   autoMemory: boolean;
   openAiApiKey?: string;
+  anthropicApiKey?: string;
   /** User-provided name from Settings for bot-side personal addressing. */
   userDisplayName?: string;
   /**
@@ -3394,7 +3405,8 @@ export async function processChatMessage(
   const provider = selectProvider(
     effectiveProvider,
     settings.openAiApiKey,
-    settings.secondaryOllamaHost
+    settings.secondaryOllamaHost,
+    settings.anthropicApiKey
   );
   const auxiliaryProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel);
 
@@ -3556,7 +3568,7 @@ export async function processChatMessage(
         startChatImageBackgroundJob({
           db,
           job: acq.job,
-          preferredProvider: effectiveProvider,
+          preferredProvider: imagePreferredProviderForTextProvider(effectiveProvider),
           openAiApiKey: settings.openAiApiKey,
           prefs: assistantImagePrefsForTurn(settings),
           prismDefaultLlmModel: settings.prismDefaultLlmModel,
@@ -4002,7 +4014,7 @@ export async function processChatMessage(
       startChatImageBackgroundJob({
         db,
         job: acq.job,
-        preferredProvider: effectiveProvider,
+        preferredProvider: imagePreferredProviderForTextProvider(effectiveProvider),
         openAiApiKey: settings.openAiApiKey,
         prefs: assistantImagePrefsForTurn(settings),
         prismDefaultLlmModel: settings.prismDefaultLlmModel,
