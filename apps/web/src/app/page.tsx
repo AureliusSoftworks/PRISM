@@ -4727,12 +4727,82 @@ interface SecondaryOllamaStatus {
   reachable: boolean;
   modelCount: number;
 }
+interface ProviderApiKeyAuthStatus {
+  configured: boolean;
+  authenticated: boolean;
+  source: "account" | "server" | "none";
+  status: "missing" | "authenticated" | "invalid" | "unreachable";
+  modelCount: number;
+  message?: string;
+}
+interface ProviderApiKeyStatusPayload {
+  openai: ProviderApiKeyAuthStatus;
+  anthropic: ProviderApiKeyAuthStatus;
+}
 type SecondaryOllamaUiStatus =
   | "unconfigured"
   | "checking"
   | "connected"
   | "empty"
   | "error";
+
+type ProviderKeyPillStatus = "idle" | "ready" | "unsaved" | "checking" | "connected" | "error";
+
+function providerKeyPillStatus(
+  hasAccountKey: boolean,
+  hasDraftKey: boolean,
+  checking: boolean,
+  status?: ProviderApiKeyAuthStatus
+): ProviderKeyPillStatus {
+  if (hasDraftKey) return "unsaved";
+  if (checking && (hasAccountKey || status?.configured)) return "checking";
+  if (status?.authenticated) return "connected";
+  if (status?.status === "invalid" || status?.status === "unreachable") return "error";
+  if (hasAccountKey || status?.configured) return "ready";
+  return "idle";
+}
+
+function providerKeyPillText(
+  label: string,
+  hasAccountKey: boolean,
+  hasDraftKey: boolean,
+  checking: boolean,
+  status?: ProviderApiKeyAuthStatus
+): string {
+  if (hasDraftKey) return `${label} unsaved`;
+  if (checking && (hasAccountKey || status?.configured)) return `${label} checking`;
+  if (status?.authenticated) {
+    return status.source === "server" ? `${label} server auth` : `${label} authenticated`;
+  }
+  if (status?.status === "invalid") return `${label} invalid key`;
+  if (status?.status === "unreachable") return `${label} check failed`;
+  if (hasAccountKey) return `${label} saved`;
+  if (status?.source === "server" && status.configured) return `${label} server key`;
+  return `${label} unset`;
+}
+
+function providerKeyPillTitle(
+  label: string,
+  hasAccountKey: boolean,
+  status?: ProviderApiKeyAuthStatus
+): string {
+  if (!status?.configured) {
+    return hasAccountKey
+      ? `${label} key is saved but has not been checked yet.`
+      : `${label} key is not configured.`;
+  }
+  if (status.authenticated) {
+    const source = status.source === "server" ? "server environment key" : "saved account key";
+    return `${label} authenticated with the ${source}.`;
+  }
+  if (status.status === "invalid") {
+    return status.message || `${label} rejected this key.`;
+  }
+  if (status.status === "unreachable") {
+    return status.message || `Could not check ${label} key status.`;
+  }
+  return `${label} key is saved but has not been checked yet.`;
+}
 interface Bot {
   id: string;
   name: string;
@@ -14813,6 +14883,9 @@ function HomeContent(): React.JSX.Element {
   const [secondaryOllamaStatusChecking, setSecondaryOllamaStatusChecking] = useState(false);
   const [comfyUiStatus, setComfyUiStatus] = useState<SecondaryOllamaStatus | null>(null);
   const [comfyUiStatusChecking, setComfyUiStatusChecking] = useState(false);
+  const [providerKeyStatus, setProviderKeyStatus] =
+    useState<ProviderApiKeyStatusPayload | null>(null);
+  const [providerKeyStatusChecking, setProviderKeyStatusChecking] = useState(false);
   const [openAiKey, setOpenAiKey] = useState("");
   const [desktopFirstRunChecklistOpen, setDesktopFirstRunChecklistOpen] = useState(false);
   const [desktopFirstRunChecklistStepIndex, setDesktopFirstRunChecklistStepIndex] = useState(0);
@@ -16670,6 +16743,12 @@ function HomeContent(): React.JSX.Element {
     [resolvedTheme]
   );
   const settingsModalBackdropClassName = `${styles.settingsAboutModalBackdrop} ${themeClass}`;
+
+  useEffect(() => {
+    if (panel !== "settings") return;
+    void refreshProviderKeyStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel, settings?.hasOpenAiApiKey, settings?.hasAnthropicApiKey]);
 
   useEffect(() => {
     if (panel !== "settings") return;
@@ -21704,6 +21783,36 @@ function HomeContent(): React.JSX.Element {
       setComfyUiStatusChecking(false);
     }
   }
+  async function refreshProviderKeyStatus() {
+    setProviderKeyStatusChecking(true);
+    try {
+      const d = await api<{ status: ProviderApiKeyStatusPayload }>(
+        "/api/settings/provider-key-status"
+      );
+      setProviderKeyStatus(d.status);
+    } catch {
+      setProviderKeyStatus({
+        openai: {
+          configured: Boolean(settings?.hasOpenAiApiKey),
+          authenticated: false,
+          source: settings?.hasOpenAiApiKey ? "account" : "none",
+          status: settings?.hasOpenAiApiKey ? "unreachable" : "missing",
+          modelCount: 0,
+          message: "Could not check OpenAI key status.",
+        },
+        anthropic: {
+          configured: Boolean(settings?.hasAnthropicApiKey),
+          authenticated: false,
+          source: settings?.hasAnthropicApiKey ? "account" : "none",
+          status: settings?.hasAnthropicApiKey ? "unreachable" : "missing",
+          modelCount: 0,
+          message: "Could not check Anthropic key status.",
+        },
+      });
+    } finally {
+      setProviderKeyStatusChecking(false);
+    }
+  }
   async function refreshMemories() {
     const d = await api<{
       memories: UserMemory[];
@@ -24557,6 +24666,7 @@ function HomeContent(): React.JSX.Element {
       setAnthropicKey("");
       const { comfyUiHost: savedComfyHost } = await refreshSettings();
       await refreshModels(savedComfyHost);
+      await refreshProviderKeyStatus();
       await refreshSecondaryOllamaStatus();
       await refreshComfyUiStatus();
       return true;
@@ -24680,6 +24790,7 @@ function HomeContent(): React.JSX.Element {
         setAnthropicKey("");
       }
       await refreshSettings();
+      await refreshProviderKeyStatus();
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Clear failed.");
     } finally {
@@ -30198,6 +30309,32 @@ function HomeContent(): React.JSX.Element {
           : comfyUiUiStatus === "error"
               ? "Not reachable"
               : "Optional";
+  const openAiKeyPillStatus = providerKeyPillStatus(
+    settings?.hasOpenAiApiKey === true,
+    openAiKey.trim().length > 0,
+    providerKeyStatusChecking,
+    providerKeyStatus?.openai
+  );
+  const anthropicKeyPillStatus = providerKeyPillStatus(
+    settings?.hasAnthropicApiKey === true,
+    anthropicKey.trim().length > 0,
+    providerKeyStatusChecking,
+    providerKeyStatus?.anthropic
+  );
+  const openAiKeyPillText = providerKeyPillText(
+    "OpenAI",
+    settings?.hasOpenAiApiKey === true,
+    openAiKey.trim().length > 0,
+    providerKeyStatusChecking,
+    providerKeyStatus?.openai
+  );
+  const anthropicKeyPillText = providerKeyPillText(
+    "Anthropic",
+    settings?.hasAnthropicApiKey === true,
+    anthropicKey.trim().length > 0,
+    providerKeyStatusChecking,
+    providerKeyStatus?.anthropic
+  );
   const shouldShowPreAuthChecklist = !user && !hasAnyAccounts && !preAuthChecklistComplete;
   const shouldShowAuthForm = !user && (hasAnyAccounts || preAuthChecklistComplete);
 
@@ -35007,11 +35144,25 @@ function HomeContent(): React.JSX.Element {
                   </p>
                 </div>
                 <div className={styles.settingsStatusPills} aria-label="Connection status">
-                  <span data-status={settings.hasOpenAiApiKey ? "ready" : "idle"}>
-                    OpenAI {settings.hasOpenAiApiKey ? "saved" : "unset"}
+                  <span
+                    data-status={openAiKeyPillStatus}
+                    title={providerKeyPillTitle(
+                      "OpenAI",
+                      settings.hasOpenAiApiKey,
+                      providerKeyStatus?.openai
+                    )}
+                  >
+                    {openAiKeyPillText}
                   </span>
-                  <span data-status={settings.hasAnthropicApiKey ? "ready" : "idle"}>
-                    Anthropic {settings.hasAnthropicApiKey ? "saved" : "unset"}
+                  <span
+                    data-status={anthropicKeyPillStatus}
+                    title={providerKeyPillTitle(
+                      "Anthropic",
+                      settings.hasAnthropicApiKey,
+                      providerKeyStatus?.anthropic
+                    )}
+                  >
+                    {anthropicKeyPillText}
                   </span>
                   <span data-status={secondaryOllamaUiStatus}>{secondaryOllamaStatusText}</span>
                   <span data-status={comfyUiUiStatus}>{comfyUiStatusText}</span>

@@ -51,6 +51,17 @@ export interface LocalModelHostStatus {
   modelCount: number;
 }
 
+export type ApiKeyAuthSource = "account" | "server" | "none";
+
+export interface ProviderApiKeyAuthStatus {
+  configured: boolean;
+  authenticated: boolean;
+  source: ApiKeyAuthSource;
+  status: "missing" | "authenticated" | "invalid" | "unreachable";
+  modelCount: number;
+  message?: string;
+}
+
 export interface LlmProvider {
   name: ProviderName;
   generateResponse(
@@ -432,6 +443,76 @@ async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> 
   }
 }
 
+function missingProviderApiKeyStatus(): ProviderApiKeyAuthStatus {
+  return {
+    configured: false,
+    authenticated: false,
+    source: "none",
+    status: "missing",
+    modelCount: 0,
+  };
+}
+
+function failedProviderApiKeyStatus(
+  source: ApiKeyAuthSource,
+  status: "invalid" | "unreachable",
+  message?: string
+): ProviderApiKeyAuthStatus {
+  return {
+    configured: true,
+    authenticated: false,
+    source,
+    status,
+    modelCount: 0,
+    ...(message ? { message } : {}),
+  };
+}
+
+function authenticatedProviderApiKeyStatus(
+  source: ApiKeyAuthSource,
+  modelCount: number
+): ProviderApiKeyAuthStatus {
+  return {
+    configured: true,
+    authenticated: true,
+    source,
+    status: "authenticated",
+    modelCount,
+  };
+}
+
+function failedAuthStatusFromResponseStatus(status: number): "invalid" | "unreachable" {
+  return status === 401 || status === 403 ? "invalid" : "unreachable";
+}
+
+export async function checkOpenAiApiKeyStatus(
+  openAiApiKey?: string,
+  source: ApiKeyAuthSource = openAiApiKey?.trim() ? "account" : "none"
+): Promise<ProviderApiKeyAuthStatus> {
+  const key = openAiApiKey?.trim();
+  if (!key) return missingProviderApiKeyStatus();
+  try {
+    const response = await fetch("https://api.openai.com/v1/models", {
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      const detail = await readOpenAiErrorMessage(response);
+      return failedProviderApiKeyStatus(
+        source,
+        failedAuthStatusFromResponseStatus(response.status),
+        detail || `Provider returned ${response.status}.`
+      );
+    }
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: unknown }>;
+    };
+    return authenticatedProviderApiKeyStatus(source, payload.data?.length ?? 0);
+  } catch {
+    return failedProviderApiKeyStatus(source, "unreachable", "Could not reach OpenAI.");
+  }
+}
+
 async function discoverAnthropicModelIds(anthropicApiKey?: string): Promise<string[]> {
   if (!anthropicApiKey) return [];
   try {
@@ -454,6 +535,37 @@ async function discoverAnthropicModelIds(anthropicApiKey?: string): Promise<stri
     );
   } catch {
     return [];
+  }
+}
+
+export async function checkAnthropicApiKeyStatus(
+  anthropicApiKey?: string,
+  source: ApiKeyAuthSource = anthropicApiKey?.trim() ? "account" : "none"
+): Promise<ProviderApiKeyAuthStatus> {
+  const key = anthropicApiKey?.trim();
+  if (!key) return missingProviderApiKeyStatus();
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/models", {
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": ANTHROPIC_API_VERSION,
+      },
+      signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      const detail = await readOpenAiErrorMessage(response);
+      return failedProviderApiKeyStatus(
+        source,
+        failedAuthStatusFromResponseStatus(response.status),
+        detail || `Provider returned ${response.status}.`
+      );
+    }
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: unknown }>;
+    };
+    return authenticatedProviderApiKeyStatus(source, payload.data?.length ?? 0);
+  } catch {
+    return failedProviderApiKeyStatus(source, "unreachable", "Could not reach Anthropic.");
   }
 }
 

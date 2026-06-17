@@ -91,7 +91,9 @@ import {
 import { normalizeMemoryDisplayText } from "./memory-validation.ts";
 import {
   buildModelCatalog,
+  checkAnthropicApiKeyStatus,
   checkLocalModelHostStatus,
+  checkOpenAiApiKeyStatus,
   getAuxiliaryProvider,
   selectProvider,
 } from "./providers.ts";
@@ -2751,6 +2753,31 @@ function buildRoutes(): RouteDefinition[] {
       }
       const status = await checkComfyUiHostStatus(hostToCheck);
       json(ctx.res, 200, { ok: true, status });
+    }),
+    route("GET", "/api/settings/provider-key-status", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const openAiAccountKey = getOpenAiApiKeyForUser(userId, userKey);
+      const anthropicAccountKey = getAnthropicApiKeyForUser(userId, userKey);
+      const openAiKey = openAiAccountKey ?? config.openAiApiKey;
+      const anthropicKey = anthropicAccountKey ?? config.anthropicApiKey;
+      const [openai, anthropic] = await Promise.all([
+        checkOpenAiApiKeyStatus(
+          openAiKey,
+          openAiAccountKey ? "account" : config.openAiApiKey ? "server" : "none"
+        ),
+        checkAnthropicApiKeyStatus(
+          anthropicKey,
+          anthropicAccountKey ? "account" : config.anthropicApiKey ? "server" : "none"
+        ),
+      ]);
+      json(ctx.res, 200, {
+        ok: true,
+        status: {
+          openai,
+          anthropic,
+        },
+      });
     }),
     route("PATCH", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);

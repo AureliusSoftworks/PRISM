@@ -2,6 +2,8 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildModelCatalog,
+  checkAnthropicApiKeyStatus,
+  checkOpenAiApiKeyStatus,
   checkLocalModelHostStatus,
   embedTextLocal,
   getAuxiliaryProvider,
@@ -139,6 +141,98 @@ describe("readOpenAiErrorMessage", () => {
     const detail = await readOpenAiErrorMessage(response);
     assert.ok(detail.length <= 600, `detail length ${detail.length} exceeded cap`);
     assert.ok(detail.endsWith("..."), "expected truncation ellipsis");
+  });
+});
+
+describe("provider API key authentication status", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("reports missing keys without probing the network", async () => {
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+
+    const status = await checkAnthropicApiKeyStatus(undefined);
+
+    assert.equal(called, false);
+    assert.deepEqual(status, {
+      configured: false,
+      authenticated: false,
+      source: "none",
+      status: "missing",
+      modelCount: 0,
+    });
+  });
+
+  it("authenticates Anthropic keys through the Models API", async () => {
+    let apiKeyHeader = "";
+    let versionHeader = "";
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      apiKeyHeader = headers.get("x-api-key") ?? "";
+      versionHeader = headers.get("anthropic-version") ?? "";
+      return new Response(
+        JSON.stringify({ data: [{ id: "claude-sonnet-4-6" }, { id: "claude-opus-4-8" }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const status = await checkAnthropicApiKeyStatus(" sk-ant-test ", "account");
+
+    assert.equal(apiKeyHeader, "sk-ant-test");
+    assert.equal(versionHeader, "2023-06-01");
+    assert.deepEqual(status, {
+      configured: true,
+      authenticated: true,
+      source: "account",
+      status: "authenticated",
+      modelCount: 2,
+    });
+  });
+
+  it("marks provider 401/403 responses as invalid keys", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const status = await checkAnthropicApiKeyStatus("sk-ant-bad", "account");
+
+    assert.equal(status.configured, true);
+    assert.equal(status.authenticated, false);
+    assert.equal(status.source, "account");
+    assert.equal(status.status, "invalid");
+    assert.equal(status.modelCount, 0);
+    assert.equal(status.message, "invalid x-api-key");
+  });
+
+  it("authenticates OpenAI keys with Bearer auth", async () => {
+    let authorization = "";
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      authorization = new Headers(init?.headers).get("authorization") ?? "";
+      return new Response(JSON.stringify({ data: [{ id: "gpt-4o-mini" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const status = await checkOpenAiApiKeyStatus(" sk-test ", "server");
+
+    assert.equal(authorization, "Bearer sk-test");
+    assert.deepEqual(status, {
+      configured: true,
+      authenticated: true,
+      source: "server",
+      status: "authenticated",
+      modelCount: 1,
+    });
   });
 });
 
