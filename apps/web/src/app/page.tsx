@@ -14919,6 +14919,8 @@ function HomeContent(): React.JSX.Element {
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
+  const [askQuestionChangingAnswerAssistantId, setAskQuestionChangingAnswerAssistantId] =
+    useState<string | null>(null);
   const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
     conversationId: string;
     prompts: string[];
@@ -23697,13 +23699,125 @@ function HomeContent(): React.JSX.Element {
     sendValue?: string;
   };
 
-  function handleComposerChipPick(chip: ComposerChip): void {
+  type AskQuestionInteraction = {
+    askQuestion: NonNullable<Message["askQuestion"]>;
+    assistantMessageId: string;
+    status: "unanswered" | "answered";
+    answerMessage: Message | null;
+  };
+
+  function buildAskQuestionChips(
+    askQuestion: NonNullable<Message["askQuestion"]>
+  ): ComposerChip[] {
+    const optionChips = askQuestion.options.map((option, index) => {
+      const cleaned = stripEmojiFromAskQuestionLabel(option.label);
+      const sendValue = cleaned.trim();
+      const fallback = `Option ${index + 1}`;
+      return {
+        id: option.id,
+        label: cleaned || fallback,
+        action: "send" as const,
+        // Preserve the authored option text on send so model behavior stays
+        // consistent with the AskQuestion payload across providers/models.
+        sendValue: sendValue || cleaned || fallback,
+      };
+    });
+    return [
+      ...optionChips,
+      {
+        id: "other",
+        label: "Other",
+        sublabel: "(Explain in chat...)",
+        action: "other",
+      },
+    ];
+  }
+
+  function renderComposerChipContent(
+    chip: ComposerChip,
+    options: { splitAskQuestionLabels: boolean } = { splitAskQuestionLabels: false }
+  ): React.ReactNode {
+    if (chip.sublabel) {
+      return (
+        <span className={styles.conversationStarterChipStack}>
+          <span className={styles.conversationStarterChipPrimary}>{chip.label}</span>
+          <span className={styles.conversationStarterChipSub}>{chip.sublabel}</span>
+        </span>
+      );
+    }
+    if (options.splitAskQuestionLabels && chip.action !== "other") {
+      const { title, detail } = splitAskQuestionOptionHeading(chip.label);
+      if (detail) {
+        return (
+          <span className={styles.conversationStarterChipStack}>
+            <span className={styles.conversationStarterChipPrimary}>{title}</span>
+            <span className={styles.conversationStarterChipSub}>{detail}</span>
+          </span>
+        );
+      }
+    }
+    return chip.label;
+  }
+
+  function getAskQuestionInteractionForMessage(msg: Message): AskQuestionInteraction | null {
+    if (!detail || msg.role !== "assistant") return null;
+    const askQuestion = resolveAssistantAskQuestion(msg);
+    if (
+      !askQuestion ||
+      askQuestion.name !== "AskQuestion" ||
+      askQuestion.options.length !== 3
+    ) {
+      return null;
+    }
+    const messageIndex = detail.messages.findIndex((message) => message.id === msg.id);
+    if (messageIndex < 0) return null;
+    const answerMessage =
+      detail.messages
+        .slice(messageIndex + 1)
+        .find((message) => message.role === "user") ?? null;
+    if (answerMessage) {
+      return {
+        askQuestion,
+        assistantMessageId: msg.id,
+        status: "answered",
+        answerMessage,
+      };
+    }
+    if (pendingAskQuestionState?.assistantMessageId !== msg.id) return null;
+    if (pendingAskQuestionWaitingForReveal) return null;
+    return {
+      askQuestion,
+      assistantMessageId: msg.id,
+      status: "unanswered",
+      answerMessage: null,
+    };
+  }
+
+  function handleComposerChipPick(
+    chip: ComposerChip,
+    options: { replaceMessageId?: string } = {}
+  ): void {
+    if (options.replaceMessageId && chip.action === "other") {
+      const answerMessage = detail?.messages.find(
+        (message) => message.id === options.replaceMessageId
+      );
+      if (answerMessage) {
+        setAskQuestionChangingAnswerAssistantId(null);
+        beginEditMessage(answerMessage);
+      }
+      return;
+    }
     if (chip.action === "other") {
       setAskQuestionComposerRevealed(true);
       requestAnimationFrame(() => draftComposerRef.current?.focus());
       return;
     }
     setConversationStarterPrompts(null);
+    if (options.replaceMessageId) {
+      setAskQuestionChangingAnswerAssistantId(null);
+      void performMessageEdit(options.replaceMessageId, chip.sendValue ?? chip.label);
+      return;
+    }
     const syntheticSubmit = {
       preventDefault: () => {
         /* no-op — used so sendMessage can share the submit pathway */
@@ -23796,30 +23910,9 @@ function HomeContent(): React.JSX.Element {
     if (qa && pendingAskQuestionWaitingForReveal) return null;
     if (qa) {
       const collapsed = askQuestionComposerRevealed;
-      const optionChips = qa.options.map((option, index) => {
-        const cleaned = stripEmojiFromAskQuestionLabel(option.label);
-        const sendValue = cleaned.trim();
-        const fallback = `Option ${index + 1}`;
-        return {
-          id: option.id,
-          label: cleaned || fallback,
-          action: "send" as const,
-          // Preserve the authored option text on send so model behavior stays
-          // consistent with the AskQuestion payload across providers/models.
-          sendValue: sendValue || cleaned || fallback,
-        };
-      });
       return {
         conversationId: id,
-        chips: [
-          ...optionChips,
-          {
-            id: "other",
-            label: "Other",
-            sublabel: "(Explain in chat...)",
-            action: "other",
-          },
-        ],
+        chips: buildAskQuestionChips(qa),
         heading: normalizeAskQuestionText(qa.prompt) || null,
         kind: "askquestion",
         collapsed,
@@ -23849,6 +23942,9 @@ function HomeContent(): React.JSX.Element {
   function renderComposerChipRail(): React.ReactNode {
     const rail = getComposerChipRail();
     if (!rail) return null;
+    if (rail.kind === "askquestion" && viewportWidth > PICKER_MOBILE_BREAKPOINT) {
+      return null;
+    }
 
     if (rail.kind === "askquestion" && rail.collapsed) {
       const rawHex = activeBot?.color?.trim();
@@ -23919,30 +24015,105 @@ function HomeContent(): React.JSX.Element {
             }
             onClick={() => handleComposerChipPick(chip)}
           >
-            {(() => {
-              if (chip.sublabel) {
-                return (
-                  <span className={styles.conversationStarterChipStack}>
-                    <span className={styles.conversationStarterChipPrimary}>{chip.label}</span>
-                    <span className={styles.conversationStarterChipSub}>{chip.sublabel}</span>
-                  </span>
-                );
-              }
-              if (rail.kind === "askquestion" && chip.action !== "other") {
-                const { title, detail } = splitAskQuestionOptionHeading(chip.label);
-                if (detail) {
-                  return (
-                    <span className={styles.conversationStarterChipStack}>
-                      <span className={styles.conversationStarterChipPrimary}>{title}</span>
-                      <span className={styles.conversationStarterChipSub}>{detail}</span>
-                    </span>
-                  );
-                }
-              }
-              return chip.label;
-            })()}
+            {renderComposerChipContent(chip, {
+              splitAskQuestionLabels: rail.kind === "askquestion",
+            })}
           </button>
         ))}
+      </div>
+    );
+  }
+
+  function renderAskQuestionInlineCard(msg: Message): React.ReactNode {
+    if (viewportWidth <= PICKER_MOBILE_BREAKPOINT) return null;
+    const interaction = getAskQuestionInteractionForMessage(msg);
+    if (!interaction) return null;
+
+    const chips = buildAskQuestionChips(interaction.askQuestion);
+    const prompt = normalizeAskQuestionText(interaction.askQuestion.prompt);
+    const answered = interaction.status === "answered";
+    const answerMessage = interaction.answerMessage;
+    const answerEditable =
+      answerMessage !== null && !String(answerMessage.id).startsWith("pending-");
+    const changing =
+      answered &&
+      answerEditable &&
+      askQuestionChangingAnswerAssistantId === interaction.assistantMessageId;
+    const choicesDisabled = pendingReply || (answered && !changing);
+    const answerText = answerMessage?.content.trim() ?? "";
+
+    return (
+      <div
+        className={styles.askQuestionInlineCard}
+        data-ask-question-state={answered ? "answered" : "unanswered"}
+        data-ask-question-changing={changing ? "true" : undefined}
+        role="group"
+        aria-label={answered ? "Answered suggested replies" : "Suggested replies"}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className={styles.askQuestionInlineHeader}>
+          <span className={styles.askQuestionInlineEyebrow}>
+            {answered ? "Answered" : "Choose a reply"}
+          </span>
+          {answered ? (
+            <button
+              type="button"
+              className={styles.askQuestionInlineChangeButton}
+              disabled={pendingReply || !answerEditable}
+              onClick={() => {
+                setAskQuestionChangingAnswerAssistantId((current) =>
+                  current === interaction.assistantMessageId
+                    ? null
+                    : interaction.assistantMessageId
+                );
+              }}
+            >
+              {changing ? "Cancel" : "Change answer"}
+            </button>
+          ) : null}
+        </div>
+        {prompt ? (
+          <p className={styles.askQuestionInlinePrompt}>{prompt}</p>
+        ) : null}
+        {answered ? (
+          <div className={styles.askQuestionInlineAnswer}>
+            <span>Your answer</span>
+            <p>{answerText || "No text recorded."}</p>
+          </div>
+        ) : null}
+        <div
+          className={styles.askQuestionInlineChoices}
+          data-choices-disabled={choicesDisabled ? "true" : undefined}
+        >
+          {chips.map((chip, chipIndex) => (
+            <button
+              key={`${interaction.assistantMessageId}-${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
+              type="button"
+              disabled={choicesDisabled}
+              className={`${styles.conversationStarterChip} ${
+                chip.action === "other" ? styles.conversationStarterChipOther : ""
+              }`}
+              data-chip-kind={chip.action}
+              aria-label={
+                chip.action === "other"
+                  ? changing
+                    ? "Other - edit your answer in chat"
+                    : "Other - explain in chat"
+                  : `Suggested reply: ${chip.sendValue ?? chip.label}`
+              }
+              onClick={() =>
+                handleComposerChipPick(
+                  chip,
+                  changing && answerMessage
+                    ? { replaceMessageId: answerMessage.id }
+                    : {}
+                )
+              }
+            >
+              {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -24153,6 +24324,7 @@ function HomeContent(): React.JSX.Element {
         .join("|")}`
     : null;
   const pendingAskQuestionInteractiveKey = askQuestionInteractive ? pendingAskQuestionKey : null;
+  const askQuestionUsesMobileRail = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
   const composerHiddenByAskQuestion =
     askQuestionInteractive &&
     !askQuestionComposerRevealed;
@@ -24200,10 +24372,13 @@ function HomeContent(): React.JSX.Element {
     askQuestionComposerRevealed,
   ]);
   const askQuestionTailSpaceActive =
+    askQuestionUsesMobileRail &&
     pendingAskQuestionInteractiveKey !== null &&
     !askQuestionComposerRevealed;
   const askQuestionCollapsedBubbleActive =
-    pendingAskQuestionInteractiveKey !== null && askQuestionComposerRevealed;
+    askQuestionUsesMobileRail &&
+    pendingAskQuestionInteractiveKey !== null &&
+    askQuestionComposerRevealed;
   useEffect(() => {
     if (!askQuestionTailSpaceActive) return;
     const el = messagesScrollRef.current;
@@ -24225,6 +24400,7 @@ function HomeContent(): React.JSX.Element {
   }, [askQuestionTailSpaceActive]);
 
   useEffect(() => {
+    if (!askQuestionUsesMobileRail) return;
     if (!pendingAskQuestionInteractiveKey || askQuestionComposerRevealed) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
@@ -24234,10 +24410,11 @@ function HomeContent(): React.JSX.Element {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed]);
+  }, [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed, askQuestionUsesMobileRail]);
 
   const handleAskQuestionOutsidePointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
+      if (!askQuestionUsesMobileRail) return;
       if (!pendingAskQuestionInteractiveKey || askQuestionComposerRevealed) return;
       const target = event.target;
       if (!(target instanceof Node)) return;
@@ -24247,7 +24424,7 @@ function HomeContent(): React.JSX.Element {
       setAskQuestionComposerRevealed(true);
       requestAnimationFrame(() => draftComposerRef.current?.focus());
     },
-    [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed]
+    [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed, askQuestionUsesMobileRail]
   );
 
   function handleMessagesPaneScroll(event: React.UIEvent<HTMLDivElement>): void {
@@ -44751,6 +44928,7 @@ function HomeContent(): React.JSX.Element {
                   }
                   onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
+                {renderAskQuestionInlineCard(msg)}
                 {copied && (
                   <span
                     className={styles.messageCopyToast}
@@ -46117,6 +46295,7 @@ function HomeContent(): React.JSX.Element {
                   }
                   onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
+                {renderAskQuestionInlineCard(msg)}
                 {copied && (
                   <span
                     className={styles.messageCopyToast}

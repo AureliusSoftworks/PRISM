@@ -3,6 +3,10 @@ setlocal EnableExtensions
 title Prism - Starting...
 cd /d "%~dp0"
 
+REM Prism launcher cleanup: stale dev/prod sessions can leave the API or web
+REM port open and make the next launch fail immediately with EADDRINUSE.
+call :cleanupPorts
+
 set "PRISM_MODE=%~1"
 if /I "%PRISM_MODE%"=="dev" goto modeReady
 if /I "%PRISM_MODE%"=="prod" goto modeReady
@@ -11,12 +15,13 @@ if /I "%PRISM_MODE%"=="production" (
     goto modeReady
 )
 
-REM Default to dev behavior on the dev branch, production behavior elsewhere.
+REM Default to production only on release/mainline. Feature branches should use
+REM the dev DB so a plain double-click keeps opening the working local instance.
 for /f "usebackq delims=" %%B in (`git branch --show-current 2^>nul`) do set "CURRENT_BRANCH=%%B"
-if /I "%CURRENT_BRANCH%"=="dev" (
-    set "PRISM_MODE=dev"
-) else (
+if /I "%CURRENT_BRANCH%"=="main" (
     set "PRISM_MODE=prod"
+) else (
+    set "PRISM_MODE=dev"
 )
 
 :modeReady
@@ -270,3 +275,11 @@ taskkill /F /FI "WINDOWTITLE eq Prism API (dev)" /T >nul 2>&1
 
 :end
 endlocal
+exit /b 0
+
+:cleanupPorts
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\cleanup-prism-windows.ps1"
+if %ERRORLEVEL% NEQ 0 (
+    echo Cleanup warning: could not fully inspect existing Prism processes.
+)
+exit /b 0

@@ -11811,6 +11811,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, var(--askq-rail-tone) 22%, transparent) 88%,
     color-mix(in srgb, var(--askq-rail-tone) 0%, transparent) 100%
   );
+  -webkit-mask-image: linear-gradient(
+    to top,
+    #000 0%,
+    #000 58%,
+    rgba(0, 0, 0, 0.72) 74%,
+    rgba(0, 0, 0, 0.28) 90%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to top,
+    #000 0%,
+    #000 58%,
+    rgba(0, 0, 0, 0.72) 74%,
+    rgba(0, 0, 0, 0.28) 90%,
+    transparent 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
 }
 
 .askQuestionRail .conversationStarterChipHeading {
@@ -11914,6 +11934,192 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow:
     0 0 0 2px var(--bg-surface),
     0 0 0 4px color-mix(in srgb, var(--accent) 52%, transparent);
+}
+
+.askQuestionInlineCard {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--askq-chip-border) 78%, var(--line));
+  border-radius: 14px;
+  background:
+    radial-gradient(
+      circle at 10% 0%,
+      color-mix(in srgb, var(--askq-rail-tone) 28%, transparent),
+      transparent 46%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 92%, var(--askq-rail-tone) 8%),
+      color-mix(in srgb, var(--bg) 90%, var(--askq-rail-tone) 10%)
+    );
+  color: var(--askq-chip-text);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, var(--askq-chip-inset) 82%, transparent);
+}
+
+.messages[data-chat-ephemeral="true"] .askQuestionInlineCard {
+  max-width: min(100%, 920px);
+}
+
+.askQuestionInlineHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.askQuestionInlineEyebrow {
+  color: color-mix(in srgb, var(--askq-rail-heading) 72%, var(--fg-muted));
+  font-size: 0.72rem;
+  font-weight: 760;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.askQuestionInlinePrompt {
+  margin: 0;
+  color: var(--askq-rail-heading);
+  font-size: 0.98rem;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.askQuestionInlineAnswer {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--askq-chip-border) 60%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--askq-chip-bg) 76%, transparent);
+}
+
+.askQuestionInlineAnswer > span {
+  color: color-mix(in srgb, var(--askq-chip-text) 64%, transparent);
+  font-size: 0.72rem;
+  font-weight: 760;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.askQuestionInlineAnswer > p {
+  margin: 0;
+  color: var(--askq-chip-text);
+  font-size: 0.93rem;
+  font-weight: 560;
+  line-height: 1.38;
+  overflow-wrap: anywhere;
+}
+
+.askQuestionInlineChangeButton {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--askq-chip-border) 84%, var(--line));
+  border-radius: 10px;
+  min-height: 32px;
+  padding: 0 11px;
+  background: color-mix(in srgb, var(--askq-chip-bg) 86%, transparent);
+  color: var(--askq-chip-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 720;
+  line-height: 1;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.05s;
+}
+
+.askQuestionInlineChangeButton:hover:not(:disabled),
+.askQuestionInlineChangeButton:focus-visible {
+  outline: none;
+  border-color: var(--askq-chip-border-hover);
+  background: color-mix(in srgb, var(--askq-chip-bg-hover) 90%, transparent);
+}
+
+.askQuestionInlineChangeButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.askQuestionInlineChangeButton:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.askQuestionInlineChoices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.askQuestionInlineChoices .conversationStarterChip {
+  min-height: 64px;
+  border-radius: 14px;
+  border-color: var(--askq-chip-border);
+  background:
+    radial-gradient(
+      circle at 12% 22%,
+      color-mix(in srgb, #ffffff 12%, transparent),
+      transparent 42%
+    ),
+    var(--askq-chip-bg);
+  color: var(--askq-chip-text);
+  font-size: 0.9rem;
+  line-height: 1.36;
+  box-shadow: inset 0 0 0 1px var(--askq-chip-inset);
+}
+
+.askQuestionInlineChoices .conversationStarterChipOther {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--askq-chip-border));
+  background:
+    radial-gradient(
+      circle at 12% 22%,
+      color-mix(in srgb, #ffffff 14%, transparent),
+      transparent 42%
+    ),
+    linear-gradient(
+      140deg,
+      color-mix(in srgb, var(--accent) 34%, var(--askq-chip-bg)),
+      color-mix(in srgb, var(--accent) 20%, var(--askq-chip-bg))
+    );
+  color: var(--accent-text);
+}
+
+.askQuestionInlineChoices[data-choices-disabled="true"] .conversationStarterChip {
+  cursor: default;
+  opacity: 0.52;
+  transform: none;
+}
+
+.askQuestionInlineChoices[data-choices-disabled="true"] .conversationStarterChip:hover,
+.askQuestionInlineChoices[data-choices-disabled="true"] .conversationStarterChip:focus-visible {
+  border-color: var(--askq-chip-border);
+  background:
+    radial-gradient(
+      circle at 12% 22%,
+      color-mix(in srgb, #ffffff 12%, transparent),
+      transparent 42%
+    ),
+    var(--askq-chip-bg);
+  box-shadow: inset 0 0 0 1px var(--askq-chip-inset);
+}
+
+.askQuestionInlineCard[data-ask-question-changing="true"] {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--askq-chip-border));
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 10px 32px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+@media (max-width: 980px) {
+  .askQuestionInlineChoices {
+    grid-template-columns: 1fr;
+  }
 }
 
 .memoryToastStack {
