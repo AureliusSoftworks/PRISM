@@ -88,6 +88,7 @@ export interface NextSettings {
    */
   openAiKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
   anthropicKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
+  elevenLabsKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
 }
 
 function isTheme(value: unknown): value is Theme {
@@ -315,6 +316,10 @@ export function sanitizeAnthropicKeyInput(input: string): string {
   return sanitizeOpenAiKeyInput(input);
 }
 
+export function sanitizeElevenLabsKeyInput(input: string): string {
+  return sanitizeOpenAiKeyInput(input);
+}
+
 function isWrappedInMatchedQuotes(value: string): boolean {
   if (value.length < 2) return false;
   const first = value[0];
@@ -436,6 +441,16 @@ export function resolveNextSettings(
     anthropicKeyIntent = { action: "clear" };
   }
 
+  let elevenLabsKeyIntent: NextSettings["elevenLabsKeyIntent"] = { action: "keep" };
+  if (typeof body.elevenLabsApiKey === "string") {
+    const sanitized = sanitizeElevenLabsKeyInput(body.elevenLabsApiKey);
+    if (sanitized.length > 0) {
+      elevenLabsKeyIntent = { action: "replace", plaintext: sanitized };
+    }
+  } else if (body.elevenLabsApiKey === null) {
+    elevenLabsKeyIntent = { action: "clear" };
+  }
+
   return {
     displayName,
     theme,
@@ -458,5 +473,6 @@ export function resolveNextSettings(
     prismImageToolLlmModel,
     openAiKeyIntent,
     anthropicKeyIntent,
+    elevenLabsKeyIntent,
   };
 }

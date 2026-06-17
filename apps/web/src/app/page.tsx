@@ -635,6 +635,21 @@ type ImageGenerateApiResponse = {
   image?: { id: string };
 };
 
+type ZenWallpaperStatus = "idle" | "generating" | "ready" | "error";
+
+interface ZenWallpaperMetadata {
+  enabled: boolean;
+  imageId: string | null;
+  promptSeed: string | null;
+  generationMessageCount: number | null;
+  status: ZenWallpaperStatus;
+}
+
+type ZenWallpaperApiResponse = {
+  zenWallpaper: ZenWallpaperMetadata;
+  image?: { id: string };
+};
+
 type ImageGenerationVariant = "portrait" | "letterbox" | "landscape";
 
 const IMAGE_GENERATION_VARIANT_OPTIONS: ReadonlyArray<{
@@ -652,6 +667,7 @@ const IMAGE_GENERATION_SIZE_BY_VARIANT: Record<ImageGenerationVariant, string> =
   letterbox: "1024x1024",
   landscape: "1536x1024",
 };
+const ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
 
 const IMAGE_VARIANT_TAGS: Readonly<Record<ImageGenerationVariant, readonly string[]>> = {
   portrait: [
@@ -3094,6 +3110,8 @@ interface ConversationSummary {
   lastBotColor: string | null;
   /** True when the conversation has at least one assistant reply; distinguishes "Default was last" from "no reply yet". */
   hasAssistantReply: boolean;
+  /** Zen-only ambient wallpaper metadata; absent on older responses means off. */
+  zenWallpaper?: ZenWallpaperMetadata;
 }
 
 interface ConversationSweepResponse {
@@ -4452,6 +4470,8 @@ interface ConversationDetail {
   lastBotColor: string | null;
   /** True when the conversation has at least one assistant reply; see ConversationSummary for disambiguation semantics. */
   hasAssistantReply: boolean;
+  /** Zen-only ambient wallpaper metadata; absent on older responses means off. */
+  zenWallpaper?: ZenWallpaperMetadata;
   messages: Message[];
 }
 
@@ -4549,6 +4569,7 @@ interface UserSettings {
   hiddenBotModelIds: string[];
   hasOpenAiApiKey: boolean;
   hasAnthropicApiKey: boolean;
+  hasElevenLabsApiKey: boolean;
   ollamaModel: string;
   /** Server OLLAMA_AUXILIARY_MODEL — Prism internal LLM when not overridden below. */
   ollamaAuxiliaryModel: string;
@@ -6601,6 +6622,7 @@ interface ImageRecord {
   provider?: string;
   model?: string | null;
   localRelPath?: string | null;
+  purpose?: "gallery" | "wallpaper" | string | null;
 }
 
 /** Authenticated WebP thumbnail for a locally stored generated image (`images.id`). */
@@ -7047,17 +7069,6 @@ function persistConversationGroupOrder(userId: string, order: string[]): void {
   }
 }
 
-function sandboxZenModeStorageKey(userId: string): string {
-  return `prism_sandbox_zen_mode:${userId}`;
-}
-
-/**
- * Sentinel zen-thread key before the server assigns a persisted conversation id
- * (`detail.id === "pending"` compose surface). Matches `sandboxZenMode` exits
- * but not optimistic → committed promotion.
- */
-const SANDBOX_ZEN_COMPOSE_SURFACE_KEY = "__sandbox_zen_compose_surface__";
-
 function reorderConversationGroupKeys(
   currentOrder: string[],
   draggedKey: string,
@@ -7248,12 +7259,14 @@ function SlashCommandGlyph(): React.ReactElement {
   );
 }
 
-/** Focus / zen layout toggle (Sandbox): concentric calm mark, matches header icon weight. */
-function ZenFocusGlyph(): React.ReactElement {
+/** Zen Atmosphere toggle: layered horizon mark for generated ambient wallpaper. */
+function AtmosphereGlyph(): React.ReactElement {
   return (
     <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" strokeWidth="1.25" />
-      <circle cx="8" cy="8" r="1.35" fill="currentColor" stroke="none" />
+      <path d="M2.25 10.9c1.45-.9 2.9-.9 4.35 0 1.2.74 2.4.74 3.6 0 1.18-.72 2.37-.78 3.55-.18" />
+      <path d="M3.35 7.6c1.08-.82 2.16-.82 3.24 0 .95.72 1.9.72 2.86 0 1.05-.8 2.1-.82 3.15-.08" />
+      <path d="M5.1 4.9a3.8 3.8 0 0 1 5.8 0" />
+      <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="0.85" opacity="0.42" />
     </svg>
   );
 }
@@ -14927,6 +14940,7 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [anthropicKey, setAnthropicKey] = useState("");
+  const [elevenLabsKey, setElevenLabsKey] = useState("");
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [comfyUiModelsPayload, setComfyUiModelsPayload] = useState<{
     configured: boolean;
@@ -15049,8 +15063,6 @@ function HomeContent(): React.JSX.Element {
     string | null
   >(null);
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
-  const [sandboxZenMode, setSandboxZenMode] = useState(false);
-  const sandboxZenExitThreadKeyRef = useRef<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   const chatSummaryRefreshMarkerRef = useRef<string | null>(null);
   const sandboxBotStatusRefreshMarkerRef = useRef<string | null>(null);
@@ -15353,6 +15365,10 @@ function HomeContent(): React.JSX.Element {
     ImageRecord[]
   >([]);
   const [imageLightbox, setImageLightbox] = useState<ImageRecord | null>(null);
+  const [zenWallpaperBusyConversationId, setZenWallpaperBusyConversationId] =
+    useState<string | null>(null);
+  const [zenWallpaperError, setZenWallpaperError] = useState<string | null>(null);
+  const zenWallpaperGenerationInFlightRef = useRef<Set<string>>(new Set());
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageGlobalPositiveKeywords, setImageGlobalPositiveKeywords] = useState<string[]>(
     []
@@ -17324,7 +17340,7 @@ function HomeContent(): React.JSX.Element {
         id: entry.id,
         label: entry.label,
         provider: "openai" as const,
-        isDefault: entry.id === "dall-e-3",
+        isDefault: "isDefault" in entry ? entry.isDefault : undefined,
       })),
     []
   );
@@ -17996,108 +18012,17 @@ function HomeContent(): React.JSX.Element {
     }
   }, [conversationGroupsByKey, expandedConversationGroupKey]);
 
-  useEffect(() => {
-    if (!user?.id) {
-      setSandboxZenMode(false);
-      return;
-    }
-    try {
-      if (typeof window === "undefined") return;
-      setSandboxZenMode(
-        window.localStorage.getItem(sandboxZenModeStorageKey(user.id)) === "1"
-      );
-    } catch {
-      setSandboxZenMode(false);
-    }
-  }, [user?.id]);
-
-  const setSandboxZenModePersisted = useCallback((next: boolean): void => {
-    setSandboxZenMode(next);
-    if (!user?.id) return;
-    try {
-      if (next) {
-        window.localStorage.setItem(sandboxZenModeStorageKey(user.id), "1");
-      } else {
-        window.localStorage.removeItem(sandboxZenModeStorageKey(user.id));
-      }
-    } catch {
-      /* non-fatal */
-    }
-  }, [user?.id]);
-
   const chatEphemeralMode = view === "chat";
-  const zenPresentationActive = view === "sandbox" && sandboxZenMode;
-  const effectiveChatPresentation = view === "chat" || zenPresentationActive;
+  const effectiveChatPresentation = view === "chat";
   const chatLikeSurface = effectiveChatPresentation;
   const chatMentionsEnabled = view !== "chat";
-  /** Autoscroll + dynamic type on chat-like surfaces (includes Sandbox focus layout). */
-  const assistantRevealActive = chatEphemeralMode || zenPresentationActive;
+  /** Autoscroll + dynamic type on Zen's chat-like surface. */
+  const assistantRevealActive = chatEphemeralMode;
   /**
    * Word-at-a-time / token-scheduled reveals, fenced-code progressive unveil,
-   * and the tap-to-interrupt typing pill — Chat mode only (not Sandbox zen).
+   * and the tap-to-interrupt typing pill — Zen chat mode only.
    */
   const chatAssistantTypingMechanicsActive = chatEphemeralMode;
-
-  useEffect(() => {
-    if (zenPresentationActive) {
-      setSidebarOpen(false);
-    }
-  }, [zenPresentationActive]);
-
-  // Focus layout persists in localStorage, but tying it only to Sandbox threads avoids
-  // carrying a chat-like zen affordance across Hub / Chat entries or unrelated threads.
-  useEffect(() => {
-    const zenThreadKey =
-      view === "sandbox"
-        ? (() => {
-            const dId = detail?.id;
-            const sel = selectedId;
-            const persistedConversationId =
-              dId !== undefined && dId !== "pending"
-                ? dId
-                : sel != null && sel !== "pending"
-                  ? sel
-                  : null;
-            if (persistedConversationId !== null) return persistedConversationId;
-            if (dId === "pending") return SANDBOX_ZEN_COMPOSE_SURFACE_KEY;
-            return null;
-          })()
-        : null;
-
-    if (view !== "sandbox") {
-      if (sandboxZenMode) {
-        setSandboxZenModePersisted(false);
-      }
-      sandboxZenExitThreadKeyRef.current = null;
-      return;
-    }
-
-    const prevKey = sandboxZenExitThreadKeyRef.current;
-    sandboxZenExitThreadKeyRef.current = zenThreadKey;
-
-    if (prevKey === null || zenThreadKey === prevKey) {
-      return;
-    }
-
-    const committedComposeDraft =
-      prevKey === SANDBOX_ZEN_COMPOSE_SURFACE_KEY &&
-      zenThreadKey !== null &&
-      zenThreadKey !== SANDBOX_ZEN_COMPOSE_SURFACE_KEY;
-
-    if (committedComposeDraft) {
-      return;
-    }
-
-    if (sandboxZenMode) {
-      setSandboxZenModePersisted(false);
-    }
-  }, [
-    view,
-    detail?.id,
-    selectedId,
-    sandboxZenMode,
-    setSandboxZenModePersisted,
-  ]);
 
   const showPrivateConversationEmptyState =
     privateChatActive && visibleConversations.length === 0;
@@ -21664,6 +21589,7 @@ function HomeContent(): React.JSX.Element {
         : [],
       hasOpenAiApiKey: d.settings.hasOpenAiApiKey === true,
       hasAnthropicApiKey: d.settings.hasAnthropicApiKey === true,
+      hasElevenLabsApiKey: d.settings.hasElevenLabsApiKey === true,
       secondaryOllamaHost: secondaryHost,
       comfyUiHost,
       preferredLocalModel:
@@ -24872,9 +24798,14 @@ function HomeContent(): React.JSX.Element {
       if (trimmedAnthropicKey.length > 0) {
         body.anthropicApiKey = trimmedAnthropicKey;
       }
+      const trimmedElevenLabsKey = elevenLabsKey.trim();
+      if (trimmedElevenLabsKey.length > 0) {
+        body.elevenLabsApiKey = trimmedElevenLabsKey;
+      }
       await api("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
       setOpenAiKey("");
       setAnthropicKey("");
+      setElevenLabsKey("");
       const { comfyUiHost: savedComfyHost } = await refreshSettings();
       await refreshModels(savedComfyHost);
       await refreshSecondaryOllamaStatus();
@@ -24963,8 +24894,13 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function clearSavedKey(provider: "openai" | "anthropic") {
-    const providerName = provider === "openai" ? "OpenAI" : "Anthropic";
+  async function clearSavedKey(provider: "openai" | "anthropic" | "elevenlabs") {
+    const providerName =
+      provider === "openai"
+        ? "OpenAI"
+        : provider === "anthropic"
+          ? "Anthropic"
+          : "ElevenLabs";
     const confirmed = window.confirm(
       `Remove the saved ${providerName} API key from this account? Chat will fall back to the server default if one is configured.`
     );
@@ -24977,13 +24913,17 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify(
           provider === "openai"
             ? { openAiApiKey: null }
-            : { anthropicApiKey: null }
+            : provider === "anthropic"
+              ? { anthropicApiKey: null }
+              : { elevenLabsApiKey: null }
         ),
       });
       if (provider === "openai") {
         setOpenAiKey("");
-      } else {
+      } else if (provider === "anthropic") {
         setAnthropicKey("");
+      } else {
+        setElevenLabsKey("");
       }
       await refreshSettings();
     } catch (err) {
@@ -30209,6 +30149,153 @@ function HomeContent(): React.JSX.Element {
     return { localModelId, openAiModelId };
   }
 
+  function zenWallpaperImageGenerationAvailable(): boolean {
+    if (!settings) return false;
+    if (effectivePreferredProvider !== "local") return true;
+    return localImageModelCatalogEntries.length > 0;
+  }
+
+  function resolveZenWallpaperImageModels(): {
+    localModelId: string;
+    openAiModelId: ReturnType<typeof normalizeOpenAiImageModelId>;
+  } {
+    const conversationBot =
+      detail?.botId && bots.length > 0
+        ? bots.find((bot) => bot.id === detail.botId) ?? null
+        : null;
+    const botLocalImage = conversationBot?.local_image_model?.trim() ?? "";
+    const botOpenAiImage = conversationBot?.openai_image_model?.trim() ?? "";
+    const headerLocalRaw = imageGenModelChoiceByProvider.local?.trim() ?? "";
+    const headerLocal =
+      headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
+        ? ""
+        : headerLocalRaw;
+    const localModelId =
+      headerLocal ||
+      botLocalImage ||
+      (settings?.preferredLocalImageModel?.trim() ?? "") ||
+      localImageModelCatalogEntries[0]?.id ||
+      "";
+    const headerOpenAiRaw = imageGenModelChoiceByProvider.openai?.trim() ?? "";
+    const headerOpenAi =
+      headerOpenAiRaw === AUTO_MODEL_CHOICE || headerOpenAiRaw === ""
+        ? ""
+        : normalizeOpenAiImageModelId(headerOpenAiRaw);
+    const openAiModelId = normalizeOpenAiImageModelId(
+      headerOpenAi ||
+        botOpenAiImage ||
+        (settings?.preferredOpenAiImageModel?.trim() ?? "") ||
+        DEFAULT_OPENAI_IMAGE_MODEL_ID
+    );
+    return { localModelId, openAiModelId };
+  }
+
+  function applyZenWallpaperMetadata(
+    conversationId: string,
+    zenWallpaper: ZenWallpaperMetadata
+  ): void {
+    setDetail((current) =>
+      current?.id === conversationId
+        ? { ...current, zenWallpaper }
+        : current
+    );
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, zenWallpaper }
+          : conversation
+      )
+    );
+  }
+
+  async function requestZenWallpaperUpdate(
+    conversationId: string,
+    options: { enabled: boolean; force?: boolean }
+  ): Promise<void> {
+    if (options.enabled && !zenWallpaperImageGenerationAvailable()) {
+      setZenWallpaperError("Configure an image generation model before enabling Atmosphere.");
+      return;
+    }
+    if (zenWallpaperGenerationInFlightRef.current.has(conversationId)) return;
+    zenWallpaperGenerationInFlightRef.current.add(conversationId);
+    setZenWallpaperBusyConversationId(conversationId);
+    setZenWallpaperError(null);
+    try {
+      const { localModelId, openAiModelId } = resolveZenWallpaperImageModels();
+      const body: Record<string, unknown> = {
+        enabled: options.enabled,
+        force: options.force === true,
+      };
+      if (options.enabled) {
+        if (effectivePreferredProvider === "local") {
+          body.preferredProvider = "local";
+          if (localModelId) body.model = localModelId;
+        } else {
+          body.preferredProvider = "openai";
+          body.model = openAiModelId;
+        }
+      }
+      const data = await api<ZenWallpaperApiResponse>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/zen-wallpaper`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        }
+      );
+      applyZenWallpaperMetadata(conversationId, data.zenWallpaper);
+    } catch (err) {
+      setZenWallpaperError(
+        err instanceof Error ? err.message : "Zen Atmosphere failed to update."
+      );
+      setDetail((current) =>
+        current?.id === conversationId && current.zenWallpaper
+          ? {
+              ...current,
+              zenWallpaper: { ...current.zenWallpaper, status: "error" },
+            }
+          : current
+      );
+    } finally {
+      zenWallpaperGenerationInFlightRef.current.delete(conversationId);
+      setZenWallpaperBusyConversationId((current) =>
+        current === conversationId ? null : current
+      );
+    }
+  }
+
+  useEffect(() => {
+    const zenWallpaper = detail?.zenWallpaper;
+    if (view !== "chat") return;
+    if (!detail || detail.mode !== "chat") return;
+    if (!zenWallpaper?.enabled) return;
+    if (zenWallpaper.status === "generating" || zenWallpaper.status === "error") return;
+    if (zenWallpaperBusyConversationId === detail.id) return;
+    if (!zenWallpaperImageGenerationAvailable()) return;
+    const messageCount = detail.messages.length;
+    if (messageCount === 0) return;
+    const lastGeneratedAt = zenWallpaper.generationMessageCount ?? 0;
+    const shouldGenerate =
+      !zenWallpaper.imageId ||
+      messageCount - lastGeneratedAt >= ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL;
+    if (!shouldGenerate) return;
+    void requestZenWallpaperUpdate(detail.id, { enabled: true });
+  }, [
+    view,
+    detail?.id,
+    detail?.mode,
+    detail?.messages.length,
+    detail?.zenWallpaper?.enabled,
+    detail?.zenWallpaper?.imageId,
+    detail?.zenWallpaper?.generationMessageCount,
+    detail?.zenWallpaper?.status,
+    zenWallpaperBusyConversationId,
+    settings,
+    effectivePreferredProvider,
+    localImageModelCatalogEntries.length,
+    imageGenModelChoiceByProvider.local,
+    imageGenModelChoiceByProvider.openai,
+  ]);
+
   function addImageKeywordTags(kind: "positive" | "negative", draftTags: string[]): void {
     const normalizedDrafts = draftTags
       .map((tag) => tag.replace(/\s+/g, " ").trim())
@@ -30680,8 +30767,8 @@ function HomeContent(): React.JSX.Element {
             body: "Drag to select multiple bots, then right-click to group, export, or manage them together.",
           },
           {
-            heading: "Enter focus layout",
-            body: "Toggle focus layout when you want a cleaner surface for long creative sessions.",
+            heading: "Switch to Zen",
+            body: "Use Zen from the Hub when you want the calmer, ambient conversation surface.",
           },
         ],
       },
@@ -32371,7 +32458,7 @@ function HomeContent(): React.JSX.Element {
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
-    const privateDefaultFocusStyle = privateDefaultHeaderMode
+    const privateDefaultAtmosphereStyle = privateDefaultHeaderMode
       ? ({ color: PRISM_WORDMARK_PALETTE[1] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
@@ -32418,6 +32505,52 @@ function HomeContent(): React.JSX.Element {
       ) : null;
 
     const closeMenu = () => setChatOverflowMenuOpen(false);
+    const zenWallpaper = detail?.zenWallpaper;
+    const showZenAtmosphereButton = view === "chat";
+    const zenAtmosphereHasConversation = Boolean(
+      detail && detail.mode === "chat" && selectedId
+    );
+    const zenAtmosphereAvailable = zenWallpaperImageGenerationAvailable();
+    const zenAtmosphereBusy = Boolean(
+      detail &&
+      (zenWallpaperBusyConversationId === detail.id ||
+        zenWallpaper?.status === "generating")
+    );
+    const zenAtmosphereEnabled = Boolean(zenWallpaper?.enabled);
+    const zenAtmosphereError =
+      zenWallpaper?.status === "error" && zenWallpaperError
+        ? zenWallpaperError
+        : null;
+    const zenAtmosphereDisabled =
+      headerActionsDisabled ||
+      zenAtmosphereBusy ||
+      !zenAtmosphereHasConversation ||
+      (!zenAtmosphereEnabled && !zenAtmosphereAvailable);
+    const zenAtmosphereTooltip = !zenAtmosphereHasConversation
+      ? "Send a Zen message before enabling Atmosphere"
+      : !zenAtmosphereAvailable && !zenAtmosphereEnabled
+        ? "Configure an image generation model to enable Atmosphere"
+        : zenAtmosphereBusy
+          ? "Generating Zen Atmosphere"
+          : zenAtmosphereError
+            ? `Atmosphere failed: ${zenAtmosphereError}`
+          : zenAtmosphereEnabled
+            ? "Turn off Zen Atmosphere"
+            : "Generate Zen Atmosphere";
+    const zenAtmosphereState = zenAtmosphereBusy
+      ? "generating"
+      : !zenAtmosphereAvailable && !zenAtmosphereEnabled
+        ? "unavailable"
+        : zenAtmosphereEnabled
+          ? "on"
+          : "off";
+    const toggleZenAtmosphere = () => {
+      if (!detail || detail.mode !== "chat" || zenAtmosphereDisabled) return;
+      void requestZenWallpaperUpdate(detail.id, {
+        enabled: !zenAtmosphereEnabled,
+        force: !zenAtmosphereEnabled,
+      });
+    };
 
     const handleSettings = () => {
       closeMenu();
@@ -32633,23 +32766,19 @@ function HomeContent(): React.JSX.Element {
               <BookmarkGlyph />
             </button>
           ) : null}
-          {showToolbarMemoriesButton && view === "sandbox" ? (
+          {showZenAtmosphereButton ? (
             <button
               type="button"
-              className={styles.headerIconButton}
-              onClick={() => setSandboxZenModePersisted(!sandboxZenMode)}
-              aria-label={
-                zenPresentationActive
-                  ? "Exit focus layout"
-                  : "Focus layout — calmer Chat chrome"
-              }
-              aria-pressed={zenPresentationActive}
-              data-glyph-tooltip={
-                zenPresentationActive ? "Exit focus layout" : "Focus layout"
-              }
-              style={privateDefaultFocusStyle}
+              className={`${styles.headerIconButton} ${styles.atmosphereHeaderButton}`}
+              onClick={toggleZenAtmosphere}
+              aria-label={zenAtmosphereTooltip}
+              aria-pressed={zenAtmosphereEnabled}
+              data-glyph-tooltip={zenAtmosphereTooltip}
+              data-atmosphere-state={zenAtmosphereState}
+              disabled={zenAtmosphereDisabled}
+              style={privateDefaultAtmosphereStyle}
             >
-              <ZenFocusGlyph />
+              <AtmosphereGlyph />
             </button>
           ) : null}
           {showToolbarMemoriesButton ? (
@@ -32810,19 +32939,23 @@ function HomeContent(): React.JSX.Element {
             >
               Prompt Center
             </button>
-            {showToolbarMemoriesButton && view === "sandbox" ? (
+            {showZenAtmosphereButton ? (
               <button
                 type="button"
                 role="menuitem"
                 className={styles.chatOverflowMenuItem}
+                disabled={zenAtmosphereDisabled}
                 onClick={(event) => {
                   swallowMenuEvent(event);
-                  setSandboxZenModePersisted(!sandboxZenMode);
+                  toggleZenAtmosphere();
                 }}
+                title={zenAtmosphereTooltip}
               >
-                {zenPresentationActive
-                  ? "Exit focus layout"
-                  : "Focus layout"}
+                {zenAtmosphereBusy
+                  ? "Generating Atmosphere"
+                  : zenAtmosphereEnabled
+                    ? "Turn off Atmosphere"
+                    : "Generate Atmosphere"}
               </button>
             ) : null}
             {showToolbarMemoriesButton ? (
@@ -33006,7 +33139,23 @@ function HomeContent(): React.JSX.Element {
     };
 
     const memoriesDisabled = headerActionsDisabled || !canMemoryActions;
-    const zenLabel = zenPresentationActive ? "Exit focus layout" : "Focus layout";
+    const zenWallpaper = detail?.zenWallpaper;
+    const showZenAtmosphereButton = view === "chat";
+    const zenAtmosphereHasConversation = Boolean(
+      detail && detail.mode === "chat" && selectedId
+    );
+    const zenAtmosphereAvailable = zenWallpaperImageGenerationAvailable();
+    const zenAtmosphereBusy = Boolean(
+      detail &&
+      (zenWallpaperBusyConversationId === detail.id ||
+        zenWallpaper?.status === "generating")
+    );
+    const zenAtmosphereEnabled = Boolean(zenWallpaper?.enabled);
+    const zenAtmosphereDisabled =
+      headerActionsDisabled ||
+      zenAtmosphereBusy ||
+      !zenAtmosphereHasConversation ||
+      (!zenAtmosphereEnabled && !zenAtmosphereAvailable);
     const editBotsLabel = activeBot ? `Edit ${activeBot.name}` : "Bots";
     const themeLabel =
       effectiveThemeMode === "system"
@@ -33107,17 +33256,26 @@ function HomeContent(): React.JSX.Element {
             Memories
           </button>
         ) : null}
-        {showToolbarMemoriesButton && view === "sandbox" ? (
+        {showZenAtmosphereButton ? (
           <button
             type="button"
             role="menuitem"
-            onClick={() =>
+            disabled={zenAtmosphereDisabled}
+            onClick={() => {
+              if (zenAtmosphereDisabled || !detail) return;
               runAndClose(() => {
-                setSandboxZenModePersisted(!sandboxZenMode);
-              })
-            }
+                void requestZenWallpaperUpdate(detail.id, {
+                  enabled: !zenAtmosphereEnabled,
+                  force: !zenAtmosphereEnabled,
+                });
+              });
+            }}
           >
-            {zenLabel}
+            {zenAtmosphereBusy
+              ? "Generating Atmosphere"
+              : zenAtmosphereEnabled
+                ? "Turn off Atmosphere"
+                : "Generate Atmosphere"}
           </button>
         ) : null}
         {showToolbarMemoriesButton ? (
@@ -35427,6 +35585,9 @@ function HomeContent(): React.JSX.Element {
                   <span data-status={settings.hasAnthropicApiKey ? "ready" : "idle"}>
                     Anthropic {settings.hasAnthropicApiKey ? "saved" : "unset"}
                   </span>
+                  <span data-status={settings.hasElevenLabsApiKey ? "ready" : "idle"}>
+                    ElevenLabs {settings.hasElevenLabsApiKey ? "saved" : "unset"}
+                  </span>
                   <span data-status={secondaryOllamaUiStatus}>{secondaryOllamaStatusText}</span>
                   <span data-status={comfyUiUiStatus}>{comfyUiStatusText}</span>
                 </div>
@@ -35484,6 +35645,30 @@ function HomeContent(): React.JSX.Element {
                           type="button"
                           className={styles.linkButton}
                           onClick={() => void clearSavedKey("anthropic")}
+                          disabled={busy}
+                        >
+                          Clear saved key
+                        </button>
+                      )}
+                    </label>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>ElevenLabs key</span>
+                      <input
+                        type="password"
+                        placeholder={
+                          settings.hasElevenLabsApiKey
+                            ? "Saved - type to replace"
+                            : "xi-..."
+                        }
+                        value={elevenLabsKey}
+                        onChange={(event) => setElevenLabsKey(event.target.value)}
+                        autoComplete="off"
+                      />
+                      {settings.hasElevenLabsApiKey && (
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => void clearSavedKey("elevenlabs")}
                           disabled={busy}
                         >
                           Clear saved key
@@ -35973,7 +36158,7 @@ function HomeContent(): React.JSX.Element {
                   {settings && (
                     <div className={`${styles.form} ${styles.formInModal}`}>
                       <p className={styles.settingsHostsLead}>
-                        Prism works without these fields. Add keys for online text models, or add
+                        Prism works without these fields. Add keys for online services, or add
                         hosts for a fallback Ollama endpoint and external ComfyUI image server.
                       </p>
                       <label className={styles.settingsHostField}>
@@ -36021,6 +36206,30 @@ function HomeContent(): React.JSX.Element {
                             disabled={busy}
                           >
                             Clear saved Anthropic key
+                          </button>
+                        )}
+                      </label>
+                      <label className={styles.settingsHostField}>
+                        <span className={styles.settingsHostLabel}>ElevenLabs API key</span>
+                        <input
+                          type="password"
+                          placeholder={
+                            settings.hasElevenLabsApiKey
+                              ? "Saved (leave blank to keep; type to replace)"
+                              : "xi-..."
+                          }
+                          value={elevenLabsKey}
+                          onChange={(event) => setElevenLabsKey(event.target.value)}
+                          autoComplete="off"
+                        />
+                        {settings.hasElevenLabsApiKey && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => void clearSavedKey("elevenlabs")}
+                            disabled={busy}
+                          >
+                            Clear saved ElevenLabs key
                           </button>
                         )}
                       </label>
@@ -44233,7 +44442,15 @@ function HomeContent(): React.JSX.Element {
   // (chat pane/messages/composer + shared panels), with the chat-specific
   // controls row exposed so users can pick bot, provider mode, and model
   // directly from Chat.
-  if (view === "chat") return (
+  if (view === "chat") {
+    const zenAtmosphereImageId =
+      detail?.zenWallpaper?.enabled && detail.zenWallpaper.imageId
+        ? detail.zenWallpaper.imageId
+        : null;
+    const zenAtmosphereImageSrc = zenAtmosphereImageId
+      ? `/api/images/${encodeURIComponent(zenAtmosphereImageId)}/file`
+      : null;
+    return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
@@ -44423,6 +44640,11 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
+          {zenAtmosphereImageSrc ? (
+            <div className={styles.zenAtmosphereBackdrop} aria-hidden="true">
+              <img src={zenAtmosphereImageSrc} alt="" />
+            </div>
+          ) : null}
           {showMessagesFrameStateLoadingOverlay ? (
             <div
               className={styles.messagesFrameBotSwitchLoading}
@@ -45145,7 +45367,8 @@ function HomeContent(): React.JSX.Element {
       {renderViewSwitchOverlay()}
       <GlyphTooltipLayer />
     </main>
-  );
+    );
+  }
 
   // ── App shell (Sandbox mode) ──
   // Reached when view !== "hub" and view !== "chat". Any stray ?view=
@@ -45158,7 +45381,6 @@ function HomeContent(): React.JSX.Element {
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
-      data-chat-sidebar-hidden={zenPresentationActive ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onTouchStart={beginSidebarEdgeSwipe}
@@ -45166,8 +45388,6 @@ function HomeContent(): React.JSX.Element {
       onTouchEnd={endSidebarEdgeSwipe}
       onTouchCancel={endSidebarEdgeSwipe}
     >
-      {!zenPresentationActive ? (
-        <>
       {/* Mobile menu toggle — faded out while either drawer is open
           (sidebar on the left, Settings/Bots/Images panel on the right)
           so the fixed hamburger doesn't overlap the profile avatar or
@@ -45273,8 +45493,6 @@ function HomeContent(): React.JSX.Element {
           </div>
         )}
       </aside>
-        </>
-      ) : null}
 
       {/* Chat */}
       <section

@@ -49,6 +49,19 @@ const ASSISTANT_IMAGE_SIZE_TAGS = {
   ],
 } as const;
 
+async function readOpenAiGeneratedImageBytes(
+  result: Awaited<ReturnType<typeof generateImage>>,
+  signal: AbortSignal
+): Promise<Buffer> {
+  if (result.imageBytes) {
+    return result.imageBytes;
+  }
+  if (!result.url) {
+    throw new Error("OpenAI returned no downloadable image URL.");
+  }
+  return downloadRemoteImage(result.url, { signal });
+}
+
 function scoreSizeTags(text: string, tags: readonly string[]): number {
   let score = 0;
   for (const tag of tags) {
@@ -637,7 +650,7 @@ export async function runAssistantSentImageGeneration(args: {
       });
       let imageBytes: Buffer;
       try {
-        imageBytes = await downloadRemoteImage(openAiResult.url, { signal });
+        imageBytes = await readOpenAiGeneratedImageBytes(openAiResult, signal);
       } catch {
         return { status: "failed" };
       }
@@ -648,9 +661,10 @@ export async function runAssistantSentImageGeneration(args: {
         return { status: "failed" };
       }
       await tryGenerateThumbAfterPngWrite(localRelPath);
+      const storedUrl = openAiResult.url || displayUrl;
       insertRow({
         revisedPrompt: openAiResult.revisedPrompt ?? null,
-        urlForDb: openAiResult.url,
+        urlForDb: storedUrl,
         providerTag: "openai",
         modelUsed: openAiResult.model,
       });
@@ -670,7 +684,7 @@ export async function runAssistantSentImageGeneration(args: {
           });
           let imageBytes: Buffer;
           try {
-            imageBytes = await downloadRemoteImage(openAiRetry.url, { signal });
+            imageBytes = await readOpenAiGeneratedImageBytes(openAiRetry, signal);
           } catch {
             return { status: "failed" };
           }
@@ -681,9 +695,10 @@ export async function runAssistantSentImageGeneration(args: {
             return { status: "failed" };
           }
           await tryGenerateThumbAfterPngWrite(localRelPath);
+          const storedUrl = openAiRetry.url || displayUrl;
           insertRow({
             revisedPrompt: openAiRetry.revisedPrompt ?? null,
-            urlForDb: openAiRetry.url,
+            urlForDb: storedUrl,
             providerTag: "openai",
             modelUsed: openAiRetry.model,
           });

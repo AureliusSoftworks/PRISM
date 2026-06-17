@@ -72,6 +72,7 @@ import {
   tryAcquireImageSlot,
   startChatImageBackgroundJob,
 } from "./image-job-slot.ts";
+import { mapZenWallpaperMetadata } from "./conversations.ts";
 
 const config = getAppConfig();
 
@@ -4526,9 +4527,23 @@ export async function processChatMessage(
   // No bot_id IS NOT NULL filter on the last_bot_* subqueries: Default
   // replies (bot_id NULL) count as "last spoken" too, and the client
   // distinguishes them from "no reply yet" via has_assistant_reply.
+  const conversationColumns = db
+    .prepare("PRAGMA table_info(conversations)")
+    .all() as Array<{ name: string }>;
+  const conversationColumnNames = new Set(
+    conversationColumns.map((column) => column.name)
+  );
+  const zenWallpaperSelect = conversationColumnNames.has("zen_wallpaper_enabled")
+    ? `c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
+              c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
+              c.zen_wallpaper_status,`
+    : `0 AS zen_wallpaper_enabled, NULL AS zen_wallpaper_image_id,
+              NULL AS zen_wallpaper_prompt_seed, NULL AS zen_wallpaper_message_count,
+              'idle' AS zen_wallpaper_status,`;
   const conversationRow = db
     .prepare(
       `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
+              ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
                    AND m.role = 'assistant'
@@ -4551,6 +4566,11 @@ export async function processChatMessage(
     conversation_mode: string | null;
     bot_id: string | null;
     incognito: number;
+    zen_wallpaper_enabled: number | null;
+    zen_wallpaper_image_id: string | null;
+    zen_wallpaper_prompt_seed: string | null;
+    zen_wallpaper_message_count: number | null;
+    zen_wallpaper_status: string | null;
     last_bot_id: string | null;
     last_bot_color: string | null;
     has_assistant_reply: number;
@@ -4579,6 +4599,7 @@ export async function processChatMessage(
     lastBotId: conversationRow.last_bot_id ?? null,
     lastBotColor: conversationRow.last_bot_color ?? null,
     hasAssistantReply: conversationRow.has_assistant_reply === 1,
+    zenWallpaper: mapZenWallpaperMetadata(conversationRow),
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,
     messages: hydrateMessages(messageRows),

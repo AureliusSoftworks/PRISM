@@ -1,6 +1,16 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomId } from "./security.ts";
 
+export type ZenWallpaperStatus = "idle" | "generating" | "ready" | "error";
+
+export interface ZenWallpaperMetadata {
+  enabled: boolean;
+  imageId: string | null;
+  promptSeed: string | null;
+  generationMessageCount: number | null;
+  status: ZenWallpaperStatus;
+}
+
 export interface ConversationSummary {
   id: string;
   title: string;
@@ -16,6 +26,7 @@ export interface ConversationSummary {
   lastBotId: string | null;
   lastBotColor: string | null;
   hasAssistantReply: boolean;
+  zenWallpaper: ZenWallpaperMetadata;
   createdAt: string;
   updatedAt: string;
 }
@@ -57,6 +68,35 @@ function parseIdList(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+export function normalizeZenWallpaperStatus(value: unknown): ZenWallpaperStatus {
+  return value === "generating" || value === "ready" || value === "error"
+    ? value
+    : "idle";
+}
+
+export function mapZenWallpaperMetadata(row: {
+  zen_wallpaper_enabled?: number | null;
+  zen_wallpaper_image_id?: string | null;
+  zen_wallpaper_prompt_seed?: string | null;
+  zen_wallpaper_message_count?: number | null;
+  zen_wallpaper_status?: string | null;
+}): ZenWallpaperMetadata {
+  const imageId = row.zen_wallpaper_image_id?.trim() || null;
+  const promptSeed = row.zen_wallpaper_prompt_seed?.trim() || null;
+  const messageCount =
+    typeof row.zen_wallpaper_message_count === "number" &&
+    Number.isFinite(row.zen_wallpaper_message_count)
+      ? Math.max(0, Math.floor(row.zen_wallpaper_message_count))
+      : null;
+  return {
+    enabled: row.zen_wallpaper_enabled === 1,
+    imageId,
+    promptSeed,
+    generationMessageCount: messageCount,
+    status: normalizeZenWallpaperStatus(row.zen_wallpaper_status),
+  };
 }
 
 export function deleteCoffeePollsForConversations(
@@ -243,6 +283,17 @@ export function listConversationSummaries(
   db: DatabaseSync,
   userId: string
 ): ConversationSummary[] {
+  const conversationColumns = db
+    .prepare("PRAGMA table_info(conversations)")
+    .all() as Array<{ name: string }>;
+  const conversationColumnNames = new Set(conversationColumns.map((column) => column.name));
+  const zenWallpaperSelect = conversationColumnNames.has("zen_wallpaper_enabled")
+    ? `c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
+              c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
+              c.zen_wallpaper_status,`
+    : `0 AS zen_wallpaper_enabled, NULL AS zen_wallpaper_image_id,
+              NULL AS zen_wallpaper_prompt_seed, NULL AS zen_wallpaper_message_count,
+              'idle' AS zen_wallpaper_status,`;
   // last_bot_id / last_bot_color come from the MOST RECENT assistant message on
   // the conversation, regardless of the conversation's locked bot_id.
   const rows = db
@@ -250,6 +301,7 @@ export function listConversationSummaries(
       `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
               c.coffee_group_id, c.coffee_duration_minutes,
               c.incognito, c.created_at, c.updated_at,
+              ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
                    AND m.role = 'assistant'
@@ -279,6 +331,11 @@ export function listConversationSummaries(
     incognito: number;
     created_at: string;
     updated_at: string;
+    zen_wallpaper_enabled: number | null;
+    zen_wallpaper_image_id: string | null;
+    zen_wallpaper_prompt_seed: string | null;
+    zen_wallpaper_message_count: number | null;
+    zen_wallpaper_status: string | null;
     last_bot_id: string | null;
     last_bot_color: string | null;
     has_assistant_reply: number;
@@ -306,6 +363,7 @@ export function listConversationSummaries(
       lastBotId: row.last_bot_id ?? null,
       lastBotColor: row.last_bot_color ?? null,
       hasAssistantReply: row.has_assistant_reply === 1,
+      zenWallpaper: mapZenWallpaperMetadata(row),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

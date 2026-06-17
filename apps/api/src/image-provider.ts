@@ -1,6 +1,7 @@
 import { getAppConfig } from "@localai/config";
 import {
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  isGptImageModelId,
   normalizeOpenAiImageGenerationParams,
 } from "@localai/shared";
 import { readOpenAiErrorMessage } from "./providers.ts";
@@ -9,7 +10,9 @@ import { readOpenAiErrorMessage } from "./providers.ts";
 export const DALLE_IMAGE_MODEL_ID = DEFAULT_OPENAI_IMAGE_MODEL_ID;
 
 export interface ImageGenerationResult {
+  /** Temporary DALL-E URL, or an empty string when the Images API returned base64 bytes. */
   url: string;
+  imageBytes?: Buffer;
   revisedPrompt: string;
   /** OpenAI `images.generations` model id used for the call. */
   model: string;
@@ -42,14 +45,19 @@ export async function generateImage(
     model: normalized.model,
     prompt,
     n: 1,
-    response_format: "url",
   };
 
-  if (normalized.model === "dall-e-3") {
+  if (isGptImageModelId(normalized.model)) {
+    body.size = normalized.size;
+    body.quality = normalized.quality ?? "medium";
+    body.output_format = "png";
+  } else if (normalized.model === "dall-e-3") {
     body.size = normalized.size;
     body.quality = normalized.quality ?? "standard";
+    body.response_format = "url";
   } else {
     body.size = normalized.size;
+    body.response_format = "url";
   }
 
   const response = await fetch("https://api.openai.com/v1/images/generations", {
@@ -76,15 +84,26 @@ export async function generateImage(
   }
 
   const payload = (await response.json()) as {
-    data?: Array<{ url?: string; revised_prompt?: string }>;
+    data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string }>;
   };
   const item = payload.data?.[0];
-  if (!item?.url) {
-    throw new Error("OpenAI returned no image URL.");
+  if (!item) {
+    throw new Error("OpenAI returned no image data.");
+  }
+  const imageBytes =
+    typeof item?.b64_json === "string" && item.b64_json.trim().length > 0
+      ? Buffer.from(item.b64_json, "base64")
+      : undefined;
+  if (imageBytes && imageBytes.length === 0) {
+    throw new Error("OpenAI returned an empty image payload.");
+  }
+  if (!item?.url && !imageBytes) {
+    throw new Error("OpenAI returned no image data.");
   }
 
   return {
-    url: item.url,
+    url: item.url ?? "",
+    ...(imageBytes ? { imageBytes } : {}),
     revisedPrompt: item.revised_prompt ?? prompt,
     model: normalized.model,
   };

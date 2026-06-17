@@ -56,6 +56,8 @@ import {
   deleteConversationsByBot,
   getConversationSweepState,
   listConversationSummaries,
+  mapZenWallpaperMetadata,
+  normalizeZenWallpaperStatus,
   rewindConversation,
   sweepConversations,
   undoLatestConversationSweep,
@@ -162,6 +164,9 @@ const memoryInferenceCheckedAtByScope = new Map<string, string>();
 const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
 const IMAGE_GENERATION_ALLOWED_SIZES = new Set(["1024x1536", "1024x1024", "1536x1024"]);
 const IMAGE_GENERATION_DEFAULT_SIZE = "1024x1024";
+const ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
+const ZEN_WALLPAPER_SIZE = "1536x1024";
+const ZEN_WALLPAPER_QUALITY = "standard";
 const IMAGE_GENERATION_VARIANT_TAGS = {
   portrait: [
     "selfie",
@@ -251,6 +256,9 @@ interface UserDbRow {
   anthropic_key_ciphertext: string | null;
   anthropic_key_iv: string | null;
   anthropic_key_tag: string | null;
+  elevenlabs_key_ciphertext: string | null;
+  elevenlabs_key_iv: string | null;
+  elevenlabs_key_tag: string | null;
   created_at: string;
   last_active_at: string;
 }
@@ -346,7 +354,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -406,6 +414,21 @@ function getAnthropicApiKeyForUser(userId: string, userKey: Buffer): string | un
       ciphertext: user.anthropic_key_ciphertext,
       iv: user.anthropic_key_iv,
       tag: user.anthropic_key_tag,
+    },
+    userKey
+  );
+}
+
+function getElevenLabsApiKeyForUser(userId: string, userKey: Buffer): string | undefined {
+  const user = getUserRow(userId);
+  if (!user.elevenlabs_key_ciphertext || !user.elevenlabs_key_iv || !user.elevenlabs_key_tag) {
+    return undefined;
+  }
+  return decryptText(
+    {
+      ciphertext: user.elevenlabs_key_ciphertext,
+      iv: user.elevenlabs_key_iv,
+      tag: user.elevenlabs_key_tag,
     },
     userKey
   );
@@ -601,6 +624,7 @@ function mapImageRowToClient(row: {
   created_at: string;
   local_rel_path: string | null;
   model: string | null;
+  purpose?: string | null;
 }): Record<string, unknown> {
   const hasLocalFile = Boolean(row.local_rel_path?.trim());
   const displayUrl = hasLocalFile
@@ -615,12 +639,66 @@ function mapImageRowToClient(row: {
     quality: row.quality,
     provider: row.provider,
     model: row.model ?? DEFAULT_OPENAI_IMAGE_MODEL_ID,
+    purpose: row.purpose ?? "gallery",
     createdAt: row.created_at,
     url: row.url,
     localRelPath: row.local_rel_path,
     displayUrl,
     hasLocalFile,
   };
+}
+
+function clampWallpaperPromptText(text: string | null | undefined, maxLen: number): string {
+  const normalized = (text ?? "").replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLen) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`;
+}
+
+function composeZenWallpaperPrompt(args: {
+  initialUserPrompt: string;
+  recentContext: string;
+  botName: string | null;
+  botSystemPrompt: string | null;
+}): string {
+  const topic = clampWallpaperPromptText(args.initialUserPrompt, 700);
+  const recent = clampWallpaperPromptText(args.recentContext, 900);
+  const botName = clampWallpaperPromptText(args.botName, 120) || "Prism";
+  const botContext = clampWallpaperPromptText(args.botSystemPrompt, 650);
+  const lines = [
+    "Create an abstract grayscale ambient wallpaper for a calm Zen chat canvas.",
+    `Conversation seed: ${topic || "open-ended reflective conversation"}.`,
+    `Companion context: ${botName}${botContext ? ` — ${botContext}` : ""}.`,
+  ];
+  if (recent && recent !== topic) {
+    lines.push(`Recent conversation texture: ${recent}.`);
+  }
+  lines.push(
+    "Visual direction: monochrome black, white, and gray only; soft gradients; atmospheric texture; spacious negative space; gentle depth; subtle shapes inspired by the conversation topic.",
+    "Composition: suitable as a desktop and mobile chat background, no single focal subject, no busy detail behind text.",
+    "Absolute exclusions: no text, no letters, no numbers, no people, no faces, no bodies, no characters, no creatures, no logos, no icons, no symbols, no UI, no screenshots."
+  );
+  return lines.join("\n");
+}
+
+function zenWallpaperResponseForConversation(conversationId: string): ReturnType<typeof mapZenWallpaperMetadata> {
+  const row = db
+    .prepare(
+      `SELECT zen_wallpaper_enabled, zen_wallpaper_image_id,
+              zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+              zen_wallpaper_status
+         FROM conversations
+        WHERE id = ?`
+    )
+    .get(conversationId) as
+    | {
+        zen_wallpaper_enabled: number | null;
+        zen_wallpaper_image_id: string | null;
+        zen_wallpaper_prompt_seed: string | null;
+        zen_wallpaper_message_count: number | null;
+        zen_wallpaper_status: string | null;
+      }
+    | undefined;
+  return mapZenWallpaperMetadata(row ?? {});
 }
 
 type ImageInsertPersistence = {
@@ -690,6 +768,19 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
       model: args.modelUsed,
     },
   });
+}
+
+async function readOpenAiGeneratedImageBytes(
+  result: Awaited<ReturnType<typeof generateImage>>,
+  signal: AbortSignal
+): Promise<Buffer> {
+  if (result.imageBytes) {
+    return result.imageBytes;
+  }
+  if (!result.url) {
+    throw new Error("OpenAI returned no downloadable image URL.");
+  }
+  return downloadRemoteImage(result.url, { signal });
 }
 
 function buildRoutes(): RouteDefinition[] {
@@ -1040,6 +1131,9 @@ function buildRoutes(): RouteDefinition[] {
           `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
                   c.coffee_settings, c.coffee_group_id, c.coffee_duration_minutes,
                   c.coffee_topic,
+                  c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
+                  c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
+                  c.zen_wallpaper_status,
                   c.incognito, c.created_at, c.updated_at,
                   (SELECT m.bot_id FROM messages m
                      WHERE m.conversation_id = c.id
@@ -1067,6 +1161,11 @@ function buildRoutes(): RouteDefinition[] {
             coffee_group_id: string | null;
             coffee_duration_minutes: number | null;
             coffee_topic: string | null;
+            zen_wallpaper_enabled: number | null;
+            zen_wallpaper_image_id: string | null;
+            zen_wallpaper_prompt_seed: string | null;
+            zen_wallpaper_message_count: number | null;
+            zen_wallpaper_status: string | null;
             incognito: number;
             created_at: string;
             updated_at: string;
@@ -1233,6 +1332,7 @@ function buildRoutes(): RouteDefinition[] {
           lastBotId: conversation.last_bot_id ?? null,
           lastBotColor: conversation.last_bot_color ?? null,
           hasAssistantReply: conversation.has_assistant_reply === 1,
+          zenWallpaper: mapZenWallpaperMetadata(conversation),
           createdAt: conversation.created_at,
           updatedAt: conversation.updated_at,
           messages,
@@ -1240,6 +1340,401 @@ function buildRoutes(): RouteDefinition[] {
         ...(opinion ? { opinion } : {}),
         ...(botOpinion ? { botOpinion } : {}),
       });
+    }),
+    route("POST", "/api/conversations/:id/zen-wallpaper", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversationId = ctx.params.id;
+      const body = ctx.body as Record<string, unknown>;
+      const enabled = body.enabled !== false;
+      const force = body.force === true;
+      const requestedProvider =
+        body.preferredProvider === "openai" || body.preferredProvider === "local"
+          ? body.preferredProvider
+          : undefined;
+      const bodyModel =
+        typeof body.model === "string" && body.model.trim().length > 0
+          ? body.model.trim()
+          : undefined;
+      const conversation = db
+        .prepare(
+          `SELECT c.id, c.conversation_mode, c.bot_id,
+                  c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
+                  c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
+                  c.zen_wallpaper_status,
+                  b.name AS bot_name, b.system_prompt AS bot_system_prompt,
+                  b.local_image_model AS bot_local_image_model,
+                  b.openai_image_model AS bot_openai_image_model,
+                  b.online_enabled AS bot_online_enabled
+             FROM conversations c
+             LEFT JOIN bots b ON b.id = c.bot_id AND b.user_id = c.user_id
+            WHERE c.id = ? AND c.user_id = ?`
+        )
+        .get(conversationId, userId) as
+        | {
+            id: string;
+            conversation_mode: string | null;
+            bot_id: string | null;
+            zen_wallpaper_enabled: number | null;
+            zen_wallpaper_image_id: string | null;
+            zen_wallpaper_prompt_seed: string | null;
+            zen_wallpaper_message_count: number | null;
+            zen_wallpaper_status: string | null;
+            bot_name: string | null;
+            bot_system_prompt: string | null;
+            bot_local_image_model: string | null;
+            bot_openai_image_model: string | null;
+            bot_online_enabled: number | null;
+          }
+        | undefined;
+      if (!conversation) {
+        throw new HttpError(404, "Conversation not found.");
+      }
+      if (conversation.conversation_mode !== "chat") {
+        throw new HttpError(400, "Zen Atmosphere is only available for Zen chats.");
+      }
+
+      if (!enabled) {
+        db.prepare(
+          `UPDATE conversations
+              SET zen_wallpaper_enabled = 0,
+                  zen_wallpaper_status = 'idle'
+            WHERE id = ? AND user_id = ?`
+        ).run(conversationId, userId);
+        json(ctx.res, 200, {
+          ok: true,
+          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+        });
+        return;
+      }
+
+      const messages = db
+        .prepare(
+          `SELECT role, content
+             FROM messages
+            WHERE conversation_id = ? AND user_id = ?
+            ORDER BY created_at ASC`
+        )
+        .all(conversationId, userId) as Array<{ role: string; content: string }>;
+      const messageCount = messages.length;
+      db.prepare(
+        `UPDATE conversations
+            SET zen_wallpaper_enabled = 1,
+                zen_wallpaper_status = CASE
+                  WHEN zen_wallpaper_image_id IS NOT NULL THEN 'ready'
+                  ELSE 'idle'
+                END
+          WHERE id = ? AND user_id = ?`
+      ).run(conversationId, userId);
+      if (messageCount === 0) {
+        json(ctx.res, 200, {
+          ok: true,
+          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+        });
+        return;
+      }
+
+      const existingWallpaper = mapZenWallpaperMetadata(conversation);
+      const lastGeneratedAt = existingWallpaper.generationMessageCount ?? 0;
+      const needsGeneration =
+        force ||
+        !existingWallpaper.imageId ||
+        messageCount - lastGeneratedAt >= ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL ||
+        normalizeZenWallpaperStatus(conversation.zen_wallpaper_status) === "error";
+      if (!needsGeneration) {
+        json(ctx.res, 200, {
+          ok: true,
+          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+        });
+        return;
+      }
+
+      const firstUserMessage =
+        messages.find((message) => message.role === "user")?.content ?? "";
+      const recentContext = messages
+        .filter((message) => message.role === "user" || message.role === "assistant")
+        .slice(-8)
+        .map((message) => `${message.role}: ${message.content}`)
+        .join("\n");
+      const prompt = composeZenWallpaperPrompt({
+        initialUserPrompt: firstUserMessage,
+        recentContext,
+        botName: conversation.bot_name,
+        botSystemPrompt: conversation.bot_system_prompt,
+      });
+
+      const user = getUserRow(userId);
+      const botForcesLocal = conversation.bot_online_enabled === 0;
+      const effectiveProvider =
+        botForcesLocal
+          ? "local"
+          : requestedProvider ?? (user.preferred_provider === "local" ? "local" : "openai");
+      const resolvedLocalImageModel =
+        (bodyModel && effectiveProvider === "local" ? bodyModel : "") ||
+        (conversation.bot_local_image_model?.trim() ?? "") ||
+        (user.preferred_local_image_model?.trim() ?? "");
+      const resolvedOpenAiImageModel =
+        (bodyModel && effectiveProvider !== "local" ? bodyModel : "") ||
+        (conversation.bot_openai_image_model?.trim() ?? "") ||
+        (user.preferred_openai_image_model?.trim() ?? "");
+      if (effectiveProvider === "local" && !resolvedLocalImageModel) {
+        db.prepare(
+          `UPDATE conversations
+              SET zen_wallpaper_status = 'error'
+            WHERE id = ? AND user_id = ?`
+        ).run(conversationId, userId);
+        throw new HttpError(
+          400,
+          "Pick a local image model in Settings or the Images panel before generating Zen Atmosphere."
+        );
+      }
+
+      const acqWallpaper = await tryAcquireImageSlot({
+        userId,
+        conversationId,
+        botId: conversation.bot_id ?? null,
+        mode: "chat",
+        incognito: false,
+        captionPrompt: prompt,
+        userMessage: `[Zen wallpaper] ${firstUserMessage.slice(0, 500)}`,
+        source: "zen_wallpaper",
+        requestedSize: ZEN_WALLPAPER_SIZE,
+      });
+      if (!acqWallpaper.ok) {
+        throw new HttpError(
+          503,
+          "Another image is generating right now. Wait for it to finish, then try Atmosphere again."
+        );
+      }
+
+      const imageGenAbort = new AbortController();
+      const onImageGenClientClose = () => imageGenAbort.abort();
+      ctx.req.once("close", onImageGenClientClose);
+      db.prepare(
+        `UPDATE conversations
+            SET zen_wallpaper_enabled = 1,
+                zen_wallpaper_status = 'generating'
+          WHERE id = ? AND user_id = ?`
+      ).run(conversationId, userId);
+
+      try {
+        const imageId = randomId(12);
+        const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+        const promptForModel = prompt;
+
+        if (effectiveProvider === "local") {
+          const lenientImageFb = user.lenient_local_image_fallback_model?.trim() ?? "";
+          const runLocalBytes = (modelId: string) =>
+            generateLocalImageBytesByModelId({
+              modelId,
+              promptForModel,
+              size: ZEN_WALLPAPER_SIZE,
+              signal: imageGenAbort.signal,
+              comfyUiHost: user.comfyui_host,
+              comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+              secondaryOllamaHost: user.secondary_ollama_host,
+              primaryOllamaHost: config.ollamaHost,
+            });
+          let localOut: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+          try {
+            localOut = await runLocalBytes(resolvedLocalImageModel);
+          } catch (primaryError) {
+            if (
+              lenientImageFb &&
+              lenientImageFb !== resolvedLocalImageModel.trim() &&
+              shouldAttemptLenientLocalImageFallback(primaryError)
+            ) {
+              localOut = await runLocalBytes(lenientImageFb);
+            } else {
+              throw primaryError;
+            }
+          }
+          try {
+            writeGeneratedImageBytes(localRelPath, localOut.imageBytes);
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : "write failed";
+            throw new Error(`Could not save Zen wallpaper (${detail}).`);
+          }
+          await tryGenerateThumbAfterPngWrite(localRelPath);
+          const storedUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+          try {
+            db.prepare(
+              "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
+            ).run(
+              imageId,
+              userId,
+              conversationId,
+              conversation.bot_id ?? null,
+              prompt,
+              prompt,
+              storedUrl,
+              ZEN_WALLPAPER_SIZE,
+              ZEN_WALLPAPER_QUALITY,
+              localOut.provider,
+              localOut.modelUsed,
+              localRelPath,
+              new Date().toISOString()
+            );
+          } catch (error) {
+            tryUnlinkGeneratedImageFile(localRelPath);
+            throw error;
+          }
+          db.prepare(
+            `UPDATE conversations
+                SET zen_wallpaper_enabled = 1,
+                    zen_wallpaper_image_id = ?,
+                    zen_wallpaper_prompt_seed = ?,
+                    zen_wallpaper_message_count = ?,
+                    zen_wallpaper_status = 'ready'
+              WHERE id = ? AND user_id = ?`
+          ).run(imageId, prompt, messageCount, conversationId, userId);
+          json(ctx.res, 200, {
+            ok: true,
+            image: { id: imageId },
+            zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          });
+          return;
+        }
+
+        const userKey = decryptUserKey(userId);
+        const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+        const lenientImageFbOnline = user.lenient_local_image_fallback_model?.trim() ?? "";
+        let openAiResult: Awaited<ReturnType<typeof generateImage>> | null = null;
+        try {
+          openAiResult = await generateImage(promptForModel, apiKey, {
+            model: resolvedOpenAiImageModel || undefined,
+            size: ZEN_WALLPAPER_SIZE,
+            quality: ZEN_WALLPAPER_QUALITY,
+            signal: imageGenAbort.signal,
+          });
+        } catch (primaryError) {
+          if (
+            lenientImageFbOnline &&
+            shouldAttemptLenientLocalImageFallback(primaryError)
+          ) {
+            const localOut = await generateLocalImageBytesByModelId({
+              modelId: lenientImageFbOnline,
+              promptForModel,
+              size: ZEN_WALLPAPER_SIZE,
+              signal: imageGenAbort.signal,
+              comfyUiHost: user.comfyui_host,
+              comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+              secondaryOllamaHost: user.secondary_ollama_host,
+              primaryOllamaHost: config.ollamaHost,
+            });
+            try {
+              writeGeneratedImageBytes(localRelPath, localOut.imageBytes);
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : "write failed";
+              throw new Error(`Could not save Zen wallpaper (${detail}).`);
+            }
+            await tryGenerateThumbAfterPngWrite(localRelPath);
+            const storedUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+            try {
+              db.prepare(
+                "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
+              ).run(
+                imageId,
+                userId,
+                conversationId,
+                conversation.bot_id ?? null,
+                prompt,
+                prompt,
+                storedUrl,
+                ZEN_WALLPAPER_SIZE,
+                ZEN_WALLPAPER_QUALITY,
+                localOut.provider,
+                localOut.modelUsed,
+                localRelPath,
+                new Date().toISOString()
+              );
+            } catch (error) {
+              tryUnlinkGeneratedImageFile(localRelPath);
+              throw error;
+            }
+            db.prepare(
+              `UPDATE conversations
+                  SET zen_wallpaper_enabled = 1,
+                      zen_wallpaper_image_id = ?,
+                      zen_wallpaper_prompt_seed = ?,
+                      zen_wallpaper_message_count = ?,
+                      zen_wallpaper_status = 'ready'
+                WHERE id = ? AND user_id = ?`
+            ).run(imageId, prompt, messageCount, conversationId, userId);
+            json(ctx.res, 200, {
+              ok: true,
+              image: { id: imageId },
+              zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+            });
+            return;
+          }
+          throw primaryError;
+        }
+
+        const result = openAiResult;
+        if (!result) {
+          throw new Error("OpenAI image generation did not return a result.");
+        }
+        let imageBytes: Buffer;
+        try {
+          imageBytes = await readOpenAiGeneratedImageBytes(result, imageGenAbort.signal);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "download failed";
+          throw new Error(`Could not download Zen wallpaper for local storage (${detail}).`);
+        }
+        try {
+          writeGeneratedImageBytes(localRelPath, imageBytes);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "write failed";
+          throw new Error(`Could not save Zen wallpaper (${detail}).`);
+        }
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        const storedUrl = result.url || `/api/images/${encodeURIComponent(imageId)}/file`;
+        try {
+          db.prepare(
+            "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, 'wallpaper', ?)"
+          ).run(
+            imageId,
+            userId,
+            conversationId,
+            conversation.bot_id ?? null,
+            prompt,
+            result.revisedPrompt,
+            storedUrl,
+            ZEN_WALLPAPER_SIZE,
+            ZEN_WALLPAPER_QUALITY,
+            result.model,
+            localRelPath,
+            new Date().toISOString()
+          );
+        } catch (error) {
+          tryUnlinkGeneratedImageFile(localRelPath);
+          throw error;
+        }
+        db.prepare(
+          `UPDATE conversations
+              SET zen_wallpaper_enabled = 1,
+                  zen_wallpaper_image_id = ?,
+                  zen_wallpaper_prompt_seed = ?,
+                  zen_wallpaper_message_count = ?,
+                  zen_wallpaper_status = 'ready'
+            WHERE id = ? AND user_id = ?`
+        ).run(imageId, prompt, messageCount, conversationId, userId);
+        json(ctx.res, 200, {
+          ok: true,
+          image: { id: imageId },
+          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+        });
+      } catch (error) {
+        db.prepare(
+          `UPDATE conversations
+              SET zen_wallpaper_status = 'error'
+            WHERE id = ? AND user_id = ?`
+        ).run(conversationId, userId);
+        throw error;
+      } finally {
+        ctx.req.off("close", onImageGenClientClose);
+        await releaseImageSlot(userId);
+      }
     }),
     route("POST", "/api/conversations/:id/title", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -2657,6 +3152,7 @@ function buildRoutes(): RouteDefinition[] {
           prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           hasAnthropicApiKey: Boolean(user.anthropic_key_ciphertext),
+          hasElevenLabsApiKey: Boolean(user.elevenlabs_key_ciphertext),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
           ollamaModel: config.ollamaModel,
@@ -2808,6 +3304,9 @@ function buildRoutes(): RouteDefinition[] {
       let anthropicCipher = user.anthropic_key_ciphertext;
       let anthropicIv = user.anthropic_key_iv;
       let anthropicTag = user.anthropic_key_tag;
+      let elevenLabsCipher = user.elevenlabs_key_ciphertext;
+      let elevenLabsIv = user.elevenlabs_key_iv;
+      let elevenLabsTag = user.elevenlabs_key_tag;
       if (next.openAiKeyIntent.action === "replace") {
         const encrypted = encryptText(next.openAiKeyIntent.plaintext, userKey);
         openAiCipher = encrypted.ciphertext;
@@ -2828,6 +3327,16 @@ function buildRoutes(): RouteDefinition[] {
         anthropicIv = null;
         anthropicTag = null;
       }
+      if (next.elevenLabsKeyIntent.action === "replace") {
+        const encrypted = encryptText(next.elevenLabsKeyIntent.plaintext, userKey);
+        elevenLabsCipher = encrypted.ciphertext;
+        elevenLabsIv = encrypted.iv;
+        elevenLabsTag = encrypted.tag;
+      } else if (next.elevenLabsKeyIntent.action === "clear") {
+        elevenLabsCipher = null;
+        elevenLabsIv = null;
+        elevenLabsTag = null;
+      }
 
       // `auto_switch_model` is intentionally not updated here. The old
       // cross-mode escalation setting has been retired; the DB column
@@ -2840,7 +3349,8 @@ function buildRoutes(): RouteDefinition[] {
             preferred_local_image_model = ?, preferred_openai_image_model = ?, comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
-            anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?
+            anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
+            elevenlabs_key_ciphertext = ?, elevenlabs_key_iv = ?, elevenlabs_key_tag = ?
         WHERE id = ?
       `).run(
         next.displayName,
@@ -2870,6 +3380,9 @@ function buildRoutes(): RouteDefinition[] {
         anthropicCipher,
         anthropicIv,
         anthropicTag,
+        elevenLabsCipher,
+        elevenLabsIv,
+        elevenLabsTag,
         userId
       );
       json(ctx.res, 200, { ok: true });
@@ -3017,12 +3530,12 @@ function buildRoutes(): RouteDefinition[] {
       }
 
       const resolvedLocalImageModel =
-        (bodyModel && bodyModel.trim()) ||
+        (bodyModel && effectiveProvider === "local" ? bodyModel.trim() : "") ||
         (botPersona?.local_image_model?.trim() ?? "") ||
         (user.preferred_local_image_model?.trim() ?? "");
 
       const resolvedOpenAiImageModel =
-        (bodyModel && bodyModel.trim()) ||
+        (bodyModel && effectiveProvider !== "local" ? bodyModel.trim() : "") ||
         (botPersona?.openai_image_model?.trim() ?? "") ||
         (user.preferred_openai_image_model?.trim() ?? "");
       if (effectiveProvider === "local" && !resolvedLocalImageModel) {
@@ -3152,9 +3665,7 @@ function buildRoutes(): RouteDefinition[] {
 
       let imageBytes: Buffer;
       try {
-        imageBytes = await downloadRemoteImage(result.url, {
-          signal: imageGenAbort.signal,
-        });
+        imageBytes = await readOpenAiGeneratedImageBytes(result, imageGenAbort.signal);
       } catch (error) {
         const detail = error instanceof Error ? error.message : "download failed";
         throw new Error(`Could not download image for local storage (${detail}).`);
@@ -3168,6 +3679,8 @@ function buildRoutes(): RouteDefinition[] {
       }
 
       await tryGenerateThumbAfterPngWrite(localRelPath);
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      const storedUrl = result.url || displayUrl;
 
       try {
         db.prepare(
@@ -3179,7 +3692,7 @@ function buildRoutes(): RouteDefinition[] {
           persistence.persistedBotId,
           prompt,
           result.revisedPrompt,
-          result.url,
+          storedUrl,
           size,
           quality,
           result.model,
@@ -3191,12 +3704,11 @@ function buildRoutes(): RouteDefinition[] {
         throw error;
       }
 
-      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
       json(ctx.res, 200, {
         ok: true,
         image: {
           id: imageId,
-          url: result.url,
+          url: storedUrl,
           revisedPrompt: result.revisedPrompt,
           displayUrl,
           hasLocalFile: true,
@@ -3285,23 +3797,23 @@ function buildRoutes(): RouteDefinition[] {
       const rows = generalOnly
         ? db
             .prepare(
-              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
-               FROM images WHERE user_id = ? AND bot_id IS NULL
+              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
+               FROM images WHERE user_id = ? AND bot_id IS NULL AND COALESCE(purpose, 'gallery') != 'wallpaper'
                ORDER BY created_at DESC LIMIT ?`
             )
             .all(userId, limit)
         : filterBotId
           ? db
               .prepare(
-                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
-                 FROM images WHERE user_id = ? AND bot_id = ?
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
+                 FROM images WHERE user_id = ? AND bot_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'
                  ORDER BY created_at DESC LIMIT ?`
               )
               .all(userId, filterBotId, limit)
           : db
               .prepare(
-                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model
-                 FROM images WHERE user_id = ?
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
+                 FROM images WHERE user_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'
                  ORDER BY created_at DESC LIMIT ?`
               )
               .all(userId, limit);
@@ -3317,6 +3829,7 @@ function buildRoutes(): RouteDefinition[] {
         created_at: string;
         local_rel_path: string | null;
         model: string | null;
+        purpose: string | null;
       }>).map((row) => mapImageRowToClient(row));
       json(ctx.res, 200, { ok: true, images });
     }),
@@ -3381,11 +3894,11 @@ function buildRoutes(): RouteDefinition[] {
         filterBotId
           ? db
               .prepare(
-                "SELECT id, local_rel_path FROM images WHERE user_id = ? AND bot_id = ?"
+                "SELECT id, local_rel_path FROM images WHERE user_id = ? AND bot_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'"
               )
               .all(userId, filterBotId)
           : db
-              .prepare("SELECT id, local_rel_path FROM images WHERE user_id = ?")
+              .prepare("SELECT id, local_rel_path FROM images WHERE user_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'")
               .all(userId)
       ) as Array<{ id: string; local_rel_path: string | null }>;
       if (rows.length === 0) {
@@ -3393,12 +3906,14 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
       if (filterBotId) {
-        db.prepare("DELETE FROM images WHERE user_id = ? AND bot_id = ?").run(
+        db.prepare(
+          "DELETE FROM images WHERE user_id = ? AND bot_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'"
+        ).run(
           userId,
           filterBotId
         );
       } else {
-        db.prepare("DELETE FROM images WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM images WHERE user_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'").run(userId);
       }
       for (const row of rows) {
         const rel = row.local_rel_path?.trim();
@@ -3843,15 +4358,31 @@ function buildRoutes(): RouteDefinition[] {
       const parentId = ctx.params.id;
       const body = ctx.body as Record<string, unknown>;
       const forkMessageId = typeof body.messageId === "string" ? body.messageId : null;
-      const parent = db.prepare("SELECT id, title, bot_id, incognito FROM conversations WHERE id = ? AND user_id = ?").get(parentId, userId) as { id: string; title: string; bot_id: string | null; incognito: number } | undefined;
+      const parent = db
+        .prepare(
+          `SELECT id, title, conversation_mode, bot_id, incognito,
+                  zen_wallpaper_enabled, zen_wallpaper_image_id,
+                  zen_wallpaper_prompt_seed
+             FROM conversations
+            WHERE id = ? AND user_id = ?`
+        )
+        .get(parentId, userId) as
+        | {
+            id: string;
+            title: string;
+            conversation_mode: string | null;
+            bot_id: string | null;
+            incognito: number;
+            zen_wallpaper_enabled: number | null;
+            zen_wallpaper_image_id: string | null;
+            zen_wallpaper_prompt_seed: string | null;
+          }
+        | undefined;
       if (!parent) {
         throw new Error("Parent conversation not found.");
       }
       const forkId = randomId(12);
       const now = new Date().toISOString();
-      db.prepare(
-        "INSERT INTO conversations (id, user_id, title, bot_id, parent_id, fork_message_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(forkId, userId, `Fork of ${parent.title}`, parent.bot_id, parentId, forkMessageId, parent.incognito, now, now);
       let messageQuery =
         "SELECT id, role, content, provider, model, bot_id, tool_payload, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC";
       let messages: Array<{
@@ -3874,6 +4405,42 @@ function buildRoutes(): RouteDefinition[] {
       } else {
         messages = db.prepare(messageQuery).all(parentId, userId) as any;
       }
+      const forkMode = parent.conversation_mode === "chat" ? "chat" : "sandbox";
+      const forkWallpaperEnabled =
+        forkMode === "chat" && parent.zen_wallpaper_enabled === 1 ? 1 : 0;
+      const forkWallpaperImageId =
+        forkWallpaperEnabled === 1 ? parent.zen_wallpaper_image_id : null;
+      const forkWallpaperPromptSeed =
+        forkWallpaperEnabled === 1 ? parent.zen_wallpaper_prompt_seed : null;
+      const forkWallpaperMessageCount =
+        forkWallpaperEnabled === 1 && forkWallpaperImageId ? messages.length : null;
+      const forkWallpaperStatus =
+        forkWallpaperEnabled === 1 && forkWallpaperImageId ? "ready" : "idle";
+      db.prepare(
+        `INSERT INTO conversations (
+          id, user_id, title, conversation_mode, bot_id, parent_id,
+          fork_message_id, incognito, zen_wallpaper_enabled,
+          zen_wallpaper_image_id, zen_wallpaper_prompt_seed,
+          zen_wallpaper_message_count, zen_wallpaper_status,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        forkId,
+        userId,
+        `Fork of ${parent.title}`,
+        forkMode,
+        parent.bot_id,
+        parentId,
+        forkMessageId,
+        parent.incognito,
+        forkWallpaperEnabled,
+        forkWallpaperImageId,
+        forkWallpaperPromptSeed,
+        forkWallpaperMessageCount,
+        forkWallpaperStatus,
+        now,
+        now
+      );
       for (const msg of messages) {
         db.prepare(
           "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"

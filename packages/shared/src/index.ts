@@ -77,6 +77,7 @@ export {
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   DEFAULT_OLLAMA_IN_APP_PULL_MODEL,
   isAllowedOpenAiImageModelId,
+  isGptImageModelId,
   normalizeOpenAiImageModelId,
   normalizeOpenAiImageGenerationParams,
   catalogEntriesMatchingLocalImageHeuristic,
@@ -507,6 +508,14 @@ export interface Conversation {
    * row WHITE, no-reply-yet falls back to the locked bot's color.
    */
   hasAssistantReply: boolean;
+  /** Zen-only generated ambient wallpaper metadata. */
+  zenWallpaper?: {
+    enabled: boolean;
+    imageId: string | null;
+    promptSeed: string | null;
+    generationMessageCount: number | null;
+    status: "idle" | "generating" | "ready" | "error";
+  };
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];

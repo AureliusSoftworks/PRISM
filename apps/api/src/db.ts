@@ -117,6 +117,9 @@ export function createDatabase(): DatabaseSync {
       anthropic_key_ciphertext TEXT,
       anthropic_key_iv TEXT,
       anthropic_key_tag TEXT,
+      elevenlabs_key_ciphertext TEXT,
+      elevenlabs_key_iv TEXT,
+      elevenlabs_key_tag TEXT,
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
     );
@@ -162,6 +165,11 @@ export function createDatabase(): DatabaseSync {
       coffee_meeting_summary TEXT,
       coffee_meeting_summary_message_count INTEGER,
       coffee_meeting_summary_updated_at TEXT,
+      zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_image_id TEXT,
+      zen_wallpaper_prompt_seed TEXT,
+      zen_wallpaper_message_count INTEGER,
+      zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -211,6 +219,7 @@ export function createDatabase(): DatabaseSync {
       provider TEXT NOT NULL DEFAULT 'openai',
       local_rel_path TEXT,
       model TEXT NOT NULL DEFAULT 'dall-e-3',
+      purpose TEXT NOT NULL DEFAULT 'gallery',
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -527,6 +536,24 @@ export function createDatabase(): DatabaseSync {
   if (!hasAnthropicKeyTag) {
     db.exec("ALTER TABLE users ADD COLUMN anthropic_key_tag TEXT;");
   }
+  const hasElevenLabsKeyCiphertext = userColumns.some(
+    (column) => column.name === "elevenlabs_key_ciphertext"
+  );
+  if (!hasElevenLabsKeyCiphertext) {
+    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_ciphertext TEXT;");
+  }
+  const hasElevenLabsKeyIv = userColumns.some(
+    (column) => column.name === "elevenlabs_key_iv"
+  );
+  if (!hasElevenLabsKeyIv) {
+    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_iv TEXT;");
+  }
+  const hasElevenLabsKeyTag = userColumns.some(
+    (column) => column.name === "elevenlabs_key_tag"
+  );
+  if (!hasElevenLabsKeyTag) {
+    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_tag TEXT;");
+  }
   db.exec(`
     UPDATE users
     SET last_active_at = COALESCE(last_active_at, created_at)
@@ -635,6 +662,36 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasConversationCoffeeMeetingSummaryUpdatedAtColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_updated_at TEXT;");
+  }
+  const hasZenWallpaperEnabledColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_enabled"
+  );
+  if (!hasZenWallpaperEnabledColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasZenWallpaperImageIdColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_image_id"
+  );
+  if (!hasZenWallpaperImageIdColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_image_id TEXT;");
+  }
+  const hasZenWallpaperPromptSeedColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_prompt_seed"
+  );
+  if (!hasZenWallpaperPromptSeedColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_prompt_seed TEXT;");
+  }
+  const hasZenWallpaperMessageCountColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_message_count"
+  );
+  if (!hasZenWallpaperMessageCountColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_message_count INTEGER;");
+  }
+  const hasZenWallpaperStatusColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_status"
+  );
+  if (!hasZenWallpaperStatusColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle';");
   }
   const coffeeGroupColumns = db
     .prepare("PRAGMA table_info(coffee_groups)")
@@ -823,6 +880,12 @@ export function createDatabase(): DatabaseSync {
     db.exec(
       "ALTER TABLE images ADD COLUMN model TEXT NOT NULL DEFAULT 'dall-e-3';"
     );
+  }
+  const hasImagePurposeColumn = imageColumns.some(
+    (column) => column.name === "purpose"
+  );
+  if (!hasImagePurposeColumn) {
+    db.exec("ALTER TABLE images ADD COLUMN purpose TEXT NOT NULL DEFAULT 'gallery';");
   }
 
   // Migrate existing DBs to the bots.color and bots.glyph columns used

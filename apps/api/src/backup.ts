@@ -26,6 +26,7 @@ export interface BackupUserSettings {
   devMemoriesText: string;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  elevenLabsApiKey?: string;
 }
 
 export interface BackupBotSnapshot {
@@ -145,7 +146,10 @@ export function exportUserSnapshot(
          openai_key_tag,
          anthropic_key_ciphertext,
          anthropic_key_iv,
-         anthropic_key_tag
+         anthropic_key_tag,
+         elevenlabs_key_ciphertext,
+         elevenlabs_key_iv,
+         elevenlabs_key_tag
        FROM users
        WHERE id = ?`
     )
@@ -177,6 +181,9 @@ export function exportUserSnapshot(
         anthropic_key_ciphertext: string | null;
         anthropic_key_iv: string | null;
         anthropic_key_tag: string | null;
+        elevenlabs_key_ciphertext: string | null;
+        elevenlabs_key_iv: string | null;
+        elevenlabs_key_tag: string | null;
       }
     | undefined;
   const settings: BackupUserSettings | undefined = user
@@ -222,6 +229,20 @@ export function exportUserSnapshot(
                   ciphertext: user.anthropic_key_ciphertext,
                   iv: user.anthropic_key_iv,
                   tag: user.anthropic_key_tag,
+                },
+                userKey
+              ),
+            }
+          : {}),
+        ...(user.elevenlabs_key_ciphertext &&
+        user.elevenlabs_key_iv &&
+        user.elevenlabs_key_tag
+          ? {
+              elevenLabsApiKey: decryptText(
+                {
+                  ciphertext: user.elevenlabs_key_ciphertext,
+                  iv: user.elevenlabs_key_iv,
+                  tag: user.elevenlabs_key_tag,
                 },
                 userKey
               ),
@@ -419,9 +440,16 @@ export function importUserSnapshot(
       typeof settings.anthropicApiKey === "string" && settings.anthropicApiKey.length > 0
         ? settings.anthropicApiKey
         : null;
+    const elevenLabsApiKey =
+      typeof settings.elevenLabsApiKey === "string" && settings.elevenLabsApiKey.length > 0
+        ? settings.elevenLabsApiKey
+        : null;
     const encryptedOpenAiKey = openAiApiKey ? encryptText(openAiApiKey, userKey) : null;
     const encryptedAnthropicKey = anthropicApiKey
       ? encryptText(anthropicApiKey, userKey)
+      : null;
+    const encryptedElevenLabsKey = elevenLabsApiKey
+      ? encryptText(elevenLabsApiKey, userKey)
       : null;
     db.prepare(`
       UPDATE users
@@ -451,7 +479,10 @@ export function importUserSnapshot(
         openai_key_tag = ?,
         anthropic_key_ciphertext = ?,
         anthropic_key_iv = ?,
-        anthropic_key_tag = ?
+        anthropic_key_tag = ?,
+        elevenlabs_key_ciphertext = ?,
+        elevenlabs_key_iv = ?,
+        elevenlabs_key_tag = ?
       WHERE id = ?
     `).run(
       settings.theme === "light" || settings.theme === "dark" ? settings.theme : "system",
@@ -488,6 +519,9 @@ export function importUserSnapshot(
       encryptedAnthropicKey?.ciphertext ?? null,
       encryptedAnthropicKey?.iv ?? null,
       encryptedAnthropicKey?.tag ?? null,
+      encryptedElevenLabsKey?.ciphertext ?? null,
+      encryptedElevenLabsKey?.iv ?? null,
+      encryptedElevenLabsKey?.tag ?? null,
       userId
     );
   }

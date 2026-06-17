@@ -4,6 +4,7 @@ import {
   parseHiddenBotModelIds,
   resolveNextSettings,
   sanitizeAnthropicKeyInput,
+  sanitizeElevenLabsKeyInput,
   sanitizeOpenAiKeyInput,
   type CurrentSettings,
 } from "../settings.ts";
@@ -572,6 +573,37 @@ describe("resolveNextSettings — anthropicApiKey", () => {
   });
 });
 
+describe("resolveNextSettings — elevenLabsApiKey", () => {
+  it("non-empty string is a replace", () => {
+    const next = resolveNextSettings({ elevenLabsApiKey: "xi-abc" }, baseline());
+    assert.deepEqual(next.elevenLabsKeyIntent, {
+      action: "replace",
+      plaintext: "xi-abc",
+    });
+  });
+
+  it("whitespace keeps the stored key", () => {
+    const next = resolveNextSettings({ elevenLabsApiKey: "   " }, baseline());
+    assert.deepEqual(next.elevenLabsKeyIntent, { action: "keep" });
+  });
+
+  it("explicit null clears the stored key", () => {
+    const next = resolveNextSettings({ elevenLabsApiKey: null }, baseline());
+    assert.deepEqual(next.elevenLabsKeyIntent, { action: "clear" });
+  });
+
+  it("strips a pasted `ELEVENLABS_API_KEY=` prefix", () => {
+    const next = resolveNextSettings(
+      { elevenLabsApiKey: "ELEVENLABS_API_KEY=\"xi-abc\"" },
+      baseline()
+    );
+    assert.deepEqual(next.elevenLabsKeyIntent, {
+      action: "replace",
+      plaintext: "xi-abc",
+    });
+  });
+});
+
 describe("sanitizeOpenAiKeyInput", () => {
   it("pass-through for a clean key", () => {
     assert.equal(sanitizeOpenAiKeyInput("sk-proj-abc123"), "sk-proj-abc123");
@@ -639,6 +671,15 @@ describe("sanitizeAnthropicKeyInput", () => {
     assert.equal(
       sanitizeAnthropicKeyInput("ANTHROPIC_API_KEY='sk-ant-api03-abc'"),
       "sk-ant-api03-abc"
+    );
+  });
+});
+
+describe("sanitizeElevenLabsKeyInput", () => {
+  it("uses the same env-line stripping behavior as OpenAI keys", () => {
+    assert.equal(
+      sanitizeElevenLabsKeyInput("ELEVENLABS_API_KEY='xi-abc'"),
+      "xi-abc"
     );
   });
 });

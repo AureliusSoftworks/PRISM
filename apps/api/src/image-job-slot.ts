@@ -56,7 +56,7 @@ function mutexFor(userId: string): PerUserMutex {
   return m;
 }
 
-export type ImageJobSource = "chat_tool" | "images_panel";
+export type ImageJobSource = "chat_tool" | "images_panel" | "zen_wallpaper";
 
 export type RunningImageJob = {
   id: string;
