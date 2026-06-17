@@ -35019,7 +35019,11 @@ function HomeContent(): React.JSX.Element {
               </section>
 
               <div className={styles.settingsSectionGrid}>
-                <section className={styles.settingsSection} aria-labelledby="settings-connections-title">
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  data-settings-section="connections"
+                  aria-labelledby="settings-connections-title"
+                >
                   <header className={styles.settingsSectionHeader}>
                     <div>
                       <span className={styles.settingsEyebrow}>Connections</span>
@@ -35116,6 +35120,7 @@ function HomeContent(): React.JSX.Element {
 
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  data-settings-section="models"
                   aria-labelledby="settings-models-title"
                 >
                   <header className={styles.settingsSectionHeader}>
@@ -35392,7 +35397,11 @@ function HomeContent(): React.JSX.Element {
                   </details>
                 </section>
 
-                <section className={styles.settingsSection} aria-labelledby="settings-behavior-title">
+                <section
+                  className={styles.settingsSection}
+                  data-settings-section="behavior"
+                  aria-labelledby="settings-behavior-title"
+                >
                   <header className={styles.settingsSectionHeader}>
                     <div>
                       <span className={styles.settingsEyebrow}>Behavior</span>
@@ -35438,7 +35447,11 @@ function HomeContent(): React.JSX.Element {
                   </div>
                 </section>
 
-                <section className={styles.settingsSection} aria-labelledby="settings-about-title">
+                <section
+                  className={styles.settingsSection}
+                  data-settings-section="about"
+                  aria-labelledby="settings-about-title"
+                >
                   <header className={styles.settingsSectionHeader}>
                     <div>
                       <span className={styles.settingsEyebrow}>About</span>
@@ -35463,6 +35476,7 @@ function HomeContent(): React.JSX.Element {
 
                 <section
                   className={styles.settingsSection}
+                  data-settings-section="account"
                   aria-labelledby="settings-account-title"
                 >
                   <header className={styles.settingsSectionHeader}>
