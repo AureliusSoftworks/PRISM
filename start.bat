@@ -253,8 +253,7 @@ REM -- API in its own window, watch + dev DB ----------------------------------
 REM `--env-file-if-exists=.env` silently no-ops when .env is absent (Node 22+).
 REM Without it, OPENAI_API_KEY / OLLAMA_HOST / etc. from .env never reach the
 REM API and every OpenAI chat turn 401s with a cryptic "invalid key".
-start "Prism API (dev)" cmd /k ^
-  "cd /d ""%~dp0"" && set DB_PATH=%CD%\apps\api\data\localai-dev.db&& set API_PORT=18789&& set NEXT_TELEMETRY_DISABLED=1&& node --env-file-if-exists=.env --watch --experimental-strip-types apps\api\src\server.ts"
+start "Prism API (dev)" cmd /k call "%~dp0scripts\windows-dev-api.cmd"
 
 REM -- Web dev server in this window ------------------------------------------
 cd apps\web
