@@ -5588,18 +5588,35 @@ function composeAutoOptionMetaLine(
 ): string {
   const sliceLocal = catalog?.local ?? [];
   const sliceOnline = catalog?.online ?? [];
+  const providerOptions =
+    provider === "local"
+      ? sliceLocal
+      : sliceOnline.filter((model) => (model.provider ?? "openai") === provider);
+  const preferredModel =
+    provider === "local"
+      ? (
+          bot?.local_model?.trim() ||
+          bot?.model?.trim() ||
+          settings?.preferredLocalModel?.trim() ||
+          null
+        )
+      : (
+          bot?.online_model?.trim() ||
+          settings?.preferredOnlineModel?.trim() ||
+          null
+        );
+  const providerScopedPreferredModel =
+    preferredModel && providerOptions.some((model) => model.id === preferredModel)
+      ? preferredModel
+      : null;
   const resolved = resolveAutoModel({
     provider,
     explicitModelOverride: null,
-    botPreferredModel:
-      provider === "local"
-        ? (bot?.local_model?.trim() || bot?.model?.trim() || null)
-        : (bot?.online_model?.trim() || null),
+    botPreferredModel: providerScopedPreferredModel,
     hiddenModelIds: settings?.hiddenBotModelIds ?? [],
     catalog: { local: sliceLocal, online: sliceOnline },
   });
-  const list = provider === "local" ? sliceLocal : sliceOnline;
-  const entry = list.find((m) => m.id === resolved.model);
+  const entry = providerOptions.find((m) => m.id === resolved.model);
   return entry?.label ?? modelLabelFromId(resolved.model);
 }
 
@@ -5726,13 +5743,21 @@ function visibleConcreteModelChoiceForProvider(
 }
 
 function visibleModelChoiceForProvider(
+  catalog: ModelCatalog | null,
   settings: UserSettings | null,
+  provider: Provider,
   choice: string | null | undefined
 ): string {
-  return visibleBotCustomizerModelChoice(
+  const visibleChoice = visibleBotCustomizerModelChoice(
     settings,
     normalizeModelChoice(choice)
   );
+  if (visibleChoice === AUTO_MODEL_CHOICE) return AUTO_MODEL_CHOICE;
+  return availableModelOptionsForProvider(catalog, settings, provider).some(
+    (model) => model.id === visibleChoice
+  )
+    ? visibleChoice
+    : AUTO_MODEL_CHOICE;
 }
 
 function allBotCustomizerModelOptions(
@@ -17323,7 +17348,9 @@ function HomeContent(): React.JSX.Element {
     const modelProvider: Provider = effectivePreferredProvider;
     const rawModelChoice = chatModelChoiceByProvider[modelProvider];
     const visibleModelChoice = visibleModelChoiceForProvider(
+      modelCatalog,
       settings,
+      modelProvider,
       rawModelChoice
     );
     const modelOptions = includeSelectedModelOption(
@@ -17561,7 +17588,9 @@ function HomeContent(): React.JSX.Element {
     const isLocal = modelProvider === "local";
     const rawModelChoice = coffeeModelChoiceByProvider[modelProvider];
     const visibleModelChoice = visibleModelChoiceForProvider(
+      modelCatalog,
       settings,
+      modelProvider,
       rawModelChoice
     );
     const modelOptions = includeSelectedModelOption(
@@ -17608,7 +17637,9 @@ function HomeContent(): React.JSX.Element {
     const isLocal = modelProvider === "local";
     const rawModelChoice = chatModelChoiceByProvider[modelProvider];
     const visibleModelChoice = visibleModelChoiceForProvider(
+      modelCatalog,
       settings,
+      modelProvider,
       rawModelChoice
     );
     const modelOptions = includeSelectedModelOption(
@@ -19697,7 +19728,9 @@ function HomeContent(): React.JSX.Element {
       isDefault: true,
     };
   const storyVisibleModelChoice = visibleModelChoiceForProvider(
+    modelCatalog,
     settings,
+    storyModelProvider,
     storyModelChoiceByProvider[storyModelProvider]
   );
   const storyEffectiveModelChoice =
@@ -20238,12 +20271,15 @@ function HomeContent(): React.JSX.Element {
     const effectiveProv = locked ? "local" : coffeeProvider;
     const modelProvider: Provider = effectiveProv;
     const visible = visibleModelChoiceForProvider(
+      modelCatalog,
       settings,
+      modelProvider,
       coffeeModelChoiceByProvider[modelProvider]
     );
     return visible !== AUTO_MODEL_CHOICE ? visible : undefined;
   }, [
     settings,
+    modelCatalog,
     coffeeAnyOfflineProtected,
     coffeeProvider,
     coffeeModelChoiceByProvider,
@@ -22591,7 +22627,9 @@ function HomeContent(): React.JSX.Element {
       ? commandCenterModelChoice.modelId
       : providerForSend
       ? visibleModelChoiceForProvider(
+          modelCatalog,
           settings,
+          providerForSend,
           chatModelChoiceByProvider[providerForSend]
         )
       : AUTO_MODEL_CHOICE;
@@ -44116,7 +44154,9 @@ function HomeContent(): React.JSX.Element {
                   const isLocal = modelProvider === "local";
                   const rawModelChoice = chatModelChoiceByProvider[modelProvider];
                   const visibleModelChoice = visibleModelChoiceForProvider(
+                    modelCatalog,
                     settings,
+                    modelProvider,
                     rawModelChoice
                   );
                   const modelOptions = includeSelectedModelOption(

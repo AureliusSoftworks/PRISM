@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ANTHROPIC_DEFAULT_MODEL,
   buildModelCatalog,
   checkAnthropicApiKeyStatus,
   checkOpenAiApiKeyStatus,
@@ -824,6 +825,50 @@ describe("OpenAiProvider request shape", () => {
         schema,
       },
     });
+  });
+});
+
+describe("AnthropicProvider request shape", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("uses the requested Claude model", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "ok" }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new AnthropicProvider({ apiKey: "sk-ant-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-opus-4-8",
+    });
+
+    assert.equal(body.model, "claude-opus-4-8");
+  });
+
+  it("falls back to the Anthropic default for a stale OpenAI model override", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "ok" }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new AnthropicProvider({ apiKey: "sk-ant-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.3-chat-latest",
+    });
+
+    assert.equal(body.model, ANTHROPIC_DEFAULT_MODEL);
   });
 });
 

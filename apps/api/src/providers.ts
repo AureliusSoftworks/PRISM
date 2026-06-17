@@ -822,7 +822,10 @@ export class AnthropicProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
-    const modelId = options?.model?.trim() || ANTHROPIC_DEFAULT_MODEL;
+    const requestedModelId = options?.model?.trim() || "";
+    const modelId = isAllowedAnthropicChatModel(requestedModelId)
+      ? requestedModelId
+      : ANTHROPIC_DEFAULT_MODEL;
     const systemMessages = messages
       .filter((message) => message.role === "system")
       .map((message) => message.content.trim())
