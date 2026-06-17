@@ -10075,34 +10075,164 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-underline-offset: 0.18em;
 }
 
-.commandMentionChip {
-  border: 0;
-  padding: 0;
-  margin: 0;
-  background: none;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-  text-decoration: none;
-  -webkit-text-fill-color: transparent;
-  background-image: linear-gradient(
-    90deg,
-    #ff6b9d 0%,
-    #ffa94d 18%,
-    #ffe066 36%,
-    #69db7c 54%,
-    #4dabf7 72%,
-    #b197fc 88%,
-    #ff6b9d 100%
-  );
-  background-clip: text;
-  -webkit-background-clip: text;
+.promptShortcutInline {
+  display: inline-grid;
+  max-width: 100%;
+  gap: 8px;
+  vertical-align: baseline;
 }
 
+.promptShortcutCapsule,
+.commandMentionChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  width: fit-content;
+  min-height: 26px;
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 28%, var(--line));
+  border-left-color: color-mix(in srgb, #ff4d6d 46%, var(--accent-ink));
+  border-radius: 999px;
+  padding: 3px 9px 3px 8px;
+  margin: 0;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 10%, transparent),
+      color-mix(in srgb, #2fd3e3 7%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 82%, var(--bg-surface));
+  color: var(--fg);
+  font: 700 0.92em/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 18%, transparent) inset,
+    0 8px 18px color-mix(in srgb, #000 10%, transparent);
+}
+
+.promptShortcutCapsule span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promptShortcutSlash {
+  color: color-mix(in srgb, var(--accent-ink) 72%, #2fd3e3);
+}
+
+.promptShortcutCapsule:hover,
+.promptShortcutCapsule:focus-visible,
 .commandMentionChip:hover,
 .commandMentionChip:focus-visible {
-  text-decoration: underline;
-  text-underline-offset: 0.18em;
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-ink) 48%, var(--line-strong));
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 14%, transparent),
+      color-mix(in srgb, #2fd3e3 10%, transparent)
+    ),
+    var(--bg-elevated);
+}
+
+.promptShortcutPreview {
+  display: grid;
+  gap: 10px;
+  width: min(620px, 100%);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--line));
+  border-radius: 12px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, var(--accent-ink) 4%);
+  box-shadow: var(--shadow-md);
+  color: var(--fg);
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  white-space: normal;
+}
+
+.promptShortcutPreviewHeader,
+.promptShortcutPreviewActions,
+.promptShortcutPreviewMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.promptShortcutPreviewHeader {
+  justify-content: space-between;
+}
+
+.promptShortcutPreviewTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font: 800 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.promptShortcutPreviewActions button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  color: var(--fg);
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.promptShortcutPreviewActions button:hover,
+.promptShortcutPreviewActions button:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+
+.promptShortcutPreviewMeta {
+  flex-wrap: wrap;
+}
+
+.promptShortcutFlag {
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 22%, var(--line));
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: color-mix(in srgb, var(--accent-ink) 8%, transparent);
+  color: color-mix(in srgb, var(--accent-ink) 76%, var(--fg));
+  font: 750 11px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.promptShortcutPreviewSection {
+  display: grid;
+  gap: 5px;
+}
+
+.promptShortcutPreviewSection > span:first-child {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.promptShortcutPreviewSection > span:last-child,
+.promptShortcutPreviewSection code {
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.promptShortcutPreviewSection code {
+  display: block;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 90%, #000 10%);
+  white-space: pre-wrap;
 }
 
 .botMentionChip {
@@ -12124,50 +12254,40 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .markdownRichEditorHost :global(.tiptapPrismDevCommandToken) {
-  background-image: repeating-linear-gradient(
-    90deg,
-    #ff5f6d 0ch,
-    #ff5f6d 1ch,
-    #ffc371 1ch,
-    #ffc371 2ch,
-    #9be15d 2ch,
-    #9be15d 3ch,
-    #5d9fff 3ch,
-    #5d9fff 4ch,
-    #c77dff 4ch,
-    #c77dff 5ch
-  );
-  background-size: 5ch 100%;
-  background-repeat: repeat;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: devCommandRainbowShift 2.8s linear infinite;
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 28%, var(--line));
+  border-left-color: color-mix(in srgb, #ff4d6d 46%, var(--accent-ink));
+  border-radius: 999px;
+  padding: 1px 7px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 10%, transparent),
+      color-mix(in srgb, #2fd3e3 7%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  color: var(--fg);
+  -webkit-text-fill-color: var(--fg);
+  font-weight: 800;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .markdownRichEditorHost :global(.tiptapPrismDevCommandQuotedToken) {
-  color: #ff4fd8;
-  -webkit-text-fill-color: #ff4fd8;
+  color: color-mix(in srgb, #ff4d6d 72%, var(--fg));
+  -webkit-text-fill-color: color-mix(in srgb, #ff4d6d 72%, var(--fg));
+  font-weight: 700;
 }
 
 .markdownRichEditorHost :global(.tiptapPrismDevCommandArgumentToken) {
-  color: #7dd3fc;
-  -webkit-text-fill-color: #7dd3fc;
+  color: color-mix(in srgb, #2fd3e3 70%, var(--fg));
+  -webkit-text-fill-color: color-mix(in srgb, #2fd3e3 70%, var(--fg));
+  font-weight: 750;
 }
 
 .markdownRichEditorHost :global(.tiptapPrismDevCommandActionToken) {
-  color: #fb923c;
-  -webkit-text-fill-color: #fb923c;
-}
-
-@keyframes devCommandRainbowShift {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 10ch 0;
-  }
+  color: color-mix(in srgb, #ff9f1c 72%, var(--fg));
+  -webkit-text-fill-color: color-mix(in srgb, #ff9f1c 72%, var(--fg));
+  font-weight: 750;
 }
 
 .compose[data-compose-ready="true"] .markdownComposerSurface {
@@ -13873,6 +13993,365 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding-right: 2px;
   padding-bottom: max(10px, env(safe-area-inset-bottom));
   overscroll-behavior-y: contain;
+}
+
+.panelPromptCenter {
+  --panel-width: min(860px, calc(100vw - 32px));
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  overflow: hidden;
+  padding: 18px;
+}
+
+.promptCenterWorkspace {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.28fr);
+  gap: 14px;
+  overflow: hidden;
+}
+
+.promptCenterSidebar,
+.promptCenterEditor {
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--bg-surface));
+  box-shadow: 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent) inset;
+}
+
+.promptCenterSidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.promptCenterModelCard {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 58%, var(--line));
+  border-radius: 12px;
+  padding: 10px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #ff4d6d 7%, transparent),
+      color-mix(in srgb, #2fd3e3 6%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-surface) 92%, transparent);
+}
+
+.promptCenterEyebrow,
+.panelHeaderKicker {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.promptCenterModelCard label,
+.promptCenterField {
+  display: grid;
+  gap: 6px;
+}
+
+.promptCenterModelCard label span,
+.promptCenterField span,
+.promptCenterFlagsHeader span,
+.promptCenterReadonlyBlock > span {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.promptCenterModelCard select,
+.promptCenterField input,
+.promptCenterField textarea,
+.promptCenterFlagRow input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, #000 6%);
+  color: var(--fg);
+  padding: 9px 10px;
+  font: 500 13px/1.45 var(--font-ui-sans), system-ui, sans-serif;
+}
+
+.promptCenterField input,
+.promptCenterFlagRow input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.promptCenterField textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+
+.promptCenterModelCard select:focus-visible,
+.promptCenterField input:focus-visible,
+.promptCenterField textarea:focus-visible,
+.promptCenterFlagRow input:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-ink) 56%, var(--line-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 14%, transparent);
+}
+
+.promptCenterListSection {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 9px;
+}
+
+.promptCenterListHeader,
+.promptCenterFlagsHeader,
+.promptCenterDangerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.promptCenterListHeader span {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.promptCenterListHeader button,
+.promptCenterFlagsHeader button,
+.promptCenterDangerRow button,
+.promptCenterMobileBack {
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 26%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  color: var(--fg);
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.promptCenterListHeader button:hover,
+.promptCenterListHeader button:focus-visible,
+.promptCenterFlagsHeader button:hover,
+.promptCenterFlagsHeader button:focus-visible,
+.promptCenterDangerRow button:hover,
+.promptCenterDangerRow button:focus-visible,
+.promptCenterMobileBack:hover,
+.promptCenterMobileBack:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+
+.promptCenterPromptList {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding-right: 2px;
+}
+
+.promptCenterPromptRow {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.promptCenterPromptRow:hover,
+.promptCenterPromptRow:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+
+.promptCenterPromptRow[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent-ink) 46%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent-ink) 9%, var(--bg-elevated));
+}
+
+.promptCenterPromptName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 800 13px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.promptCenterPromptMeta {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.promptCenterEditor {
+  overflow-y: auto;
+  padding: 14px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.promptCenterMobileBack {
+  display: none;
+  width: fit-content;
+}
+
+.promptCenterEditorHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.promptCenterEditorHeader h4 {
+  margin: 4px 0 0;
+  font-size: 24px;
+  line-height: 1.1;
+  word-break: break-word;
+}
+
+.promptCenterStatusBadge {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 24%, var(--line));
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: color-mix(in srgb, var(--accent-ink) 8%, transparent);
+  color: color-mix(in srgb, var(--accent-ink) 78%, var(--fg));
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.promptCenterStatusBadge[data-read-only="true"] {
+  border-color: color-mix(in srgb, var(--fg-muted) 28%, var(--line));
+  background: color-mix(in srgb, var(--bg-hover) 82%, transparent);
+  color: var(--fg-muted);
+}
+
+.promptCenterReadonlyBody,
+.promptCenterEditorFields {
+  display: grid;
+  gap: 13px;
+}
+
+.promptCenterReadonlyBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.promptCenterReadonlyBlock pre {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, #000 8%);
+  color: var(--fg);
+  font: 500 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.promptCenterReadonlyBlock p,
+.promptCenterFlagList p,
+.promptCenterEmptyState p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.promptCenterFlagPreviewList,
+.promptCenterFlagList {
+  display: grid;
+  gap: 8px;
+}
+
+.promptCenterFlagPreview,
+.promptCenterFlagRow {
+  display: grid;
+  grid-template-columns: minmax(78px, 0.34fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.promptCenterFlagPreview {
+  grid-template-columns: minmax(78px, 0.34fr) minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 90%, transparent);
+}
+
+.promptCenterFlagPreview code {
+  color: color-mix(in srgb, var(--accent-ink) 78%, var(--fg));
+  font-weight: 800;
+}
+
+.promptCenterFlagPreview span {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.promptCenterFlagRow button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.promptCenterFlagRow button:hover,
+.promptCenterFlagRow button:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+
+.promptCenterDangerRow {
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.promptCenterDangerRow button {
+  border-color: color-mix(in srgb, #ff4d6d 40%, var(--line));
+  color: color-mix(in srgb, #ff4d6d 72%, var(--fg));
+}
+
+.promptCenterEmptyState {
+  min-height: 220px;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.promptCenterEmptyState strong {
+  color: var(--fg);
+  font-size: 15px;
 }
 
 @keyframes panelIn {
@@ -24755,6 +25234,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   /* Match Bots / Memories: edge-to-edge drawer on phone. */
   .panelSettings,
+  .panelPromptCenter,
   .panelImages {
     left: env(safe-area-inset-left);
     right: env(safe-area-inset-right);
@@ -24767,6 +25247,51 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .panelSettings {
     max-height: 100dvh;
     overflow: hidden;
+  }
+
+  .panelPromptCenter {
+    max-height: 100dvh;
+    overflow: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .promptCenterWorkspace {
+    grid-template-columns: 1fr;
+  }
+
+  .promptCenterWorkspace[data-has-selection="true"] .promptCenterSidebar {
+    display: none;
+  }
+
+  .promptCenterWorkspace:not([data-has-selection="true"]) .promptCenterEditor {
+    display: none;
+  }
+
+  .promptCenterSidebar,
+  .promptCenterEditor {
+    border-radius: 12px;
+  }
+
+  .promptCenterMobileBack {
+    display: inline-flex;
+  }
+
+  .promptCenterEditor {
+    padding: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .promptCenterEditorHeader h4 {
+    font-size: 21px;
+  }
+
+  .promptCenterFlagRow,
+  .promptCenterFlagPreview {
+    grid-template-columns: 1fr;
+  }
+
+  .promptCenterFlagRow button {
+    justify-self: end;
   }
 
   .panelSettings > .settingsWorkspace {

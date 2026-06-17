@@ -105,6 +105,8 @@ import {
   encodeComfyUiRemoteWorkflowModelId,
   hydrateAssistantMessageParts,
   isAllowedInAppOllamaPullModelName,
+  normalizePromptShortcutMetadata,
+  parseStoredPromptShortcutPayload,
   parseStoredComfyUiWorkflows,
   type BotOpinion,
   type BotOpinionBoundaryLevel,
@@ -1114,6 +1116,13 @@ function buildRoutes(): RouteDefinition[] {
           botColor: row.bot_color ?? undefined,
           botGlyph: row.bot_glyph ?? undefined,
         };
+        if (row.role === "user") {
+          const promptShortcut = parseStoredPromptShortcutPayload(row.tool_payload);
+          return {
+            ...shared,
+            ...(promptShortcut ? { promptShortcut } : {}),
+          };
+        }
         if (row.role !== "assistant") return shared;
         const assembled = hydrateAssistantMessageParts({
           content: row.content,
@@ -1563,6 +1572,7 @@ function buildRoutes(): RouteDefinition[] {
       const starterPromptWarrantsIntro =
         starterPrompt && body.starterPromptWarrantsIntro === true;
       const message = starterPrompt ? "" : readString(body.message, "message");
+      const promptShortcut = normalizePromptShortcutMetadata(body.promptShortcut);
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
       const forceNewConversation = body.forceNewConversation === true;
@@ -1734,6 +1744,7 @@ function buildRoutes(): RouteDefinition[] {
             mode,
             sessionEnding,
             forceNewConversation,
+            ...(promptShortcut ? { promptShortcut } : {}),
           },
           conversationId
         );

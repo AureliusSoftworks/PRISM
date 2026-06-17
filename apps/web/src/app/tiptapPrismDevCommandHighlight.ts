@@ -3,7 +3,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
-const DEV_COMMAND_RE = /^\/(?:dev|echo|forget|help|clear)(?=\s|$)/iu;
+const DEV_COMMAND_RE = /^\/[a-z0-9][a-z0-9-]*(?=\s|$)/iu;
 
 interface DevCommandHighlightRanges {
   command: { from: number; to: number };

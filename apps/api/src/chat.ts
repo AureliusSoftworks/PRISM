@@ -53,6 +53,7 @@ import type {
   MemoryTier,
   OpinionBand,
   OpinionTrend,
+  PromptShortcutMetadata,
   SessionOpinion,
   SentGeneratedImagePayload,
 } from "@localai/shared";
@@ -61,7 +62,9 @@ import {
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   parseAssistantPrismTools,
+  parseStoredPromptShortcutPayload,
   serializeAssistantToolPayload,
+  serializePromptShortcutPayload,
 } from "@localai/shared";
 import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
 import {
@@ -1617,6 +1620,8 @@ export interface UserChatSettings {
   sessionEnding?: boolean;
   /** When true, skip automatic latest-chat reuse and force a new conversation row. */
   forceNewConversation?: boolean;
+  /** Optional user-facing prompt shortcut metadata for resolved Prompt Center sends. */
+  promptShortcut?: PromptShortcutMetadata;
 }
 
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
@@ -2689,6 +2694,13 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
       botColor: row.bot_color ? row.bot_color : undefined,
       botGlyph: row.bot_glyph ? row.bot_glyph : undefined,
     };
+    if (row.role === "user") {
+      const promptShortcut = parseStoredPromptShortcutPayload(row.tool_payload);
+      return {
+        ...base,
+        ...(promptShortcut ? { promptShortcut } : {}),
+      };
+    }
     if (row.role !== "assistant") {
       return base;
     }
@@ -3628,11 +3640,12 @@ export async function processChatMessage(
         isStarterPrompt
           ? []
           : [{
-              id: randomId(12),
-              role: "user" as const,
-              content: message,
-              createdAt: now,
-            }]
+            id: randomId(12),
+            role: "user" as const,
+            content: message,
+            createdAt: now,
+            ...(settings.promptShortcut ? { promptShortcut: settings.promptShortcut } : {}),
+          }]
       ),
       ...assistantTail,
     ];
@@ -3875,9 +3888,10 @@ export async function processChatMessage(
   let userMessageId: string | null = null;
   if (!isStarterPrompt) {
     userMessageId = randomId(12);
+    const promptShortcutPayload = serializePromptShortcutPayload(settings.promptShortcut);
     db.prepare(
-      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?)"
-    ).run(userMessageId, activeConversationId, userId, message, now);
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, NULL, ?, ?)"
+    ).run(userMessageId, activeConversationId, userId, message, promptShortcutPayload, now);
   }
 
   const { provider: primaryProvider, botOverrides: primaryBotOverrides } =

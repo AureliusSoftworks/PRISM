@@ -18,6 +18,16 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     });
   });
 
+  it("recognizes custom prompt shortcuts", () => {
+    const out = resolveLeadingDevCommandTextRanges("/summarize-this -f notes");
+    assert.deepEqual(out, {
+      commandStart: 0,
+      commandEnd: 15,
+      quotedStringRanges: [],
+      actionTokenRanges: [],
+    });
+  });
+
   it("resolves command bounds for a leading slash command", () => {
     const out = resolveLeadingDevCommandTextRanges("  /echo \"hello\"");
     assert.deepEqual(out, {

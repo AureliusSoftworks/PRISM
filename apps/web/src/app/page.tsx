@@ -102,6 +102,7 @@ import {
   type BotVoicePreset,
   type BotMoodKey,
   type ComfyUiWorkflowRegistration,
+  type PromptShortcutMetadata,
   type SentGeneratedImagePayload,
   type StoryEpisodeManifest,
   type StoryInventoryItem,
@@ -3136,6 +3137,8 @@ interface Message {
   };
   /** Assistant attached a generated image (also listed in the Images library). */
   sentGeneratedImage?: SentGeneratedImagePayload;
+  /** User-entered Prompt Center shortcut that resolved into this message content. */
+  promptShortcut?: PromptShortcutMetadata;
 }
 
 function collectGeneratedImageIds(messages: readonly Message[]): string[] {
@@ -11896,6 +11899,10 @@ interface MessageBodyProps {
   resolvedTheme?: "light" | "dark";
   commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
   onOpenCommandMention?: (commandId: string) => void;
+  promptShortcut?: PromptShortcutMetadata;
+  promptShortcutExpanded?: boolean;
+  onTogglePromptShortcut?: () => void;
+  onCollapsePromptShortcut?: () => void;
 }
 
 function flattenMarkdownCodeText(node: React.ReactNode): string {
@@ -11914,6 +11921,101 @@ function flattenMarkdownText(node: React.ReactNode): string {
   if (!isValidElement(node)) return "";
   const element = node as React.ReactElement<{ children?: React.ReactNode }>;
   return flattenMarkdownText(element.props.children);
+}
+
+function promptShortcutLabel(promptShortcut: PromptShortcutMetadata): string {
+  const invocation = promptShortcut.invocation.trim();
+  return invocation || `/${promptShortcut.name}`;
+}
+
+function PromptShortcutMessage({
+  promptShortcut,
+  fullPrompt,
+  expanded,
+  onToggle,
+  onCollapse,
+  onOpenPrompt,
+}: {
+  promptShortcut: PromptShortcutMetadata;
+  fullPrompt: string;
+  expanded: boolean;
+  onToggle?: () => void;
+  onCollapse?: () => void;
+  onOpenPrompt?: (commandId: string) => void;
+}) {
+  const label = promptShortcutLabel(promptShortcut);
+  return (
+    <span
+      className={styles.promptShortcutInline}
+      data-prompt-shortcut-preview="true"
+      data-expanded={expanded ? "true" : undefined}
+    >
+      <button
+        type="button"
+        className={styles.promptShortcutCapsule}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle?.();
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggle?.();
+        }}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Expand"} prompt shortcut ${label}`}
+      >
+        <span className={styles.promptShortcutSlash} aria-hidden="true">/</span>
+        <span>{label.replace(/^\/+/, "")}</span>
+      </button>
+      {expanded && (
+        <span className={styles.promptShortcutPreview} role="group" aria-label="Prompt shortcut preview">
+          <span className={styles.promptShortcutPreviewHeader}>
+            <span className={styles.promptShortcutPreviewTitle}>{label}</span>
+            <span className={styles.promptShortcutPreviewActions}>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenPrompt?.(promptShortcut.commandId);
+                }}
+              >
+                Edit prompt
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCollapse?.();
+                }}
+              >
+                Collapse
+              </button>
+            </span>
+          </span>
+          {promptShortcut.flags.length > 0 && (
+            <span className={styles.promptShortcutPreviewMeta}>
+              {promptShortcut.flags.map((flag) => (
+                <span key={`${flag.key}:${flag.value}`} className={styles.promptShortcutFlag}>
+                  -{flag.key}
+                </span>
+              ))}
+            </span>
+          )}
+          {promptShortcut.passthrough && (
+            <span className={styles.promptShortcutPreviewSection}>
+              <span>User request</span>
+              <span>{promptShortcut.passthrough}</span>
+            </span>
+          )}
+          <span className={styles.promptShortcutPreviewSection}>
+            <span>Prompt sent</span>
+            <code>{fullPrompt.trim() || "(empty prompt)"}</code>
+          </span>
+        </span>
+      )}
+    </span>
+  );
 }
 
 interface MarkdownCodeBlockProps {
@@ -12607,7 +12709,27 @@ function resolveTypedLineStartIndexes(lines: string[]): number[] {
   });
 }
 
-function MessageBody({
+function MessageBody(props: MessageBodyProps): React.JSX.Element {
+  const fullSource =
+    props.assistantStripPrismToolTail === true
+      ? parseAssistantPrismTools(props.content).displayContent
+      : props.content;
+  if (props.messageRole === "user" && props.promptShortcut) {
+    return (
+      <PromptShortcutMessage
+        promptShortcut={props.promptShortcut}
+        fullPrompt={fullSource}
+        expanded={props.promptShortcutExpanded === true}
+        onToggle={props.onTogglePromptShortcut}
+        onCollapse={props.onCollapsePromptShortcut}
+        onOpenPrompt={props.onOpenCommandMention}
+      />
+    );
+  }
+  return <MarkdownMessageBody {...props} />;
+}
+
+function MarkdownMessageBody({
   content,
   assistantStripPrismToolTail,
   messageRole,
@@ -12877,12 +12999,13 @@ function MessageBody({
           return (
             <button
               type="button"
-              className={styles.commandMentionChip}
+              className={styles.promptShortcutCapsule}
               onClick={() => onOpenCommandMention?.(commandId)}
               data-command-id={commandId}
-              aria-label={`Edit command ${label}`}
+              aria-label={`Open prompt ${label}`}
             >
-              {label}
+              <span className={styles.promptShortcutSlash} aria-hidden="true">/</span>
+              <span>{label.replace(/^\/+/, "")}</span>
             </button>
           );
         }
@@ -15116,10 +15239,11 @@ function HomeContent(): React.JSX.Element {
     () => new Map(commandCenterCommands.map((command) => [command.id, command] as const)),
     [commandCenterCommands]
   );
-  const commandDisplayByMessageIdRef = useRef<Map<string, string>>(new Map());
   const [commandCenterSelectedCommandId, setCommandCenterSelectedCommandId] =
     useState<string | null>(null);
   const [commandCenterSpecsCommandId, setCommandCenterSpecsCommandId] =
+    useState<string | null>(null);
+  const [expandedPromptShortcutMessageId, setExpandedPromptShortcutMessageId] =
     useState<string | null>(null);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const pendingImportedChatBotSelectionRef = useRef<string | null>(null);
@@ -16162,18 +16286,7 @@ function HomeContent(): React.JSX.Element {
 
   const applyCommandDisplayAliases = useCallback(
     function <T extends { messages: Message[] }>(conversation: T): T {
-      let changed = false;
-      const messages = conversation.messages.map((message) => {
-        if (message.role !== "user") return message;
-        const alias = commandDisplayByMessageIdRef.current.get(message.id);
-        if (!alias || alias === message.content) return message;
-        changed = true;
-        return {
-          ...message,
-          content: alias,
-        };
-      });
-      return changed ? { ...conversation, messages } : conversation;
+      return conversation;
     },
     []
   );
@@ -17823,6 +17936,31 @@ function HomeContent(): React.JSX.Element {
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
   }, [commandCenterSpecsCommandId]);
+
+  useEffect(() => {
+    if (!expandedPromptShortcutMessageId || typeof document === "undefined") return;
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("[data-prompt-shortcut-preview='true']")
+      ) {
+        return;
+      }
+      setExpandedPromptShortcutMessageId(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setExpandedPromptShortcutMessageId(null);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [expandedPromptShortcutMessageId]);
 
   useEffect(() => {
     if (!user) return;
@@ -22380,6 +22518,7 @@ function HomeContent(): React.JSX.Element {
       sessionEnding?: boolean;
       forceNewConversation?: boolean;
       commandCenterModelChoice?: string;
+      promptShortcut?: PromptShortcutMetadata;
     } = {}
   ): Record<string, unknown> {
     const isChatMode = view === "chat";
@@ -22453,6 +22592,7 @@ function HomeContent(): React.JSX.Element {
       preferredProvider:
         mode === "sandbox" || privateForSend || modelOverride ? providerForSend : undefined,
       ...(modelOverride ? { modelOverride } : {}),
+      ...(options.promptShortcut ? { promptShortcut: options.promptShortcut } : {}),
     };
   }
 
@@ -22487,9 +22627,10 @@ function HomeContent(): React.JSX.Element {
     // Optimistic-only rows are never in SQLite — editing would call /rewind
     // with a fake id after a cancelled send.
     if (String(msg.id).startsWith("pending-")) return;
+    const editableText = msg.promptShortcut?.invocation ?? msg.content;
     setEditingMessageId(msg.id);
-    setEditingOriginalText(msg.content);
-    setDraft(msg.content);
+    setEditingOriginalText(editableText);
+    setDraft(editableText);
     queueMicrotask(() => draftComposerRef.current?.focus());
   }
 
@@ -22897,7 +23038,7 @@ function HomeContent(): React.JSX.Element {
     kind: "resolved";
     commandId: string;
     commandName: string;
-    displayMarkdown: string;
+    promptShortcut: PromptShortcutMetadata;
     prompt: string;
     modelChoice: string;
   } {
@@ -22943,6 +23084,7 @@ function HomeContent(): React.JSX.Element {
         .map((argument) => [argument.key, argument.value] as const)
     );
     const selectedArgumentValues: string[] = [];
+    const selectedFlags: PromptShortcutMetadata["flags"] = [];
     const passthroughTokens: string[] = [];
     for (let index = 1; index < tokens.length; index += 1) {
       const token = tokens[index];
@@ -22951,6 +23093,7 @@ function HomeContent(): React.JSX.Element {
         const mappedValue = knownArguments.get(key);
         if (mappedValue) {
           selectedArgumentValues.push(mappedValue);
+          selectedFlags.push({ key, value: mappedValue });
           continue;
         }
       }
@@ -22970,7 +23113,14 @@ function HomeContent(): React.JSX.Element {
       kind: "resolved",
       commandId: command.id,
       commandName: command.name,
-      displayMarkdown: `[${command.name}](prism-command://${encodeURIComponent(command.id)})`,
+      promptShortcut: {
+        v: 1,
+        commandId: command.id,
+        name: command.name,
+        invocation: trimmedLine,
+        flags: selectedFlags,
+        ...(passthrough.length > 0 ? { passthrough } : {}),
+      },
       prompt,
       modelChoice: commandCenterPreferredModel,
     };
@@ -23163,9 +23313,9 @@ function HomeContent(): React.JSX.Element {
       commandCenterResolution.kind === "resolved"
         ? commandCenterResolution.modelChoice
         : AUTO_MODEL_CHOICE;
-    const commandCenterDisplayMarkdown =
+    const commandCenterPromptShortcut =
       commandCenterResolution.kind === "resolved"
-        ? commandCenterResolution.displayMarkdown
+        ? commandCenterResolution.promptShortcut
         : null;
     const trimmed = (
       commandCenterResolution.kind === "resolved"
@@ -23303,15 +23453,12 @@ function HomeContent(): React.JSX.Element {
         messages: [],
       });
     } else if (!isStarterPrompt) {
-      const visibleUserMessageContent =
-        commandCenterDisplayMarkdown && rawTrimmed.length > 0
-          ? commandCenterDisplayMarkdown
-          : trimmed;
       const optimisticMessage: Message = {
         id: `pending-${Date.now()}`,
         role: "user",
-        content: visibleUserMessageContent,
+        content: trimmed,
         createdAt: new Date().toISOString(),
+        ...(commandCenterPromptShortcut ? { promptShortcut: commandCenterPromptShortcut } : {}),
       };
       const optimisticTitle =
         detail?.title ?? (trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed);
@@ -23357,6 +23504,9 @@ function HomeContent(): React.JSX.Element {
         ...(commandCenterModelChoice !== AUTO_MODEL_CHOICE
           ? { commandCenterModelChoice }
           : {}),
+        ...(commandCenterPromptShortcut
+          ? { promptShortcut: commandCenterPromptShortcut }
+          : {}),
       });
       appendDevChatRouteStart("send", chatBody);
       const d = await api<ChatPostEnvelope>("/api/chat", {
@@ -23368,14 +23518,6 @@ function HomeContent(): React.JSX.Element {
       pushMemoryToasts(d.memoryLearned);
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
       successfulConversationId = d.conversation.id;
-      if (commandCenterDisplayMarkdown) {
-        for (let idx = d.conversation.messages.length - 1; idx >= 0; idx -= 1) {
-          const message = d.conversation.messages[idx];
-          if (message.role !== "user" || message.content !== trimmed) continue;
-          commandDisplayByMessageIdRef.current.set(message.id, commandCenterDisplayMarkdown);
-          break;
-        }
-      }
       if (d.summaryCompaction?.mode === "sandbox" && d.summaryCompaction.triggered) {
         setSandboxSummaryBusy(true);
         window.setTimeout(() => {
@@ -32283,8 +32425,8 @@ function HomeContent(): React.JSX.Element {
             type="button"
             className={styles.headerIconButton}
             onClick={handleOpenCommandCenter}
-            aria-label="Open Command Center"
-            data-glyph-tooltip="Command Center"
+            aria-label="Open Prompt Center"
+            data-glyph-tooltip="Prompt Center"
             disabled={headerActionsDisabled}
           >
             <SlashCommandGlyph />
@@ -32489,7 +32631,7 @@ function HomeContent(): React.JSX.Element {
                 handleOpenCommandCenter();
               }}
             >
-              Command Center
+              Prompt Center
             </button>
             {showToolbarMemoriesButton && view === "sandbox" ? (
               <button
@@ -32762,7 +32904,7 @@ function HomeContent(): React.JSX.Element {
         >
           <span className={styles.contextMenuItemLabel}>
             <span className={styles.contextMenuGlyph} aria-hidden="true">⌘</span>
-            <span>Command Center</span>
+            <span>Prompt Center</span>
           </span>
         </button>
         {showToolbarMemoriesButton ? (
@@ -34634,14 +34776,17 @@ function HomeContent(): React.JSX.Element {
         </div>
       )}
 
-      {/* ── Command Center panel ── */}
+      {/* ── Prompt Center panel ── */}
       {panel === "command-center" && (
         <div
-          className={`${styles.panel} ${styles.panelSettings}`}
+          className={`${styles.panel} ${styles.panelPromptCenter}`}
           data-closing={panelClosing ? "true" : undefined}
         >
           <div className={styles.panelHeader}>
-            <h3>Command Center</h3>
+            <div className={styles.panelHeaderTitle}>
+              <span className={styles.panelHeaderKicker}>Prompt Center</span>
+              <h3>Prompts</h3>
+            </div>
             <button
               type="button"
               className={styles.panelClose}
@@ -34652,386 +34797,381 @@ function HomeContent(): React.JSX.Element {
               ×
             </button>
           </div>
-          <div style={{ display: "grid", gap: "0.9rem" }}>
-            <section>
-              <h4 style={{ margin: 0, fontSize: "0.92rem" }}>LLM Selection</h4>
-              {(() => {
-                const localModelOptions = modelCatalog?.local ?? [];
-                const onlineModelOptions = modelCatalog?.online ?? [];
-                return (
-              <label style={{ display: "grid", gap: "0.35rem", marginTop: "0.45rem" }}>
-                <span style={{ fontSize: "0.8rem", opacity: 0.85 }}>
-                  Preferred model for command work
-                </span>
-                <select
-                  value={commandCenterPreferredModel}
-                  onChange={(event) =>
-                    setCommandCenterPreferredModel(normalizeModelChoice(event.currentTarget.value))
-                  }
-                >
-                  <option value={AUTO_MODEL_CHOICE}>Auto</option>
-                  {localModelOptions.map((model) => (
-                    <option key={`local:${model.id}`} value={`local:${model.id}`}>
-                      {`LOCAL - ${model.label}`}
-                    </option>
-                  ))}
-                  {onlineModelOptions.map((model) => (
-                    <option key={`${model.provider}:${model.id}`} value={`${model.provider}:${model.id}`}>
-                      {`${providerShortLabel(model.provider)} - ${model.label}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-                );
-              })()}
-            </section>
-            <section>
+          {(() => {
+            const localModelOptions = modelCatalog?.local ?? [];
+            const onlineModelOptions = modelCatalog?.online ?? [];
+            const selectedCommand =
+              commandCenterCommands.find(
+                (candidate) => candidate.id === commandCenterSelectedCommandId
+              ) ?? null;
+            const addPrompt = (): void => {
+              const draft = createUserCommandDraft(commandCenterCommands);
+              setCommandCenterCommands((current) =>
+                normalizeCommandCenterState({
+                  schema: "prism-command-center-v1",
+                  preferredModel: commandCenterPreferredModel,
+                  commands: [...current, draft],
+                }).commands
+              );
+              setCommandCenterSelectedCommandId(draft.id);
+            };
+            return (
               <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "0.6rem",
-                }}
+                className={styles.promptCenterWorkspace}
+                data-has-selection={selectedCommand ? "true" : undefined}
               >
-                <h4 style={{ margin: 0, fontSize: "0.92rem" }}>Commands</h4>
-              </div>
-              <button
-                type="button"
-                className={styles.chatOverflowMenuItem}
-                style={{ marginTop: "0.6rem" }}
-                onClick={() =>
-                  setCommandCenterCommands((current) =>
-                    normalizeCommandCenterState({
-                      schema: "prism-command-center-v1",
-                      preferredModel: commandCenterPreferredModel,
-                      commands: [...current, createUserCommandDraft(current)],
-                    }).commands
-                  )
-                }
-              >
-                + Add command
-              </button>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "0.5rem",
-                  marginTop: "0.6rem",
-                }}
-              >
-                {commandCenterCommands.map((command) => (
-                  <button
-                    key={command.id}
-                    type="button"
-                    className={styles.chatOverflowMenuItem}
-                    data-active={
-                      command.id === commandCenterSelectedCommandId ? "true" : undefined
-                    }
-                    onClick={() => {
-                      setCommandCenterSelectedCommandId(command.id);
-                      setCommandCenterSpecsCommandId(command.id);
-                    }}
-                  >
-                    /{command.name}
-                  </button>
-                ))}
-              </div>
-            </section>
-          </div>
-          {commandCenterSpecsCommandId &&
-            typeof document !== "undefined" &&
-            createPortal(
-              (() => {
-                const command = commandCenterCommands.find(
-                  (candidate) => candidate.id === commandCenterSpecsCommandId
-                );
-                if (!command) return null;
-                const commandArgumentsText =
-                  command.arguments.length > 0
-                    ? command.arguments
-                        .map((argument) => `-${argument.key} ${argument.value}`.trim())
-                        .join("\n")
-                    : "(none)";
-                return (
-                  <div
-                    className={styles.commandSpecsBackdrop}
-                    role="presentation"
-                    onClick={() => setCommandCenterSpecsCommandId(null)}
-                  >
-                    <div
-                      className={styles.commandSpecsModal}
-                      role="dialog"
-                      aria-modal="true"
-                      aria-label={`Command specification for /${command.name}`}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <header className={styles.commandSpecsHeader}>
-                        <div>
-                          <span>Command specification</span>
-                          <h4>/{command.name}</h4>
-                          <p>
-                            {command.readOnly
-                              ? "Built-in command (read-only)."
-                              : "Custom command definition."}
-                          </p>
-                        </div>
+                <aside className={styles.promptCenterSidebar} aria-label="Saved prompts">
+                  <section className={styles.promptCenterModelCard}>
+                    <span className={styles.promptCenterEyebrow}>Model</span>
+                    <label>
+                      <span>Prompt runs</span>
+                      <select
+                        value={commandCenterPreferredModel}
+                        onChange={(event) =>
+                          setCommandCenterPreferredModel(
+                            normalizeModelChoice(event.currentTarget.value)
+                          )
+                        }
+                      >
+                        <option value={AUTO_MODEL_CHOICE}>Auto</option>
+                        {localModelOptions.map((model) => (
+                          <option key={`local:${model.id}`} value={`local:${model.id}`}>
+                            {`LOCAL - ${model.label}`}
+                          </option>
+                        ))}
+                        {onlineModelOptions.map((model) => (
+                          <option
+                            key={`${model.provider}:${model.id}`}
+                            value={`${model.provider}:${model.id}`}
+                          >
+                            {`${providerShortLabel(model.provider)} - ${model.label}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </section>
+                  <section className={styles.promptCenterListSection}>
+                    <div className={styles.promptCenterListHeader}>
+                      <span>Saved prompts</span>
+                      <button type="button" onClick={addPrompt}>
+                        New
+                      </button>
+                    </div>
+                    <div className={styles.promptCenterPromptList} role="list">
+                      {commandCenterCommands.map((command) => (
                         <button
+                          key={command.id}
                           type="button"
-                          className={styles.commandSpecsClose}
-                          onClick={() => setCommandCenterSpecsCommandId(null)}
-                          aria-label={`Close /${command.name} command specification`}
+                          className={styles.promptCenterPromptRow}
+                          data-active={
+                            command.id === commandCenterSelectedCommandId
+                              ? "true"
+                              : undefined
+                          }
+                          data-read-only={command.readOnly ? "true" : undefined}
+                          onClick={() => {
+                            setCommandCenterSelectedCommandId(command.id);
+                            setCommandCenterSpecsCommandId(null);
+                          }}
                         >
-                          ×
+                          <span className={styles.promptCenterPromptName}>
+                            /{command.name}
+                          </span>
+                          <span className={styles.promptCenterPromptMeta}>
+                            {command.readOnly ? "Built-in" : "Custom"}
+                            {command.arguments.length > 0
+                              ? ` · ${command.arguments.length} flags`
+                              : ""}
+                          </span>
                         </button>
+                      ))}
+                    </div>
+                  </section>
+                </aside>
+                <section className={styles.promptCenterEditor} aria-label="Prompt details">
+                  {selectedCommand ? (
+                    <>
+                      <button
+                        type="button"
+                        className={styles.promptCenterMobileBack}
+                        onClick={() => setCommandCenterSelectedCommandId(null)}
+                      >
+                        Back to prompts
+                      </button>
+                      <header className={styles.promptCenterEditorHeader}>
+                        <div>
+                          <span className={styles.promptCenterEyebrow}>
+                            {selectedCommand.readOnly ? "Built-in prompt" : "Custom prompt"}
+                          </span>
+                          <h4>/{selectedCommand.name}</h4>
+                        </div>
+                        <span
+                          className={styles.promptCenterStatusBadge}
+                          data-read-only={selectedCommand.readOnly ? "true" : undefined}
+                        >
+                          {selectedCommand.readOnly ? "Read-only" : "Editable"}
+                        </span>
                       </header>
-                      <div className={styles.commandSpecsBody}>
-                        {command.readOnly ? (
-                          <>
-                            <section className={styles.commandSpecsSection}>
-                              <h5>Name</h5>
-                              <code>/{command.name}</code>
-                            </section>
-                            <section className={styles.commandSpecsSection}>
-                              <h5>Command text</h5>
-                              <pre>{command.command || "(empty)"}</pre>
-                            </section>
-                            <section className={styles.commandSpecsSection}>
-                              <h5>Arguments</h5>
-                              <pre>{commandArgumentsText}</pre>
-                            </section>
-                          </>
-                        ) : (
-                          <>
-                            <label className={styles.commandSpecsField}>
-                              <span>Name</span>
-                              <input
-                                type="text"
-                                value={command.name.length > 0 ? `/${command.name}` : ""}
-                                onChange={(event) => {
-                                  const typed = event.currentTarget.value;
-                                  const draftName = normalizeCommandNameInput(typed);
-                                  setCommandCenterCommands((current) => {
-                                    const now = new Date().toISOString();
-                                    return current.map((entry) =>
-                                      entry.id === command.id
-                                        ? {
-                                            ...entry,
-                                            name: draftName,
-                                            title:
-                                              entry.title.trim().length === 0
-                                                ? draftName
-                                                : entry.title,
-                                            updatedAt: now,
-                                          }
-                                        : entry
-                                    );
-                                  });
-                                }}
-                                onBlur={() => {
-                                  setCommandCenterCommands((current) => {
-                                    const existing = current.find((entry) => entry.id === command.id);
-                                    if (!existing) return current;
-                                    const nextName = uniqueCommandNameForList(
-                                      existing.name,
-                                      current,
-                                      command.id
-                                    );
-                                    if (nextName === existing.name) return current;
-                                    const now = new Date().toISOString();
-                                    return current.map((entry) =>
-                                      entry.id === command.id
-                                        ? {
-                                            ...entry,
-                                            name: nextName,
-                                            title:
-                                              entry.title.trim().length === 0
-                                                ? nextName
-                                                : entry.title,
-                                            updatedAt: now,
-                                          }
-                                        : entry
-                                    );
-                                  });
-                                }}
-                                placeholder="/command-name"
-                                spellCheck={false}
-                              />
-                            </label>
-                            <label className={styles.commandSpecsField}>
-                              <span>Command text</span>
-                              <textarea
-                                value={command.command}
-                                onChange={(event) => {
-                                  const nextCommandText = event.currentTarget.value;
-                                  setCommandCenterCommands((current) => {
-                                    const now = new Date().toISOString();
-                                    return normalizeCommandCenterState({
-                                      schema: "prism-command-center-v1",
-                                      preferredModel: commandCenterPreferredModel,
-                                      commands: current.map((entry) =>
-                                        entry.id === command.id
-                                          ? {
-                                              ...entry,
-                                              command: nextCommandText,
-                                              updatedAt: now,
-                                            }
-                                          : entry
-                                      ),
-                                    }).commands;
-                                  });
-                                }}
-                                rows={6}
-                                placeholder="What this command should do..."
-                                spellCheck={true}
-                              />
-                            </label>
-                            <div className={styles.commandSpecsField}>
-                              <span>Arguments</span>
-                              <button
-                                type="button"
-                                className={styles.commandSpecsAddArgumentButton}
-                                onClick={() => {
-                                  setCommandCenterCommands((current) => {
-                                    const now = new Date().toISOString();
-                                    return normalizeCommandCenterState({
-                                      schema: "prism-command-center-v1",
-                                      preferredModel: commandCenterPreferredModel,
-                                      commands: current.map((entry) =>
-                                        entry.id === command.id
-                                          ? {
-                                              ...entry,
-                                              arguments: [{ key: "", value: "" }, ...entry.arguments],
-                                              updatedAt: now,
-                                            }
-                                          : entry
-                                      ),
-                                    }).commands;
-                                  });
-                                }}
-                              >
-                                + Add argument
-                              </button>
-                              <div className={styles.commandSpecsArgumentList}>
-                                {command.arguments.map((argument, index) => (
-                                  <div
-                                    key={`${command.id}-arg-${index}`}
-                                    className={styles.commandSpecsArgumentRow}
-                                  >
-                                    <input
-                                      type="text"
-                                      value={argument.key}
-                                      onChange={(event) => {
-                                        const nextKey = normalizeCommandArgumentKeyInput(
-                                          event.currentTarget.value
-                                        );
-                                        setCommandCenterCommands((current) => {
-                                          const now = new Date().toISOString();
-                                          return current.map((entry) =>
-                                            entry.id === command.id
-                                              ? {
-                                                  ...entry,
-                                                  arguments: entry.arguments.map((item, itemIndex) =>
-                                                    itemIndex === index
-                                                      ? { ...item, key: nextKey }
-                                                      : item
-                                                  ),
-                                                  updatedAt: now,
-                                                }
-                                              : entry
-                                          );
-                                        });
-                                      }}
-                                      placeholder="flag"
-                                      spellCheck={false}
-                                    />
-                                    <input
-                                      type="text"
-                                      value={argument.value}
-                                      onChange={(event) => {
-                                        const nextValue = event.currentTarget.value;
-                                        setCommandCenterCommands((current) => {
-                                          const now = new Date().toISOString();
-                                          return current.map((entry) =>
-                                            entry.id === command.id
-                                              ? {
-                                                  ...entry,
-                                                  arguments: entry.arguments.map((item, itemIndex) =>
-                                                    itemIndex === index
-                                                      ? { ...item, value: nextValue }
-                                                      : item
-                                                  ),
-                                                  updatedAt: now,
-                                                }
-                                              : entry
-                                          );
-                                        });
-                                      }}
-                                      placeholder="Meaning or instruction"
-                                    />
-                                    <button
-                                      type="button"
-                                      className={styles.commandSpecsArgumentRemove}
-                                      onClick={() => {
-                                        setCommandCenterCommands((current) => {
-                                          const now = new Date().toISOString();
-                                          return normalizeCommandCenterState({
-                                            schema: "prism-command-center-v1",
-                                            preferredModel: commandCenterPreferredModel,
-                                            commands: current.map((entry) =>
-                                              entry.id === command.id
-                                                ? {
-                                                    ...entry,
-                                                    arguments: entry.arguments.filter(
-                                                      (_, itemIndex) => itemIndex !== index
-                                                    ),
-                                                    updatedAt: now,
-                                                  }
-                                                : entry
-                                            ),
-                                          }).commands;
-                                        });
-                                      }}
-                                      aria-label={`Remove argument ${index + 1}`}
-                                    >
-                                      ×
-                                    </button>
+                      {selectedCommand.readOnly ? (
+                        <div className={styles.promptCenterReadonlyBody}>
+                          <section className={styles.promptCenterReadonlyBlock}>
+                            <span>Prompt text</span>
+                            <pre>{selectedCommand.command || "(empty)"}</pre>
+                          </section>
+                          <section className={styles.promptCenterReadonlyBlock}>
+                            <span>Flags</span>
+                            {selectedCommand.arguments.length > 0 ? (
+                              <div className={styles.promptCenterFlagPreviewList}>
+                                {selectedCommand.arguments.map((argument) => (
+                                  <div key={argument.key} className={styles.promptCenterFlagPreview}>
+                                    <code>-{argument.key}</code>
+                                    <span>{argument.value}</span>
                                   </div>
                                 ))}
                               </div>
-                            </div>
-                            <div className={styles.commandSpecsActions}>
-                              <button
-                                type="button"
-                                className={styles.commandSpecsDeleteButton}
-                                onClick={() => {
-                                  setCommandCenterCommands((current) =>
-                                    normalizeCommandCenterState({
-                                      schema: "prism-command-center-v1",
-                                      preferredModel: commandCenterPreferredModel,
-                                      commands: current.filter(
-                                        (entry) => entry.id !== command.id
-                                      ),
-                                    }).commands
+                            ) : (
+                              <p>No flags configured.</p>
+                            )}
+                          </section>
+                        </div>
+                      ) : (
+                        <div className={styles.promptCenterEditorFields}>
+                          <label className={styles.promptCenterField}>
+                            <span>Shortcut</span>
+                            <input
+                              type="text"
+                              value={
+                                selectedCommand.name.length > 0
+                                  ? `/${selectedCommand.name}`
+                                  : ""
+                              }
+                              onChange={(event) => {
+                                const typed = event.currentTarget.value;
+                                const draftName = normalizeCommandNameInput(typed);
+                                setCommandCenterCommands((current) => {
+                                  const now = new Date().toISOString();
+                                  return current.map((entry) =>
+                                    entry.id === selectedCommand.id
+                                      ? {
+                                          ...entry,
+                                          name: draftName,
+                                          title:
+                                            entry.title.trim().length === 0
+                                              ? draftName
+                                              : entry.title,
+                                          updatedAt: now,
+                                        }
+                                      : entry
                                   );
-                                  setCommandCenterSpecsCommandId(null);
-                                  if (commandCenterSelectedCommandId === command.id) {
-                                    setCommandCenterSelectedCommandId(null);
-                                  }
-                                }}
+                                });
+                              }}
+                              onBlur={() => {
+                                setCommandCenterCommands((current) => {
+                                  const existing = current.find(
+                                    (entry) => entry.id === selectedCommand.id
+                                  );
+                                  if (!existing) return current;
+                                  const nextName = uniqueCommandNameForList(
+                                    existing.name,
+                                    current,
+                                    selectedCommand.id
+                                  );
+                                  if (nextName === existing.name) return current;
+                                  const now = new Date().toISOString();
+                                  return current.map((entry) =>
+                                    entry.id === selectedCommand.id
+                                      ? {
+                                          ...entry,
+                                          name: nextName,
+                                          title:
+                                            entry.title.trim().length === 0
+                                              ? nextName
+                                              : entry.title,
+                                          updatedAt: now,
+                                        }
+                                      : entry
+                                  );
+                                });
+                              }}
+                              placeholder="/prompt-name"
+                              spellCheck={false}
+                            />
+                          </label>
+                          <label className={styles.promptCenterField}>
+                            <span>Prompt text</span>
+                            <textarea
+                              value={selectedCommand.command}
+                              onChange={(event) => {
+                                const nextCommandText = event.currentTarget.value;
+                                setCommandCenterCommands((current) => {
+                                  const now = new Date().toISOString();
+                                  return normalizeCommandCenterState({
+                                    schema: "prism-command-center-v1",
+                                    preferredModel: commandCenterPreferredModel,
+                                    commands: current.map((entry) =>
+                                      entry.id === selectedCommand.id
+                                        ? {
+                                            ...entry,
+                                            command: nextCommandText,
+                                            updatedAt: now,
+                                          }
+                                        : entry
+                                    ),
+                                  }).commands;
+                                });
+                              }}
+                              rows={8}
+                              placeholder="What this prompt should ask the model to do..."
+                              spellCheck={true}
+                            />
+                          </label>
+                          <div className={styles.promptCenterFlagsHeader}>
+                            <span>Flags</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCommandCenterCommands((current) => {
+                                  const now = new Date().toISOString();
+                                  return normalizeCommandCenterState({
+                                    schema: "prism-command-center-v1",
+                                    preferredModel: commandCenterPreferredModel,
+                                    commands: current.map((entry) =>
+                                      entry.id === selectedCommand.id
+                                        ? {
+                                            ...entry,
+                                            arguments: [{ key: "", value: "" }, ...entry.arguments],
+                                            updatedAt: now,
+                                          }
+                                        : entry
+                                    ),
+                                  }).commands;
+                                });
+                              }}
+                            >
+                              Add flag
+                            </button>
+                          </div>
+                          <div className={styles.promptCenterFlagList}>
+                            {selectedCommand.arguments.length === 0 && (
+                              <p>No flags yet.</p>
+                            )}
+                            {selectedCommand.arguments.map((argument, index) => (
+                              <div
+                                key={`${selectedCommand.id}-arg-${index}`}
+                                className={styles.promptCenterFlagRow}
                               >
-                                Delete command
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
+                                <input
+                                  type="text"
+                                  value={argument.key}
+                                  onChange={(event) => {
+                                    const nextKey = normalizeCommandArgumentKeyInput(
+                                      event.currentTarget.value
+                                    );
+                                    setCommandCenterCommands((current) => {
+                                      const now = new Date().toISOString();
+                                      return current.map((entry) =>
+                                        entry.id === selectedCommand.id
+                                          ? {
+                                              ...entry,
+                                              arguments: entry.arguments.map((item, itemIndex) =>
+                                                itemIndex === index
+                                                  ? { ...item, key: nextKey }
+                                                  : item
+                                              ),
+                                              updatedAt: now,
+                                            }
+                                          : entry
+                                      );
+                                    });
+                                  }}
+                                  placeholder="flag"
+                                  spellCheck={false}
+                                />
+                                <input
+                                  type="text"
+                                  value={argument.value}
+                                  onChange={(event) => {
+                                    const nextValue = event.currentTarget.value;
+                                    setCommandCenterCommands((current) => {
+                                      const now = new Date().toISOString();
+                                      return current.map((entry) =>
+                                        entry.id === selectedCommand.id
+                                          ? {
+                                              ...entry,
+                                              arguments: entry.arguments.map((item, itemIndex) =>
+                                                itemIndex === index
+                                                  ? { ...item, value: nextValue }
+                                                  : item
+                                              ),
+                                              updatedAt: now,
+                                            }
+                                          : entry
+                                      );
+                                    });
+                                  }}
+                                  placeholder="Instruction added by this flag"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCommandCenterCommands((current) => {
+                                      const now = new Date().toISOString();
+                                      return normalizeCommandCenterState({
+                                        schema: "prism-command-center-v1",
+                                        preferredModel: commandCenterPreferredModel,
+                                        commands: current.map((entry) =>
+                                          entry.id === selectedCommand.id
+                                            ? {
+                                                ...entry,
+                                                arguments: entry.arguments.filter(
+                                                  (_, itemIndex) => itemIndex !== index
+                                                ),
+                                                updatedAt: now,
+                                              }
+                                            : entry
+                                        ),
+                                      }).commands;
+                                    });
+                                  }}
+                                  aria-label={`Remove flag ${index + 1}`}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <div className={styles.promptCenterDangerRow}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCommandCenterCommands((current) =>
+                                  normalizeCommandCenterState({
+                                    schema: "prism-command-center-v1",
+                                    preferredModel: commandCenterPreferredModel,
+                                    commands: current.filter(
+                                      (entry) => entry.id !== selectedCommand.id
+                                    ),
+                                  }).commands
+                                );
+                                setCommandCenterSelectedCommandId(null);
+                              }}
+                            >
+                              Delete prompt
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className={styles.promptCenterEmptyState}>
+                      <strong>Select a prompt</strong>
+                      <p>Choose a saved slash prompt or create a new one.</p>
                     </div>
-                  </div>
-                );
-              })(),
-              document.body
-            )}
+                  )}
+                </section>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -44602,6 +44742,14 @@ function HomeContent(): React.JSX.Element {
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterCommandById}
                   onOpenCommandMention={openCommandCenterCommandEditor}
+                  promptShortcut={msg.promptShortcut}
+                  promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
+                  onTogglePromptShortcut={() =>
+                    setExpandedPromptShortcutMessageId((current) =>
+                      current === msg.id ? null : msg.id
+                    )
+                  }
+                  onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
                 {copied && (
                   <span
@@ -45960,6 +46108,14 @@ function HomeContent(): React.JSX.Element {
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterCommandById}
                   onOpenCommandMention={openCommandCenterCommandEditor}
+                  promptShortcut={msg.promptShortcut}
+                  promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
+                  onTogglePromptShortcut={() =>
+                    setExpandedPromptShortcutMessageId((current) =>
+                      current === msg.id ? null : msg.id
+                    )
+                  }
+                  onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
                 {copied && (
                   <span

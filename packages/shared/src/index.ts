@@ -64,6 +64,14 @@ export {
 } from "./prismTool.js";
 
 export {
+  normalizePromptShortcutMetadata,
+  parseStoredPromptShortcutPayload,
+  serializePromptShortcutPayload,
+  type PromptShortcutFlag,
+  type PromptShortcutMetadata,
+} from "./promptShortcut.js";
+
+export {
   OPENAI_IMAGE_MODEL_IDS,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
@@ -188,6 +196,7 @@ export {
 } from "./color.js";
 
 import type { AskQuestionPayload, SentGeneratedImagePayload } from "./prismTool.js";
+import type { PromptShortcutMetadata } from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 
 export type UserRole = "user";
@@ -232,6 +241,8 @@ export interface ChatMessage {
   askQuestion?: AskQuestionPayload;
   /** When this assistant turn included a generated image shown in chat and the library. */
   sentGeneratedImage?: SentGeneratedImagePayload;
+  /** User-entered Prompt Center shortcut that resolved into this message content. */
+  promptShortcut?: PromptShortcutMetadata;
 }
 
 /**
