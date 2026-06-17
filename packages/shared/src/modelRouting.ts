@@ -60,10 +60,12 @@ export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoMode
   const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
   const explicit = input.explicitModelOverride?.trim() || null;
   const botPreferred = input.botPreferredModel?.trim() || null;
+  const providerCatalog = providerCatalogIds(input.catalog, input.provider);
+  const providerCatalogIdSet = new Set(providerCatalog);
   const providerCandidates = [
-    ...(explicit ? [explicit] : []),
-    ...(botPreferred ? [botPreferred] : []),
-    ...providerCatalogIds(input.catalog, input.provider),
+    ...(explicit && providerCatalogIdSet.has(explicit) ? [explicit] : []),
+    ...(botPreferred && providerCatalogIdSet.has(botPreferred) ? [botPreferred] : []),
+    ...providerCatalog,
   ];
   const providerModel = firstVisibleModelId(providerCandidates, hidden);
   if (providerModel) {

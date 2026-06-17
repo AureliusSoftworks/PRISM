@@ -24,6 +24,8 @@ function catalog(overrides: Partial<ModelCatalog> = {}): ModelCatalog {
       { id: "gpt-4o-mini", label: "GPT 4o Mini", provider: "openai", isDefault: true },
       { id: "gpt-4o", label: "GPT 4o", provider: "openai" },
       { id: "gpt-4.1-mini", label: "GPT 4.1 Mini", provider: "openai" },
+      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", provider: "anthropic", isDefault: true },
+      { id: "claude-opus-4-8", label: "Claude Opus 4.8", provider: "anthropic" },
     ],
     defaults: {
       local: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
@@ -89,6 +91,38 @@ describe("resolveAutoModel", () => {
     });
 
     assert.equal(resolved.model, "gpt-4o");
+  });
+
+  it("ignores OpenAI model preferences while resolving Anthropic chat", () => {
+    const resolved = resolveAutoModel({
+      provider: "anthropic",
+      explicitModelOverride: "gpt-5.3-chat-latest",
+      botPreferredModel: "gpt-4o-mini",
+      hiddenModelIds: [],
+      catalog: catalog(),
+    });
+
+    assert.deepEqual(resolved, {
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      usedRequiredLocalFallback: false,
+    });
+  });
+
+  it("uses an Anthropic bot preference after ignoring a stale OpenAI override", () => {
+    const resolved = resolveAutoModel({
+      provider: "anthropic",
+      explicitModelOverride: "gpt-4o-mini",
+      botPreferredModel: "claude-opus-4-8",
+      hiddenModelIds: [],
+      catalog: catalog(),
+    });
+
+    assert.deepEqual(resolved, {
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      usedRequiredLocalFallback: false,
+    });
   });
 
   it("falls back to the required primary local model when every provider model is hidden", () => {
