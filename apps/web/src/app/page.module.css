@@ -1206,35 +1206,28 @@
 }
 
 .themeLight {
-  /* Light theme layers:
-     - bg: the page under everything (warm paper, not blue-white).
-     - bg-surface: cards, sidebar, chat header, compose, panels. Warm ivory
-       instead of pure white so large surfaces stop feeling backlit.
-     - bg-elevated: a barely brighter paper layer for things that float ON a
-       surface (dropdowns, armed delete pill).
-     - bg-deep: slightly darker/warm for recessed rails like the LOCAL/ONLINE
-       track where we want a carved-in look. */
-  --bg: #eee7dc;
-  --bg-deep: #ded3c5;
-  --bg-surface: #faf3e9;
-  --bg-elevated: #fff8ef;
-  --bg-hover: #e8ded0;
-  --bg-active: #d8cab8;
+  /* Crisp Paper light theme:
+     cleaner paper neutrals with just enough warmth to avoid a blue-white app
+     shell. Color is reserved for Prism accents, bot identity, and focus. */
+  --bg: #f4f2ee;
+  --bg-deep: #e6e1d9;
+  --bg-surface: #fffdf8;
+  --bg-elevated: #ffffff;
+  --bg-hover: #ebe7df;
+  --bg-active: #dcd5cb;
 
-  --fg: #17130f;
-  --fg-muted: #625a51;
-  --fg-subtle: #92887c;
+  --fg: #161514;
+  --fg-muted: #5f5b55;
+  --fg-subtle: #8d857b;
 
-  /* Borders get a small bump so card edges don't disappear against white
-     surfaces. Still subtle enough not to feel "heavy". */
-  --line: #d5c8b9;
-  --line-strong: #b8a894;
+  --line: #d8d1c8;
+  --line-strong: #bcb2a6;
 
-  --accent: #312b24;
+  --accent: #1f1d1b;
   --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000 15%);
-  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--bg) 88%);
-  --accent-glow: color-mix(in srgb, var(--accent) 14%, transparent);
-  --accent-text: #fff8ef;
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, var(--bg) 91%);
+  --accent-glow: color-mix(in srgb, var(--accent) 11%, transparent);
+  --accent-text: #ffffff;
   --accent-ink: var(--accent);
 
   --user-bubble: linear-gradient(
@@ -1245,32 +1238,35 @@
   --user-bubble-fg: var(--accent-text);
 
   --danger: #dc2626;
-  --danger-soft: #f7ddd9;
+  --danger-soft: #fde7e3;
 
-  /* Warm shadows keep elevation visible without reintroducing cool gray haze. */
-  --shadow-sm: 0 1px 2px rgba(64, 46, 27, 0.08);
-  --shadow-md: 0 8px 24px rgba(64, 46, 27, 0.1);
-  --shadow-lg: 0 24px 48px rgba(64, 46, 27, 0.14);
+  --shadow-sm: 0 1px 2px rgba(22, 21, 20, 0.08);
+  --shadow-md: 0 10px 30px rgba(22, 21, 20, 0.1);
+  --shadow-lg: 0 26px 58px rgba(22, 21, 20, 0.14);
 
   --app-gradient:
-    radial-gradient(ellipse at top left, var(--accent-glow), transparent 52%),
+    radial-gradient(ellipse 68% 58% at top left, var(--accent-glow), transparent 56%),
     radial-gradient(
-      ellipse at bottom right,
-      color-mix(in srgb, var(--accent) 5%, transparent),
-      transparent 52%
+      ellipse 52% 42% at 92% 8%,
+      color-mix(in srgb, #2fd3e3 4%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 58% 48% at 8% 92%,
+      color-mix(in srgb, #ff4d6d 3%, transparent),
+      transparent 62%
     );
 
-  /* Light mode keeps warm chips, but AskQuestion backdrop is bot-tinted. */
-  --askq-rail-tone: color-mix(in srgb, var(--accent) 42%, #fff3e0 58%);
+  --askq-rail-tone: color-mix(in srgb, var(--accent) 34%, #fffdf8 66%);
   --askq-rail-heading: #000000;
-  --askq-rail-heading-shadow: rgba(255, 248, 239, 0.5);
-  --askq-chip-bg: color-mix(in srgb, #f8f1e7 84%, var(--bg-surface));
-  --askq-chip-bg-hover: color-mix(in srgb, #f3e8da 78%, var(--bg-hover));
-  --askq-chip-border: color-mix(in srgb, #cdbca8 48%, var(--line));
-  --askq-chip-border-hover: color-mix(in srgb, #c2b09b 62%, var(--line));
+  --askq-rail-heading-shadow: rgba(255, 255, 255, 0.56);
+  --askq-chip-bg: color-mix(in srgb, #ffffff 82%, var(--bg-surface));
+  --askq-chip-bg-hover: color-mix(in srgb, #ffffff 72%, var(--bg-hover));
+  --askq-chip-border: color-mix(in srgb, var(--line-strong) 44%, var(--line));
+  --askq-chip-border-hover: color-mix(in srgb, var(--accent) 30%, var(--line-strong));
   --askq-chip-text: #13100d;
-  --askq-chip-inset: color-mix(in srgb, #ffffff 34%, transparent);
-  --askq-chip-focus: color-mix(in srgb, #9a7f60 34%, transparent);
+  --askq-chip-inset: color-mix(in srgb, #ffffff 54%, transparent);
+  --askq-chip-focus: color-mix(in srgb, var(--accent) 28%, transparent);
 
   /* LOCAL/ONLINE crescent: lit track slot in light mode (pure black groove). */
   --mode-toggle-track: #000000;
@@ -15501,6 +15497,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .panelBots .form {
+  display: flex;
+  flex-direction: column;
   margin-top: 0;
   /* Tighter than default .form (10px) so name → prompt → params feel like one column */
   gap: 8px;
@@ -15512,7 +15510,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: contain;
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-bottom: max(16px, calc(env(safe-area-inset-bottom) + 16px));
   /* Intentionally NO `both` (or `forwards`) fill — keeping the
      `transform: translateY(0)` keyframe state stuck on the form
      would create a CSS containing block, which silently re-anchors
@@ -15532,6 +15530,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: 100%;
 }
 
+.panelBots .form > * {
+  flex: 0 0 auto;
+}
+
 .panelBots .form textarea {
   min-height: clamp(92px, 16dvh, 168px);
   /* Slightly less inset than generic .form fields — prompt box reads tighter to the label row */
@@ -15543,6 +15545,349 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-height: 72px;
   max-height: min(200px, 32dvh);
   resize: vertical;
+}
+
+.botIdentityCard {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 28%, var(--line));
+  border-radius: 16px;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  background:
+    radial-gradient(
+      circle at 92% 0%,
+      color-mix(in srgb, var(--editor-bot-color) 18%, transparent),
+      transparent 42%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 88%, var(--editor-bot-color) 12%),
+      color-mix(in srgb, var(--bg) 94%, var(--editor-bot-color) 6%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent),
+    0 12px 34px -30px color-mix(in srgb, var(--editor-bot-color) 72%, #000000);
+}
+
+.botIdentityCard[data-mode="edit"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 42%, var(--line-strong));
+  background:
+    radial-gradient(
+      circle at 92% 0%,
+      color-mix(in srgb, var(--editor-bot-color) 28%, transparent),
+      transparent 48%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 80%, var(--editor-bot-color) 20%),
+      color-mix(in srgb, var(--bg) 88%, var(--editor-bot-color) 12%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent),
+    0 16px 38px -30px color-mix(in srgb, var(--editor-bot-color) 86%, #000000);
+}
+
+.botIdentityCard[data-mode="edit"][data-dirty="true"] {
+  border-color: color-mix(in srgb, #ffc85e 48%, var(--editor-bot-color));
+}
+
+.botIdentityPreview {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.botIdentityGlyph {
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  color: var(--editor-bot-text);
+  background:
+    radial-gradient(
+      circle at 32% 22%,
+      color-mix(in srgb, var(--editor-bot-text) 32%, transparent),
+      transparent 42%
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color) 82%, var(--editor-bot-ink) 18%),
+      var(--editor-bot-color)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--editor-bot-text) 24%, transparent),
+    0 10px 26px -18px color-mix(in srgb, var(--editor-bot-color) 82%, #000000);
+}
+
+.botIdentityCopy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.botIdentityCopy span {
+  color: var(--fg-subtle);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.botIdentityCopy strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: 19px;
+  line-height: 1.08;
+  font-weight: 760;
+}
+
+.botIdentityCopy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.botIdentityStatus {
+  justify-self: end;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-ink) 28%, var(--line));
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--editor-bot-color) 12%, var(--bg));
+  color: color-mix(in srgb, var(--editor-bot-ink) 78%, var(--fg));
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.botIdentityStatus[data-state="draft"] {
+  border-color: color-mix(in srgb, var(--line-strong) 48%, var(--line));
+  background: color-mix(in srgb, var(--bg-deep) 72%, transparent);
+  color: var(--fg-muted);
+}
+
+.botIdentityStatus[data-state="dirty"] {
+  border-color: color-mix(in srgb, #ffc85e 48%, var(--line));
+  background: color-mix(in srgb, #ffc85e 16%, var(--bg));
+  color: color-mix(in srgb, #ffc85e 68%, var(--fg));
+}
+
+.botIdentityStatus[data-state="saved"],
+.botIdentityStatus[data-state="ready"] {
+  border-color: color-mix(in srgb, #62d68a 42%, var(--line));
+  background: color-mix(in srgb, #62d68a 13%, var(--bg));
+  color: color-mix(in srgb, #62d68a 66%, var(--fg));
+}
+
+.botIdentityPillRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.botIdentityPillRow span {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 18%, var(--line));
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 680;
+  line-height: 1.1;
+}
+
+.botIdentityModeStrip {
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 18%, var(--line));
+  border-radius: 12px;
+  padding: 7px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: color-mix(in srgb, var(--bg) 72%, var(--bg-surface));
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.botIdentityModeStrip > span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.botIdentityModeStrip > span::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: color-mix(in srgb, var(--editor-bot-color) 68%, var(--fg-muted));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--editor-bot-color) 16%, transparent);
+}
+
+.botIdentityModeStrip[data-mode="edit"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 26%, var(--line-strong));
+  color: color-mix(in srgb, var(--fg) 72%, var(--fg-muted));
+}
+
+.botIdentityModeStrip[data-dirty="true"] > span::before {
+  background: #ffc85e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ffc85e 20%, transparent);
+}
+
+.botIdentityModeStrip button,
+.botEditorActionStrip button {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 24%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 78%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+  padding: 6px 9px;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease,
+    transform 80ms ease;
+}
+
+.botIdentityModeStrip button:hover:not(:disabled),
+.botIdentityModeStrip button:focus-visible,
+.botEditorActionStrip button:hover:not(:disabled),
+.botEditorActionStrip button:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 40%, var(--line-strong));
+  background: color-mix(in srgb, var(--editor-bot-color) 12%, var(--bg-hover));
+  outline: none;
+}
+
+.botIdentityModeStrip button:active:not(:disabled),
+.botEditorActionStrip button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.botIdentityModeStrip button:disabled,
+.botEditorActionStrip button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.botIdentityCard .botNameRow {
+  align-items: end;
+}
+
+.botNameField {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.botNameField > span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.botProfileProgressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.botProfileProgressHeader span {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.botProfileProgressHeader strong {
+  color: var(--fg-muted);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  font-weight: 760;
+}
+
+.botProfileProgressTrack {
+  height: 5px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--line) 62%, transparent);
+}
+
+.botProfileProgressTrack::before {
+  content: "";
+  display: block;
+  width: var(--bot-profile-progress, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--editor-bot-color) 78%, var(--editor-bot-ink) 22%),
+    color-mix(in srgb, var(--editor-bot-color) 54%, var(--fg) 46%)
+  );
+  transition: width 180ms ease;
+}
+
+.panelBots .form > button[type="submit"]:last-child {
+  min-height: 46px;
+  margin-top: 4px;
+  border-radius: 14px;
+  box-shadow:
+    0 10px 28px -24px color-mix(in srgb, #000000 54%, transparent),
+    var(--shadow-sm);
+}
+
+.panelBots .form > button[type="submit"]:last-child:disabled {
+  box-shadow:
+    0 8px 22px -24px color-mix(in srgb, #000000 44%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent);
+}
+
+.botEditorActionStrip {
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 20%, var(--line));
+  border-radius: 14px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color) 8%, transparent),
+      transparent 62%
+    ),
+    color-mix(in srgb, var(--bg) 82%, var(--bg-surface));
+}
+
+.botEditorActionStrip > span {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .botProfileFieldHint {
@@ -17458,6 +17803,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-width: 0;
 }
 
+.panelHeaderTitleText {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.panelHeaderTitleText h3,
+.panelHeaderTitleText small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panelHeaderTitleText small {
+  color: var(--fg-muted);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .panelBack {
   border: 1px solid var(--line);
   background: var(--bg);
@@ -17504,20 +17872,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border: 1px solid var(--line);
   background:
     linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--fg) 6%, transparent),
-      transparent 56%
+      155deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 8%, transparent),
+      transparent 62%
     ),
     var(--bg);
-  border-radius: 14px;
-  padding: 10px;
+  border-radius: 16px;
+  padding: 12px;
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 6%, transparent);
 }
 
 .botParameterHeader {
   display: grid;
-  gap: 3px;
+  gap: 7px;
 }
 
 .botParameterHeader span,
@@ -17607,7 +17976,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .botParameterToggleRow {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 8px;
 }
 
@@ -17622,15 +17991,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg-deep);
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--fg)) 18%, var(--line));
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 8%, transparent),
+      transparent 62%
+    ),
+    var(--bg-deep);
   color: var(--fg);
   cursor: pointer;
   display: grid;
   gap: 2px;
-  padding: 10px 11px;
+  padding: 11px 12px;
   text-align: left;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 6%, transparent);
 }
 
 .panelBots .form button.botPreferredModelsButton strong,
@@ -17942,17 +18318,30 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg-deep);
+  min-height: 86px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, var(--editor-bot-color) 16%);
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 6%, transparent),
+      transparent 64%
+    ),
+    var(--bg-deep);
   color: var(--fg-muted);
   cursor: pointer;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   gap: 8px;
-  padding: 9px 10px;
+  padding: 11px;
   text-align: left;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 6%, transparent);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease,
+    transform 80ms ease;
 }
 
 .botOnlineCapabilityToggle button::after {
@@ -17968,7 +18357,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .botOnlineCapabilityToggle button[data-enabled="true"] {
   border-color: color-mix(in srgb, var(--accent-ink) 42%, var(--line) 58%);
-  background: color-mix(in srgb, var(--accent-ink) 10%, var(--bg) 90%);
+  background:
+    radial-gradient(
+      circle at 92% 12%,
+      color-mix(in srgb, var(--accent-ink) 18%, transparent),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--accent-ink) 10%, var(--bg) 90%);
   color: var(--fg);
 }
 
@@ -17998,7 +18393,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
    intentional unlock action. */
 .botOnlineCapabilityToggle button[data-locked="true"] {
   border-color: color-mix(in srgb, var(--fg) 32%, var(--line) 68%);
-  background: color-mix(in srgb, var(--fg) 5%, var(--bg-deep) 95%);
+  background:
+    radial-gradient(
+      circle at 92% 12%,
+      color-mix(in srgb, var(--fg) 9%, transparent),
+      transparent 44%
+    ),
+    color-mix(in srgb, var(--fg) 5%, var(--bg-deep) 95%);
   color: var(--fg);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--fg) 14%, transparent),
@@ -18175,10 +18576,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .panelBots .form button.botLengthOption {
-  border: 1px solid var(--line);
-  background: var(--bg-deep);
+  border: 1px solid color-mix(in srgb, var(--line) 88%, var(--editor-bot-color) 12%);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 5%, transparent),
+      transparent 66%
+    ),
+    var(--bg-deep);
   color: var(--fg-muted);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 9px 8px;
   font-size: 12px;
   font-weight: 650;
@@ -22887,6 +23294,717 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: var(--bg-hover) !important;
 }
 
+/* ── Light Mode: Crisp Paper polish ───────────────────────────────────
+   A late, light-only pass over the core shell. Keep this scoped to
+   `.themeLight` so Dark Mode keeps its existing cinematic contrast. */
+.themeLight.authLayout {
+  background:
+    radial-gradient(
+      ellipse 52% 42% at 18% 12%,
+      color-mix(in srgb, #ffffff 72%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 46% 34% at 92% 12%,
+      color-mix(in srgb, #2fd3e3 4%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      ellipse 54% 38% at 6% 92%,
+      color-mix(in srgb, #ff4d6d 3%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(180deg, #f8f6f2 0%, var(--bg) 100%);
+}
+
+.themeLight .card,
+.themeLight .hubCard {
+  border-color: color-mix(in srgb, var(--line-strong) 42%, #ffffff 58%);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 96%, var(--bg-surface) 4%),
+      color-mix(in srgb, var(--bg-surface) 94%, var(--bg) 6%)
+    );
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 84%, transparent) inset,
+    0 28px 68px -46px rgba(22, 21, 20, 0.32),
+    0 10px 24px -22px rgba(22, 21, 20, 0.28);
+}
+
+.themeLight .form input,
+.themeLight .form select,
+.themeLight .form textarea {
+  border-color: color-mix(in srgb, var(--line-strong) 38%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 58%, var(--bg-surface) 42%),
+      color-mix(in srgb, var(--bg) 76%, #ffffff 24%)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 78%, transparent);
+}
+
+.themeLight .form input:focus,
+.themeLight .form select:focus,
+.themeLight .form textarea:focus {
+  border-color: color-mix(in srgb, var(--accent-ink) 54%, var(--line-strong));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent-ink) 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 86%, transparent);
+}
+
+.themeLight .authToggle {
+  background: color-mix(in srgb, var(--bg) 76%, #ffffff 24%);
+  border-color: color-mix(in srgb, var(--line-strong) 44%, var(--line));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 70%, transparent);
+}
+
+.themeLight .authToggle .selected,
+.themeLight .authToggle a.selected {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #34312d 88%, #ffffff 12%), var(--accent));
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    0 1px 3px rgba(22, 21, 20, 0.18);
+}
+
+.themeLight .hubTile {
+  border-color: color-mix(in srgb, var(--line-strong) 34%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 88%, var(--bg-surface) 12%),
+      color-mix(in srgb, var(--bg) 66%, #ffffff 34%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 74%, transparent),
+    0 1px 2px rgba(22, 21, 20, 0.05);
+}
+
+.themeLight .hubTile:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-ink) 26%, var(--line-strong));
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      color-mix(in srgb, #ffffff 64%, transparent),
+      transparent 52%
+    ),
+    linear-gradient(
+      180deg,
+      #ffffff,
+      color-mix(in srgb, var(--bg-surface) 78%, var(--bg-hover) 22%)
+    );
+  box-shadow:
+    0 12px 34px -28px rgba(22, 21, 20, 0.34),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 86%, transparent);
+}
+
+.themeLight .hubNavButton,
+.themeLight .headerActions button {
+  border-color: color-mix(in srgb, var(--line-strong) 38%, var(--line));
+  background: color-mix(in srgb, #ffffff 58%, var(--bg) 42%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 66%, transparent);
+}
+
+.themeLight .sidebar {
+  border-right-color: color-mix(in srgb, var(--line-strong) 42%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 82%, var(--bg-surface) 18%),
+      color-mix(in srgb, var(--bg-surface) 72%, var(--bg) 28%)
+    );
+  box-shadow:
+    inset -1px 0 0 color-mix(in srgb, #ffffff 70%, transparent),
+    8px 0 28px -30px rgba(22, 21, 20, 0.28);
+}
+
+.themeLight .conversationList {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg) 72%, #ffffff 28%),
+      color-mix(in srgb, var(--bg-deep) 58%, #ffffff 42%)
+    );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--line-strong) 30%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 68%, transparent);
+}
+
+.themeLight .conversationTitleButton {
+  color: color-mix(in srgb, var(--fg-muted) 84%, var(--fg));
+  box-shadow: none;
+}
+
+.themeLight .conversationTitleButton:hover {
+  background: color-mix(in srgb, #ffffff 54%, var(--bg-hover) 46%);
+  color: var(--fg);
+}
+
+.themeLight .conversationTitleButton.selected {
+  border-color: color-mix(in srgb, var(--accent-ink) 28%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent-ink) 7%, var(--bg-surface));
+  color: var(--fg);
+  box-shadow:
+    inset 2px 0 0 var(--accent-ink),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 68%, transparent);
+}
+
+.themeLight .conversationGroupTile,
+.themeLight .conversationRow[style*="--row-color"] .conversationTitleButton {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 48%, transparent),
+    0 1px 2px color-mix(in srgb, var(--row-color, var(--fg)) 10%, transparent);
+}
+
+.themeLight .conversationGroupTile:hover,
+.themeLight .conversationRow[style*="--row-color"] .conversationTitleButton:hover {
+  border-color: color-mix(in srgb, var(--row-color, var(--accent)) 54%, var(--line-strong));
+}
+
+.themeLight .conversationRow[style*="--row-color"] .conversationTitleButton.selected {
+  border-color: color-mix(in srgb, var(--row-color) 62%, var(--fg));
+  box-shadow:
+    inset 2px 0 0 color-mix(in srgb, var(--row-color) 78%, var(--fg) 22%),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 54%, transparent),
+    0 2px 8px color-mix(in srgb, var(--row-color) 12%, transparent);
+}
+
+.themeLight .newChatButton {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, #ffffff 18%, #11100f 82%);
+  background:
+    linear-gradient(180deg, #302e2b 0%, #171615 100%);
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.38),
+    0 10px 24px -18px rgba(22, 21, 20, 0.56);
+}
+
+.themeLight .newChatButton::after {
+  content: "";
+  position: absolute;
+  left: 34px;
+  right: 12px;
+  bottom: 6px;
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff4d6d, #ff9f1c 25%, #b7e63a 48%, #2fd3e3 72%, #7b5cff);
+  opacity: 0.62;
+}
+
+.themeLight .newChatButton:hover {
+  border-color: color-mix(in srgb, #ffffff 28%, #11100f 72%);
+  background:
+    radial-gradient(
+      circle at 88% 44%,
+      color-mix(in srgb, #ffffff 9%, transparent),
+      transparent 44%
+    ),
+    linear-gradient(180deg, #3a3733 0%, #1c1a18 100%);
+  color: #ffffff;
+}
+
+.themeLight.appLayout[data-accent-active="true"] .newChatButton {
+  border-color: color-mix(in srgb, var(--accent-ink) 42%, #ffffff 18%);
+  background:
+    radial-gradient(
+      circle at 86% 45%,
+      color-mix(in srgb, var(--accent) 24%, transparent),
+      transparent 48%
+    ),
+    linear-gradient(180deg, #302e2b 0%, #171615 100%);
+}
+
+.themeLight.appLayout[data-accent-active="true"] .newChatButton:hover {
+  border-color: color-mix(in srgb, var(--accent-ink) 50%, #ffffff 24%);
+  background:
+    radial-gradient(
+      circle at 86% 45%,
+      color-mix(in srgb, var(--accent) 32%, transparent),
+      transparent 50%
+    ),
+    linear-gradient(180deg, #3a3733 0%, #1c1a18 100%);
+}
+
+.themeLight .chatHeader {
+  border-bottom-color: color-mix(in srgb, var(--line-strong) 34%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 76%, var(--bg-surface) 24%),
+      color-mix(in srgb, var(--bg-surface) 86%, var(--bg) 14%)
+    );
+  box-shadow: 0 1px 0 color-mix(in srgb, #ffffff 76%, transparent);
+}
+
+.themeLight .messagesFrame {
+  background:
+    radial-gradient(
+      ellipse 80% 54% at 10% 4%,
+      color-mix(in srgb, #ffffff 78%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 68% 46% at 92% 12%,
+      color-mix(in srgb, #2fd3e3 3.5%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 66% 44% at 2% 90%,
+      color-mix(in srgb, #ff4d6d 2.5%, transparent),
+      transparent 74%
+    ),
+    linear-gradient(
+      to bottom,
+      #fffefb 0%,
+      var(--bg-surface) 52%,
+      var(--bg) 100%
+    );
+}
+
+.themeLight .messagesFrame[data-mode="home"] {
+  background:
+    radial-gradient(
+      ellipse 78% 58% at 10% 18%,
+      color-mix(in srgb, #ff4d6d 4.5%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      ellipse 82% 56% at 34% 4%,
+      color-mix(in srgb, #ff9f1c 3.5%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 86% 60% at 52% 50%,
+      color-mix(in srgb, #b7e63a 2.75%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 82% 58% at 72% 16%,
+      color-mix(in srgb, #2fd3e3 4%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 80% 60% at 92% 40%,
+      color-mix(in srgb, #7b5cff 4%, transparent),
+      transparent 72%
+    ),
+    linear-gradient(to bottom, #fffefb 0%, var(--bg-surface) 62%, var(--bg) 100%);
+}
+
+.themeLight .messagesFrame[data-mode="private"][data-private-bot="true"] {
+  background:
+    radial-gradient(
+      ellipse 58% 42% at 50% 0%,
+      color-mix(in srgb, var(--fg) 3%, transparent),
+      transparent 72%
+    ),
+    linear-gradient(to bottom, #fffefb 0%, var(--bg-surface) 58%, var(--bg) 100%);
+}
+
+.themeLight .messagesFrameBotSwitchLoading {
+  background:
+    radial-gradient(
+      ellipse at 50% 24%,
+      color-mix(in srgb, var(--accent) 8%, transparent),
+      transparent 62%
+    ),
+    color-mix(in srgb, var(--bg-surface) 92%, var(--bg) 8%);
+}
+
+.themeLight .compose {
+  border-top-color: color-mix(in srgb, var(--line-strong) 34%, var(--line));
+  background:
+    radial-gradient(
+      ellipse 72% 36% at var(--lens-thumb-x, 50%) 0%,
+      color-mix(in srgb, var(--accent) 7%, transparent) 0%,
+      transparent 72%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 82%, var(--bg-surface) 18%),
+      var(--bg-surface)
+    );
+  box-shadow:
+    0 -14px 34px -30px color-mix(in srgb, #161514 34%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 82%, transparent);
+}
+
+.themeLight .composeEditNotice,
+.themeLight .composeWritingAssistButton,
+.themeLight .queuedPromptChip {
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 24%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 74%, var(--bg-surface) 26%),
+      color-mix(in srgb, var(--bg-surface) 88%, var(--compose-bot-color, var(--accent)) 12%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 76%, transparent),
+    var(--shadow-sm);
+}
+
+.themeLight .panel,
+.themeLight .imagePanelToolsDock,
+.themeLight .chatOverflowMenu {
+  border-color: color-mix(in srgb, var(--line-strong) 40%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 82%, var(--bg-surface) 18%),
+      color-mix(in srgb, var(--bg-surface) 88%, var(--bg) 12%)
+    );
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 80%, transparent) inset,
+    var(--shadow-lg);
+}
+
+.themeLight .panel.panelImages {
+  color: var(--fg);
+}
+
+.themeLight .panel.panelImages[data-image-scope="all"],
+.themeLight .panel.panelImages[data-image-scope="general"] {
+  --bg: #f4f2ee;
+  --bg-deep: #e6e1d9;
+  --bg-surface: #fffdf8;
+  --bg-elevated: #ffffff;
+  --bg-hover: #ebe7df;
+  --bg-active: #dcd5cb;
+  --fg: #161514;
+  --fg-muted: #5f5b55;
+  --fg-subtle: #8d857b;
+  --line: #d8d1c8;
+  --line-strong: #bcb2a6;
+  --accent: #1f1d1b;
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000 15%);
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, var(--bg) 91%);
+  --accent-glow: color-mix(in srgb, var(--accent) 11%, transparent);
+  --accent-text: #ffffff;
+  --accent-ink: var(--accent);
+  --shadow-lg: 0 26px 58px rgba(22, 21, 20, 0.14);
+  --images-panel-color: #20899a;
+  --images-panel-ink: #126f7d;
+  --images-panel-text: #161514;
+  border-color: color-mix(in srgb, var(--images-panel-ink) 24%, var(--line-strong));
+  background:
+    radial-gradient(
+      ellipse 84% 38% at 84% 8%,
+      color-mix(in srgb, #2fd3e3 7%, transparent),
+      transparent 66%
+    ),
+    radial-gradient(
+      ellipse 76% 34% at 4% 94%,
+      color-mix(in srgb, #ff4d6d 3.5%, transparent),
+      transparent 68%
+    ),
+    linear-gradient(180deg, #ffffff 0%, var(--bg-surface) 54%, color-mix(in srgb, var(--bg) 82%, #ffffff 18%) 100%);
+}
+
+.themeLight .panel.panelImages[data-image-scope="bot"] {
+  border-color: color-mix(in srgb, var(--editor-bot-ink) 22%, var(--line-strong));
+  background:
+    radial-gradient(
+      ellipse 82% 38% at 86% 9%,
+      color-mix(in srgb, var(--editor-bot-color) 9%, transparent),
+      transparent 66%
+    ),
+    linear-gradient(180deg, #ffffff 0%, var(--bg-surface) 56%, color-mix(in srgb, var(--bg) 82%, #ffffff 18%) 100%);
+}
+
+.themeLight .panelImages .panelHeader {
+  border-bottom-color: color-mix(in srgb, var(--line-strong) 34%, var(--line));
+}
+
+.themeLight .panelImagesTitleSuffix,
+.themeLight .panelImages .sectionLabel,
+.themeLight .panelImagesGalleryScroll {
+  color: var(--fg-muted);
+}
+
+.themeLight .panelImages .panelBack,
+.themeLight .panelImages .panelClose,
+.themeLight .panelImages .panelHeaderIconButton {
+  border-color: color-mix(in srgb, var(--line-strong) 40%, var(--line));
+  background: color-mix(in srgb, #ffffff 64%, var(--bg) 36%);
+  color: var(--fg-muted);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 74%, transparent);
+}
+
+.themeLight .panelImages .panelBack:hover,
+.themeLight .panelImages .panelBack:focus-visible,
+.themeLight .panelImages .panelClose:hover,
+.themeLight .panelImages .panelClose:focus-visible,
+.themeLight .panelImages .panelHeaderIconButton:hover:not(:disabled),
+.themeLight .panelImages .panelHeaderIconButton:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-ink) 30%, var(--line-strong));
+  background: color-mix(in srgb, #ffffff 76%, var(--bg-hover) 24%);
+  color: var(--fg);
+}
+
+.themeLight .panelImages .form input,
+.themeLight .panelImages .form select,
+.themeLight .panelImages .form textarea {
+  border-color: color-mix(in srgb, var(--line-strong) 42%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 76%, var(--bg-surface) 24%),
+      color-mix(in srgb, var(--bg) 68%, #ffffff 32%)
+    );
+  color: var(--fg);
+}
+
+.themeLight .panelImages .form input::placeholder,
+.themeLight .panelImages .form textarea::placeholder {
+  color: color-mix(in srgb, var(--fg-muted) 76%, transparent);
+  opacity: 1;
+}
+
+.themeLight .panelImages[data-image-scope="all"] .form input:focus,
+.themeLight .panelImages[data-image-scope="all"] .form input:focus-visible,
+.themeLight .panelImages[data-image-scope="all"] .form textarea:focus,
+.themeLight .panelImages[data-image-scope="all"] .form textarea:focus-visible,
+.themeLight .panelImages[data-image-scope="general"] .form input:focus,
+.themeLight .panelImages[data-image-scope="general"] .form input:focus-visible,
+.themeLight .panelImages[data-image-scope="general"] .form textarea:focus,
+.themeLight .panelImages[data-image-scope="general"] .form textarea:focus-visible {
+  border-color: color-mix(in srgb, var(--images-panel-ink) 68%, var(--line-strong));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--images-panel-ink) 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 86%, transparent);
+}
+
+.themeLight .panelImages[data-image-scope="bot"] .form input:focus,
+.themeLight .panelImages[data-image-scope="bot"] .form input:focus-visible,
+.themeLight .panelImages[data-image-scope="bot"] .form textarea:focus,
+.themeLight .panelImages[data-image-scope="bot"] .form textarea:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-ink) 56%, var(--line-strong));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--editor-bot-color) 16%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 86%, transparent);
+}
+
+.themeLight .panelImages .imageVariantButton {
+  border-color: color-mix(in srgb, var(--line-strong) 36%, var(--line));
+  background: color-mix(in srgb, #ffffff 66%, var(--bg) 34%);
+  color: var(--fg-muted);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 70%, transparent);
+}
+
+.themeLight .panelImages .imageVariantButton > span:last-child {
+  color: var(--fg-subtle);
+}
+
+.themeLight .panelImages .imageVariantButton[data-selected="true"] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent-soft) 32%, #ffffff 68%);
+  color: var(--fg);
+}
+
+.themeLight .panelImages .imageVariantButton:hover:not(:disabled),
+.themeLight .panelImages .imageVariantButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-ink) 28%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      #ffffff,
+      color-mix(in srgb, var(--bg-surface) 74%, var(--bg-hover) 26%)
+    );
+  color: var(--fg);
+}
+
+.themeLight .panelImages .imageKeywordLauncherButton,
+.themeLight .panelImages .imageBotDirectoryTrigger {
+  border-color: color-mix(in srgb, var(--line-strong) 38%, var(--line));
+  background: color-mix(in srgb, #ffffff 62%, var(--bg) 38%);
+  color: var(--fg);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 72%, transparent);
+}
+
+.themeLight .panelImages .imageKeywordLauncherButton[data-active="true"],
+.themeLight .panelImages .imageKeywordLauncherButton:hover:not(:disabled),
+.themeLight .panelImages .imageKeywordLauncherButton:focus-visible:not(:disabled),
+.themeLight .panelImages .imageBotDirectoryTrigger:hover,
+.themeLight .panelImages .imageBotDirectoryTrigger:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-ink) 30%, var(--line-strong));
+  background: color-mix(in srgb, #ffffff 78%, var(--bg-hover) 22%);
+  color: var(--fg);
+}
+
+.themeLight .panel.panelBots {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--line-strong) 40%, var(--line));
+  background:
+    radial-gradient(
+      ellipse 80% 36% at 88% 6%,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 5.5%, transparent),
+      transparent 66%
+    ),
+    linear-gradient(180deg, #ffffff 0%, var(--bg-surface) 58%, color-mix(in srgb, var(--bg) 84%, #ffffff 16%) 100%);
+}
+
+.themeLight .panel.panelBots[data-editor-only="true"] {
+  border-left-color: color-mix(in srgb, var(--editor-bot-ink) 28%, var(--line-strong));
+  background:
+    radial-gradient(
+      ellipse 78% 38% at 86% 7%,
+      color-mix(in srgb, var(--editor-bot-color) 8%, transparent),
+      transparent 66%
+    ),
+    linear-gradient(180deg, #ffffff 0%, var(--bg-surface) 56%, color-mix(in srgb, var(--bg) 84%, #ffffff 16%) 100%);
+}
+
+.themeLight .panelBots .botIdentityCard,
+.themeLight .panelBots .botParameterCard,
+.themeLight .botProfileBuilder,
+.themeLight .botModelRoutingSheet,
+.themeLight .botPreferredModelsModal {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 86%, var(--bg-surface) 14%),
+      color-mix(in srgb, var(--bg-surface) 86%, var(--bg) 14%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 78%, transparent),
+    0 12px 34px -30px color-mix(in srgb, var(--editor-bot-color, #161514) 38%, #161514);
+}
+
+.themeLight .panelBots .botIdentityCard {
+  background:
+    radial-gradient(
+      ellipse 56% 58% at 92% 0%,
+      color-mix(in srgb, var(--editor-bot-color) 10%, transparent),
+      transparent 68%
+    ),
+    linear-gradient(180deg, #ffffff, color-mix(in srgb, var(--bg-surface) 86%, var(--bg) 14%));
+}
+
+.themeLight .panelBots .botIdentityCard[data-mode="edit"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 32%, var(--line-strong));
+  background:
+    radial-gradient(
+      ellipse 62% 62% at 92% 0%,
+      color-mix(in srgb, var(--editor-bot-color) 14%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(
+      180deg,
+      #ffffff,
+      color-mix(in srgb, var(--bg-surface) 80%, var(--editor-bot-color) 8%)
+    );
+}
+
+.themeLight .panelBots .botIdentityCard[data-mode="edit"][data-dirty="true"] {
+  border-color: color-mix(in srgb, #d89a1d 34%, var(--editor-bot-color));
+}
+
+.themeLight .panelBots .botIdentityGlyph {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--editor-bot-text) 24%, transparent),
+    0 12px 24px -18px color-mix(in srgb, var(--editor-bot-color) 72%, #161514);
+}
+
+.themeLight .panelBots .botIdentityModeStrip,
+.themeLight .panelBots .botEditorActionStrip {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 70%, var(--bg-surface) 30%),
+      color-mix(in srgb, var(--bg) 72%, #ffffff 28%)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 78%, transparent);
+}
+
+.themeLight .panelBots .botIdentityModeStrip button,
+.themeLight .panelBots .botEditorActionStrip button {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, var(--line-strong));
+  background: color-mix(in srgb, #ffffff 72%, var(--bg) 28%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 80%, transparent);
+}
+
+.themeLight .panelBots .botIdentityPillRow span,
+.themeLight .panelBots .botOnlineCapabilityToggle button,
+.themeLight .panelBots .botPreferredModelsButton,
+.themeLight .panelBots .form button.botLengthOption {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 72%, var(--bg-surface) 28%),
+      color-mix(in srgb, var(--bg) 70%, #ffffff 30%)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 76%, transparent);
+}
+
+.themeLight .panelBots .botOnlineCapabilityToggle button:hover,
+.themeLight .panelBots .botOnlineCapabilityToggle button:focus-visible,
+.themeLight .panelBots .botPreferredModelsButton:hover:not(:disabled),
+.themeLight .panelBots .botPreferredModelsButton:focus-visible,
+.themeLight .panelBots .form button.botLengthOption:hover {
+  border-color: color-mix(in srgb, var(--editor-bot-ink, var(--accent-ink)) 30%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      #ffffff,
+      color-mix(in srgb, var(--bg-surface) 76%, var(--bg-hover) 24%)
+    );
+  color: var(--fg);
+}
+
+.themeLight .panelBots .botProfileProgressTrack {
+  background: color-mix(in srgb, var(--line-strong) 30%, var(--bg-deep));
+}
+
+.themeLight .panelBots .form > button[type="submit"]:last-child {
+  box-shadow:
+    0 10px 30px -26px rgba(22, 21, 20, 0.38),
+    var(--shadow-sm);
+}
+
+.themeLight .panelOverlay {
+  background: rgba(22, 21, 20, 0.14);
+}
+
+.themeLight .settingsOverview,
+.themeLight .settingsSection {
+  border-color: color-mix(in srgb, var(--line-strong) 34%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 78%, var(--bg-surface) 22%),
+      color-mix(in srgb, var(--bg-surface) 82%, var(--bg) 18%)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 76%, transparent);
+}
+
+.themeLight .settingsStatusPills span {
+  background: color-mix(in srgb, #ffffff 52%, var(--bg-deep));
+  border-color: color-mix(in srgb, var(--line-strong) 34%, var(--line));
+}
+
+.themeLight .settingsSaveDock {
+  background: color-mix(in srgb, #ffffff 84%, var(--bg-surface) 16%);
+  box-shadow:
+    0 -18px 36px -34px rgba(22, 21, 20, 0.38),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 82%, transparent);
+}
+
+.themeLight .chatOverflowMenuItem:hover:not(:disabled),
+.themeLight .chatOverflowMenuGlyphRow .headerIconButton:hover:not(:disabled),
+.themeLight .chatOverflowMenuGlyphRow .themeToggleButton:hover:not(:disabled) {
+  background: color-mix(in srgb, #ffffff 54%, var(--bg-hover) 46%) !important;
+}
+
 /* ── Mid-width drawer ─────────────────────────────────────────────────
    At tablet / narrow-desktop widths the permanent 280px sidebar leaves
    the chat feeling cramped. Collapse it into the same drawer model as
@@ -23713,7 +24831,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     overflow-y: auto;
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: max(12px, calc(env(safe-area-inset-bottom) + 12px));
+    padding-bottom: max(18px, calc(env(safe-area-inset-bottom) + 18px));
   }
 
   .panelBots .form textarea {
@@ -23729,6 +24847,63 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   .botProfileSummaryGrid {
     gap: 5px;
+  }
+
+  .botIdentityCard {
+    gap: 10px;
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .botIdentityPreview {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 9px;
+  }
+
+  .botIdentityGlyph {
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+  }
+
+  .botIdentityCopy strong {
+    font-size: 16px;
+  }
+
+  .botIdentityCopy small {
+    font-size: 11px;
+  }
+
+  .botIdentityStatus {
+    grid-column: 1 / -1;
+    justify-self: start;
+    padding: 3px 7px;
+    font-size: 9.5px;
+  }
+
+  .botIdentityPillRow {
+    gap: 5px;
+  }
+
+  .botIdentityPillRow span {
+    font-size: 10px;
+  }
+
+  .botIdentityModeStrip {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 7px;
+    padding: 7px;
+  }
+
+  .botIdentityModeStrip button,
+  .botEditorActionStrip button {
+    min-height: 34px;
+    width: 100%;
+  }
+
+  .botNameField > span {
+    font-size: 10px;
   }
 
   .form button.botProfileSummaryButton,
@@ -23868,6 +25043,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .botParameterCard {
     gap: 6px;
     padding: 8px;
+  }
+
+  .panelBots .form > button[type="submit"]:last-child {
+    min-height: 44px;
+  }
+
+  .botEditorActionStrip {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 7px;
   }
 
   .botParameterHeader {

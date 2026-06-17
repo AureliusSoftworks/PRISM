@@ -2161,7 +2161,7 @@ function ensureContrast(foreground: string, background: string, targetRatio = 4.
 // now?" doesn't have to duplicate literals. Mirrored in page.module.css
 // under .themeDark / .themeLight — keep these in sync.
 const THEME_BG: Record<"light" | "dark", string> = {
-  light: "#eee7dc",
+  light: "#f4f2ee",
   dark: "#0b0a09",
 };
 
@@ -2309,7 +2309,7 @@ function coffeeBotTranscriptTextColor(
 // page.module.css so the swatch-border compensator can reason about what
 // surface the swatch actually sits on.
 const THEME_SURFACE_BG: Record<"light" | "dark", string> = {
-  light: "#faf3e9",
+  light: "#fffdf8",
   dark: "#151311",
 };
 const COMPOSE_BOT_LIGHT_INK_CONTRAST_RATIO = 5.8;
@@ -27506,6 +27506,116 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  function revertEditingBotDraft() {
+    const original = editOriginalRef.current;
+    if (!original || busy) return;
+    const { fields } = parseStoredBotPrompt(original.prompt);
+    setPanelError(null);
+    setPanelNotice(null);
+    setNewBotName(original.name);
+    setBotProfile(fields);
+    setNewBotLocalModel(original.localModel);
+    setNewBotOnlineModel(original.onlineModel);
+    setNewBotLocalImageModel(original.localImageModel);
+    setNewBotOpenAiImageModel(original.openAiImageModel);
+    setNewBotOnlineEnabled(original.onlineEnabled);
+    setNewBotDeleteProtected(original.deleteProtected);
+    setNewBotFlirtEnabled(original.flirtEnabled);
+    setNewBotTemperature(original.temperature);
+    setNewBotMaxTokens(original.maxTokens);
+    setNewBotColor(original.color);
+    setNewBotGlyph(original.glyph);
+    setColorWheelOpen(false);
+    setBotProfileBuilderOpen(false);
+    setBotPreferredModelsModalOpen(false);
+    setBotModelRoutingPage("chat");
+  }
+
+  async function duplicateCurrentBotDraft() {
+    const copiedName = `${newBotName.trim() || "Untitled bot"} (copy)`;
+    const localModel = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      "local",
+      newBotLocalModel
+    );
+    const onlineModel = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      "openai",
+      newBotOnlineModel
+    );
+    const localImageStored =
+      newBotLocalImageModel === AUTO_MODEL_CHOICE ? "" : newBotLocalImageModel.trim();
+    const openaiImageStored =
+      newBotOpenAiImageModel === AUTO_MODEL_CHOICE
+        ? ""
+        : normalizeOpenAiImageModelId(newBotOpenAiImageModel.trim());
+    const copiedPrompt = serializeStoredBotPrompt(botProfile, copiedName);
+
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      const result = await api<{ bot?: { id?: string } }>("/api/bots", {
+        method: "POST",
+        body: JSON.stringify({
+          name: copiedName,
+          systemPrompt: copiedPrompt,
+          localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
+          onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
+          localImageModel: localImageStored,
+          openaiImageModel: openaiImageStored,
+          onlineEnabled: newBotOnlineEnabled,
+          deleteProtected: newBotDeleteProtected,
+          flirtEnabled: newBotFlirtEnabled,
+          temperature: newBotTemperature,
+          maxTokens: newBotMaxTokens,
+          color: newBotColor,
+          glyph: newBotGlyph,
+        }),
+      });
+      setNewBotName(copiedName);
+      setNewBotLocalModel(localModel);
+      setNewBotOnlineModel(onlineModel);
+      setNewBotLocalImageModel(
+        localImageStored ? localImageStored : AUTO_MODEL_CHOICE
+      );
+      setNewBotOpenAiImageModel(
+        openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE
+      );
+      editOriginalRef.current = {
+        name: copiedName,
+        prompt: copiedPrompt,
+        localModel,
+        onlineModel,
+        localImageModel: localImageStored ? localImageStored : AUTO_MODEL_CHOICE,
+        openAiImageModel: openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE,
+        onlineEnabled: newBotOnlineEnabled,
+        deleteProtected: newBotDeleteProtected,
+        flirtEnabled: newBotFlirtEnabled,
+        temperature: newBotTemperature,
+        maxTokens: newBotMaxTokens,
+        color: newBotColor,
+        glyph: newBotGlyph,
+      };
+      if (result.bot?.id) {
+        setEditingBotId(result.bot.id);
+      }
+      setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+      setBotLibraryExpanded(false);
+      setBotLibraryClosing(false);
+      setBotPanelLibraryEnabled(false);
+      setColorWheelOpen(false);
+      setPanelNotice(`${copiedName} duplicated.`);
+      await refreshBots();
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Duplicate bot failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function resolveCommonBotGroupForSelection(selectedBotIds: string[]): BotLibraryGroup | null {
     if (selectedBotIds.length < 2) return null;
     const selectedSet = new Set(selectedBotIds);
@@ -36191,13 +36301,13 @@ function HomeContent(): React.JSX.Element {
           ? (nameIsPresent && hasEditChanges && !busy)
           : (nameIsPresent && !busy);
 
-        // Edit mode locks the label to "Update" from the moment edit
+        // Edit mode locks the label to "Save changes" from the moment edit
         // starts (even before any field changes) so the user's intent
         // reads correctly: you're editing, not creating. The B/W vs.
         // bot-color styling still hinges on hasEditChanges below, so
-        // the inert "Update" button remains visually identical to the
+        // the inert "Save changes" button remains visually identical to the
         // inert "Create bot" button — same chrome, different word.
-        const primaryLabel = editingBotId ? "Update" : "Create bot";
+        const primaryLabel = editingBotId ? "Save changes" : "Create bot";
 
         // Derive the inline --accent / --accent-text / --accent-ink
         // triad from the currently-picked color so the primary button
@@ -36286,6 +36396,63 @@ function HomeContent(): React.JSX.Element {
             : completedProfileCategories === 0
             ? "Purpose only"
             : `${completedProfileCategories} profile section${completedProfileCategories === 1 ? "" : "s"} filled`;
+        const profileProgressPercent = nameIsPresent
+          ? Math.round(
+              (completedProfileCategories / BOT_PROFILE_BUILDER_PAGE_ORDER.length) * 100
+            )
+          : 0;
+        const botIdentityDisplayName =
+          trimmedName || editingBot?.name?.trim() || "Unnamed bot";
+        const botIdentityStatus = editingBotId
+          ? hasEditChanges
+            ? "Unsaved changes"
+            : "Saved"
+          : nameIsPresent
+            ? "Ready"
+            : "Draft";
+        const botPanelMode = editingBotId ? "edit" : "create";
+        const botPanelTitle = botLibraryExpanded
+          ? "Bot library"
+          : editingBotId
+            ? "Edit bot"
+            : "Create bot";
+        const botPanelSubtitle = botLibraryExpanded
+          ? editingBotId
+            ? `Return to ${botIdentityDisplayName}`
+            : botLibrarySummary
+          : editingBotId
+            ? botIdentityDisplayName
+            : "New custom bot";
+        const botIdentityKicker = editingBotId ? "Editing existing bot" : "New bot";
+        const botIdentityActionHint = editingBotId
+          ? hasEditChanges
+            ? "Review changes, then save this bot."
+            : "Make a change to save this bot."
+          : nameIsPresent
+            ? "Ready to create."
+            : "Start with a name.";
+        const botRoutingSummary =
+          `${botTemperatureLabel(newBotTemperature)} · ${selectedLengthPreset?.label ?? "Custom"}`;
+        const botIdentityProfileSummary = nameIsPresent ? profileSummary : "Name needed";
+        const botIdentityModeMessage = editingBotId
+          ? hasEditChanges
+            ? "Unsaved edits are local until you save."
+            : "You are editing a saved bot."
+          : nameIsPresent
+            ? "This will create a separate new bot."
+            : "Name the bot to unlock the editor.";
+        const botLibraryHandleTitle = botLibraryExpanded
+          ? editingBotId
+            ? "Back to editor"
+            : "Bot Creator"
+          : editingBotId
+            ? "Back to bot library"
+            : "Bot library";
+        const botLibraryHandleSummary = editingBotId
+          ? hasEditChanges
+            ? "Unsaved edits"
+            : botLibrarySummary
+          : botLibrarySummary;
 
         const headerTrashEnabled =
           !busy &&
@@ -36319,6 +36486,8 @@ function HomeContent(): React.JSX.Element {
               botPanelLibraryEnabled && botLibraryExpanded ? "true" : undefined
             }
             data-editor-only={!botPanelLibraryEnabled ? "true" : undefined}
+            data-bot-editor-mode={botPanelMode}
+            data-bot-editor-dirty={hasEditChanges ? "true" : undefined}
             style={editorPanelStyle}
           >
             <div className={styles.panelHeader}>
@@ -36334,7 +36503,10 @@ function HomeContent(): React.JSX.Element {
                     ←
                   </button>
                 ) : null}
-                <h3>{!botPanelLibraryEnabled ? "Edit Bot" : "Bots"}</h3>
+                <div className={styles.panelHeaderTitleText}>
+                  <h3>{botPanelTitle}</h3>
+                  <small>{botPanelSubtitle}</small>
+                </div>
               </div>
               <div className={styles.panelHeaderActions}>
                 <input
@@ -36461,34 +36633,106 @@ function HomeContent(): React.JSX.Element {
                 className={styles.form}
                 onSubmit={(e) => void submitBotForm(e)}
               >
-              <div className={styles.botNameRow}>
-                <ColorGlyphPicker
-                  color={newBotColor}
-                  glyph={newBotGlyph}
-                  onColorChange={handleNewBotColorChange}
-                  onGlyphChange={handleNewBotGlyphChange}
-                  open={colorWheelOpen}
-                  onToggle={() => setColorWheelOpen(o => !o)}
-                  resolvedTheme={resolvedTheme}
-                />
-                <input ref={botNameInputRef} required placeholder="Bot name" value={newBotName} onChange={e => setNewBotName(e.target.value)} />
-                {!editingBotId ? (
-                <button
-                  type="button"
-                  className={styles.botRandomizeButton}
-                  onClick={applyRandomBotDraft}
-                  aria-label="Randomize bot"
-                  title="Randomize bot"
+              <section
+                className={styles.botIdentityCard}
+                data-mode={botPanelMode}
+                data-dirty={hasEditChanges ? "true" : undefined}
+                aria-label="Bot identity"
+              >
+                <div className={styles.botIdentityPreview}>
+                  <span className={styles.botIdentityGlyph} aria-hidden="true">
+                    <BotGlyph name={newBotGlyph} size={26} strokeWidth={1.8} />
+                  </span>
+                  <div className={styles.botIdentityCopy}>
+                    <span>{botIdentityKicker}</span>
+                    <strong>{botIdentityDisplayName}</strong>
+                    <small>{botIdentityActionHint}</small>
+                  </div>
+                  <span
+                    className={styles.botIdentityStatus}
+                    data-state={
+                      editingBotId
+                        ? hasEditChanges
+                          ? "dirty"
+                          : "saved"
+                        : nameIsPresent
+                          ? "ready"
+                          : "draft"
+                    }
+                  >
+                    {botIdentityStatus}
+                  </span>
+                </div>
+                <div className={styles.botIdentityPillRow} aria-label="Bot setup summary">
+                  <span>{botIdentityProfileSummary}</span>
+                  <span>{newBotOnlineEnabled ? "Online allowed" : "Offline only"}</span>
+                  <span>{botRoutingSummary}</span>
+                </div>
+                <div
+                  className={styles.botIdentityModeStrip}
+                  data-mode={botPanelMode}
+                  data-dirty={hasEditChanges ? "true" : undefined}
                 >
-                  <BotGlyph name="dice" size={20} strokeWidth={1.8} />
-                </button>
-                ) : null}
-              </div>
+                  <span>{botIdentityModeMessage}</span>
+                  {editingBotId ? (
+                    <button
+                      type="button"
+                      onClick={revertEditingBotDraft}
+                      disabled={!hasEditChanges || busy}
+                    >
+                      Revert
+                    </button>
+                  ) : null}
+                </div>
+                <div className={styles.botNameRow}>
+                  <ColorGlyphPicker
+                    color={newBotColor}
+                    glyph={newBotGlyph}
+                    onColorChange={handleNewBotColorChange}
+                    onGlyphChange={handleNewBotGlyphChange}
+                    open={colorWheelOpen}
+                    onToggle={() => setColorWheelOpen(o => !o)}
+                    resolvedTheme={resolvedTheme}
+                  />
+                  <label className={styles.botNameField}>
+                    <span>Bot name</span>
+                    <input
+                      ref={botNameInputRef}
+                      required
+                      placeholder="Name this bot"
+                      value={newBotName}
+                      onChange={e => setNewBotName(e.target.value)}
+                    />
+                  </label>
+                  {!editingBotId ? (
+                  <button
+                    type="button"
+                    className={styles.botRandomizeButton}
+                    onClick={applyRandomBotDraft}
+                    aria-label="Randomize bot"
+                    title="Randomize bot"
+                  >
+                    <BotGlyph name="dice" size={20} strokeWidth={1.8} />
+                  </button>
+                  ) : null}
+                </div>
+              </section>
               <section
                 className={`${styles.botParameterCard} ${styles.botProfileSummaryCard}`}
                 aria-label="Profile Builder"
               >
                 <div className={styles.botParameterHeader}>
+                  <div className={styles.botProfileProgressHeader}>
+                    <span>Profile</span>
+                    <strong>{profileProgressPercent}%</strong>
+                  </div>
+                  <div
+                    className={styles.botProfileProgressTrack}
+                    aria-hidden="true"
+                    style={{
+                      ["--bot-profile-progress" as string]: `${profileProgressPercent}%`,
+                    }}
+                  />
                   <small>
                     {profileSummary}. These details shape how the bot behaves.
                   </small>
@@ -37112,6 +37356,20 @@ function HomeContent(): React.JSX.Element {
                 </div>
                 )
               )}
+              {editingBotId && editingBot ? (
+                <div className={styles.botEditorActionStrip} aria-label="Edit bot actions">
+                  <span>
+                    {hasEditChanges ? "Save when you are ready." : "No unsaved changes."}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void duplicateCurrentBotDraft()}
+                    disabled={busy || !nameIsPresent}
+                  >
+                    Duplicate
+                  </button>
+                </div>
+              ) : null}
               <button
                 type="submit"
                 disabled={!primaryActive}
@@ -37142,9 +37400,9 @@ function HomeContent(): React.JSX.Element {
                     create-bot form). */}
                 <span className={styles.botLibraryHandleCopy}>
                   <strong>
-                    {botLibraryExpanded ? "Bot Creator" : "Bot library"}
+                    {botLibraryHandleTitle}
                   </strong>
-                  <small>{botLibrarySummary}</small>
+                  <small>{botLibraryHandleSummary}</small>
                 </span>
                 <span className={styles.botLibraryHandleChevron} aria-hidden="true">
                   {botLibraryExpanded ? "↓" : "↑"}
