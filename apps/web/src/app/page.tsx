@@ -24533,9 +24533,8 @@ function HomeContent(): React.JSX.Element {
     showEmptyStateSearchAfterReturn();
   }
 
-  async function saveSettings(e: React.FormEvent) {
-    e.preventDefault();
-    if (!settings) return;
+  async function persistSettings(): Promise<boolean> {
+    if (!settings) return false;
     setBusy(true);
     setPanelError(null);
     try {
@@ -24560,10 +24559,24 @@ function HomeContent(): React.JSX.Element {
       await refreshModels(savedComfyHost);
       await refreshSecondaryOllamaStatus();
       await refreshComfyUiStatus();
+      return true;
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Save failed.");
+      return false;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveSettings(e: React.FormEvent) {
+    e.preventDefault();
+    await persistSettings();
+  }
+
+  async function saveSettingsHostsModal() {
+    const saved = await persistSettings();
+    if (saved) {
+      setSettingsHostsModalOpen(false);
     }
   }
 
@@ -35649,9 +35662,16 @@ function HomeContent(): React.JSX.Element {
                         <strong>Save (API format)</strong> still works as-is. ComfyUI’s default port is often{" "}
                         <code>8188</code>.
                       </p>
-                      <p className={styles.muted} style={{ margin: 0 }}>
-                        Save behavior: use the main <strong>Save</strong> button in Settings when you are done.
-                      </p>
+                      <div className={styles.settingsSaveDock}>
+                        <span>Save keys and server addresses before closing this panel.</span>
+                        <button
+                          type="button"
+                          onClick={() => void saveSettingsHostsModal()}
+                          disabled={busy}
+                        >
+                          {busy ? "Saving..." : "Save connections"}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
