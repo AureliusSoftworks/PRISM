@@ -23867,7 +23867,28 @@ function HomeContent(): React.JSX.Element {
         aria-label="Suggested replies"
         className={railClassName}
       >
-        {rail.heading ? (
+        {rail.kind === "askquestion" ? (
+          <div className={styles.conversationStarterHeadingRow}>
+            {rail.heading ? (
+              <p className={styles.conversationStarterChipHeading}>{rail.heading}</p>
+            ) : (
+              <span aria-hidden="true" />
+            )}
+            <button
+              type="button"
+              className={styles.askQuestionDismissButton}
+              aria-label="Hide suggested replies"
+              title="Hide suggested replies"
+              disabled={pendingReply}
+              onClick={() => {
+                setAskQuestionComposerRevealed(true);
+                requestAnimationFrame(() => draftComposerRef.current?.focus());
+              }}
+            >
+              <X size={15} strokeWidth={2.4} aria-hidden="true" />
+            </button>
+          </div>
+        ) : rail.heading ? (
           <p className={styles.conversationStarterChipHeading}>{rail.heading}</p>
         ) : null}
         {rail.chips.map((chip, chipIndex) => (
@@ -24120,9 +24141,8 @@ function HomeContent(): React.JSX.Element {
         .join("|")}`
     : null;
   const pendingAskQuestionInteractiveKey = askQuestionInteractive ? pendingAskQuestionKey : null;
-  const composerHiddenByAskQuestion =
-    askQuestionInteractive &&
-    !askQuestionComposerRevealed;
+  // AskQuestion now floats beside the thread, so the composer can stay available.
+  const composerHiddenByAskQuestion = false;
 
   useEffect(() => {
     if (pendingAskQuestionKey) {

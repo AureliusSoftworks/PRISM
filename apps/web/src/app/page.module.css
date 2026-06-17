@@ -6564,7 +6564,7 @@
 
 /* Extra breathing room when AskQuestion chips dock over the thread. */
 .messages.messagesAskQuestionTailSpace {
-  padding-bottom: max(240px, 58dvh);
+  padding-bottom: max(140px, calc(env(safe-area-inset-bottom, 0px) + 112px));
   transition: padding-bottom 0.22s ease-out;
 }
 
@@ -11518,9 +11518,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 /* Two classes beat `.conversationStarterRail` alone so minmax(…, 260px) cannot win after minification reordering. */
 .conversationStarterRail.askQuestionRail {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 12px;
-  row-gap: 12px;
+  top: clamp(118px, 18dvh, 198px);
+  right: clamp(18px, 4vw, 64px);
+  bottom: auto;
+  left: auto;
+  width: clamp(280px, 20vw, 360px);
+  max-height: min(66dvh, 620px);
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  justify-content: stretch;
+  column-gap: 0;
+  row-gap: 8px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--askq-chip-border) 78%, var(--line));
+  border-radius: 18px;
+  box-shadow:
+    var(--shadow-md),
+    0 18px 60px color-mix(in srgb, var(--bg-deep) 42%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .conversationStarterRail::before {
@@ -11570,19 +11587,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .conversationStarterHeadingRow .conversationStarterChipHeading {
+  grid-column: auto;
   margin-bottom: 0;
+  padding: 0;
+  text-align: left;
 }
 
 .askQuestionDismissButton {
   pointer-events: auto;
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--askq-chip-border) 86%, var(--line));
-  border-radius: 12px;
-  min-width: 34px;
-  height: 34px;
-  padding: 0 10px;
+  border-radius: 10px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
   background: color-mix(in srgb, var(--askq-chip-bg) 92%, transparent);
   color: var(--askq-chip-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font: inherit;
   font-weight: 700;
   line-height: 1;
@@ -11720,15 +11744,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .askQuestionRail {
-  /* Grid width: see `.conversationStarterRail.askQuestionRail` (must outrank base rail). */
-  background: linear-gradient(
-    to top,
-    color-mix(in srgb, var(--askq-rail-tone) 96%, transparent) 0%,
-    color-mix(in srgb, var(--askq-rail-tone) 90%, transparent) 34%,
-    color-mix(in srgb, var(--askq-rail-tone) 62%, transparent) 58%,
-    color-mix(in srgb, var(--askq-rail-tone) 28%, transparent) 76%,
-    transparent
-  );
+  background:
+    radial-gradient(
+      circle at 16% 12%,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--askq-rail-tone) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(126%);
+  -webkit-backdrop-filter: blur(18px) saturate(126%);
   transition:
     opacity 0.22s ease-out,
     transform 0.22s ease-out;
@@ -11799,19 +11823,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .askQuestionRail::before {
-  background: linear-gradient(
-    to top,
-    color-mix(in srgb, var(--askq-rail-tone) 95%, transparent) 0%,
-    color-mix(in srgb, var(--askq-rail-tone) 91%, transparent) 24%,
-    color-mix(in srgb, var(--askq-rail-tone) 82%, transparent) 44%,
-    color-mix(in srgb, var(--askq-rail-tone) 66%, transparent) 62%,
-    color-mix(in srgb, var(--askq-rail-tone) 45%, transparent) 76%,
-    color-mix(in srgb, var(--askq-rail-tone) 22%, transparent) 88%,
-    color-mix(in srgb, var(--askq-rail-tone) 0%, transparent) 100%
-  );
+  display: none;
 }
 
 .askQuestionRail .conversationStarterChipHeading {
+  font-size: 0.82rem;
+  line-height: 1.3;
   color: var(--askq-rail-heading);
   text-shadow: 0 1px 6px var(--askq-rail-heading-shadow);
 }
@@ -11828,7 +11845,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .askQuestionRail .conversationStarterChipPrimary {
-  font-size: 0.95rem;
+  font-size: 0.86rem;
   font-weight: 680;
   line-height: 1.28;
 }
@@ -11838,13 +11855,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow-wrap: break-word;
   word-break: break-word;
   /* Long model-authored choices: keep the rail compact; scroll inside the chip. */
-  max-height: min(38dvh, 340px);
+  max-height: min(28dvh, 220px);
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
 .askQuestionRail .conversationStarterChip {
+  min-height: 54px;
+  border-radius: 12px;
+  padding: 11px 12px;
   border-color: var(--askq-chip-border);
   background:
     radial-gradient(
@@ -11912,6 +11932,57 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow:
     0 0 0 2px var(--bg-surface),
     0 0 0 4px color-mix(in srgb, var(--accent) 52%, transparent);
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .conversationStarterRail.askQuestionRail {
+  position: fixed;
+  top: clamp(118px, 18dvh, 198px);
+  right: clamp(18px, 4vw, 64px);
+  bottom: auto;
+  left: auto;
+}
+
+@media (max-width: 1180px) {
+  .conversationStarterRail.askQuestionRail,
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .conversationStarterRail.askQuestionRail {
+    top: auto;
+    right: 0;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    left: 0;
+    width: 100%;
+    max-height: min(58dvh, 520px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 10px;
+    row-gap: 10px;
+    padding: 18px clamp(16px, 4vw, 40px) 16px;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow:
+      0 -16px 44px color-mix(in srgb, var(--bg-deep) 38%, transparent),
+      inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+  }
+
+  .conversationStarterRail.askQuestionRail::before {
+    display: block;
+    top: -128px;
+    background: linear-gradient(
+      to top,
+      color-mix(in srgb, var(--askq-rail-tone) 78%, transparent) 0%,
+      color-mix(in srgb, var(--askq-rail-tone) 50%, transparent) 54%,
+      transparent 100%
+    );
+  }
+}
+
+@media (max-width: 620px) {
+  .conversationStarterRail.askQuestionRail,
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .conversationStarterRail.askQuestionRail {
+    grid-template-columns: 1fr;
+    max-height: min(64dvh, 520px);
+    padding: 14px 14px 12px;
+  }
 }
 
 .memoryToastStack {
@@ -24435,6 +24506,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
     padding-bottom: max(32dvh, calc(env(safe-area-inset-bottom) + 24px));
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .messages.messagesAskQuestionTailSpace {
+    padding-bottom: max(240px, 58dvh);
   }
 
   .appLayout[data-chat-sidebar-hidden="true"] .compose {
