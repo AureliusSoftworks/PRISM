@@ -121,10 +121,12 @@ import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
   hasLeadingDevCommand,
   PrismDevCommandHighlight,
+  type PrismDevCommandHighlightSpec,
 } from "./tiptapPrismDevCommandHighlight";
 import {
   PRISM_BOT_MARKDOWN_LINK_RE,
   composeMentionTabPlainTextAction,
+  escapeMarkdownLinkLabel,
   extractStageDirectionCues,
   extractStageDirections,
   filterBotsForMentionQuery,
@@ -2964,6 +2966,14 @@ function parsePrismCommandMentionHref(href?: string | null): string | null {
   }
 }
 
+function prismCommandMentionHref(commandId: string): string {
+  return `prism-command://${encodeURIComponent(commandId)}`;
+}
+
+function formatCommandMentionMarkdown(commandId: string, label: string): string {
+  return `[${escapeMarkdownLinkLabel(label)}](${prismCommandMentionHref(commandId)})`;
+}
+
 /**
  * User line from a post-`POST /api/coffee/turn` payload: prefer the user message before a
  * trailing assistant reply; otherwise the last user message in the array.
@@ -4889,6 +4899,11 @@ interface CommandCenterCommand {
   readOnly: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+interface CommandCenterDisplayAlias {
+  displayMarkdown: string;
+  originalText: string;
 }
 
 interface CommandCenterStateV1 {
@@ -12579,6 +12594,7 @@ interface ComposerInputProps {
   hideSubmitButton?: boolean;
   resolvedTheme: "light" | "dark";
   mentionBots: readonly BotMentionPick[];
+  commandHighlightSpecs: readonly PrismDevCommandHighlightSpec[];
 }
 
 interface ProseMirrorSelectionState {
@@ -12943,7 +12959,10 @@ function MessageBody({
         const commandId = parsePrismCommandMentionHref(href ?? undefined);
         if (commandId) {
           const command = commandMentionsById?.get(commandId);
-          const label = flattenMarkdownText(children).trim() || command?.name || "command";
+          const label = flattenMarkdownText(children).trim() || `/${command?.name ?? "command"}`;
+          const labelParts = label.split(/\s+/).filter((part) => part.length > 0);
+          const commandLabel = labelParts[0] ?? label;
+          const flagLabel = labelParts.slice(1).join(" ");
           return (
             <button
               type="button"
@@ -12952,7 +12971,10 @@ function MessageBody({
               data-command-id={commandId}
               aria-label={`Edit command ${label}`}
             >
-              {label}
+              <span className={styles.commandMentionName}>{commandLabel}</span>
+              {flagLabel ? (
+                <span className={styles.commandMentionFlags}>{flagLabel}</span>
+              ) : null}
             </button>
           );
         }
@@ -13110,6 +13132,8 @@ interface DesktopMarkdownComposerProps {
   resolvedTheme: "light" | "dark";
   /** Chat-enabled bots available for `@` mentions (empty disables). */
   mentionBots: readonly BotMentionPick[];
+  /** Slash commands available for lightweight command-token highlighting. */
+  commandHighlightSpecs: readonly PrismDevCommandHighlightSpec[];
   /** When true, the editor is locked (read-only) and visually muted. */
   disabled?: boolean;
 }
@@ -13129,6 +13153,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       hideSubmitButton,
       resolvedTheme,
       mentionBots,
+      commandHighlightSpecs,
       disabled = false,
     },
     ref
@@ -13137,6 +13162,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const onValueChangeRef = useRef(onValueChange);
     const onFocusRef = useRef(onFocus);
     const editorRef = useRef<Editor | null>(null);
+    const commandHighlightSpecsRef = useRef(commandHighlightSpecs);
     const pendingValueRef = useRef<string | null>(null);
     const pendingValueTimerRef = useRef<number | null>(null);
     const mentionBotsRef = useRef(mentionBots);
@@ -13150,6 +13176,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     useLayoutEffect(() => {
       mentionBotsRef.current = mentionBots;
     }, [mentionBots]);
+    useLayoutEffect(() => {
+      commandHighlightSpecsRef.current = commandHighlightSpecs;
+    }, [commandHighlightSpecs]);
     useLayoutEffect(() => {
       mentionUiRef.current = mentionUi;
     }, [mentionUi]);
@@ -13210,6 +13239,11 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       onFocusRef.current = onFocus;
     }, [onFocus, onValueChange]);
 
+    const commandHighlightExtension = useMemo(
+      () => PrismDevCommandHighlight.configure({ commands: commandHighlightSpecs }),
+      [commandHighlightSpecs]
+    );
+
     const editor = useEditor(
       {
         immediatelyRender: false,
@@ -13223,7 +13257,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             autolink: true,
             defaultProtocol: "https",
           }),
-          PrismDevCommandHighlight,
+          commandHighlightExtension,
           Placeholder.configure({ placeholder }),
           Markdown.configure({
             markedOptions: {
@@ -13257,7 +13291,11 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               event.preventDefault();
               return true;
             }
-            if (hasLeadingDevCommand(view.state.doc)) {
+            if (
+              hasLeadingDevCommand(view.state.doc, {
+                commands: commandHighlightSpecsRef.current,
+              })
+            ) {
               const plain = event.clipboardData?.getData("text/plain");
               if (typeof plain === "string") {
                 event.preventDefault();
@@ -13268,7 +13306,11 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             return false;
           },
           handleTextInput: (view, from, to, text) => {
-            if (!hasLeadingDevCommand(view.state.doc)) return false;
+            if (
+              !hasLeadingDevCommand(view.state.doc, {
+                commands: commandHighlightSpecsRef.current,
+              })
+            ) return false;
             view.dispatch(view.state.tr.insertText(text, from, to));
             return true;
           },
@@ -13400,7 +13442,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           }, 90);
         },
       },
-      [placeholder, syncMentionPopover]
+      [commandHighlightExtension, placeholder, syncMentionPopover]
     );
 
     const mentionBotsByIdForTipTap = useMemo(() => {
@@ -13644,6 +13686,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     hideSubmitButton,
     resolvedTheme,
     mentionBots,
+    commandHighlightSpecs,
   },
   ref
 ): React.JSX.Element {
@@ -13762,6 +13805,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           hideSubmitButton={hideSubmitButton}
           resolvedTheme={resolvedTheme}
           mentionBots={mentionBots}
+          commandHighlightSpecs={commandHighlightSpecs}
         />
       ) : (
         <>
@@ -15189,7 +15233,19 @@ function HomeContent(): React.JSX.Element {
     () => new Map(commandCenterCommands.map((command) => [command.id, command] as const)),
     [commandCenterCommands]
   );
-  const commandDisplayByMessageIdRef = useRef<Map<string, string>>(new Map());
+  const commandCenterHighlightSpecs = useMemo<PrismDevCommandHighlightSpec[]>(
+    () =>
+      commandCenterCommands.map((command) => ({
+        name: command.name,
+        arguments: command.arguments
+          .map((argument) => argument.key.trim())
+          .filter((key) => key.length > 0),
+      })),
+    [commandCenterCommands]
+  );
+  const commandDisplayByMessageIdRef = useRef<Map<string, CommandCenterDisplayAlias>>(
+    new Map()
+  );
   const [commandCenterSelectedCommandId, setCommandCenterSelectedCommandId] =
     useState<string | null>(null);
   const [commandCenterSpecsCommandId, setCommandCenterSpecsCommandId] =
@@ -16233,17 +16289,31 @@ function HomeContent(): React.JSX.Element {
     [openRightPanel]
   );
 
+  function rememberCommandDisplayAliasForLatestUserPrompt(
+    conversation: { messages: Message[] },
+    prompt: string,
+    alias?: CommandCenterDisplayAlias | null
+  ): void {
+    if (!alias) return;
+    for (let idx = conversation.messages.length - 1; idx >= 0; idx -= 1) {
+      const message = conversation.messages[idx];
+      if (message.role !== "user" || message.content !== prompt) continue;
+      commandDisplayByMessageIdRef.current.set(message.id, alias);
+      return;
+    }
+  }
+
   const applyCommandDisplayAliases = useCallback(
     function <T extends { messages: Message[] }>(conversation: T): T {
       let changed = false;
       const messages = conversation.messages.map((message) => {
         if (message.role !== "user") return message;
         const alias = commandDisplayByMessageIdRef.current.get(message.id);
-        if (!alias || alias === message.content) return message;
+        if (!alias || alias.displayMarkdown === message.content) return message;
         changed = true;
         return {
           ...message,
-          content: alias,
+          content: alias.displayMarkdown,
         };
       });
       return changed ? { ...conversation, messages } : conversation;
@@ -22596,9 +22666,11 @@ function HomeContent(): React.JSX.Element {
     // Optimistic-only rows are never in SQLite — editing would call /rewind
     // with a fake id after a cancelled send.
     if (String(msg.id).startsWith("pending-")) return;
+    const commandAlias = commandDisplayByMessageIdRef.current.get(msg.id);
+    const editableText = commandAlias?.originalText ?? msg.content;
     setEditingMessageId(msg.id);
-    setEditingOriginalText(msg.content);
-    setDraft(msg.content);
+    setEditingOriginalText(editableText);
+    setDraft(editableText);
     queueMicrotask(() => draftComposerRef.current?.focus());
   }
 
@@ -22608,7 +22680,11 @@ function HomeContent(): React.JSX.Element {
     setDraft("");
   }
 
-  async function performMessageEdit(messageId: string, text: string): Promise<void> {
+  async function performMessageEdit(
+    messageId: string,
+    text: string,
+    commandDisplayAlias?: CommandCenterDisplayAlias | null
+  ): Promise<void> {
     if (!detail || !selectedId) return;
     const cutoffIdx = detail.messages.findIndex((message) => message.id === messageId);
     if (cutoffIdx < 0) return;
@@ -22623,12 +22699,17 @@ function HomeContent(): React.JSX.Element {
     setPendingReplyIsNewConversation(false);
     setError(null);
     const previousDetail = detail;
+    const previousCommandAlias = commandDisplayByMessageIdRef.current.get(messageId);
     const rewoundMessages = previousDetail.messages.slice(0, cutoffIdx);
+    commandDisplayByMessageIdRef.current.delete(messageId);
+    if (commandDisplayAlias) {
+      commandDisplayByMessageIdRef.current.set(messageId, commandDisplayAlias);
+    }
     setPendingReplyStartMessageCount(rewoundMessages.length);
     const optimisticEditedMessage: Message = {
       id: messageId,
       role: "user",
-      content: text,
+      content: commandDisplayAlias?.displayMarkdown ?? text,
       createdAt: new Date().toISOString(),
     };
     let editedConversation: ConversationDetail | null = null;
@@ -22654,6 +22735,11 @@ function HomeContent(): React.JSX.Element {
           method: "POST",
           body: JSON.stringify(chatBody),
         });
+        rememberCommandDisplayAliasForLatestUserPrompt(
+          d.conversation,
+          text,
+          commandDisplayAlias
+        );
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
@@ -22693,6 +22779,11 @@ function HomeContent(): React.JSX.Element {
           method: "POST",
           body: JSON.stringify(chatBody),
         });
+        rememberCommandDisplayAliasForLatestUserPrompt(
+          d.conversation,
+          text,
+          commandDisplayAlias
+        );
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
@@ -22726,6 +22817,11 @@ function HomeContent(): React.JSX.Element {
       }
       await refreshOpenMemoryViews();
     } catch (err) {
+      if (previousCommandAlias) {
+        commandDisplayByMessageIdRef.current.set(messageId, previousCommandAlias);
+      } else {
+        commandDisplayByMessageIdRef.current.delete(messageId);
+      }
       setDetail(previousDetail);
       setError(err instanceof Error ? err.message : "Message edit failed.");
     } finally {
@@ -22733,8 +22829,12 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function requestMessageEdit(messageId: string, text: string): void {
-    void performMessageEdit(messageId, text);
+  function requestMessageEdit(
+    messageId: string,
+    text: string,
+    commandDisplayAlias?: CommandCenterDisplayAlias | null
+  ): void {
+    void performMessageEdit(messageId, text, commandDisplayAlias);
   }
 
   /** `/dev …` — local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
@@ -23052,6 +23152,7 @@ function HomeContent(): React.JSX.Element {
         .map((argument) => [argument.key, argument.value] as const)
     );
     const selectedArgumentValues: string[] = [];
+    const selectedArgumentDisplayTokens: string[] = [];
     const passthroughTokens: string[] = [];
     for (let index = 1; index < tokens.length; index += 1) {
       const token = tokens[index];
@@ -23060,6 +23161,7 @@ function HomeContent(): React.JSX.Element {
         const mappedValue = knownArguments.get(key);
         if (mappedValue) {
           selectedArgumentValues.push(mappedValue);
+          selectedArgumentDisplayTokens.push(token);
           continue;
         }
       }
@@ -23075,11 +23177,13 @@ function HomeContent(): React.JSX.Element {
     if (passthrough.length > 0) {
       prompt += `\n\nUser request:\n${passthrough}`;
     }
+    const commandDisplayLabel = [`/${command.name}`, ...selectedArgumentDisplayTokens].join(" ");
+    const displayMarkdown = formatCommandMentionMarkdown(command.id, commandDisplayLabel);
     return {
       kind: "resolved",
       commandId: command.id,
       commandName: command.name,
-      displayMarkdown: `[${command.name}](prism-command://${encodeURIComponent(command.id)})`,
+      displayMarkdown,
       prompt,
       modelChoice: commandCenterPreferredModel,
     };
@@ -23276,6 +23380,13 @@ function HomeContent(): React.JSX.Element {
       commandCenterResolution.kind === "resolved"
         ? commandCenterResolution.displayMarkdown
         : null;
+    const commandCenterDisplayAlias: CommandCenterDisplayAlias | null =
+      commandCenterDisplayMarkdown
+        ? {
+            displayMarkdown: commandCenterDisplayMarkdown,
+            originalText: rawTrimmed,
+          }
+        : null;
     const trimmed = (
       commandCenterResolution.kind === "resolved"
         ? commandCenterResolution.prompt
@@ -23340,7 +23451,7 @@ function HomeContent(): React.JSX.Element {
       setEditingMessageId(null);
       setEditingOriginalText("");
       draftComposerRef.current?.blur();
-      requestMessageEdit(editMessageId, trimmed);
+      requestMessageEdit(editMessageId, trimmed, commandCenterDisplayAlias);
       return;
     }
     // Any typed/chosen follow-up supersedes the starter quick-replies row.
@@ -23416,8 +23527,15 @@ function HomeContent(): React.JSX.Element {
         commandCenterDisplayMarkdown && rawTrimmed.length > 0
           ? commandCenterDisplayMarkdown
           : trimmed;
+      const optimisticMessageId = `pending-${Date.now()}`;
+      if (commandCenterDisplayAlias) {
+        commandDisplayByMessageIdRef.current.set(
+          optimisticMessageId,
+          commandCenterDisplayAlias
+        );
+      }
       const optimisticMessage: Message = {
-        id: `pending-${Date.now()}`,
+        id: optimisticMessageId,
         role: "user",
         content: visibleUserMessageContent,
         createdAt: new Date().toISOString(),
@@ -23477,14 +23595,11 @@ function HomeContent(): React.JSX.Element {
       pushMemoryToasts(d.memoryLearned);
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
       successfulConversationId = d.conversation.id;
-      if (commandCenterDisplayMarkdown) {
-        for (let idx = d.conversation.messages.length - 1; idx >= 0; idx -= 1) {
-          const message = d.conversation.messages[idx];
-          if (message.role !== "user" || message.content !== trimmed) continue;
-          commandDisplayByMessageIdRef.current.set(message.id, commandCenterDisplayMarkdown);
-          break;
-        }
-      }
+      rememberCommandDisplayAliasForLatestUserPrompt(
+        d.conversation,
+        trimmed,
+        commandCenterDisplayAlias
+      );
       if (d.summaryCompaction?.mode === "sandbox" && d.summaryCompaction.triggered) {
         setSandboxSummaryBusy(true);
         window.setTimeout(() => {
@@ -23681,7 +23796,8 @@ function HomeContent(): React.JSX.Element {
 
   function resendUserMessage(msg: Message): void {
     if (msg.role !== "user") return;
-    const resendText = msg.content.trim();
+    const commandAlias = commandDisplayByMessageIdRef.current.get(msg.id);
+    const resendText = (commandAlias?.originalText ?? msg.content).trim();
     if (resendText.length === 0) return;
     closeMessageContextOverlay();
     // Force normal send mode if an edit draft was active.
@@ -24968,7 +25084,8 @@ function HomeContent(): React.JSX.Element {
 
   async function copyMessageToClipboard(msg: Message): Promise<void> {
     try {
-      await writeClipboardText(msg.content);
+      const commandAlias = commandDisplayByMessageIdRef.current.get(msg.id);
+      await writeClipboardText(commandAlias?.originalText ?? msg.content);
       setCopiedMessageId(msg.id);
       if (copiedMessageTimerRef.current) {
         clearTimeout(copiedMessageTimerRef.current);
@@ -42839,6 +42956,7 @@ function HomeContent(): React.JSX.Element {
                   hideSubmitButton
                   resolvedTheme={resolvedTheme}
                   mentionBots={coffeeMentionBotPicks}
+                  commandHighlightSpecs={commandCenterHighlightSpecs}
                   disabled={
                     coffeeBusy ||
                     coffeeTurnRhythmState === "cooldown" ||
@@ -44712,6 +44830,7 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    commandHighlightSpecs={commandCenterHighlightSpecs}
                   />
                 </div>
               </div>
@@ -44732,6 +44851,7 @@ function HomeContent(): React.JSX.Element {
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                commandHighlightSpecs={commandCenterHighlightSpecs}
               />
             )
           ) : null}
@@ -46061,6 +46181,7 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    commandHighlightSpecs={commandCenterHighlightSpecs}
                   />
                 </div>
               </div>
@@ -46081,6 +46202,7 @@ function HomeContent(): React.JSX.Element {
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                commandHighlightSpecs={commandCenterHighlightSpecs}
               />
             )
           ) : null}

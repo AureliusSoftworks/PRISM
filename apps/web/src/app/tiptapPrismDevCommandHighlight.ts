@@ -3,7 +3,22 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
-const DEV_COMMAND_RE = /^\/(?:dev|echo|forget|help|clear)(?=\s|$)/iu;
+export interface PrismDevCommandHighlightSpec {
+  name: string;
+  arguments?: readonly string[];
+}
+
+export interface PrismDevCommandHighlightOptions {
+  commands?: readonly PrismDevCommandHighlightSpec[];
+}
+
+const BUILT_IN_COMMAND_HIGHLIGHT_SPECS: readonly PrismDevCommandHighlightSpec[] = [
+  { name: "dev" },
+  { name: "echo", arguments: ["wait", "load"] },
+  { name: "forget" },
+  { name: "help" },
+  { name: "clear" },
+];
 
 interface DevCommandHighlightRanges {
   command: { from: number; to: number };
@@ -21,16 +36,93 @@ export interface LeadingDevCommandTextRanges {
   argumentEnd?: number;
 }
 
+function normalizeCommandName(value: string): string {
+  return value.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function normalizeCommandArgumentName(value: string): string {
+  return value.trim().replace(/^[-/]+/, "").toLowerCase();
+}
+
+function buildCommandSpecLookup(
+  options?: PrismDevCommandHighlightOptions
+): Map<string, Set<string>> {
+  const specs = [
+    ...BUILT_IN_COMMAND_HIGHLIGHT_SPECS,
+    ...(options?.commands ?? []),
+  ];
+  const lookup = new Map<string, Set<string>>();
+  for (const spec of specs) {
+    const name = normalizeCommandName(spec.name);
+    if (!name) continue;
+    const existing = lookup.get(name) ?? new Set<string>();
+    for (const arg of spec.arguments ?? []) {
+      const normalizedArg = normalizeCommandArgumentName(arg);
+      if (normalizedArg) existing.add(normalizedArg);
+    }
+    lookup.set(name, existing);
+  }
+  return lookup;
+}
+
+function resolveKnownCommand(
+  tail: string,
+  options?: PrismDevCommandHighlightOptions
+): { commandText: string; argumentNames: ReadonlySet<string> } | null {
+  const match = /^\/([^\s/]+)(?=\s|$)/u.exec(tail);
+  if (!match) return null;
+  const commandText = match[0] ?? "";
+  const name = normalizeCommandName(match[1] ?? "");
+  if (!name) return null;
+  const spec = buildCommandSpecLookup(options).get(name);
+  if (!spec) return null;
+  return { commandText, argumentNames: spec };
+}
+
+function resolveKnownArgumentRange(
+  text: string,
+  startCursor: number,
+  argumentNames: ReadonlySet<string>
+): { start: number; end: number } | null {
+  if (argumentNames.size === 0) return null;
+  let scan = startCursor;
+  let argumentStart: number | undefined;
+  let argumentEnd: number | undefined;
+  while (scan < text.length) {
+    const tail = text.slice(scan);
+    const leadingWs = /^[\t ]*/u.exec(tail)?.[0].length ?? 0;
+    const flagStart = scan + leadingWs;
+    const flagMatch = /^--?([A-Za-z0-9][A-Za-z0-9-]*)/u.exec(text.slice(flagStart));
+    if (!flagMatch) break;
+    const key = normalizeCommandArgumentName(flagMatch[1] ?? "");
+    if (!argumentNames.has(key)) break;
+    let flagEnd = flagStart + (flagMatch[0]?.length ?? 0);
+    if (key === "wait" || key === "load") {
+      const numericValueMatch = /^[\t ]+[0-9]+(?:\.[0-9]+)?/u.exec(text.slice(flagEnd));
+      if (numericValueMatch) {
+        flagEnd += numericValueMatch[0].length;
+      }
+    }
+    argumentStart ??= flagStart;
+    argumentEnd = flagEnd;
+    scan = flagEnd;
+  }
+  return typeof argumentStart === "number" && typeof argumentEnd === "number"
+    ? { start: argumentStart, end: argumentEnd }
+    : null;
+}
+
 export function resolveLeadingDevCommandTextRanges(
-  firstTextBlockText: string
+  firstTextBlockText: string,
+  options?: PrismDevCommandHighlightOptions
 ): LeadingDevCommandTextRanges | null {
   const leadingWs = (firstTextBlockText.match(/^\s*/u)?.[0] ?? "").length;
   const tail = firstTextBlockText.slice(leadingWs);
-  const commandMatch = DEV_COMMAND_RE.exec(tail);
+  const commandMatch = resolveKnownCommand(tail, options);
   if (!commandMatch) return null;
 
   const commandStart = leadingWs;
-  const commandEnd = commandStart + commandMatch[0].length;
+  const commandEnd = commandStart + commandMatch.commandText.length;
   const text = firstTextBlockText;
   const quotedStringRanges: Array<{ start: number; end: number }> = [];
   let cursor = commandEnd;
@@ -79,7 +171,6 @@ export function resolveLeadingDevCommandTextRanges(
     consumeWhitespace();
   }
 
-  const tailAfterStrings = text.slice(cursor);
   const expressionText = text.slice(commandEnd, cursor);
   const actionTokenRanges: Array<{ start: number; end: number }> = [];
   const actionTokenRe = /\*[^*\n]+\*/gu;
@@ -92,33 +183,33 @@ export function resolveLeadingDevCommandTextRanges(
       end: commandEnd + relStart + token.length,
     });
   }
-  const argMatch =
-    /^[\t ]*(?:--wait|--load|-load)(?:[\t ]+[0-9]*(?:\.[0-9]*)?)?/u.exec(tailAfterStrings);
-  const argumentLeadingWs = (tailAfterStrings.match(/^[\t ]*/u)?.[0] ?? "").length;
-  const argumentStart =
-    argMatch && argMatch[0].length > argumentLeadingWs
-      ? cursor + argumentLeadingWs
-      : undefined;
-  const argumentEnd =
-    typeof argumentStart === "number" && argMatch
-      ? cursor + argMatch[0].length
-      : undefined;
+  const argumentRange = resolveKnownArgumentRange(
+    firstTextBlockText,
+    cursor,
+    commandMatch.argumentNames
+  );
   return {
     commandStart,
     commandEnd,
     quotedStringRanges,
     actionTokenRanges,
-    ...(typeof argumentStart === "number" && typeof argumentEnd === "number"
-      ? { argumentStart, argumentEnd }
+    ...(argumentRange
+      ? { argumentStart: argumentRange.start, argumentEnd: argumentRange.end }
       : {}),
   };
 }
 
-export function hasLeadingDevCommand(doc: ProseMirrorNode): boolean {
-  return findLeadingDevCommandRanges(doc) !== null;
+export function hasLeadingDevCommand(
+  doc: ProseMirrorNode,
+  options?: PrismDevCommandHighlightOptions
+): boolean {
+  return findLeadingDevCommandRanges(doc, options) !== null;
 }
 
-function findLeadingDevCommandRanges(doc: ProseMirrorNode): DevCommandHighlightRanges | null {
+function findLeadingDevCommandRanges(
+  doc: ProseMirrorNode,
+  options?: PrismDevCommandHighlightOptions
+): DevCommandHighlightRanges | null {
   let firstTextBlockText = "";
   let firstTextBlockPos = -1;
   doc.descendants((node: ProseMirrorNode, pos: number) => {
@@ -128,7 +219,7 @@ function findLeadingDevCommandRanges(doc: ProseMirrorNode): DevCommandHighlightR
     return false;
   });
   if (firstTextBlockPos < 0) return null;
-  const textRanges = resolveLeadingDevCommandTextRanges(firstTextBlockText);
+  const textRanges = resolveLeadingDevCommandTextRanges(firstTextBlockText, options);
   if (!textRanges) return null;
   const commandFrom = firstTextBlockPos + 1 + textRanges.commandStart;
   const commandTo = firstTextBlockPos + 1 + textRanges.commandEnd;
@@ -161,14 +252,19 @@ function findLeadingDevCommandRanges(doc: ProseMirrorNode): DevCommandHighlightR
   };
 }
 
-export const PrismDevCommandHighlight = Extension.create({
+export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighlightOptions>({
   name: "prismDevCommandHighlight",
+  addOptions(): PrismDevCommandHighlightOptions {
+    return {
+      commands: [],
+    };
+  },
   addProseMirrorPlugins() {
     return [
       new Plugin({
         props: {
           decorations: (state) => {
-            const ranges = findLeadingDevCommandRanges(state.doc);
+            const ranges = findLeadingDevCommandRanges(state.doc, this.options);
             if (!ranges) return DecorationSet.empty;
             const decorations: Decoration[] = [
               Decoration.inline(ranges.command.from, ranges.command.to, {

@@ -8,6 +8,11 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     assert.equal(out, null);
   });
 
+  it("does not highlight partial slash command names", () => {
+    const out = resolveLeadingDevCommandTextRanges("/he");
+    assert.equal(out, null);
+  });
+
   it("recognizes /clear as a highlighted dev command", () => {
     const out = resolveLeadingDevCommandTextRanges("/clear");
     assert.deepEqual(out, {
@@ -33,6 +38,44 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
+      quotedStringRanges: [],
+      actionTokenRanges: [],
+    });
+  });
+
+  it("recognizes configured prompt commands only after the complete token is typed", () => {
+    const options = { commands: [{ name: "pirate", arguments: ["story"] }] };
+    assert.equal(resolveLeadingDevCommandTextRanges("/pira", options), null);
+    const out = resolveLeadingDevCommandTextRanges("/pirate", options);
+    assert.deepEqual(out, {
+      commandStart: 0,
+      commandEnd: 7,
+      quotedStringRanges: [],
+      actionTokenRanges: [],
+    });
+  });
+
+  it("highlights configured prompt command flags as command arguments", () => {
+    const out = resolveLeadingDevCommandTextRanges("/pirate -story tell it", {
+      commands: [{ name: "pirate", arguments: ["story"] }],
+    });
+    assert.deepEqual(out, {
+      commandStart: 0,
+      commandEnd: 7,
+      quotedStringRanges: [],
+      actionTokenRanges: [],
+      argumentStart: 8,
+      argumentEnd: 14,
+    });
+  });
+
+  it("leaves unknown prompt command flags as normal follow-on text", () => {
+    const out = resolveLeadingDevCommandTextRanges("/pirate -unknown tell it", {
+      commands: [{ name: "pirate", arguments: ["story"] }],
+    });
+    assert.deepEqual(out, {
+      commandStart: 0,
+      commandEnd: 7,
       quotedStringRanges: [],
       actionTokenRanges: [],
     });
