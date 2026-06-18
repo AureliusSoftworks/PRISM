@@ -10,6 +10,7 @@ export interface BackupUserSettings {
   providerLocked: boolean;
   autoMemory: boolean;
   composerWritingAssist: boolean;
+  experimentalDualOllamaEnabled: boolean;
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
@@ -131,6 +132,7 @@ export function exportUserSnapshot(
          provider_locked,
          auto_memory,
          composer_writing_assist,
+         experimental_dual_ollama_enabled,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
          hidden_comfyui_workflow_ids,
@@ -169,6 +171,7 @@ export function exportUserSnapshot(
         provider_locked: number;
         auto_memory: number;
         composer_writing_assist: number;
+        experimental_dual_ollama_enabled: number;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
         hidden_comfyui_workflow_ids: string | null;
@@ -206,6 +209,7 @@ export function exportUserSnapshot(
         providerLocked: user.provider_locked === 1,
         autoMemory: user.auto_memory === 1,
         composerWritingAssist: user.composer_writing_assist !== 0,
+        experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
         fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
         hiddenComfyUiWorkflowIds: safeParseStringArray(user.hidden_comfyui_workflow_ids),
@@ -480,6 +484,7 @@ export function importUserSnapshot(
         provider_locked = ?,
         auto_memory = ?,
         composer_writing_assist = ?,
+        experimental_dual_ollama_enabled = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
         hidden_comfyui_workflow_ids = ?,
@@ -517,6 +522,7 @@ export function importUserSnapshot(
       settings.providerLocked ? 1 : 0,
       settings.autoMemory ? 1 : 0,
       settings.composerWritingAssist ? 1 : 0,
+      settings.experimentalDualOllamaEnabled ? 1 : 0,
       settings.fallbackModelMessageStripe ? 1 : 0,
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)

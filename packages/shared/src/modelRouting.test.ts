@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  REQUIRED_PRIMARY_LOCAL_MODEL_ID,
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
+  resolveAutoModel,
 } from "./modelRouting.ts";
 
 describe("default online model visibility", () => {
@@ -47,5 +49,51 @@ describe("default online model visibility", () => {
       "claude-sonnet-4-5-20250929",
       "claude-test-model",
     ]);
+  });
+});
+
+describe("resolveAutoModel", () => {
+  const catalog = {
+    local: [
+      { id: REQUIRED_PRIMARY_LOCAL_MODEL_ID },
+      { id: "mistral:latest" },
+    ],
+    online: [
+      { id: "gpt-4o-mini", provider: "openai" as const },
+      { id: "gpt-4o", provider: "openai" as const },
+      { id: "claude-sonnet-4-6", provider: "anthropic" as const },
+    ],
+  };
+
+  it("routes an Anthropic saved online default through Anthropic", () => {
+    assert.deepEqual(
+      resolveAutoModel({
+        provider: "openai",
+        botPreferredModel: "claude-sonnet-4-6",
+        hiddenModelIds: [],
+        catalog,
+      }),
+      {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        usedRequiredLocalFallback: false,
+      }
+    );
+  });
+
+  it("keeps local requests local when an online model leaks in", () => {
+    assert.deepEqual(
+      resolveAutoModel({
+        provider: "local",
+        explicitModelOverride: "claude-sonnet-4-6",
+        hiddenModelIds: [],
+        catalog,
+      }),
+      {
+        provider: "local",
+        model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+        usedRequiredLocalFallback: false,
+      }
+    );
   });
 });

@@ -3359,13 +3359,13 @@ const CHAT_MODE_MESSAGE_MANIFEST_MS = 480;
 const CHAT_MODE_OFFSCREEN_VISIBLE_MS = 12000;
 const CHAT_MODE_OFFSCREEN_DISSOLVE_MS = 2200;
 const CHAT_MODE_ARCHIVE_LOAD_DELAY_MS = 320;
-const CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO = 0.5;
-const CHAT_MODE_NEW_TURN_START_RATIO = 0.46;
+const CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO = 0.34;
+const CHAT_MODE_NEW_TURN_START_RATIO = 0.34;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.46;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.34;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 14;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.8;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 24;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 1.2;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MAX_CORRECTION_PX = 220;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MIN_CORRECTION_PX = 8;
 const CHAT_MODE_USER_QUESTION_PATTERN =
@@ -4601,6 +4601,7 @@ interface UserSettings {
   providerLocked: boolean;
   autoMemory: boolean;
   composerWritingAssist: boolean;
+  experimentalDualOllamaEnabled: boolean;
   /**
    * When true (default), assistant bubbles that used the configured copyright
    * lenient local fallback get the striped left-edge treatment.
@@ -4795,6 +4796,25 @@ interface SecondaryOllamaStatus {
   configured: boolean;
   reachable: boolean;
   modelCount: number;
+}
+interface DualOllamaWorkloadStatus {
+  configured: boolean;
+  enabled: boolean;
+  primaryReachable: boolean;
+  secondaryReachable: boolean;
+  modelParity: boolean;
+  primaryModelCount: number;
+  secondaryModelCount: number;
+  sharedModelIds: string[];
+  missingOnPrimary: string[];
+  missingOnSecondary: string[];
+  reason:
+    | "not_configured"
+    | "primary_unreachable"
+    | "secondary_unreachable"
+    | "empty_catalog"
+    | "model_mismatch"
+    | "ready";
 }
 type SecondaryOllamaUiStatus =
   | "unconfigured"
@@ -12971,6 +12991,25 @@ function findChatModeMessageScrollAnchor(row: HTMLElement): HTMLElement {
   return typingLines[typingLines.length - 1] ?? row;
 }
 
+function resolveChatModeMessageFollowY(row: HTMLElement, scrollRoot: HTMLElement): number {
+  const rootRect = scrollRoot.getBoundingClientRect();
+  const toScrollY = (viewportY: number): number =>
+    viewportY - rootRect.top + scrollRoot.scrollTop;
+  const typingLines = row.querySelectorAll<HTMLElement>('[data-chat-typing-line="true"]');
+  const typingLine = typingLines[typingLines.length - 1] ?? null;
+  if (typingLine) {
+    const rect = typingLine.getBoundingClientRect();
+    return toScrollY(rect.top + rect.height / 2);
+  }
+
+  const markdownChildren = row.querySelectorAll<HTMLElement>(
+    '[data-chat-render-kind="markdown"] > *'
+  );
+  const latestMarkdownChild = markdownChildren[markdownChildren.length - 1] ?? null;
+  const rect = (latestMarkdownChild ?? row).getBoundingClientRect();
+  return toScrollY(rect.bottom);
+}
+
 function normalizeZenAtmosphereHistory(
   metadata: ZenWallpaperMetadata | null | undefined
 ): ZenWallpaperHistoryEntry[] {
@@ -16095,6 +16134,8 @@ function HomeContent(): React.JSX.Element {
   const [composerFocused, setComposerFocused] = useState(false);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
   const [starterComposerRevealed, setStarterComposerRevealed] = useState(false);
+  const [starterPromptSettlingMessageId, setStarterPromptSettlingMessageId] =
+    useState<string | null>(null);
   const [askQuestionChangingAnswerAssistantId, setAskQuestionChangingAnswerAssistantId] =
     useState<string | null>(null);
   const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
@@ -16113,6 +16154,8 @@ function HomeContent(): React.JSX.Element {
   }>({ configured: false, reachable: false, checkpoints: [] });
   const [secondaryOllamaStatus, setSecondaryOllamaStatus] =
     useState<SecondaryOllamaStatus | null>(null);
+  const [dualOllamaWorkloadStatus, setDualOllamaWorkloadStatus] =
+    useState<DualOllamaWorkloadStatus | null>(null);
   const [secondaryOllamaStatusChecking, setSecondaryOllamaStatusChecking] = useState(false);
   const [comfyUiStatus, setComfyUiStatus] = useState<SecondaryOllamaStatus | null>(null);
   const [comfyUiStatusChecking, setComfyUiStatusChecking] = useState(false);
@@ -16896,6 +16939,8 @@ function HomeContent(): React.JSX.Element {
   /** Expanded AskQuestion chip rail; kept as a stable anchor for future rail-local gestures. */
   const askQuestionRailRef = useRef<HTMLDivElement | null>(null);
   const askQuestionComposerHiddenForReadingKeyRef = useRef<string | null>(null);
+  const starterPromptCenteredMessageIdRef = useRef<string | null>(null);
+  const starterPromptSettlingTimerRef = useRef<number | null>(null);
   const chatLastPinnedUserMessageKeyRef = useRef<string | null>(null);
   const chatLastRestoredConversationIdRef = useRef<string | null>(null);
   const chatProgrammaticScrollUntilMsRef = useRef(0);
@@ -20066,6 +20111,8 @@ function HomeContent(): React.JSX.Element {
     chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
     chatCompletedRevealKeysRef.current.add(revealKey);
     chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
+    setStarterComposerRevealed(false);
+    setConversationStarterPrompts(null);
     // Freeze auto-scroll so the pause marker stays where the user interrupted
     // the reply instead of being chased by the dolly.
     chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
@@ -22429,7 +22476,7 @@ function HomeContent(): React.JSX.Element {
     // disarm signals (user scroll-up, interruption) will turn this off.
     chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
 
-    const EASE_FACTOR = 0.24;
+    const EASE_FACTOR = 0.32;
     const MIN_STEP_PX = CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX;
     const REST_THRESHOLD_PX = 0.5;
 
@@ -22445,13 +22492,22 @@ function HomeContent(): React.JSX.Element {
       const activeAssistantRow = latestAssistantMessageId
         ? findMessageRowById(scrollEl, latestAssistantMessageId)
         : null;
+      const activeUserRow =
+        !activeAssistantRow && latestUserMessageId
+          ? findMessageRowById(scrollEl, latestUserMessageId)
+          : null;
       const targetTop = (() => {
-        if (!activeAssistantRow) return maxScrollTop;
-        const anchor = findChatModeMessageScrollAnchor(activeAssistantRow);
-        const rootRect = scrollEl.getBoundingClientRect();
-        const anchorRect = anchor.getBoundingClientRect();
-        const anchorY =
-          anchorRect.top - rootRect.top + scrollEl.scrollTop + anchorRect.height / 2;
+        if (!activeAssistantRow) {
+          if (!activeUserRow) return maxScrollTop;
+          return Math.max(
+            0,
+            Math.min(
+              maxScrollTop,
+              activeUserRow.offsetTop - scrollEl.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO
+            )
+          );
+        }
+        const anchorY = resolveChatModeMessageFollowY(activeAssistantRow, scrollEl);
         return Math.max(
           0,
           Math.min(
@@ -22478,7 +22534,13 @@ function HomeContent(): React.JSX.Element {
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [assistantRevealActive, detail?.id, latestAssistantMessageId, replyInFlightSignals]);
+  }, [
+    assistantRevealActive,
+    detail?.id,
+    latestAssistantMessageId,
+    latestUserMessageId,
+    replyInFlightSignals,
+  ]);
   useEffect(() => {
     if (!chatEphemeralMode || !detail?.id || detail.messages.length === 0) return;
     if (!latestUserMessageId) return;
@@ -22593,16 +22655,20 @@ function HomeContent(): React.JSX.Element {
     requestAnimationFrame(() => {
       const scrollRoot = messagesScrollRef.current;
       if (!scrollRoot) return;
-      const latestUser = [...detail.messages].reverse().find((msg) => msg.role === "user");
-      const latestAssistant = [...detail.messages].reverse().find((msg) => msg.role === "assistant");
-      const targetMessage = latestUser ?? latestAssistant;
+      const targetMessage = detail.messages[detail.messages.length - 1] ?? null;
       if (!targetMessage) return;
       const target = findMessageRowById(scrollRoot, targetMessage.id);
       if (!target) return;
-      target.scrollIntoView({
-        behavior: "auto",
-        block: targetMessage.role === "user" ? "start" : "center",
-      });
+      const maxScrollTop = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight);
+      const rawTop =
+        targetMessage.role === "assistant"
+          ? resolveChatModeMessageFollowY(target, scrollRoot) -
+            scrollRoot.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
+          : target.offsetTop - scrollRoot.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO;
+      const top = Math.max(0, Math.min(maxScrollTop, rawTop));
+      scrollRoot.scrollTop = top;
+      chatLastScrollTopByConversationRef.current.set(detail.id, top);
+      chatLastScrollHeightByConversationRef.current.set(detail.id, scrollRoot.scrollHeight);
     });
   }, [
     chatEphemeralMode,
@@ -23341,6 +23407,7 @@ function HomeContent(): React.JSX.Element {
       ...d.settings,
       displayName,
       composerWritingAssist: d.settings.composerWritingAssist !== false,
+      experimentalDualOllamaEnabled: d.settings.experimentalDualOllamaEnabled === true,
       fallbackModelMessageStripe: d.settings.fallbackModelMessageStripe !== false,
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
@@ -23565,16 +23632,19 @@ function HomeContent(): React.JSX.Element {
       const statusUrl = hostOverride !== undefined
         ? `/api/settings/secondary-ollama-status?host=${encodeURIComponent(hostOverride)}`
         : "/api/settings/secondary-ollama-status";
-      const d = await api<{ status: SecondaryOllamaStatus }>(
-        statusUrl
-      );
+      const d = await api<{
+        status: SecondaryOllamaStatus;
+        dualWorkload?: DualOllamaWorkloadStatus;
+      }>(statusUrl);
       setSecondaryOllamaStatus(d.status);
+      setDualOllamaWorkloadStatus(d.dualWorkload ?? null);
     } catch {
       setSecondaryOllamaStatus({
         configured: Boolean(hostOverride?.trim()),
         reachable: false,
         modelCount: 0,
       });
+      setDualOllamaWorkloadStatus(null);
     } finally {
       setSecondaryOllamaStatusChecking(false);
     }
@@ -25601,12 +25671,22 @@ function HomeContent(): React.JSX.Element {
   type AskQuestionInteraction = {
     askQuestion: NonNullable<Message["askQuestion"]>;
     assistantMessageId: string;
+    source: "askquestion" | "starter";
     status: "unanswered" | "answered";
     answerMessage: Message | null;
   };
 
+  type ComposerChipRail = {
+    conversationId: string;
+    chips: ComposerChip[];
+    heading: string | null;
+    source: "askquestion" | "starter";
+    collapsed: boolean;
+  };
+
   function buildAskQuestionChips(
-    askQuestion: NonNullable<Message["askQuestion"]>
+    askQuestion: NonNullable<Message["askQuestion"]>,
+    source: "askquestion" | "starter" = "askquestion"
   ): ComposerChip[] {
     const optionChips = askQuestion.options.map((option, index) => {
       const cleaned = stripEmojiFromAskQuestionLabel(option.label);
@@ -25628,9 +25708,37 @@ function HomeContent(): React.JSX.Element {
         label: "Other",
         sublabel: "(Explain in chat...)",
         action: "other",
-        otherSource: "askquestion",
+        otherSource: source,
       },
     ];
+  }
+
+  function buildStarterAskQuestion(msg: Message): NonNullable<Message["askQuestion"]> | null {
+    if (
+      !detail ||
+      !conversationStarterPrompts ||
+      conversationStarterPrompts.conversationId !== detail.id
+    ) {
+      return null;
+    }
+    const latestAssistant = [...detail.messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    if (!latestAssistant || latestAssistant.id !== msg.id) return null;
+    const options = conversationStarterPrompts.prompts
+      .slice(0, 3)
+      .map((prompt, index) => ({
+        id: String.fromCharCode(97 + index),
+        label: prompt.trim(),
+      }))
+      .filter((option) => option.label.length > 0);
+    if (options.length !== 3) return null;
+    return {
+      v: 1,
+      name: "AskQuestion",
+      prompt: "Choose a reply:",
+      options,
+    };
   }
 
   function renderComposerChipContent(
@@ -25663,31 +25771,43 @@ function HomeContent(): React.JSX.Element {
     if (!detail || msg.role !== "assistant") return null;
     const askQuestion = resolveAssistantAskQuestion(msg);
     if (
-      !askQuestion ||
-      askQuestion.name !== "AskQuestion" ||
-      askQuestion.options.length !== 3
+      askQuestion &&
+      askQuestion.name === "AskQuestion" &&
+      askQuestion.options.length === 3
     ) {
-      return null;
-    }
-    const messageIndex = detail.messages.findIndex((message) => message.id === msg.id);
-    if (messageIndex < 0) return null;
-    const answerMessage =
-      detail.messages
-        .slice(messageIndex + 1)
-        .find((message) => message.role === "user") ?? null;
-    if (answerMessage) {
+      const messageIndex = detail.messages.findIndex((message) => message.id === msg.id);
+      if (messageIndex < 0) return null;
+      const answerMessage =
+        detail.messages
+          .slice(messageIndex + 1)
+          .find((message) => message.role === "user") ?? null;
+      if (answerMessage) {
+        return {
+          askQuestion,
+          assistantMessageId: msg.id,
+          source: "askquestion",
+          status: "answered",
+          answerMessage,
+        };
+      }
+      if (pendingAskQuestionState?.assistantMessageId !== msg.id) return null;
+      if (pendingAskQuestionWaitingForReveal) return null;
       return {
         askQuestion,
         assistantMessageId: msg.id,
-        status: "answered",
-        answerMessage,
+        source: "askquestion",
+        status: "unanswered",
+        answerMessage: null,
       };
     }
-    if (pendingAskQuestionState?.assistantMessageId !== msg.id) return null;
-    if (pendingAskQuestionWaitingForReveal) return null;
+
+    if (starterPromptsWaitingForReveal) return null;
+    const starterAskQuestion = buildStarterAskQuestion(msg);
+    if (!starterAskQuestion) return null;
     return {
-      askQuestion,
+      askQuestion: starterAskQuestion,
       assistantMessageId: msg.id,
+      source: "starter",
       status: "unanswered",
       answerMessage: null,
     };
@@ -25710,8 +25830,10 @@ function HomeContent(): React.JSX.Element {
     if (chip.action === "other") {
       if (chip.otherSource === "starter") {
         setStarterComposerRevealed(true);
-        setConversationStarterPrompts(null);
-        requestAnimationFrame(() => draftComposerRef.current?.focus());
+        requestAnimationFrame(() => {
+          snapAskQuestionComposerToChatBottom(true);
+          draftComposerRef.current?.focus();
+        });
         return;
       }
       setConversationStarterPrompts(null);
@@ -25809,13 +25931,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   /** Quick chips: Prism AskQuestion (if pending) beats server “Talk to me” prompts. Single UI path. */
-  function getComposerChipRail(): {
-    conversationId: string;
-    chips: ComposerChip[];
-    heading: string | null;
-    kind: "askquestion" | "starter";
-    collapsed: boolean;
-  } | null {
+  function getComposerChipRail(): ComposerChipRail | null {
     const id = detail?.id;
     if (!detail || id === undefined || id === "pending") return null;
     const qa = pendingAskQuestion;
@@ -25824,9 +25940,9 @@ function HomeContent(): React.JSX.Element {
       const collapsed = askQuestionComposerRevealed;
       return {
         conversationId: id,
-        chips: buildAskQuestionChips(qa),
+        chips: buildAskQuestionChips(qa, "askquestion"),
         heading: normalizeAskQuestionText(qa.prompt) || null,
-        kind: "askquestion",
+        source: "askquestion",
         collapsed,
       };
     }
@@ -25835,29 +25951,20 @@ function HomeContent(): React.JSX.Element {
       conversationStarterPrompts.conversationId === id &&
       conversationStarterPrompts.prompts.length > 0
     ) {
-      const starterChips: ComposerChip[] = conversationStarterPrompts.prompts
-        .slice(0, 3)
-        .map((prompt, index) => ({
-          id: `starter-${index}`,
-          label: prompt,
-          action: "send",
-          sendValue: prompt,
-        }));
+      if (starterPromptsWaitingForReveal) return null;
+      const latestAssistant = [...detail.messages]
+        .reverse()
+        .find((message) => message.role === "assistant");
+      const starterAskQuestion = latestAssistant
+        ? buildStarterAskQuestion(latestAssistant)
+        : null;
+      if (!starterAskQuestion) return null;
       return {
         conversationId: id,
-        chips: [
-          ...starterChips,
-          {
-            id: "starter-other",
-            label: "Other",
-            sublabel: "(Write your own...)",
-            action: "other",
-            otherSource: "starter",
-          },
-        ],
+        chips: buildAskQuestionChips(starterAskQuestion, "starter"),
         heading: null,
-        kind: "starter",
-        collapsed: false,
+        source: "starter",
+        collapsed: starterComposerRevealed,
       };
     }
     return null;
@@ -25866,12 +25973,11 @@ function HomeContent(): React.JSX.Element {
   function renderComposerChipRail(): React.ReactNode {
     const rail = getComposerChipRail();
     if (!rail) return null;
-    if (rail.kind === "starter") return null;
-    if (rail.kind === "askquestion" && viewportWidth > PICKER_MOBILE_BREAKPOINT) {
+    if (viewportWidth > PICKER_MOBILE_BREAKPOINT) {
       return null;
     }
 
-    if (rail.kind === "askquestion" && rail.collapsed) {
+    if (rail.collapsed) {
       const rawHex = activeBot?.color?.trim();
       const accentHex = rawHex
         ? normalizeAccentForTheme(rawHex, resolvedTheme)
@@ -25903,8 +26009,12 @@ function HomeContent(): React.JSX.Element {
             title="Show suggested replies"
             disabled={pendingReply}
             onClick={() => {
-              askQuestionComposerHiddenForReadingKeyRef.current = null;
-              setAskQuestionComposerRevealed(false);
+              if (rail.source === "starter") {
+                setStarterComposerRevealed(false);
+              } else {
+                askQuestionComposerHiddenForReadingKeyRef.current = null;
+                setAskQuestionComposerRevealed(false);
+              }
             }}
           >
             ?
@@ -25913,13 +26023,10 @@ function HomeContent(): React.JSX.Element {
       );
     }
 
-    const railClassName =
-      rail.kind === "askquestion"
-        ? `${styles.conversationStarterRail} ${styles.askQuestionRail}`
-        : styles.conversationStarterRail;
+    const railClassName = `${styles.conversationStarterRail} ${styles.askQuestionRail}`;
     return (
       <div
-        ref={rail.kind === "askquestion" ? askQuestionRailRef : undefined}
+        ref={askQuestionRailRef}
         role="group"
         aria-label="Suggested replies"
         className={railClassName}
@@ -25944,40 +26051,8 @@ function HomeContent(): React.JSX.Element {
             onClick={() => handleComposerChipPick(chip)}
           >
             {renderComposerChipContent(chip, {
-              splitAskQuestionLabels: rail.kind === "askquestion",
+              splitAskQuestionLabels: true,
             })}
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  function renderStarterPromptInlineRail(): React.ReactNode {
-    const rail = getComposerChipRail();
-    if (!rail || rail.kind !== "starter") return null;
-    return (
-      <div
-        role="group"
-        aria-label="Suggested follow-up questions"
-        className={styles.conversationStarterInlineRail}
-      >
-        {rail.chips.map((chip, chipIndex) => (
-          <button
-            key={`${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
-            type="button"
-            disabled={pendingReply}
-            className={`${styles.conversationStarterChip} ${
-              chip.action === "other" ? styles.conversationStarterChipOther : ""
-            }`}
-            data-chip-kind={chip.action}
-            aria-label={
-              chip.action === "other"
-                ? "Other - write your own message"
-                : `Suggested reply: ${chip.sendValue ?? chip.label}`
-            }
-            onClick={() => handleComposerChipPick(chip)}
-          >
-            {renderComposerChipContent(chip)}
           </button>
         ))}
       </div>
@@ -25989,8 +26064,11 @@ function HomeContent(): React.JSX.Element {
     const interaction = getAskQuestionInteractionForMessage(msg);
     if (!interaction) return null;
 
-    const chips = buildAskQuestionChips(interaction.askQuestion);
-    const prompt = normalizeAskQuestionText(interaction.askQuestion.prompt);
+    const chips = buildAskQuestionChips(interaction.askQuestion, interaction.source);
+    const prompt =
+      interaction.source === "starter"
+        ? ""
+        : normalizeAskQuestionText(interaction.askQuestion.prompt);
     const answered = interaction.status === "answered";
     const answerMessage = interaction.answerMessage;
     const canChangeAnsweredAskQuestion = view !== "chat";
@@ -26006,8 +26084,10 @@ function HomeContent(): React.JSX.Element {
     const answerText = answerMessage?.content.trim() ?? "";
     const otherSelected =
       !answered &&
-      askQuestionComposerRevealed &&
-      pendingAskQuestionState?.assistantMessageId === interaction.assistantMessageId;
+      (interaction.source === "starter"
+        ? starterComposerRevealed
+        : askQuestionComposerRevealed &&
+          pendingAskQuestionState?.assistantMessageId === interaction.assistantMessageId);
     const choicesVisible = !otherSelected && (!answered || changing);
 
     return (
@@ -26095,7 +26175,7 @@ function HomeContent(): React.JSX.Element {
 
   function renderImageJobOrbDock(): React.ReactNode {
     const rail = getComposerChipRail();
-    if (rail?.kind === "askquestion" && rail.collapsed) return null;
+    if (rail?.collapsed) return null;
     if (!composerImageJobOrb || !detail || detail.id !== composerImageJobOrb.conversationId) {
       return null;
     }
@@ -26258,6 +26338,23 @@ function HomeContent(): React.JSX.Element {
     return composerPrimed && isStarterPromptAvailable(value);
   }
 
+  function assistantRevealStillTyping(message: Message | undefined): boolean {
+    if (!chatAssistantTypingMechanicsActive || !detail?.id || !message) return false;
+    const revealKey = `${detail.id}:${message.id}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
+    if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
+    if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return true;
+    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
+    const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
+    const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(message));
+    const tokenTotal = Math.max(1, revealTokens.length);
+    const visibleTokenCount = Math.min(
+      tokenTotal,
+      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, DEFAULT_MESSAGE_MOOD)
+    );
+    return visibleTokenCount < tokenTotal;
+  }
+
   const pendingAskQuestionState = detail
     ? getConversationPendingAskQuestionState(detail.messages)
     : undefined;
@@ -26310,10 +26407,32 @@ function HomeContent(): React.JSX.Element {
         message.role === "assistant" &&
         resolveAssistantAskQuestion(message) !== undefined
     ) === true;
-  const starterPromptsInteractive =
+  const starterPromptsAvailable =
     conversationStarterPrompts !== null &&
     conversationStarterPrompts.conversationId === detail?.id &&
     conversationStarterPrompts.prompts.length > 0;
+  const starterPromptsLatestAssistantMessage =
+    starterPromptsAvailable && detail
+      ? [...detail.messages].reverse().find((message) => message.role === "assistant")
+      : undefined;
+  const starterPromptsWaitingForReveal =
+    starterPromptsAvailable &&
+    assistantRevealStillTyping(starterPromptsLatestAssistantMessage);
+  const starterPromptsInteractive =
+    starterPromptsAvailable && !starterPromptsWaitingForReveal;
+  const starterPromptCenteredMessageId =
+    starterPromptsAvailable && !starterComposerRevealed
+      ? starterPromptsLatestAssistantMessage?.id ?? null
+      : null;
+  const starterPromptsInteractiveKey = starterPromptsInteractive && conversationStarterPrompts
+    ? `${conversationStarterPrompts.conversationId}:${conversationStarterPrompts.prompts.join("|")}`
+    : null;
+  const choiceChipRailInteractiveKey =
+    pendingAskQuestionInteractiveKey ?? starterPromptsInteractiveKey;
+  const choiceChipRailComposerRevealed =
+    pendingAskQuestionInteractiveKey !== null
+      ? askQuestionComposerRevealed
+      : starterComposerRevealed;
   const askQuestionComposerHiddenByChoices =
     (askQuestionInteractive && !askQuestionComposerRevealed) ||
     askQuestionChangeChoicesVisible;
@@ -26331,11 +26450,46 @@ function HomeContent(): React.JSX.Element {
   }, [pendingAskQuestionKey]);
 
   useEffect(() => {
-    if (!pendingAskQuestionInteractiveKey) return;
-    if (askQuestionComposerRevealed) return;
+    setStarterComposerRevealed(false);
+  }, [starterPromptsInteractiveKey]);
+
+  useEffect(() => {
+    const previousCenteredId = starterPromptCenteredMessageIdRef.current;
+    if (previousCenteredId === starterPromptCenteredMessageId) return;
+    starterPromptCenteredMessageIdRef.current = starterPromptCenteredMessageId;
+    if (starterPromptSettlingTimerRef.current !== null) {
+      window.clearTimeout(starterPromptSettlingTimerRef.current);
+      starterPromptSettlingTimerRef.current = null;
+    }
+    if (starterPromptCenteredMessageId !== null) {
+      setStarterPromptSettlingMessageId(null);
+      return;
+    }
+    if (previousCenteredId === null) return;
+    setStarterPromptSettlingMessageId(previousCenteredId);
+    starterPromptSettlingTimerRef.current = window.setTimeout(() => {
+      starterPromptSettlingTimerRef.current = null;
+      setStarterPromptSettlingMessageId((current) =>
+        current === previousCenteredId ? null : current
+      );
+    }, 560);
+  }, [starterPromptCenteredMessageId]);
+
+  useEffect(() => {
+    return () => {
+      if (starterPromptSettlingTimerRef.current !== null) {
+        window.clearTimeout(starterPromptSettlingTimerRef.current);
+        starterPromptSettlingTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!choiceChipRailInteractiveKey) return;
+    if (choiceChipRailComposerRevealed) return;
     if (
       askQuestionComposerHiddenForReadingKeyRef.current ===
-      pendingAskQuestionInteractiveKey
+      choiceChipRailInteractiveKey
     ) {
       return;
     }
@@ -26367,20 +26521,20 @@ function HomeContent(): React.JSX.Element {
       if (settleTimer !== null) window.clearTimeout(settleTimer);
     };
   }, [
-    pendingAskQuestionInteractiveKey,
-    askQuestionComposerRevealed,
+    choiceChipRailInteractiveKey,
+    choiceChipRailComposerRevealed,
   ]);
   const askQuestionTailSpaceActive =
     askQuestionUsesMobileRail &&
-    pendingAskQuestionInteractiveKey !== null &&
-    !askQuestionComposerRevealed;
+    choiceChipRailInteractiveKey !== null &&
+    !choiceChipRailComposerRevealed;
   const askQuestionCollapsedBubbleActive =
     askQuestionUsesMobileRail &&
-    pendingAskQuestionInteractiveKey !== null &&
-    askQuestionComposerRevealed;
+    choiceChipRailInteractiveKey !== null &&
+    choiceChipRailComposerRevealed;
 
   function snapAskQuestionComposerToChatBottom(force = false): void {
-    if (!pendingAskQuestionInteractiveKey || (!force && !askQuestionComposerRevealed)) return;
+    if (!choiceChipRailInteractiveKey || (!force && !choiceChipRailComposerRevealed)) return;
     const el = messagesScrollRef.current;
     if (!el) return;
     chatProgrammaticScrollUntilMsRef.current = Date.now() + 160;
@@ -26392,9 +26546,13 @@ function HomeContent(): React.JSX.Element {
   }
 
   function hideAskQuestionComposerForReading(): void {
-    if (!pendingAskQuestionInteractiveKey || !askQuestionComposerRevealed) return;
-    askQuestionComposerHiddenForReadingKeyRef.current = pendingAskQuestionInteractiveKey;
-    setAskQuestionComposerRevealed(false);
+    if (!choiceChipRailInteractiveKey || !choiceChipRailComposerRevealed) return;
+    askQuestionComposerHiddenForReadingKeyRef.current = choiceChipRailInteractiveKey;
+    if (pendingAskQuestionInteractiveKey !== null) {
+      setAskQuestionComposerRevealed(false);
+    } else {
+      setStarterComposerRevealed(false);
+    }
     draftComposerRef.current?.blur();
   }
 
@@ -32951,6 +33109,20 @@ function HomeContent(): React.JSX.Element {
           : secondaryOllamaUiStatus === "error"
               ? "Not reachable"
               : "Optional";
+  const dualOllamaWorkloadText =
+    dualOllamaWorkloadStatus?.enabled
+      ? `Dual routing ready · ${dualOllamaWorkloadStatus.primaryModelCount} matched model${
+          dualOllamaWorkloadStatus.primaryModelCount === 1 ? "" : "s"
+        }`
+      : dualOllamaWorkloadStatus?.reason === "model_mismatch"
+        ? "Dual routing paused · model lists do not match exactly"
+        : dualOllamaWorkloadStatus?.reason === "empty_catalog"
+          ? "Dual routing paused · one host has no detected models"
+          : dualOllamaWorkloadStatus?.reason === "secondary_unreachable"
+            ? "Dual routing paused · second host is not reachable"
+            : dualOllamaWorkloadStatus?.reason === "primary_unreachable"
+              ? "Dual routing paused · primary host is not reachable"
+              : "Dual routing waits for a second Ollama host";
 
   const comfyUiUiStatus: SecondaryOllamaUiStatus =
     !comfyUiDraftHost
@@ -38936,6 +39108,25 @@ function HomeContent(): React.JSX.Element {
                         </span>
                       </span>
                     </label>
+                    <div className={styles.settingsHostField}>
+                      <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                        <input
+                          type="checkbox"
+                          checked={settings.experimentalDualOllamaEnabled === true}
+                          onChange={e =>
+                            setSettings(p =>
+                              p ? { ...p, experimentalDualOllamaEnabled: e.target.checked } : p
+                            )
+                          }
+                        />
+                        Experimental dual Ollama routing
+                      </label>
+                      <small className={styles.settingsHostHint}>
+                        Requires both Ollama endpoints to expose the exact same model list. Prism falls back to primary
+                        if parity is missing.
+                        {settings.experimentalDualOllamaEnabled ? ` ${dualOllamaWorkloadText}.` : ""}
+                      </small>
+                    </div>
                     <label className={styles.settingsHostField}>
                       <span className={styles.settingsHostLabel}>ComfyUI server</span>
                       <span className={styles.settingsHostInputWrap} data-status={comfyUiUiStatus}>
@@ -39312,6 +39503,25 @@ function HomeContent(): React.JSX.Element {
                           Use host:port only, for example <code>192.168.1.50:11434</code>.
                         </small>
                       </label>
+                      <div className={styles.settingsHostField}>
+                        <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                          <input
+                            type="checkbox"
+                            checked={settings.experimentalDualOllamaEnabled === true}
+                            onChange={e =>
+                              setSettings(p =>
+                                p ? { ...p, experimentalDualOllamaEnabled: e.target.checked } : p
+                              )
+                            }
+                          />
+                          Experimental dual Ollama routing
+                        </label>
+                        <small className={styles.settingsHostHint}>
+                          Requires both Ollama endpoints to expose the exact same model list. Prism falls back to
+                          primary if parity is missing.
+                          {settings.experimentalDualOllamaEnabled ? ` ${dualOllamaWorkloadText}.` : ""}
+                        </small>
+                      </div>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>ComfyUI server</span>
                         <span
@@ -47230,9 +47440,6 @@ function HomeContent(): React.JSX.Element {
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
-      data-ask-question-composer-hidden={
-        askQuestionComposerHiddenByChoices ? "true" : undefined
-      }
       data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       data-chat-sidebar-hidden="true"
       data-zen-surface="true"
@@ -47780,6 +47987,12 @@ function HomeContent(): React.JSX.Element {
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
             const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
+            const starterPromptAlignment =
+              msg.id === starterPromptCenteredMessageId
+                ? "centered"
+                : msg.id === starterPromptSettlingMessageId
+                  ? "settling"
+                  : undefined;
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -47810,6 +48023,7 @@ function HomeContent(): React.JSX.Element {
                 data-message-id={msg.id}
                 data-chat-phase={chatPhase}
                 data-message-edge={messageEdge}
+                data-starter-prompt-align={starterPromptAlignment}
                 data-chat-latest-user-anchor={
                   chatLikeSurface && msg.id === latestUserMessageId ? "true" : undefined
                 }
@@ -47994,7 +48208,6 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
-          {renderStarterPromptInlineRail()}
           {manualCompactionIndicatorNode}
           {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
@@ -48168,9 +48381,6 @@ function HomeContent(): React.JSX.Element {
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
-      data-ask-question-composer-hidden={
-        askQuestionComposerHiddenByChoices ? "true" : undefined
-      }
       data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
@@ -49177,6 +49387,12 @@ function HomeContent(): React.JSX.Element {
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
             const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
+            const starterPromptAlignment =
+              msg.id === starterPromptCenteredMessageId
+                ? "centered"
+                : msg.id === starterPromptSettlingMessageId
+                  ? "settling"
+                  : undefined;
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -49207,6 +49423,7 @@ function HomeContent(): React.JSX.Element {
                 data-message-id={msg.id}
                 data-chat-phase={chatPhase}
                 data-message-edge={messageEdge}
+                data-starter-prompt-align={starterPromptAlignment}
                 data-chat-latest-user-anchor={
                   chatLikeSurface && msg.id === latestUserMessageId ? "true" : undefined
                 }
@@ -49388,7 +49605,6 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
-          {renderStarterPromptInlineRail()}
           {manualCompactionIndicatorNode}
           {compactedSummaryDebugNode}
           {devChatDebugEventsNode}

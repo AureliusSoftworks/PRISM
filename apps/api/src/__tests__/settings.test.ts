@@ -30,6 +30,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     providerLocked: 0,
     autoMemory: 1,
     composerWritingAssist: 1,
+    experimentalDualOllamaEnabled: 0,
     fallbackModelMessageStripe: 1,
     hiddenBotModelIds: "[]",
     hiddenComfyUiWorkflowIds: "[]",
@@ -202,6 +203,37 @@ describe("resolveNextSettings — composerWritingAssist", () => {
         current
       ).composerWritingAssist,
       0
+    );
+  });
+});
+
+describe("resolveNextSettings — experimentalDualOllamaEnabled", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { experimentalDualOllamaEnabled: true },
+        baseline({ experimentalDualOllamaEnabled: 0 })
+      ).experimentalDualOllamaEnabled,
+      1
+    );
+    assert.equal(
+      resolveNextSettings(
+        { experimentalDualOllamaEnabled: false },
+        baseline({ experimentalDualOllamaEnabled: 1 })
+      ).experimentalDualOllamaEnabled,
+      0
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ experimentalDualOllamaEnabled: 1 });
+    assert.equal(resolveNextSettings({}, current).experimentalDualOllamaEnabled, 1);
+    assert.equal(
+      resolveNextSettings(
+        { experimentalDualOllamaEnabled: "true" as unknown as boolean },
+        current
+      ).experimentalDualOllamaEnabled,
+      1
     );
   });
 });

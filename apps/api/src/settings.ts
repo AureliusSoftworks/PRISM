@@ -46,6 +46,7 @@ export interface CurrentSettings {
   providerLocked: number;
   autoMemory: number;
   composerWritingAssist: number;
+  experimentalDualOllamaEnabled: number;
   /** 1 = show left-edge stripe on assistant bubbles when the copyright lenient fallback answered. */
   fallbackModelMessageStripe: number;
   hiddenBotModelIds: string;
@@ -78,6 +79,7 @@ export interface NextSettings {
   providerLocked: number;
   autoMemory: number;
   composerWritingAssist: number;
+  experimentalDualOllamaEnabled: number;
   fallbackModelMessageStripe: number;
   hiddenBotModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
@@ -429,6 +431,10 @@ export function resolveNextSettings(
     typeof body.composerWritingAssist === "boolean"
       ? Number(body.composerWritingAssist)
       : current.composerWritingAssist;
+  const experimentalDualOllamaEnabled =
+    typeof body.experimentalDualOllamaEnabled === "boolean"
+      ? Number(body.experimentalDualOllamaEnabled)
+      : current.experimentalDualOllamaEnabled;
   const fallbackModelMessageStripe =
     typeof body.fallbackModelMessageStripe === "boolean"
       ? Number(body.fallbackModelMessageStripe)
@@ -554,6 +560,7 @@ export function resolveNextSettings(
     providerLocked,
     autoMemory,
     composerWritingAssist,
+    experimentalDualOllamaEnabled,
     fallbackModelMessageStripe,
     hiddenBotModelIds,
     hiddenComfyUiWorkflowIds,

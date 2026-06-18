@@ -95,10 +95,6 @@ export function defaultHiddenModelIdsForCatalog(catalog: {
   );
 }
 
-function firstVisibleModelId(ids: string[], hidden: Set<string>): string | null {
-  return ids.find((id) => id.trim().length > 0 && !hidden.has(id)) ?? null;
-}
-
 function providerCatalogIds(catalog: CatalogShapeForAuto, provider: AutoModelProvider): string[] {
   if (provider === "local") {
     return catalog.local.map((model) => model.id);
@@ -106,6 +102,62 @@ function providerCatalogIds(catalog: CatalogShapeForAuto, provider: AutoModelPro
   return catalog.online
     .filter((model) => (model.provider ?? "openai") === provider)
     .map((model) => model.id);
+}
+
+function inferOnlineProviderFromModelId(modelId: string): Exclude<AutoModelProvider, "local"> | null {
+  const normalized = modelId.trim().toLowerCase();
+  if (normalized.startsWith("claude-")) return "anthropic";
+  if (
+    normalized.startsWith("gpt-") ||
+    normalized.startsWith("o1") ||
+    normalized.startsWith("o3") ||
+    normalized.startsWith("o4")
+  ) {
+    return "openai";
+  }
+  return null;
+}
+
+function catalogProviderForModel(
+  catalog: CatalogShapeForAuto,
+  modelId: string
+): AutoModelProvider | null {
+  if (catalog.local.some((model) => model.id === modelId)) {
+    return "local";
+  }
+  const online = catalog.online.find((model) => model.id === modelId);
+  return online?.provider ?? (online ? "openai" : null);
+}
+
+function providerForCandidateModel(
+  requestedProvider: AutoModelProvider,
+  catalog: CatalogShapeForAuto,
+  modelId: string
+): AutoModelProvider | null {
+  const catalogProvider = catalogProviderForModel(catalog, modelId);
+  const inferredProvider = catalogProvider ?? inferOnlineProviderFromModelId(modelId);
+
+  if (requestedProvider === "local") {
+    return inferredProvider === null || inferredProvider === "local" ? "local" : null;
+  }
+
+  if (inferredProvider === "local") return null;
+  return inferredProvider ?? requestedProvider;
+}
+
+function firstVisibleRoutableModel(
+  ids: string[],
+  hidden: Set<string>,
+  requestedProvider: AutoModelProvider,
+  catalog: CatalogShapeForAuto
+): { provider: AutoModelProvider; model: string } | null {
+  for (const rawId of ids) {
+    const model = rawId.trim();
+    if (!model || hidden.has(model)) continue;
+    const provider = providerForCandidateModel(requestedProvider, catalog, model);
+    if (provider) return { provider, model };
+  }
+  return null;
 }
 
 export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoModel {
@@ -117,11 +169,16 @@ export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoMode
     ...(botPreferred ? [botPreferred] : []),
     ...providerCatalogIds(input.catalog, input.provider),
   ];
-  const providerModel = firstVisibleModelId(providerCandidates, hidden);
+  const providerModel = firstVisibleRoutableModel(
+    providerCandidates,
+    hidden,
+    input.provider,
+    input.catalog
+  );
   if (providerModel) {
     return {
-      provider: input.provider,
-      model: providerModel,
+      provider: providerModel.provider,
+      model: providerModel.model,
       usedRequiredLocalFallback: false,
     };
   }

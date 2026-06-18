@@ -242,6 +242,19 @@ const STARTER_FALLBACK_STOP_WORDS = new Set([
   "first",
   "should",
 ]);
+const STARTER_SUGGESTION_JSON_KEYS = [
+  "suggestions",
+  "options",
+  "replies",
+  "quickReplies",
+  "quick_replies",
+  "starterSuggestions",
+  "starter_suggestions",
+  "conversationStarters",
+  "conversation_starters",
+];
+const STARTER_SUGGESTION_TEXT_KEYS = ["label", "text", "value", "title", "reply", "content"];
+const STARTER_SUGGESTION_MAX_CHARS = 180;
 
 const OPINION_SCORE_MIN = 0;
 const OPINION_SCORE_MAX = 100;
@@ -1175,20 +1188,142 @@ function extractJsonObjectPayload(raw: string): string {
   return trimmed;
 }
 
-function parseSuggestedRepliesPayload(raw: string): string[] {
-  const payload = extractJsonObjectPayload(raw);
-  try {
-    const parsedUnknown = JSON.parse(payload) as { suggestions?: unknown };
-    const list = parsedUnknown?.suggestions;
-    if (!Array.isArray(list)) return [];
-    const strings = list
-      .filter((item): item is string => typeof item === "string")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    return [...new Set(strings)].slice(0, 4);
-  } catch {
-    return [];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function extractSuggestedRepliesJsonPayloads(raw: string): string[] {
+  const trimmed = raw.trim();
+  const payloads: string[] = [];
+  const seen = new Set<string>();
+  const addPayload = (payload: string): void => {
+    const next = payload.trim();
+    if (!next || seen.has(next)) return;
+    seen.add(next);
+    payloads.push(next);
+  };
+
+  const fence = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)```$/);
+  if (fence?.[1]) {
+    addPayload(fence[1]);
   }
+  addPayload(trimmed);
+
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    addPayload(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  const firstBracket = trimmed.indexOf("[");
+  const lastBracket = trimmed.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    addPayload(trimmed.slice(firstBracket, lastBracket + 1));
+  }
+
+  return payloads;
+}
+
+function extractSuggestedReplyValues(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (!isRecord(parsed)) return [];
+
+  for (const key of STARTER_SUGGESTION_JSON_KEYS) {
+    const value = parsed[key];
+    if (Array.isArray(value)) return value;
+  }
+
+  for (const key of ["data", "result", "response"]) {
+    const nested = parsed[key];
+    if (Array.isArray(nested)) return nested;
+    if (isRecord(nested)) {
+      const nestedValues = extractSuggestedReplyValues(nested);
+      if (nestedValues.length > 0) return nestedValues;
+    }
+  }
+
+  return [];
+}
+
+function cleanSuggestedReplyText(value: string): string | null {
+  let text = value
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  for (let i = 0; i < 3; i += 1) {
+    text = text
+      .replace(/^(?:[-*•]\s+|\d{1,2}[\).:\]-]\s*)/, "")
+      .replace(/^[\s"'“”‘’`*_]+/, "")
+      .replace(/[\s"'“”‘’`*_]+$/, "")
+      .trim();
+  }
+  if (!text || text.length > STARTER_SUGGESTION_MAX_CHARS) return null;
+  if (/^(?:suggestions?|options?|replies)\s*:?\s*$/i.test(text)) return null;
+  if (/^(?:sure[,.!]?\s+)?(?:here are|these are)\b/i.test(text)) return null;
+  return text;
+}
+
+function suggestedReplyTextFromValue(value: unknown): string | null {
+  if (typeof value === "string") return cleanSuggestedReplyText(value);
+  if (!isRecord(value)) return null;
+  for (const key of STARTER_SUGGESTION_TEXT_KEYS) {
+    const candidate = value[key];
+    if (typeof candidate !== "string") continue;
+    const text = cleanSuggestedReplyText(candidate);
+    if (text) return text;
+  }
+  return null;
+}
+
+function normalizeSuggestedReplyValues(values: unknown[]): string[] {
+  const replies: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const text = suggestedReplyTextFromValue(value);
+    if (!text) continue;
+    const comparisonKey = text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    if (!comparisonKey || seen.has(comparisonKey)) continue;
+    seen.add(comparisonKey);
+    replies.push(text);
+    if (replies.length >= 4) break;
+  }
+  return replies;
+}
+
+function parseSuggestedRepliesListPayload(raw: string): string[] {
+  const lines = raw
+    .replace(/^```(?:json|text)?\s*\n?([\s\S]*?)```$/i, "$1")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length < 3 || lines.length > 8) return [];
+
+  const listMarkerLines = lines.filter((line) =>
+    /^(?:[-*•]\s+|\d{1,2}[\).:\]-]\s*)/.test(line)
+  );
+  const sourceLines = listMarkerLines.length >= 3 ? listMarkerLines : lines;
+  return normalizeSuggestedReplyValues(sourceLines);
+}
+
+function parseSuggestedRepliesPayload(raw: string): string[] {
+  let best: string[] = [];
+  for (const payload of extractSuggestedRepliesJsonPayloads(raw)) {
+    try {
+      const parsedUnknown = JSON.parse(payload) as unknown;
+      const candidates = normalizeSuggestedReplyValues(
+        extractSuggestedReplyValues(parsedUnknown)
+      );
+      if (candidates.length > best.length) best = candidates;
+      if (best.length >= 3) return best.slice(0, 4);
+    } catch {
+      // Try the next candidate; starter chips are optional.
+    }
+  }
+  const listCandidates = parseSuggestedRepliesListPayload(raw);
+  return listCandidates.length > best.length ? listCandidates : best;
 }
 
 export function sanitizeConversationTitle(rawTitle: string): string | null {
@@ -1262,6 +1397,23 @@ function extractStarterQuestionAlternatives(question: string): string[] {
   return alternatives.length >= 2 ? [...new Set(alternatives)].slice(0, 3) : [];
 }
 
+function fallbackOpenEndedQuestionStarters(question: string): string[] {
+  if (/\b(?:call|name)\s+(?:you|me)\b|\bwhat(?:'s| is)\s+your\s+name\b/i.test(question)) {
+    return [
+      "Use my first name.",
+      "Use my full name.",
+      "Use a nickname.",
+      "I'm not sure yet.",
+    ];
+  }
+  return [
+    "Something weighing on me.",
+    "A decision I keep circling.",
+    "A small moment from today.",
+    "I'm not sure yet.",
+  ];
+}
+
 function fallbackConversationStarters(
   assistantOpening: string,
   personaLabel: string | undefined
@@ -1279,12 +1431,7 @@ function fallbackConversationStarters(
       }
       return replies.slice(0, 4);
     }
-    return [
-      "I'm not sure yet.",
-      "A small specific detail.",
-      "I need another clue.",
-      "Surprise me with your guess.",
-    ];
+    return fallbackOpenEndedQuestionStarters(question);
   }
   const words = assistantOpening
     .toLowerCase()
@@ -1359,6 +1506,23 @@ async function inferConversationStarters(
     // Non-fatal: chips are optional chrome.
   }
   return fallbackConversationStarters(opener, personaLabel);
+}
+
+function buildStarterAskQuestion(starters: string[] | undefined): AskQuestionPayload | undefined {
+  const options = (starters ?? [])
+    .slice(0, 3)
+    .map((starter, index) => ({
+      id: String.fromCharCode(97 + index),
+      label: starter.trim(),
+    }))
+    .filter((option) => option.label.length > 0);
+  if (options.length !== 3) return undefined;
+  return {
+    v: 1,
+    name: "AskQuestion",
+    prompt: "Choose a reply:",
+    options,
+  };
 }
 
 /** Background chrome call: names a conversation for the sidebar/history list. */
@@ -1533,18 +1697,30 @@ export async function refreshConversationTitle(
   }
 
   let prismAuxiliaryModel: string | null | undefined;
+  let secondaryOllamaHost: string | null | undefined;
+  let experimentalDualOllamaEnabled = false;
   try {
-    prismAuxiliaryModel = (
-      db.prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?").get(userId) as
-        | { m: string | null }
+    const userSettings = db
+      .prepare(
+        "SELECT prism_default_llm_model AS m, secondary_ollama_host AS secondaryHost, experimental_dual_ollama_enabled AS dualEnabled FROM users WHERE id = ?"
+      )
+      .get(userId) as
+      | { m: string | null; secondaryHost: string | null; dualEnabled: number | null }
         | undefined
-    )?.m;
+    prismAuxiliaryModel = userSettings?.m;
+    secondaryOllamaHost = userSettings?.secondaryHost;
+    experimentalDualOllamaEnabled = userSettings?.dualEnabled === 1;
   } catch {
     // Test/minimal DB fixtures may omit the users table; fall back to server defaults.
     prismAuxiliaryModel = undefined;
+    secondaryOllamaHost = undefined;
+    experimentalDualOllamaEnabled = false;
   }
   const title = await inferRefreshedConversationTitle(
-    getAuxiliaryProvider(prismAuxiliaryModel ?? null),
+    getAuxiliaryProvider(prismAuxiliaryModel ?? null, {
+      secondaryOllamaHost,
+      experimentalDualOllama: experimentalDualOllamaEnabled,
+    }),
     recentMessages,
     conversation.title,
     conversation.last_bot_name
@@ -1613,6 +1789,8 @@ export interface UserChatSettings {
   devMemoriesText?: string;
   /** Optional user-saved second Ollama host for host-aware local model choices. */
   secondaryOllamaHost?: string | null;
+  /** Experimental: route Prism-owned local work to a matching second Ollama host. */
+  experimentalDualOllamaEnabled?: boolean;
   /** Optional local-only fallback model used when copyright refusals happen. */
   lenientLocalFallbackModel?: string | null;
   /**
@@ -3590,7 +3768,10 @@ export async function processChatMessage(
     settings.secondaryOllamaHost,
     settings.anthropicApiKey
   );
-  const auxiliaryProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel);
+  const auxiliaryProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel, {
+    secondaryOllamaHost: settings.secondaryOllamaHost,
+    experimentalDualOllama: settings.experimentalDualOllamaEnabled === true,
+  });
 
   if (incognitoForTurn) {
     throwIfChatRequestCancelled(settings.signal);
@@ -3784,6 +3965,20 @@ export async function processChatMessage(
         `slot=${incognitoImageSlot}; job=${incognitoImageJobId ?? "none"}`
       );
     }
+    let conversationStartersIncognito: string[] | undefined;
+    if (isStarterPrompt) {
+      const startersInferred = await inferConversationStarters(
+        auxiliaryProvider,
+        assistantDisplay,
+        settings.starterPromptLabel,
+        settings.botOverrides
+      );
+      if (startersInferred.length >= 3) {
+        conversationStartersIncognito = startersInferred;
+      }
+    }
+    const assistantAskQuestionForTurn =
+      askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersIncognito);
     const incognitoToolCallEvents = buildAssistantToolCallEvents({
       rawReply: assistantReplyRaw,
       ...((parsedAssistant.sendGeneratedImage ||
@@ -3793,7 +3988,9 @@ export async function processChatMessage(
             parsedSendGeneratedImage: { prompt: sendImgPromptIncRequested },
           }
         : {}),
-      ...(askQuestionForTurn ? { parsedAskQuestion: askQuestionForTurn } : {}),
+      ...(assistantAskQuestionForTurn
+        ? { parsedAskQuestion: assistantAskQuestionForTurn }
+        : {}),
       imageSlot: incognitoImageSlot,
       ...(incognitoImageJobId ? { imageJobId: incognitoImageJobId } : {}),
     });
@@ -3812,7 +4009,7 @@ export async function processChatMessage(
       moodKey: assistantMood.key,
       moodConfidence: assistantMood.confidence,
       ...(activeBotName ? { botName: activeBotName } : {}),
-      ...(askQuestionForTurn ? { askQuestion: askQuestionForTurn } : {}),
+      ...(assistantAskQuestionForTurn ? { askQuestion: assistantAskQuestionForTurn } : {}),
     };
     const assistantTail: ChatMessage[] = [assistantMessageProse];
     const nextMessages: ChatMessage[] = [
@@ -3845,18 +4042,6 @@ export async function processChatMessage(
       messages: nextMessages,
     };
 
-    let conversationStartersIncognito: string[] | undefined;
-    if (isStarterPrompt) {
-      const startersInferred = await inferConversationStarters(
-        auxiliaryProvider,
-        assistantDisplay,
-        settings.starterPromptLabel,
-        settings.botOverrides
-      );
-      if (startersInferred.length >= 3) {
-        conversationStartersIncognito = startersInferred;
-      }
-    }
     const incognitoOpinion = isStarterPrompt
       ? buildOpinion(
           OPINION_SCORE_BASELINE,
@@ -4257,6 +4442,20 @@ export async function processChatMessage(
       `slot=${persistedImageSlot}; job=${persistedImageJobId ?? "none"}`
     );
   }
+  let conversationStartersPersisted: string[] | undefined;
+  if (isStarterPrompt) {
+    const startersPersisted = await inferConversationStarters(
+      auxiliaryProvider,
+      assistantDisplay,
+      settings.starterPromptLabel,
+      settings.botOverrides
+    );
+    if (startersPersisted.length >= 3) {
+      conversationStartersPersisted = startersPersisted;
+    }
+  }
+  const assistantAskQuestionForTurn =
+    askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
   const persistedToolCallEvents = buildAssistantToolCallEvents({
     rawReply: assistantReplyRaw,
     ...((parsedAssistant.sendGeneratedImage ||
@@ -4266,12 +4465,14 @@ export async function processChatMessage(
           parsedSendGeneratedImage: { prompt: sendImgPromptPersistedRequested },
         }
       : {}),
-    ...(askQuestionForTurn ? { parsedAskQuestion: askQuestionForTurn } : {}),
+    ...(assistantAskQuestionForTurn
+      ? { parsedAskQuestion: assistantAskQuestionForTurn }
+      : {}),
     imageSlot: persistedImageSlot,
     ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
   });
   const toolPayloadProseOnly = serializeAssistantToolPayload({
-    askQuestion: askQuestionForTurn,
+    askQuestion: assistantAskQuestionForTurn,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
   });
@@ -4845,18 +5046,6 @@ export async function processChatMessage(
     messages: hydrateMessages(messageRows),
   };
 
-  let conversationStartersPersisted: string[] | undefined;
-  if (isStarterPrompt) {
-    const startersPersisted = await inferConversationStarters(
-      auxiliaryProvider,
-      assistantDisplay,
-      settings.starterPromptLabel,
-      settings.botOverrides
-    );
-    if (startersPersisted.length >= 3) {
-      conversationStartersPersisted = startersPersisted;
-    }
-  }
   pushBackendEvent(
     "route",
     "POST /api/chat completed",

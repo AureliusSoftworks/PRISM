@@ -291,6 +291,76 @@ describe("processChatMessage starter prompts", () => {
     assert.equal(fetchCount, 3);
   });
 
+  it("persists starter choices as AskQuestion metadata for restored Zen chats", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of check-in would help you settle in?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["Help me sort one decision","Ask me something grounding","Follow a playful thread","Just sit with me for a minute"]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const assistant = result.conversation.messages[0];
+    assert.equal(assistant?.role, "assistant");
+    assert.equal(assistant?.askQuestion?.prompt, "Choose a reply:");
+    assert.deepEqual(
+      assistant?.askQuestion?.options.map((option) => option.label),
+      [
+        "Help me sort one decision",
+        "Ask me something grounding",
+        "Follow a playful thread",
+      ]
+    );
+
+    const storedAssistant = db
+      .prepare("SELECT tool_payload FROM messages WHERE role = 'assistant'")
+      .get() as { tool_payload: string | null };
+    const storedPayload = JSON.parse(storedAssistant.tool_payload ?? "{}") as {
+      askQuestion?: { prompt?: string; options?: Array<{ label?: string }> };
+    };
+    assert.equal(storedPayload.askQuestion?.prompt, "Choose a reply:");
+    assert.deepEqual(
+      storedPayload.askQuestion?.options?.map((option) => option.label),
+      [
+        "Help me sort one decision",
+        "Ask me something grounding",
+        "Follow a playful thread",
+      ]
+    );
+  });
+
   it("does not inject first-contact intro instructions for hero-start prompts", async () => {
     const db = createChatTestDb();
     db.prepare(
@@ -680,10 +750,171 @@ describe("processChatMessage starter prompts", () => {
     );
 
     assert.deepEqual(result.conversationStarters, [
+      "Something weighing on me.",
+      "A decision I keep circling.",
+      "A small moment from today.",
       "I'm not sure yet.",
-      "A small specific detail.",
-      "I need another clue.",
-      "Surprise me with your guess.",
+    ]);
+  });
+
+  it("uses starter chips from alternate JSON keys and object labels", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of check-in would help you settle in?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: JSON.stringify({
+              options: [
+                { label: "Help me sort one decision" },
+                { label: "Ask me something grounding" },
+                { label: "Follow a playful thread" },
+                { label: "Just sit with me for a minute" },
+              ],
+            }),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "Help me sort one decision",
+      "Ask me something grounding",
+      "Follow a playful thread",
+      "Just sit with me for a minute",
+    ]);
+  });
+
+  it("uses starter chips from bare JSON arrays", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Where should we begin tonight?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: JSON.stringify([
+              "With the thing I keep postponing",
+              "With something lighter",
+              "Ask me one honest question",
+              "Help me slow down first",
+            ]),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "With the thing I keep postponing",
+      "With something lighter",
+      "Ask me one honest question",
+      "Help me slow down first",
+    ]);
+  });
+
+  it("uses starter chips from numbered list inference replies", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What would feel most useful to talk through first?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "1. A decision I keep avoiding",
+              "2. A feeling I cannot quite name",
+              "3. Something practical for tonight",
+              "4. Surprise me with a gentle prompt",
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "A decision I keep avoiding",
+      "A feeling I cannot quite name",
+      "Something practical for tonight",
+      "Surprise me with a gentle prompt",
     ]);
   });
 

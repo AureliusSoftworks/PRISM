@@ -100,6 +100,7 @@ import {
 import { normalizeMemoryDisplayText } from "./memory-validation.ts";
 import {
   buildModelCatalog,
+  checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
   getAuxiliaryProvider,
   selectProvider,
@@ -258,6 +259,7 @@ interface UserDbRow {
   lenient_local_fallback_model: string | null;
   lenient_local_image_fallback_model: string | null;
   secondary_ollama_host: string | null;
+  experimental_dual_ollama_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
   preferred_openai_image_model: string | null;
@@ -373,13 +375,23 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
     throw new Error("User not found.");
   }
   return row;
+}
+
+function dualOllamaWorkloadOptions(user: UserDbRow): {
+  secondaryOllamaHost: string | null;
+  experimentalDualOllama: boolean;
+} {
+  return {
+    secondaryOllamaHost: user.secondary_ollama_host,
+    experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
+  };
 }
 
 function seedModelVisibilityDefaultsIfNeeded(
@@ -2055,7 +2067,10 @@ function buildRoutes(): RouteDefinition[] {
       // updates can roll forward without requiring message activity.
       await summarizeSandboxBotStatus(
         db,
-        getAuxiliaryProvider(user.prism_default_llm_model),
+        getAuxiliaryProvider(
+          user.prism_default_llm_model,
+          dualOllamaWorkloadOptions(user)
+        ),
         userId,
         botId,
         { reason: "manual", userKey }
@@ -2120,7 +2135,10 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const compacted = await summarizeThreadCompact(
         db,
-        getAuxiliaryProvider(user.prism_default_llm_model),
+        getAuxiliaryProvider(
+          user.prism_default_llm_model,
+          dualOllamaWorkloadOptions(user)
+        ),
         userId,
         conversationId,
         { mode, reason, force: true }
@@ -2140,7 +2158,10 @@ function buildRoutes(): RouteDefinition[] {
           const userKey = decryptUserKey(userId);
           await summarizeSandboxBotStatus(
             db,
-            getAuxiliaryProvider(user.prism_default_llm_model),
+            getAuxiliaryProvider(
+              user.prism_default_llm_model,
+              dualOllamaWorkloadOptions(user)
+            ),
             userId,
             conversationBotId,
             { reason: "mode_exit", userKey }
@@ -2503,6 +2524,7 @@ function buildRoutes(): RouteDefinition[] {
             lenientLocalFallbackModel: user.lenient_local_fallback_model,
             prismDefaultLlmModel: user.prism_default_llm_model,
             prismImageToolLlmModel: user.prism_image_tool_llm_model,
+            experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
             devMemoriesEnabled: user.dev_memories_enabled === 1,
             devMemoriesText: user.dev_memories_text,
             assistantImageUserPrefs: {
@@ -2648,7 +2670,11 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.modelChoiceByProvider !== undefined
           ? { modelChoiceByProvider: body.modelChoiceByProvider }
           : {}),
-      }, { prismDefaultLlmModel: user.prism_default_llm_model });
+      }, {
+        prismDefaultLlmModel: user.prism_default_llm_model,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+      });
       json(ctx.res, 201, {
         ok: true,
         group,
@@ -2702,7 +2728,12 @@ function buildRoutes(): RouteDefinition[] {
           presetId: body.presetId,
           initialPoll,
         },
-        { prismDefaultLlmModel: user.prism_default_llm_model, userKey }
+        {
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+          userKey,
+        }
       );
       json(ctx.res, 201, {
         ok: true,
@@ -2732,7 +2763,12 @@ function buildRoutes(): RouteDefinition[] {
           coffeeSettings: body.coffeeSettings,
           initialPoll,
         },
-        { prismDefaultLlmModel: user.prism_default_llm_model, userKey }
+        {
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+          userKey,
+        }
       );
       json(ctx.res, 200, {
         ok: true,
@@ -2824,6 +2860,7 @@ function buildRoutes(): RouteDefinition[] {
           openAiApiKey,
           anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
+          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
           userDisplayName: user.display_name,
           userKey,
           prismDefaultLlmModel: user.prism_default_llm_model,
@@ -2896,6 +2933,7 @@ function buildRoutes(): RouteDefinition[] {
           openAiApiKey,
           anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
+          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
           userDisplayName: user.display_name,
           userKey,
           prismDefaultLlmModel: user.prism_default_llm_model,
@@ -2939,6 +2977,7 @@ function buildRoutes(): RouteDefinition[] {
           openAiApiKey,
           anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
+          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
           userDisplayName: user.display_name,
           userKey,
           prismDefaultLlmModel: user.prism_default_llm_model,
@@ -3013,6 +3052,7 @@ function buildRoutes(): RouteDefinition[] {
           openAiApiKey,
           anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
+          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
           userDisplayName: user.display_name,
           userKey,
           prismDefaultLlmModel: user.prism_default_llm_model,
@@ -3066,7 +3106,11 @@ function buildRoutes(): RouteDefinition[] {
                 | { m: string | null }
                 | undefined
             )?.m;
-            const auxiliaryProvider = getAuxiliaryProvider(prismModel);
+            const memoryUser = getUserRow(userId);
+            const auxiliaryProvider = getAuxiliaryProvider(
+              prismModel,
+              dualOllamaWorkloadOptions(memoryUser)
+            );
             await inferAndStoreBotMemories(db, auxiliaryProvider, userId, botId, userKey);
           } catch (error) {
             console.warn("Memory inference skipped:", error);
@@ -3492,6 +3536,7 @@ function buildRoutes(): RouteDefinition[] {
           providerLocked: Boolean(user.provider_locked),
           autoMemory: Boolean(user.auto_memory),
           composerWritingAssist: user.composer_writing_assist !== 0,
+          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
           fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           hiddenComfyUiWorkflowIds: parseHiddenComfyUiWorkflowIds(
@@ -3622,7 +3667,8 @@ function buildRoutes(): RouteDefinition[] {
         hostToCheck = normalizeOllamaHostForStatusCheck(ctx.query.get("host"));
       }
       const status = await checkLocalModelHostStatus(hostToCheck);
-      json(ctx.res, 200, { ok: true, status });
+      const dualWorkload = await checkDualOllamaWorkloadStatus(hostToCheck);
+      json(ctx.res, 200, { ok: true, status, dualWorkload });
     }),
     route("GET", "/api/settings/comfyui-status", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -3657,6 +3703,7 @@ function buildRoutes(): RouteDefinition[] {
         providerLocked: user.provider_locked,
         autoMemory: user.auto_memory,
         composerWritingAssist: user.composer_writing_assist,
+        experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled,
         fallbackModelMessageStripe: user.fallback_model_message_stripe,
         hiddenBotModelIds: user.hidden_bot_model_ids,
         hiddenComfyUiWorkflowIds: user.hidden_comfyui_workflow_ids,
@@ -3730,7 +3777,7 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(`
         UPDATE users
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            experimental_dual_ollama_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
@@ -3748,6 +3795,7 @@ function buildRoutes(): RouteDefinition[] {
         JSON.stringify(next.hiddenBotModelIds),
         JSON.stringify(next.hiddenComfyUiWorkflowIds),
         modelVisibilityDefaultsVersion,
+        next.experimentalDualOllamaEnabled,
         next.preferredLocalModel,
         next.preferredOnlineModel,
         next.lenientLocalFallbackModel,
@@ -3813,7 +3861,10 @@ function buildRoutes(): RouteDefinition[] {
       }
       const user = getUserRow(userId);
       const suggestions = await inferBotImagePromptSuggestions(
-        getAuxiliaryProvider(user.prism_default_llm_model),
+        getAuxiliaryProvider(
+          user.prism_default_llm_model,
+          dualOllamaWorkloadOptions(user)
+        ),
         { botName: row.name, systemPrompt: row.system_prompt }
       );
       json(ctx.res, 200, { ok: true, suggestions });
@@ -3841,7 +3892,10 @@ function buildRoutes(): RouteDefinition[] {
       }
       const user = getUserRow(userId);
       const prompt = await inferRandomImageSceneLine(
-        getAuxiliaryProvider(user.prism_default_llm_model),
+        getAuxiliaryProvider(
+          user.prism_default_llm_model,
+          dualOllamaWorkloadOptions(user)
+        ),
         {
           botName,
           systemPrompt,

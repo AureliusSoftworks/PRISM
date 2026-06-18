@@ -53,6 +53,26 @@ export interface LocalModelHostStatus {
   modelCount: number;
 }
 
+export interface DualOllamaWorkloadStatus {
+  configured: boolean;
+  enabled: boolean;
+  primaryReachable: boolean;
+  secondaryReachable: boolean;
+  modelParity: boolean;
+  primaryModelCount: number;
+  secondaryModelCount: number;
+  sharedModelIds: string[];
+  missingOnPrimary: string[];
+  missingOnSecondary: string[];
+  reason:
+    | "not_configured"
+    | "primary_unreachable"
+    | "secondary_unreachable"
+    | "empty_catalog"
+    | "model_mismatch"
+    | "ready";
+}
+
 export interface LlmProvider {
   name: ProviderName;
   generateResponse(
@@ -70,8 +90,14 @@ interface AnthropicConfig {
   apiKey: string;
 }
 
+interface DualOllamaWorkloadOptions {
+  secondaryOllamaHost?: string | null;
+  experimentalDualOllama?: boolean;
+}
+
 const config = getAppConfig();
 export const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
+const DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS = 30_000;
 
 export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
 export const ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -152,13 +178,23 @@ export function fallbackEmbedding(text: string): number[] {
   return vector.map((value) => value / magnitude);
 }
 
-export async function embedTextLocal(text: string): Promise<number[]> {
+export async function embedTextLocal(
+  text: string,
+  options: DualOllamaWorkloadOptions = {}
+): Promise<number[]> {
+  const requestedModel = config.ollamaEmbeddingModel || "nomic-embed-text";
+  const secondaryModel = await resolveDualOllamaWorkloadModelId(
+    requestedModel,
+    options
+  );
+  const ollamaHost = secondaryModel ? options.secondaryOllamaHost!.trim() : config.ollamaHost;
+  const model = secondaryModel ?? requestedModel;
   try {
-    const response = await fetch(`${config.ollamaHost}/api/embeddings`, {
+    const response = await fetch(`${ollamaHost}/api/embeddings`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: config.ollamaEmbeddingModel || "nomic-embed-text",
+        model,
         prompt: text
       })
     });
@@ -327,11 +363,17 @@ function isAllowedAnthropicChatModel(id: string): boolean {
 }
 
 async function discoverLocalModelIds(ollamaHost: string): Promise<string[]> {
+  return (await discoverLocalModels(ollamaHost)).modelIds;
+}
+
+async function discoverLocalModels(
+  ollamaHost: string
+): Promise<{ reachable: boolean; modelIds: string[] }> {
   for (const host of localModelHostCandidates(ollamaHost)) {
     const modelIds = await fetchLocalModelIds(host);
-    if (modelIds) return modelIds;
+    if (modelIds) return { reachable: true, modelIds };
   }
-  return [];
+  return { reachable: false, modelIds: [] };
 }
 
 async function fetchLocalModelIds(ollamaHost: string): Promise<string[] | null> {
@@ -402,14 +444,164 @@ export async function checkLocalModelHostStatus(
     return { configured: false, reachable: false, modelCount: 0 };
   }
 
-  for (const host of localModelHostCandidates(normalizedHost)) {
-    const modelIds = await fetchLocalModelIds(host);
-    if (modelIds) {
-      return { configured: true, reachable: true, modelCount: modelIds.length };
+  const discovered = await discoverLocalModels(normalizedHost);
+  return {
+    configured: true,
+    reachable: discovered.reachable,
+    modelCount: discovered.modelIds.length,
+  };
+}
+
+const dualOllamaWorkloadStatusCache = new Map<
+  string,
+  { expiresAt: number; status: DualOllamaWorkloadStatus }
+>();
+
+function sortedModelIds(ids: readonly string[]): string[] {
+  return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+function uniqueSortedModelIds(ids: readonly string[]): string[] {
+  return sortedModelIds(uniqueModelIds([...ids]));
+}
+
+function disabledDualOllamaStatus(
+  reason: DualOllamaWorkloadStatus["reason"],
+  overrides: Partial<DualOllamaWorkloadStatus> = {}
+): DualOllamaWorkloadStatus {
+  return {
+    configured: reason !== "not_configured",
+    enabled: false,
+    primaryReachable: false,
+    secondaryReachable: false,
+    modelParity: false,
+    primaryModelCount: 0,
+    secondaryModelCount: 0,
+    sharedModelIds: [],
+    missingOnPrimary: [],
+    missingOnSecondary: [],
+    reason,
+    ...overrides,
+  };
+}
+
+export async function checkDualOllamaWorkloadStatus(
+  secondaryOllamaHost: string | null | undefined,
+  options: { useCache?: boolean } = {}
+): Promise<DualOllamaWorkloadStatus> {
+  const secondaryHost = secondaryOllamaHost?.trim();
+  if (!secondaryHost) {
+    return disabledDualOllamaStatus("not_configured", { configured: false });
+  }
+
+  const cacheKey = `${config.ollamaHost} -> ${secondaryHost}`;
+  const useCache = options.useCache !== false;
+  if (useCache) {
+    const cached = dualOllamaWorkloadStatusCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.status;
     }
   }
 
-  return { configured: true, reachable: false, modelCount: 0 };
+  const [primary, secondary] = await Promise.all([
+    discoverLocalModels(config.ollamaHost),
+    discoverLocalModels(secondaryHost),
+  ]);
+  const primaryModelIds = uniqueSortedModelIds(primary.modelIds);
+  const secondaryModelIds = uniqueSortedModelIds(secondary.modelIds);
+  const primarySet = new Set(primaryModelIds);
+  const secondarySet = new Set(secondaryModelIds);
+  const sharedModelIds = primaryModelIds.filter((id) => secondarySet.has(id));
+  const missingOnPrimary = secondaryModelIds.filter((id) => !primarySet.has(id));
+  const missingOnSecondary = primaryModelIds.filter((id) => !secondarySet.has(id));
+  const primaryModelCount = primaryModelIds.length;
+  const secondaryModelCount = secondaryModelIds.length;
+
+  let status: DualOllamaWorkloadStatus;
+  if (!primary.reachable) {
+    status = disabledDualOllamaStatus("primary_unreachable", {
+      configured: true,
+      primaryReachable: false,
+      secondaryReachable: secondary.reachable,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else if (!secondary.reachable) {
+    status = disabledDualOllamaStatus("secondary_unreachable", {
+      configured: true,
+      primaryReachable: true,
+      secondaryReachable: false,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else if (primaryModelCount === 0 || secondaryModelCount === 0) {
+    status = disabledDualOllamaStatus("empty_catalog", {
+      configured: true,
+      primaryReachable: true,
+      secondaryReachable: true,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else if (missingOnPrimary.length > 0 || missingOnSecondary.length > 0) {
+    status = disabledDualOllamaStatus("model_mismatch", {
+      configured: true,
+      primaryReachable: true,
+      secondaryReachable: true,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else {
+    status = {
+      configured: true,
+      enabled: true,
+      primaryReachable: true,
+      secondaryReachable: true,
+      modelParity: true,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary: [],
+      missingOnSecondary: [],
+      reason: "ready",
+    };
+  }
+
+  if (useCache) {
+    dualOllamaWorkloadStatusCache.set(cacheKey, {
+      expiresAt: Date.now() + DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS,
+      status,
+    });
+  }
+  return status;
+}
+
+async function resolveDualOllamaWorkloadModelId(
+  requestedModel: string,
+  options: DualOllamaWorkloadOptions
+): Promise<string | null> {
+  if (!options.experimentalDualOllama || !options.secondaryOllamaHost?.trim()) {
+    return null;
+  }
+  if (parseSecondaryOllamaModelId(requestedModel)) {
+    return null;
+  }
+  const status = await checkDualOllamaWorkloadStatus(options.secondaryOllamaHost);
+  if (!status.enabled || !status.sharedModelIds.includes(requestedModel)) {
+    return null;
+  }
+  return requestedModel;
 }
 
 async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> {
@@ -520,9 +712,11 @@ export async function buildModelCatalog(
 export class LocalOllamaProvider implements LlmProvider {
   public readonly name = "local" as const;
   private readonly secondaryOllamaHost: string | null;
+  private readonly experimentalDualOllama: boolean;
 
-  public constructor(options: { secondaryOllamaHost?: string | null } = {}) {
+  public constructor(options: DualOllamaWorkloadOptions = {}) {
     this.secondaryOllamaHost = options.secondaryOllamaHost?.trim() || null;
+    this.experimentalDualOllama = options.experimentalDualOllama === true;
   }
 
   public async generateResponse(
@@ -534,8 +728,15 @@ export class LocalOllamaProvider implements LlmProvider {
     if (secondaryModel && !this.secondaryOllamaHost) {
       throw new Error("Second Ollama host is not configured.");
     }
-    const ollamaHost = secondaryModel ? this.secondaryOllamaHost! : config.ollamaHost;
-    const model = secondaryModel ?? requestedModel;
+    const dualWorkloadModel = secondaryModel
+      ? null
+      : await resolveDualOllamaWorkloadModelId(requestedModel, {
+          secondaryOllamaHost: this.secondaryOllamaHost,
+          experimentalDualOllama: this.experimentalDualOllama,
+        });
+    const ollamaHost =
+      secondaryModel || dualWorkloadModel ? this.secondaryOllamaHost! : config.ollamaHost;
+    const model = secondaryModel ?? dualWorkloadModel ?? requestedModel;
     const ollamaOptions: Record<string, unknown> = {};
     if (typeof options?.temperature === "number") {
       ollamaOptions.temperature = options.temperature;
@@ -604,7 +805,10 @@ export class LocalOllamaProvider implements LlmProvider {
   }
 
   public async embedText(text: string): Promise<number[]> {
-    return embedTextLocal(text);
+    return embedTextLocal(text, {
+      secondaryOllamaHost: this.secondaryOllamaHost,
+      experimentalDualOllama: this.experimentalDualOllama,
+    });
   }
 }
 
@@ -797,9 +1001,12 @@ export function resolveAuxiliaryOllamaModel(prismDefaultLlmModel?: string | null
   return config.ollamaAuxiliaryModel || "llama3.2";
 }
 
-export function getAuxiliaryProvider(prismDefaultLlmModel?: string | null): LlmProvider {
+export function getAuxiliaryProvider(
+  prismDefaultLlmModel?: string | null,
+  options: DualOllamaWorkloadOptions = {}
+): LlmProvider {
   const auxiliaryModel = resolveAuxiliaryOllamaModel(prismDefaultLlmModel);
-  const inner = new LocalOllamaProvider();
+  const inner = new LocalOllamaProvider(options);
   return {
     name: "local",
     async generateResponse(
@@ -812,7 +1019,7 @@ export function getAuxiliaryProvider(prismDefaultLlmModel?: string | null): LlmP
       });
     },
     async embedText(text: string): Promise<number[]> {
-      return embedTextLocal(text);
+      return inner.embedText(text);
     }
   };
 }

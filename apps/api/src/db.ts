@@ -32,6 +32,7 @@ export interface DbUserRecord {
   secondaryOllamaHost: string | null;
   comfyUiHost: string | null;
   composerWritingAssist: number;
+  experimentalDualOllamaEnabled: number;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
   openAiKeyTag: string | null;
@@ -106,6 +107,7 @@ export function createDatabase(): DatabaseSync {
       preferred_online_model TEXT,
       lenient_local_fallback_model TEXT,
       secondary_ollama_host TEXT,
+      experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
       preferred_local_image_model TEXT,
@@ -454,6 +456,14 @@ export function createDatabase(): DatabaseSync {
   const hasSecondaryOllamaHost = userColumns.some((column) => column.name === "secondary_ollama_host");
   if (!hasSecondaryOllamaHost) {
     db.exec("ALTER TABLE users ADD COLUMN secondary_ollama_host TEXT;");
+  }
+  const hasExperimentalDualOllamaEnabled = userColumns.some(
+    (column) => column.name === "experimental_dual_ollama_enabled"
+  );
+  if (!hasExperimentalDualOllamaEnabled) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0;"
+    );
   }
   const hasDevMemoriesEnabled = userColumns.some(
     (column) => column.name === "dev_memories_enabled"
