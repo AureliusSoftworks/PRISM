@@ -1260,6 +1260,13 @@ function cleanSuggestedReplyText(value: string): string | null {
   if (!text || text.length > STARTER_SUGGESTION_MAX_CHARS) return null;
   if (/^(?:suggestions?|options?|replies)\s*:?\s*$/i.test(text)) return null;
   if (/^(?:sure[,.!]?\s+)?(?:here are|these are)\b/i.test(text)) return null;
+  if (
+    /^(?:the\s+)?user\s+(?:has\s+)?(?:chosen|chose|chooses|selected|selects|picked|picks)\b/i.test(
+      text
+    )
+  ) {
+    return null;
+  }
   return text;
 }
 

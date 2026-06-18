@@ -638,6 +638,8 @@ const MESSAGE_COPY_FEEDBACK_MS = 1600;
 const MEMORY_TOAST_DISMISS_MS = 7000;
 const MEMORY_TOAST_REARM_MS = 2500;
 const MEMORY_TOAST_VISIBLE_LIMIT = 3;
+const ZEN_HEADER_REVEAL_EDGE_PX = 72;
+const ZEN_HEADER_REVEAL_HOLD_MS = 3200;
 const COMPOSER_HISTORY_LIMIT = 50;
 
 // ── Prism logo letter palette ─────────────────────────────────────────
@@ -3360,12 +3362,16 @@ const CHAT_MODE_OFFSCREEN_VISIBLE_MS = 12000;
 const CHAT_MODE_OFFSCREEN_DISSOLVE_MS = 2200;
 const CHAT_MODE_ARCHIVE_LOAD_DELAY_MS = 320;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO = 0.34;
-const CHAT_MODE_NEW_TURN_START_RATIO = 0.34;
+const CHAT_MODE_NEW_TURN_START_RATIO = 0.32;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.34;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.46;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 24;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 1.2;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 36;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 2;
+const CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX = 36;
+const CHAT_MODE_SCROLL_ELASTIC_WHEEL_RESISTANCE = 0.22;
+const CHAT_MODE_SCROLL_ELASTIC_TOUCH_RESISTANCE = 0.5;
+const CHAT_MODE_SCROLL_ELASTIC_RESET_DELAY_MS = 90;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MAX_CORRECTION_PX = 220;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MIN_CORRECTION_PX = 8;
 const CHAT_MODE_USER_QUESTION_PATTERN =
@@ -3396,10 +3402,10 @@ const CHAT_MODE_PULL_QUOTE_MARKER_PATTERN = /^\s*\[!pull\]\s*/i;
 const CHAT_MODE_PULL_QUOTE_INLINE_PREFIX_PATTERN = /^\s*pull\s+quote\s*[:\-–—]\s*/i;
 const CHAT_MODE_PULL_QUOTE_INLINE_LINE_PATTERN =
   /^\s*(?:\*\*|__)?\s*pull\s+quote\s*[:\-–—]/i;
-const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX = 11;
-const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX = 32;
-const CHAT_MODE_USER_MESSAGE_FONT_MIN_PX = 18;
-const CHAT_MODE_USER_MESSAGE_FONT_MAX_PX = 40;
+const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX = 9.7;
+const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX = 30.7;
+const CHAT_MODE_USER_MESSAGE_FONT_MIN_PX = 16.7;
+const CHAT_MODE_USER_MESSAGE_FONT_MAX_PX = 38.7;
 const CHAT_MODE_MESSAGE_FONT_MIN_LINES = 1;
 const CHAT_MODE_MESSAGE_FONT_MAX_LINES = 18;
 const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
@@ -4005,6 +4011,12 @@ function getConversationPendingAskQuestionState(
 function stripEmojiFromAskQuestionLabel(label: string): string {
   const withoutEmoji = label.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "");
   return withoutEmoji.replace(/\s+/g, " ").trim();
+}
+
+function suggestedReplyLooksInternalChoiceNarration(label: string): boolean {
+  return /^(?:the\s+)?user\s+(?:has\s+)?(?:chosen|chose|chooses|selected|selects|picked|picks)\b/i.test(
+    label.trim()
+  );
 }
 type StatusTag = "human" | "local" | "online";
 
@@ -15974,10 +15986,87 @@ function HomeContent(): React.JSX.Element {
   const [viewSwitchTarget, setViewSwitchTarget] = useState<View | null>(null);
   const [viewSwitchOverlayPhase, setViewSwitchOverlayPhase] =
     useState<"hidden" | "entering" | "visible" | "fading">("hidden");
+  const [zenHeaderVisible, setZenHeaderVisible] = useState(true);
   const viewSwitchOverlayHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewSwitchOverlayUnmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewSwitchOverlayEnterFrameRef = useRef<number | null>(null);
+  const zenHeaderAutoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zenHeaderAutoHideArmedRef = useRef(false);
   const pendingPrivateExitOnHubRef = useRef(false);
+  const clearZenHeaderAutoHideTimer = useCallback(() => {
+    if (zenHeaderAutoHideTimerRef.current) {
+      clearTimeout(zenHeaderAutoHideTimerRef.current);
+      zenHeaderAutoHideTimerRef.current = null;
+    }
+  }, []);
+  const scheduleZenHeaderAutoHide = useCallback(() => {
+    if (view !== "chat") return;
+    if (!zenHeaderAutoHideArmedRef.current) return;
+    clearZenHeaderAutoHideTimer();
+    zenHeaderAutoHideTimerRef.current = setTimeout(() => {
+      setZenHeaderVisible(false);
+      zenHeaderAutoHideTimerRef.current = null;
+    }, ZEN_HEADER_REVEAL_HOLD_MS);
+  }, [clearZenHeaderAutoHideTimer, view]);
+  const revealZenHeaderTemporarily = useCallback(() => {
+    if (view !== "chat") return;
+    setZenHeaderVisible(true);
+    scheduleZenHeaderAutoHide();
+  }, [scheduleZenHeaderAutoHide, view]);
+  const showZenHeaderWhileInteracting = useCallback(() => {
+    if (view !== "chat") return;
+    clearZenHeaderAutoHideTimer();
+    setZenHeaderVisible(true);
+  }, [clearZenHeaderAutoHideTimer, view]);
+  const hideZenHeaderForConversationAction = useCallback(() => {
+    if (view !== "chat") return;
+    zenHeaderAutoHideArmedRef.current = true;
+    clearZenHeaderAutoHideTimer();
+    setZenHeaderVisible(false);
+  }, [clearZenHeaderAutoHideTimer, view]);
+  const handleZenSurfacePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "mouse") return;
+      if (zenHeaderVisible) return;
+      if (event.clientY > ZEN_HEADER_REVEAL_EDGE_PX) return;
+      revealZenHeaderTemporarily();
+    },
+    [revealZenHeaderTemporarily, zenHeaderVisible]
+  );
+  const handleZenSurfacePointerDownCapture = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType === "mouse") return;
+      if (zenHeaderVisible) return;
+      if (event.clientY > ZEN_HEADER_REVEAL_EDGE_PX) return;
+      revealZenHeaderTemporarily();
+    },
+    [revealZenHeaderTemporarily, zenHeaderVisible]
+  );
+  const handleZenHeaderPointerEnter = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "mouse") return;
+      showZenHeaderWhileInteracting();
+    },
+    [showZenHeaderWhileInteracting]
+  );
+  const handleZenHeaderPointerLeave = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "mouse") return;
+      scheduleZenHeaderAutoHide();
+    },
+    [scheduleZenHeaderAutoHide]
+  );
+  const handleZenHeaderFocusCapture = useCallback(() => {
+    showZenHeaderWhileInteracting();
+  }, [showZenHeaderWhileInteracting]);
+  const handleZenHeaderBlurCapture = useCallback(
+    (event: React.FocusEvent<HTMLElement>) => {
+      const nextFocus = event.relatedTarget;
+      if (nextFocus instanceof Node && event.currentTarget.contains(nextFocus)) return;
+      scheduleZenHeaderAutoHide();
+    },
+    [scheduleZenHeaderAutoHide]
+  );
   const clearViewSwitchOverlayTimers = useCallback(() => {
     if (viewSwitchOverlayHideTimerRef.current) {
       clearTimeout(viewSwitchOverlayHideTimerRef.current);
@@ -15992,6 +16081,13 @@ function HomeContent(): React.JSX.Element {
       viewSwitchOverlayEnterFrameRef.current = null;
     }
   }, []);
+  useEffect(() => {
+    if (view === "chat") return;
+    zenHeaderAutoHideArmedRef.current = false;
+    clearZenHeaderAutoHideTimer();
+    setZenHeaderVisible(true);
+  }, [clearZenHeaderAutoHideTimer, view]);
+  useEffect(() => clearZenHeaderAutoHideTimer, [clearZenHeaderAutoHideTimer]);
   const triggerConversationModeExitCompaction = useCallback((
     conversationId: string,
     sourceMode: "zen" | "chat" | "sandbox"
@@ -16252,6 +16348,7 @@ function HomeContent(): React.JSX.Element {
   const [pendingReplyIsNewConversation, setPendingReplyIsNewConversation] =
     useState(false);
   const pendingReplyAbortControllerRef = useRef<AbortController | null>(null);
+  const zenInitialThinkingCancelControllerRef = useRef<AbortController | null>(null);
   const [composerImageJobOrb, setComposerImageJobOrb] = useState<{
     jobId: string;
     conversationId: string;
@@ -16945,6 +17042,8 @@ function HomeContent(): React.JSX.Element {
   const chatLastRestoredConversationIdRef = useRef<string | null>(null);
   const chatProgrammaticScrollUntilMsRef = useRef(0);
   const chatTouchScrollLastYRef = useRef<number | null>(null);
+  const chatScrollElasticOffsetRef = useRef(0);
+  const chatScrollElasticResetTimerRef = useRef<number | null>(null);
   const chatLastScrollTopByConversationRef = useRef<Map<string, number>>(new Map());
   // Tracks scrollHeight alongside scrollTop so the manual-scroll-up detector
   // can distinguish a real upward gesture from a reflow-induced drop (e.g.
@@ -19731,6 +19830,23 @@ function HomeContent(): React.JSX.Element {
     }
     setError(null);
   }, [chatEphemeralMode, detail?.id]);
+  const handleZenInitialThinkingCancel = useCallback(
+    (event?: React.MouseEvent<HTMLButtonElement>): void => {
+      event?.stopPropagation();
+      zenInitialThinkingCancelControllerRef.current =
+        pendingReplyAbortControllerRef.current;
+      stopPendingReply();
+      setSelectedId(null);
+      setDetail(null);
+      setDraft("");
+      setComposerPrimed(false);
+      setConversationStarterPrompts(null);
+      setChatStartupSummary(null);
+      chatSummaryRefreshMarkerRef.current = null;
+      setError(null);
+    },
+    [stopPendingReply]
+  );
   const assistantWordByWordMode = chatAssistantTypingMechanicsActive;
   const chatMessageTemporalById = useMemo(() => {
     const temporal = new Map<string, { phase: ChatMessageTemporalPhase; ageMs: number }>();
@@ -20058,8 +20174,11 @@ function HomeContent(): React.JSX.Element {
     if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
     if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return false;
     if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
-    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey);
-    if (firstSeenAt === undefined) return false;
+    let firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey);
+    if (firstSeenAt === undefined) {
+      firstSeenAt = chatEphemeralNowMs;
+      chatMessageFirstSeenAtRef.current.set(revealKey, firstSeenAt);
+    }
     const latestAssistantMessage =
       detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
     if (!latestAssistantMessage) return false;
@@ -20187,12 +20306,33 @@ function HomeContent(): React.JSX.Element {
     refreshOpenMemoryViews,
   ]);
 
+  const zenAssistantReplyCount = useMemo(
+    () =>
+      detail?.messages.reduce(
+        (count, message) => count + (message.role === "assistant" ? 1 : 0),
+        0
+      ) ?? 0,
+    [detail?.messages]
+  );
+  const zenInitialThinkingActive =
+    view === "chat" &&
+    pendingReplyVisible &&
+    pendingReplyStartMessageCount === 0 &&
+    detail?.hasAssistantReply !== true;
+  const zenInitialReplyRevealActive =
+    view === "chat" &&
+    chatAssistantRevealInProgress &&
+    pendingReplyStartMessageCount === 0 &&
+    zenAssistantReplyCount <= 1;
+
   const replyInFlightSignals =
     pendingReplyVisible || chatAssistantRevealInProgress;
   /** Chat shows the pill during stream + during word-reveal; Sandbox zen only during live API stream (same as ordinary Sandbox stop). */
   const typingIndicatorVisible =
-    pendingReplyVisible ||
-    (chatEphemeralMode && chatAssistantRevealInProgress);
+    (pendingReplyVisible && !zenInitialThinkingActive) ||
+    (chatEphemeralMode &&
+      chatAssistantRevealInProgress &&
+      !zenInitialReplyRevealActive);
   const typingIndicatorNode = useMemo(() => {
     if (!typingIndicatorVisible) return null;
     const pendingRespondent =
@@ -20257,6 +20397,29 @@ function HomeContent(): React.JSX.Element {
     chatLikeSurface,
     handleTypingIndicatorPress,
   ]);
+  const zenInitialThinkingNode = useMemo(() => {
+    if (!zenInitialThinkingActive) return null;
+    return (
+      <div
+        className={styles.zenInitialThinkingOverlay}
+        role="status"
+        aria-live="polite"
+      >
+        <button
+          type="button"
+          className={styles.zenInitialThinkingButton}
+          onClick={handleZenInitialThinkingCancel}
+          aria-label="Cancel reply and return to the Zen start"
+          title="Cancel reply"
+        >
+          <span className={styles.zenInitialThinkingGlyphHalo} aria-hidden="true">
+            <PrismTriangleMark className={styles.zenInitialThinkingGlyph} />
+          </span>
+          <span className={styles.zenInitialThinkingLabel}>Thinking...</span>
+        </button>
+      </div>
+    );
+  }, [handleZenInitialThinkingCancel, zenInitialThinkingActive]);
   const sandboxSummaryIndicatorNode = useMemo(() => {
     if (view !== "sandbox") return null;
     const showCompactionSpinner = sandboxSummaryBusy && !pendingReplyVisible;
@@ -22449,10 +22612,63 @@ function HomeContent(): React.JSX.Element {
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (!assistantRevealActive) return;
+    if (!replyInFlightSignals) return;
+    if (latestMessageRole !== "assistant") return;
+    if (!detail?.id || !latestAssistantMessageId) return;
+    if (
+      chatScrollPinnedByConversationRef.current.get(detail.id) === true ||
+      chatAutoscrollUserDisarmedByConversationRef.current.get(detail.id) === true
+    ) {
+      return;
+    }
+
+    const alignLatestAssistant = (): void => {
+      const scrollRoot = messagesScrollRef.current;
+      if (!scrollRoot) return;
+      const activeAssistantRow = findMessageRowById(scrollRoot, latestAssistantMessageId);
+      if (!activeAssistantRow) return;
+      const maxScrollTop = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight);
+      const anchorY = resolveChatModeMessageFollowY(activeAssistantRow, scrollRoot);
+      const targetTop = Math.max(
+        0,
+        Math.min(
+          maxScrollTop,
+          anchorY - scrollRoot.clientHeight * CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO
+        )
+      );
+      if (Math.abs(targetTop - scrollRoot.scrollTop) <= 0.5) return;
+      chatAutoscrollArmedByConversationRef.current.set(detail.id, true);
+      chatProgrammaticScrollUntilMsRef.current = Date.now() + 160;
+      scrollRoot.scrollTop = targetTop;
+      chatLastScrollTopByConversationRef.current.set(detail.id, scrollRoot.scrollTop);
+      chatLastScrollHeightByConversationRef.current.set(detail.id, scrollRoot.scrollHeight);
+    };
+
+    let frame = window.requestAnimationFrame(() => {
+      alignLatestAssistant();
+      frame = window.requestAnimationFrame(alignLatestAssistant);
+    });
+    const settleTimers = [80, 180].map((delayMs) =>
+      window.setTimeout(alignLatestAssistant, delayMs)
+    );
+    return () => {
+      window.cancelAnimationFrame(frame);
+      settleTimers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [
+    assistantRevealActive,
+    detail?.id,
+    latestAssistantMessageId,
+    latestMessageRole,
+    replyInFlightSignals,
+  ]);
+
   // Auto-scroll for Chat mode while a reply is streaming or revealing.
   // Each animation frame eases scrollTop toward the active typed line's
-  // reading-band position. That keeps new prose a little above center
-  // without pinning the user to the bottom of the thread.
+  // centered reading-band position without pinning the user to the bottom
+  // of the thread.
   //
   // The loop self-arms when typing starts so we never depend on a separate
   // deferred arm effect. Manual scroll-up sets `armed=false` via the
@@ -22476,7 +22692,7 @@ function HomeContent(): React.JSX.Element {
     // disarm signals (user scroll-up, interruption) will turn this off.
     chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
 
-    const EASE_FACTOR = 0.32;
+    const EASE_FACTOR = 0.42;
     const MIN_STEP_PX = CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX;
     const REST_THRESHOLD_PX = 0.5;
 
@@ -22499,11 +22715,12 @@ function HomeContent(): React.JSX.Element {
       const targetTop = (() => {
         if (!activeAssistantRow) {
           if (!activeUserRow) return maxScrollTop;
+          const userAnchorY = resolveChatModeMessageFollowY(activeUserRow, scrollEl);
           return Math.max(
             0,
             Math.min(
               maxScrollTop,
-              activeUserRow.offsetTop - scrollEl.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO
+              userAnchorY - scrollEl.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO
             )
           );
         }
@@ -22517,13 +22734,16 @@ function HomeContent(): React.JSX.Element {
         );
       })();
       const delta = targetTop - scrollEl.scrollTop;
-      if (delta <= REST_THRESHOLD_PX) return;
+      if (Math.abs(delta) <= REST_THRESHOLD_PX) return;
 
       const stepPx = Math.min(
         CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX,
-        Math.max(MIN_STEP_PX, delta * EASE_FACTOR)
+        Math.max(MIN_STEP_PX, Math.abs(delta) * EASE_FACTOR)
       );
-      const nextTop = Math.min(targetTop, scrollEl.scrollTop + stepPx);
+      const nextTop =
+        delta > 0
+          ? Math.min(targetTop, scrollEl.scrollTop + stepPx)
+          : Math.max(targetTop, scrollEl.scrollTop - stepPx);
       // Tag this write as programmatic so the onScroll handler does not
       // interpret reflow-induced drops as a manual upward scroll.
       chatProgrammaticScrollUntilMsRef.current = Date.now() + 80;
@@ -22581,7 +22801,8 @@ function HomeContent(): React.JSX.Element {
       chatProgrammaticScrollUntilMsRef.current = Date.now() + (useSmoothQuestionScroll ? 900 : 180);
       const top = Math.max(
         0,
-        target.offsetTop - scrollRoot.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO
+        resolveChatModeMessageFollowY(target, scrollRoot) -
+          scrollRoot.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO
       );
       scrollRoot.scrollTo({ top, behavior: useSmoothQuestionScroll ? "smooth" : "auto" });
       chatLastScrollTopByConversationRef.current.set(detail.id, top);
@@ -22664,7 +22885,8 @@ function HomeContent(): React.JSX.Element {
         targetMessage.role === "assistant"
           ? resolveChatModeMessageFollowY(target, scrollRoot) -
             scrollRoot.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
-          : target.offsetTop - scrollRoot.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO;
+          : resolveChatModeMessageFollowY(target, scrollRoot) -
+            scrollRoot.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO;
       const top = Math.max(0, Math.min(maxScrollTop, rawTop));
       scrollRoot.scrollTop = top;
       chatLastScrollTopByConversationRef.current.set(detail.id, top);
@@ -24442,6 +24664,17 @@ function HomeContent(): React.JSX.Element {
     setDraft("");
   }
 
+  function resumeChatModeAutoscrollForOutgoingTurn(
+    conversationId: string | null | undefined
+  ): void {
+    if (!chatEphemeralMode || !conversationId) return;
+    chatScrollPinnedByConversationRef.current.delete(conversationId);
+    chatAutoscrollUserDisarmedByConversationRef.current.delete(conversationId);
+    chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
+    chatLastPinnedUserMessageKeyRef.current = null;
+    chatProgrammaticScrollUntilMsRef.current = Date.now() + 180;
+  }
+
   async function performMessageEdit(messageId: string, text: string): Promise<void> {
     if (!detail || !selectedId) return;
     const cutoffIdx = detail.messages.findIndex((message) => message.id === messageId);
@@ -24450,6 +24683,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
 
+    resumeChatModeAutoscrollForOutgoingTurn(detail.id ?? selectedId);
     setPendingReply(true);
     setPendingReplyStartedAtMs(Date.now());
     setPendingReplyDenialRisk(promptLooksDenialProne(text));
@@ -25316,6 +25550,7 @@ function HomeContent(): React.JSX.Element {
     if (!trimmed && !isStarterPrompt) return;
     if (pendingReply && !canSendTextWhileReplyPending()) {
       if (!isStarterPrompt && trimmed.length > 0) {
+        hideZenHeaderForConversationAction();
         setQueuedChatPrompts((previous) => [
           ...previous,
           {
@@ -25340,6 +25575,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (editingMessageId && !isStarterPrompt) {
       const editMessageId = editingMessageId;
+      hideZenHeaderForConversationAction();
       setDraft("");
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -25347,6 +25583,7 @@ function HomeContent(): React.JSX.Element {
       requestMessageEdit(editMessageId, trimmed);
       return;
     }
+    hideZenHeaderForConversationAction();
     // Any typed/chosen follow-up supersedes the starter quick-replies row.
     if (!isStarterPrompt) {
       setConversationStarterPrompts(null);
@@ -25360,6 +25597,13 @@ function HomeContent(): React.JSX.Element {
         ? detail.id
         : selectedId
     );
+    const requestStartedNewConversation = requestConversationId === null;
+    resumeChatModeAutoscrollForOutgoingTurn(
+      requestConversationId ??
+        detail?.id ??
+        selectedId ??
+        (requestStartedNewConversation ? "pending" : null)
+    );
     const archiveConversationId =
       requestConversationId ??
       (detail?.id && detail.id !== "pending" ? detail.id : null);
@@ -25367,7 +25611,6 @@ function HomeContent(): React.JSX.Element {
       // Every new send starts from the compact active-turn view again.
       hardResetChatArchiveStateForConversation(archiveConversationId);
     }
-    const requestStartedNewConversation = requestConversationId === null;
     const baselineMessageCount = detail?.messages.length ?? 0;
     const chatRequestController = new AbortController();
     pendingReplyAbortControllerRef.current = chatRequestController;
@@ -25628,11 +25871,24 @@ function HomeContent(): React.JSX.Element {
         chatRequestController.signal.aborted ||
         (err instanceof DOMException && err.name === "AbortError") ||
         (err instanceof Error && /abort/i.test(err.message));
+      const requestWasZenInitialThinkingCancelled =
+        zenInitialThinkingCancelControllerRef.current === chatRequestController;
       if (requestWasAborted) {
-        if (stillViewingRequest) {
-          setDetail(previousDetail);
+        if (stillViewingRequest || requestWasZenInitialThinkingCancelled) {
+          setDetail(requestWasZenInitialThinkingCancelled ? null : previousDetail);
           setPendingIncognito(previousPendingIncognito);
-          setDraft(isStarterPrompt ? "" : trimmed);
+          setDraft(
+            isStarterPrompt || requestWasZenInitialThinkingCancelled
+              ? ""
+              : trimmed
+          );
+          if (requestWasZenInitialThinkingCancelled) {
+            setSelectedId(null);
+            setConversationStarterPrompts(null);
+            setChatStartupSummary(null);
+            chatSummaryRefreshMarkerRef.current = null;
+            setComposerPrimed(false);
+          }
         }
         setError(null);
         return;
@@ -25651,6 +25907,9 @@ function HomeContent(): React.JSX.Element {
           : "Send failed. Verify the provider is reachable and try again."
       );
     } finally {
+      if (zenInitialThinkingCancelControllerRef.current === chatRequestController) {
+        zenInitialThinkingCancelControllerRef.current = null;
+      }
       clearPendingReplyVisuals();
       if (successfulConversationId) {
         scheduleNextQueuedPrompt(successfulConversationId);
@@ -25690,15 +25949,18 @@ function HomeContent(): React.JSX.Element {
   ): ComposerChip[] {
     const optionChips = askQuestion.options.map((option, index) => {
       const cleaned = stripEmojiFromAskQuestionLabel(option.label);
-      const sendValue = cleaned.trim();
       const fallback = `Option ${index + 1}`;
+      const label = suggestedReplyLooksInternalChoiceNarration(cleaned)
+        ? fallback
+        : cleaned || fallback;
+      const sendValue = label.trim();
       return {
         id: option.id,
-        label: cleaned || fallback,
+        label,
         action: "send" as const,
-        // Preserve the authored option text on send so model behavior stays
-        // consistent with the AskQuestion payload across providers/models.
-        sendValue: sendValue || cleaned || fallback,
+        // Preserve the authored option text unless a model leaked internal
+        // selection narration such as "the user chose...".
+        sendValue: sendValue || fallback,
       };
     });
     return [
@@ -25845,6 +26107,8 @@ function HomeContent(): React.JSX.Element {
       });
       return;
     }
+    hideZenHeaderForConversationAction();
+    resumeChatModeAutoscrollForOutgoingTurn(detail?.id ?? selectedId);
     setConversationStarterPrompts(null);
     setStarterComposerRevealed(false);
     if (options.replaceMessageId) {
@@ -26692,8 +26956,16 @@ function HomeContent(): React.JSX.Element {
         window.cancelAnimationFrame(zenAtmosphereScrollFrameRef.current);
         zenAtmosphereScrollFrameRef.current = null;
       }
+      if (chatScrollElasticResetTimerRef.current !== null) {
+        window.clearTimeout(chatScrollElasticResetTimerRef.current);
+        chatScrollElasticResetTimerRef.current = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    resetChatModeScrollElastic();
+  }, [chatEphemeralMode, detail?.id, view]);
 
   useEffect(() => {
     if (!askQuestionTailSpaceActive) return;
@@ -26718,6 +26990,66 @@ function HomeContent(): React.JSX.Element {
     };
   }, [askQuestionTailSpaceActive]);
 
+  function clearChatModeScrollElasticResetTimer(): void {
+    if (chatScrollElasticResetTimerRef.current === null) return;
+    window.clearTimeout(chatScrollElasticResetTimerRef.current);
+    chatScrollElasticResetTimerRef.current = null;
+  }
+
+  function setChatModeScrollElasticOffset(
+    scrollRoot: HTMLDivElement | null,
+    offsetPx: number,
+    pulling: boolean
+  ): void {
+    const nextOffset =
+      Math.abs(offsetPx) < 0.5
+        ? 0
+        : Math.max(
+            -CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX,
+            Math.min(CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX, offsetPx)
+          );
+    chatScrollElasticOffsetRef.current = nextOffset;
+    if (!scrollRoot) return;
+    scrollRoot.style.setProperty("--chat-elastic-offset-y", `${nextOffset.toFixed(2)}px`);
+    if (pulling && nextOffset !== 0) {
+      scrollRoot.dataset.chatElasticPulling = "true";
+    } else {
+      delete scrollRoot.dataset.chatElasticPulling;
+    }
+  }
+
+  function resetChatModeScrollElastic(scrollRoot = messagesScrollRef.current): void {
+    clearChatModeScrollElasticResetTimer();
+    setChatModeScrollElasticOffset(scrollRoot, 0, false);
+  }
+
+  function queueChatModeScrollElasticReset(scrollRoot: HTMLDivElement): void {
+    clearChatModeScrollElasticResetTimer();
+    chatScrollElasticResetTimerRef.current = window.setTimeout(() => {
+      chatScrollElasticResetTimerRef.current = null;
+      setChatModeScrollElasticOffset(scrollRoot, 0, false);
+    }, CHAT_MODE_SCROLL_ELASTIC_RESET_DELAY_MS);
+  }
+
+  function applyChatModeScrollElasticPull(
+    scrollRoot: HTMLDivElement,
+    direction: 1 | -1,
+    gestureDistancePx: number,
+    resistance: number
+  ): void {
+    const currentOffset = chatScrollElasticOffsetRef.current;
+    const currentMagnitude =
+      Math.sign(currentOffset) === direction ? Math.abs(currentOffset) : 0;
+    const remaining = Math.max(
+      0,
+      CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX - currentMagnitude
+    );
+    const nextMagnitude =
+      currentMagnitude + Math.min(remaining, gestureDistancePx * resistance);
+    setChatModeScrollElasticOffset(scrollRoot, direction * nextMagnitude, true);
+    queueChatModeScrollElasticReset(scrollRoot);
+  }
+
   function handleMessagesPaneScroll(event: React.UIEvent<HTMLDivElement>): void {
     scheduleZenAtmosphereScrollBlend(event.currentTarget);
     if (!chatEphemeralMode || !detail?.id) return;
@@ -26738,10 +27070,12 @@ function HomeContent(): React.JSX.Element {
     // drop is reflow, not a user gesture. Allow a small +2px slack for
     // sub-pixel rounding.
     const probableReflow = heightDrop > 0 && scrollDrop <= heightDrop + 2;
+    const programmaticScrollActive = Date.now() < chatProgrammaticScrollUntilMsRef.current;
     const scrolledUp =
       previousScrollTop !== undefined &&
       scrollDrop > MANUAL_SCROLL_UP_THRESHOLD_PX &&
-      !probableReflow;
+      !probableReflow &&
+      !programmaticScrollActive;
     if (scrolledUp) {
       chatAutoscrollUserDisarmedByConversationRef.current.set(detail.id, true);
       chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
@@ -26759,27 +27093,82 @@ function HomeContent(): React.JSX.Element {
   }
   function handleChatModeThreadWheel(event: React.WheelEvent<HTMLDivElement>): void {
     if (!chatEphemeralMode || !detail?.id) return;
+    const el = event.currentTarget;
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const atTop = el.scrollTop <= 0.5;
+    const atBottom = el.scrollTop >= maxScrollTop - 0.5;
     if (event.deltaY < -1) {
       disarmChatModeAutoscrollFromUserGesture();
     }
+    if (atTop && event.deltaY < -1) {
+      event.preventDefault();
+      applyChatModeScrollElasticPull(
+        el,
+        1,
+        Math.abs(event.deltaY),
+        CHAT_MODE_SCROLL_ELASTIC_WHEEL_RESISTANCE
+      );
+      return;
+    }
+    if (atBottom && event.deltaY > 1) {
+      event.preventDefault();
+      applyChatModeScrollElasticPull(
+        el,
+        -1,
+        event.deltaY,
+        CHAT_MODE_SCROLL_ELASTIC_WHEEL_RESISTANCE
+      );
+      return;
+    }
+    if (chatScrollElasticOffsetRef.current !== 0) {
+      queueChatModeScrollElasticReset(el);
+    }
   }
   function handleChatModeThreadTouchStart(event: React.TouchEvent<HTMLDivElement>): void {
+    clearChatModeScrollElasticResetTimer();
     chatTouchScrollLastYRef.current = event.touches[0]?.clientY ?? null;
   }
   function handleChatModeThreadTouchMove(event: React.TouchEvent<HTMLDivElement>): void {
     if (!chatEphemeralMode || !detail?.id) return;
+    const el = event.currentTarget;
     const nextY = event.touches[0]?.clientY ?? null;
     const previousY = chatTouchScrollLastYRef.current;
     chatTouchScrollLastYRef.current = nextY;
     if (nextY === null || previousY === null) return;
+    const touchDeltaY = nextY - previousY;
     // Swiping down moves the thread upward. That is the user's "pause follow"
     // gesture while PRISM is typing, so let the scroll surface take over.
-    if (nextY - previousY > 4) {
+    if (touchDeltaY > 4) {
       disarmChatModeAutoscrollFromUserGesture();
+    }
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const atTop = el.scrollTop <= 0.5;
+    const atBottom = el.scrollTop >= maxScrollTop - 0.5;
+    if (atTop && touchDeltaY > 1) {
+      applyChatModeScrollElasticPull(
+        el,
+        1,
+        touchDeltaY,
+        CHAT_MODE_SCROLL_ELASTIC_TOUCH_RESISTANCE
+      );
+      return;
+    }
+    if (atBottom && touchDeltaY < -1) {
+      applyChatModeScrollElasticPull(
+        el,
+        -1,
+        Math.abs(touchDeltaY),
+        CHAT_MODE_SCROLL_ELASTIC_TOUCH_RESISTANCE
+      );
+      return;
+    }
+    if (chatScrollElasticOffsetRef.current !== 0) {
+      queueChatModeScrollElasticReset(el);
     }
   }
   function handleChatModeThreadTouchEnd(): void {
     chatTouchScrollLastYRef.current = null;
+    resetChatModeScrollElastic();
   }
 
   function resetComposerHistoryCursor(): void {
@@ -27080,6 +27469,9 @@ function HomeContent(): React.JSX.Element {
       if (switchingPrivacyMode && !pendingReplyVisible) {
         pulseConversationSurfaceLoading();
       }
+      zenHeaderAutoHideArmedRef.current = false;
+      clearZenHeaderAutoHideTimer();
+      setZenHeaderVisible(true);
       setConversationStarterPrompts(null);
       setChatStartupSummary(null);
       chatSummaryRefreshMarkerRef.current = null;
@@ -47435,6 +47827,10 @@ function HomeContent(): React.JSX.Element {
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
       ),
     } as React.CSSProperties;
+    const zenSplashModelPickerActive =
+      (!detail || detail.messages.length === 0) &&
+      !pendingReplyVisible &&
+      !chatStartupSummaryVisible;
     return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
@@ -47443,8 +47839,12 @@ function HomeContent(): React.JSX.Element {
       data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       data-chat-sidebar-hidden="true"
       data-zen-surface="true"
+      data-zen-header-hidden={zenHeaderVisible ? undefined : "true"}
+      data-zen-initial-thinking={zenInitialThinkingActive ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
+      onPointerMove={handleZenSurfacePointerMove}
+      onPointerDownCapture={handleZenSurfacePointerDownCapture}
       onTouchStart={beginSidebarEdgeSwipe}
       onTouchMove={continueSidebarEdgeSwipe}
       onTouchEnd={endSidebarEdgeSwipe}
@@ -47454,7 +47854,13 @@ function HomeContent(): React.JSX.Element {
         className={styles.chatPane}
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
       >
-        <header className={styles.chatHeader}>
+        <header
+          className={styles.chatHeader}
+          onPointerEnter={handleZenHeaderPointerEnter}
+          onPointerLeave={handleZenHeaderPointerLeave}
+          onFocusCapture={handleZenHeaderFocusCapture}
+          onBlurCapture={handleZenHeaderBlurCapture}
+        >
           <div className={styles.chatHeaderIdentityGroup}>
             <div className={styles.chatHeaderWordmarkColumn}>
               <button
@@ -47488,7 +47894,7 @@ function HomeContent(): React.JSX.Element {
             </div>
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
-          {renderHeaderModelPicker()}
+          {zenSplashModelPickerActive ? null : renderHeaderModelPicker()}
           {renderChatOverflowGear()}
           {!chatLikeSurface ? (
             <div className={styles.chatHeaderComposeToolsRow}>
@@ -47659,6 +48065,7 @@ function HomeContent(): React.JSX.Element {
               <p>{messagesFrameStateLoadingLabel}</p>
             </div>
           ) : null}
+          {zenInitialThinkingNode}
           <div
             className={`${styles.messages} ${
               (!detail || detail.messages.length === 0) && !pendingReplyVisible
@@ -47829,6 +48236,11 @@ function HomeContent(): React.JSX.Element {
                   <div className={styles.emptyStateTitleBlock}>
                     <div className={styles.emptyStateTitle}>{title}</div>
                     <p className={styles.emptyStateHint}>{hint}</p>
+                  </div>
+                ) : null}
+                {zenSplashModelPickerActive ? (
+                  <div className={styles.zenSplashModelPicker}>
+                    {renderHeaderModelPicker()}
                   </div>
                 ) : null}
                 {/* Personal Chat skips the Sandbox tile grid — ComposerBotPicker lives in the compose strip. */}
@@ -48213,7 +48625,11 @@ function HomeContent(): React.JSX.Element {
           {devChatDebugEventsNode}
           {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
-            <div ref={messagesEndRef} aria-hidden="true" />
+            <div
+              ref={messagesEndRef}
+              className={styles.chatEphemeralLiveEndSpacer}
+              aria-hidden="true"
+            />
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
@@ -49612,7 +50028,11 @@ function HomeContent(): React.JSX.Element {
           {sandboxSummaryIndicatorNode}
           {/* Scroll sentinel: kept at the very end so the scroll effect can
               always bring the latest content into view. */}
-            <div ref={messagesEndRef} aria-hidden="true" />
+            <div
+              ref={messagesEndRef}
+              className={styles.chatEphemeralLiveEndSpacer}
+              aria-hidden="true"
+            />
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}

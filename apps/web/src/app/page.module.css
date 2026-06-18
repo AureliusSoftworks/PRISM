@@ -6773,14 +6773,14 @@
   left: 0;
   right: 0;
   bottom: 0;
-  height: 220px;
+  height: 168px;
   z-index: 3;
   pointer-events: none;
   background: linear-gradient(
     to top,
-    color-mix(in srgb, var(--bg-surface) 97%, transparent) 8%,
-    color-mix(in srgb, var(--bg-surface) 92%, transparent) 34%,
-    color-mix(in srgb, var(--bg-surface) 72%, transparent) 56%,
+    color-mix(in srgb, var(--bg-surface) 96%, transparent) 12%,
+    color-mix(in srgb, var(--bg-surface) 84%, transparent) 44%,
+    color-mix(in srgb, var(--bg-surface) 46%, transparent) 68%,
     transparent 100%
   );
 }
@@ -7198,11 +7198,20 @@
 }
 
 .messages[data-chat-ephemeral="true"] {
+  --chat-elastic-offset-y: 0px;
   overflow-y: auto;
-  overscroll-behavior-y: none;
+  overscroll-behavior-y: contain;
   touch-action: pan-y;
   scroll-behavior: smooth;
+  transform: translate3d(0, var(--chat-elastic-offset-y), 0);
+  transition: transform 0.42s cubic-bezier(0.18, 0.98, 0.22, 1);
+  will-change: scroll-position, transform;
   padding-bottom: max(140px, calc(env(safe-area-inset-bottom) + 112px));
+}
+
+.messages[data-chat-ephemeral="true"][data-chat-elastic-pulling="true"] {
+  transition-duration: 80ms;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
@@ -7218,25 +7227,36 @@
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.18) clamp(38px, 6dvh, 72px),
-    rgba(0, 0, 0, 0.74) clamp(104px, 15dvh, 170px),
-    #000 clamp(178px, 26dvh, 300px),
-    #000 calc(100% - 238px),
-    rgba(0, 0, 0, 0.58) calc(100% - 190px),
-    transparent calc(100% - 148px),
+    rgba(0, 0, 0, 0.18) clamp(24px, 4dvh, 48px),
+    rgba(0, 0, 0, 0.78) clamp(72px, 10dvh, 128px),
+    #000 clamp(118px, 17dvh, 212px),
+    #000 calc(100% - 152px),
+    rgba(0, 0, 0, 0.56) calc(100% - 112px),
+    transparent calc(100% - 78px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.18) clamp(38px, 6dvh, 72px),
-    rgba(0, 0, 0, 0.74) clamp(104px, 15dvh, 170px),
-    #000 clamp(178px, 26dvh, 300px),
-    #000 calc(100% - 238px),
-    rgba(0, 0, 0, 0.58) calc(100% - 190px),
-    transparent calc(100% - 148px),
+    rgba(0, 0, 0, 0.18) clamp(24px, 4dvh, 48px),
+    rgba(0, 0, 0, 0.78) clamp(72px, 10dvh, 128px),
+    #000 clamp(118px, 17dvh, 212px),
+    #000 calc(100% - 152px),
+    rgba(0, 0, 0, 0.56) calc(100% - 112px),
+    transparent calc(100% - 78px),
     transparent 100%
   );
+}
+
+.chatEphemeralLiveEndSpacer {
+  flex: 0 0 auto;
+  height: 1px;
+  pointer-events: none;
+}
+
+.messages[data-chat-ephemeral="true"][data-replying-live="true"]
+  .chatEphemeralLiveEndSpacer {
+  height: max(42dvh, 280px);
 }
 
 .messagesFrame[data-chat-focus="true"] .messages[data-chat-ephemeral="true"] {
@@ -10209,14 +10229,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-zen-surface="true"]
-  .messages[data-chat-ephemeral="true"][data-replying-live="true"]
-  .messageAssistant
-  .chatEphemeralMarkdownBody,
-.appLayout[data-zen-surface="true"]
   .messages.messagesAskQuestionTailSpace[data-chat-ephemeral="true"]
   .messageAssistant[data-starter-prompt-align="centered"]
   .chatEphemeralMarkdownBody {
-  transform: translateY(calc(-1 * clamp(120px, 16dvh, 260px)));
+  transform: translateY(calc(-1 * clamp(64px, 8dvh, 144px)));
 }
 
 .messages[data-chat-ephemeral="true"]
@@ -11666,6 +11682,260 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation-duration: 0.95s;
 }
 
+.appLayout[data-zen-initial-thinking="true"] .chatHeader,
+.appLayout[data-zen-initial-thinking="true"] .compose,
+.appLayout[data-zen-initial-thinking="true"] .messages {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 260ms ease;
+}
+
+.zenInitialThinkingOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      color-mix(in srgb, #5de6ff 16%, transparent) 0 18%,
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 38% 58%,
+      color-mix(in srgb, #ff5c7a 10%, transparent) 0 22%,
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 62% 60%,
+      color-mix(in srgb, #ffe45c 9%, transparent) 0 20%,
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--bg-deep) 76%, transparent);
+  backdrop-filter: blur(12px) saturate(1.08);
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+  animation: zenInitialThinkingVeilIn 420ms ease-out both;
+}
+
+.themeLight .zenInitialThinkingOverlay {
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      color-mix(in srgb, #1aa6c3 14%, transparent) 0 18%,
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 38% 58%,
+      color-mix(in srgb, #e43f5f 8%, transparent) 0 22%,
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 62% 60%,
+      color-mix(in srgb, #d9a800 8%, transparent) 0 20%,
+      transparent 46%
+    ),
+    color-mix(in srgb, #fffaf2 78%, transparent);
+}
+
+.zenInitialThinkingButton {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 0;
+  margin: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+  animation: zenInitialThinkingFloatIn 620ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.zenInitialThinkingButton:focus-visible {
+  outline: none;
+}
+
+.zenInitialThinkingGlyphHalo {
+  position: relative;
+  width: clamp(96px, 17dvh, 132px);
+  height: clamp(96px, 17dvh, 132px);
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--fg) 92%, #5de6ff 8%);
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--bg-surface) 58%, transparent) 0 45%,
+      transparent 70%
+    );
+  box-shadow:
+    0 24px 76px rgba(0, 0, 0, 0.34),
+    0 0 60px color-mix(in srgb, #5de6ff 24%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 14%, transparent);
+  isolation: isolate;
+  animation: zenInitialThinkingGlyphDrift 2.6s ease-in-out infinite;
+}
+
+.zenInitialThinkingGlyphHalo::before,
+.zenInitialThinkingGlyphHalo::after {
+  content: "";
+  position: absolute;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.zenInitialThinkingGlyphHalo::before {
+  inset: -14px;
+  z-index: -1;
+  padding: 2px;
+  background: conic-gradient(
+    from 18deg,
+    #ff4d6d,
+    #ff9f1c,
+    #b7e63a,
+    #2fd3e3,
+    #7b5cff,
+    #ff4d6d
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.86;
+  animation: zenInitialThinkingRingSpin 4.8s linear infinite;
+}
+
+.zenInitialThinkingGlyphHalo::after {
+  inset: -44px;
+  z-index: -2;
+  background:
+    conic-gradient(
+      from 120deg,
+      color-mix(in srgb, #ff4d6d 38%, transparent),
+      color-mix(in srgb, #2fd3e3 38%, transparent),
+      color-mix(in srgb, #7b5cff 34%, transparent),
+      color-mix(in srgb, #ff9f1c 34%, transparent),
+      color-mix(in srgb, #ff4d6d 38%, transparent)
+    );
+  filter: blur(28px);
+  opacity: 0.42;
+  animation: zenInitialThinkingAuraPulse 2.8s ease-in-out infinite;
+}
+
+.zenInitialThinkingGlyph {
+  width: clamp(42px, 7.2dvh, 56px);
+  height: clamp(42px, 7.2dvh, 56px);
+  display: block;
+  filter:
+    drop-shadow(0 0 16px color-mix(in srgb, currentColor 34%, transparent))
+    drop-shadow(0 3px 10px rgba(0, 0, 0, 0.34));
+  animation: zenInitialThinkingGlyphPulse 1.55s ease-in-out infinite;
+}
+
+.zenInitialThinkingLabel {
+  color: color-mix(in srgb, var(--fg) 86%, var(--fg-muted));
+  font-size: 1rem;
+  font-weight: 640;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.24),
+    0 0 18px color-mix(in srgb, #5de6ff 18%, transparent);
+}
+
+.zenInitialThinkingButton:hover .zenInitialThinkingGlyphHalo,
+.zenInitialThinkingButton:focus-visible .zenInitialThinkingGlyphHalo {
+  box-shadow:
+    0 28px 86px rgba(0, 0, 0, 0.4),
+    0 0 74px color-mix(in srgb, #5de6ff 34%, transparent),
+    0 0 0 4px color-mix(in srgb, #ffffff 8%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 18%, transparent);
+}
+
+@keyframes zenInitialThinkingVeilIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes zenInitialThinkingFloatIn {
+  from {
+    opacity: 0;
+    transform: translateY(clamp(64px, 14dvh, 136px)) scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zenInitialThinkingGlyphDrift {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-9px) scale(1.025);
+  }
+}
+
+@keyframes zenInitialThinkingRingSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes zenInitialThinkingAuraPulse {
+  0%,
+  100% {
+    opacity: 0.34;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.58;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes zenInitialThinkingGlyphPulse {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenInitialThinkingOverlay,
+  .zenInitialThinkingButton,
+  .zenInitialThinkingGlyphHalo,
+  .zenInitialThinkingGlyphHalo::before,
+  .zenInitialThinkingGlyphHalo::after,
+  .zenInitialThinkingGlyph {
+    animation: none;
+  }
+}
+
 .devChatDebugStream {
   display: grid;
   gap: 6px;
@@ -11974,7 +12244,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-chat-sidebar-hidden="true"][data-choice-composer-hidden="true"]
   .messagesFrame
   > .conversationStarterRail.askQuestionRail {
-  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  bottom: max(42px, calc(env(safe-area-inset-bottom, 0px) + 36px));
+  padding-bottom: clamp(24px, 3dvh, 44px);
 }
 
 .appLayout[data-chat-sidebar-hidden="true"] .composeTools {
@@ -12003,6 +12274,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   z-index: 6;
 }
 
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .chatHeader {
+  transition:
+    transform 0.32s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.22s ease,
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+  will-change: transform, opacity;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-zen-header-hidden="true"]
+  .chatHeader {
+  transform: translateY(calc(-100% - max(16px, env(safe-area-inset-top, 0px))));
+  opacity: 0;
+  pointer-events: none;
+  border-bottom-color: transparent;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .chatHeader {
+    transition:
+      opacity 0.01s linear,
+      border-color 0.01s linear,
+      box-shadow 0.01s linear;
+  }
+}
+
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame {
   height: 100dvh;
   min-height: 100dvh;
@@ -12014,16 +12312,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   left: 0;
   right: 0;
   bottom: 0;
-  height: clamp(172px, 24dvh, 286px);
+  height: clamp(132px, 18dvh, 228px);
   z-index: 3;
   pointer-events: none;
   background:
     linear-gradient(
       to bottom,
       transparent 0%,
-      color-mix(in srgb, var(--bg-surface) 58%, transparent) 20%,
-      color-mix(in srgb, var(--bg-surface) 94%, transparent) 42%,
-      var(--bg-surface) 58%,
+      color-mix(in srgb, var(--bg-surface) 46%, transparent) 30%,
+      color-mix(in srgb, var(--bg-surface) 90%, transparent) 58%,
+      var(--bg-surface) 78%,
       var(--bg-surface) 100%
     );
   backdrop-filter: blur(8px) saturate(1.04);
@@ -12058,6 +12356,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-backdrop-filter: blur(7px) saturate(0.98);
 }
 
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesFrame[data-chat-focus="true"]::before {
+  transform: translateY(clamp(72px, 10dvh, 128px));
+}
+
 .appLayout[data-chat-sidebar-hidden="true"][data-choice-composer-hidden="true"]
   .messagesFrame[data-chat-focus="true"]::before {
   transform: translateY(100%);
@@ -12069,15 +12372,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   top: 0;
   left: 0;
   right: 0;
-  height: clamp(190px, 31dvh, 372px);
+  height: clamp(150px, 24dvh, 300px);
   z-index: 3;
   pointer-events: none;
   background:
     linear-gradient(
       to bottom,
       color-mix(in srgb, var(--bg-deep) 96%, transparent) 0%,
-      color-mix(in srgb, var(--bg-deep) 78%, transparent) 34%,
-      color-mix(in srgb, var(--bg-deep) 28%, transparent) 72%,
+      color-mix(in srgb, var(--bg-deep) 72%, transparent) 30%,
+      color-mix(in srgb, var(--bg-deep) 20%, transparent) 64%,
       transparent 100%
     );
   backdrop-filter: blur(26px) saturate(1.04);
@@ -12096,6 +12399,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     rgba(0, 0, 0, 0.42) 74%,
     transparent 100%
   );
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesFrame[data-chat-focus="true"]::after {
+  transform: translateY(calc(-1 * clamp(28px, 5dvh, 72px)));
 }
 
 .appLayout[data-chat-sidebar-hidden="true"].themeLight .messagesFrame[data-chat-focus="true"]::after {
@@ -12126,23 +12434,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0,
-    rgba(0, 0, 0, 0.18) clamp(38px, 6dvh, 72px),
-    rgba(0, 0, 0, 0.74) clamp(104px, 15dvh, 170px),
-    #000 clamp(178px, 26dvh, 300px),
-    #000 calc(100% - 188px),
-    rgba(0, 0, 0, 0.62) calc(100% - 150px),
-    transparent calc(100% - 112px),
+    rgba(0, 0, 0, 0.18) clamp(24px, 4dvh, 48px),
+    rgba(0, 0, 0, 0.78) clamp(72px, 10dvh, 128px),
+    #000 clamp(118px, 17dvh, 212px),
+    #000 calc(100% - 136px),
+    rgba(0, 0, 0, 0.56) calc(100% - 98px),
+    transparent calc(100% - 68px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0,
-    rgba(0, 0, 0, 0.18) clamp(38px, 6dvh, 72px),
-    rgba(0, 0, 0, 0.74) clamp(104px, 15dvh, 170px),
-    #000 clamp(178px, 26dvh, 300px),
-    #000 calc(100% - 188px),
-    rgba(0, 0, 0, 0.62) calc(100% - 150px),
-    transparent calc(100% - 112px),
+    rgba(0, 0, 0, 0.18) clamp(24px, 4dvh, 48px),
+    rgba(0, 0, 0, 0.78) clamp(72px, 10dvh, 128px),
+    #000 clamp(118px, 17dvh, 212px),
+    #000 calc(100% - 136px),
+    rgba(0, 0, 0, 0.56) calc(100% - 98px),
+    transparent calc(100% - 68px),
     transparent 100%
   );
 }
@@ -12307,6 +12615,70 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-weight: 430;
   line-height: 1.62;
   color: color-mix(in srgb, var(--fg) 74%, var(--fg-muted));
+}
+
+.zenSplashModelPicker {
+  width: min(520px, calc(100vw - 40px));
+  margin-top: clamp(14px, 3vh, 24px);
+  display: flex;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.zenSplashModelPicker .chatHeaderModelPicker {
+  max-width: none;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.zenSplashModelPicker .modeControl.chatHeaderModeToggle {
+  height: 34px;
+}
+
+.zenSplashModelPicker .chatHeaderModeToggle .modeToggleTrack {
+  width: 92px;
+  height: 34px;
+}
+
+.zenSplashModelPicker .chatHeaderModeToggle .modeThumb {
+  width: 70px;
+  min-width: 70px;
+  height: 34px;
+  font-size: 12px;
+}
+
+.zenSplashModelPicker .chatHeaderModeToggle .modeThumbOnline {
+  transform: translate3d(22px, 0, 0);
+}
+
+.zenSplashModelPicker .chatHeaderModelPicker .composeModelControl {
+  height: 38px;
+  max-width: min(18rem, 62vw);
+  border-radius: 12px;
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 9%, transparent);
+}
+
+.zenSplashModelPicker .chatHeaderModelPicker .composeModelTrigger {
+  min-width: 172px;
+  padding-inline: 14px;
+  gap: 9px;
+  justify-content: center;
+}
+
+.zenSplashModelPicker .chatHeaderModelPicker .composeControlLabel {
+  display: inline;
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: 0;
+  color: var(--fg-subtle);
+}
+
+.zenSplashModelPicker .chatHeaderModelPicker .composeModelTriggerName {
+  max-width: min(18ch, 42vw);
+  font-size: 13px;
 }
 
 .appLayout[data-zen-surface="true"] .markdownComposerSurface {
@@ -12872,6 +13244,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
 }
 
+.appLayout[data-chat-sidebar-hidden="true"][data-choice-composer-hidden="true"]
+  .messagesFrame
+  > .conversationStarterRail.askQuestionRail::before {
+  top: -180px;
+  transform: translateY(36px);
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.92) 0%,
+    rgba(0, 0, 0, 0.8) 28%,
+    rgba(0, 0, 0, 0.52) 54%,
+    rgba(0, 0, 0, 0.2) 78%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
 /* Optional line above quick-reply chips (Prism AskQuestion prompt or Talk-to-me supersets). */
 .conversationStarterChipHeading {
   grid-column: 1 / -1;
@@ -13215,7 +13602,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, var(--accent) 40%, var(--askq-chip-bg)),
       color-mix(in srgb, var(--accent) 22%, var(--askq-chip-bg))
     );
-  color: var(--accent-text);
+  color: var(--askq-chip-text);
   box-shadow:
     var(--shadow-sm),
     inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
@@ -13432,7 +13819,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, var(--accent) 34%, var(--askq-chip-bg)),
       color-mix(in srgb, var(--accent) 20%, var(--askq-chip-bg))
     );
-  color: var(--accent-text);
+  color: var(--askq-chip-text);
 }
 
 .askQuestionInlineChoices[data-choices-disabled="true"] .conversationStarterChip {
@@ -13472,7 +13859,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, var(--accent) 34%, var(--askq-chip-bg)),
       color-mix(in srgb, var(--accent) 20%, var(--askq-chip-bg))
     );
-  color: var(--accent-text);
+  color: var(--askq-chip-text);
   box-shadow: inset 0 0 0 1px var(--askq-chip-inset);
 }
 
@@ -27809,6 +28196,25 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     z-index: 40;
   }
 
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .chatHeader {
+    overflow: hidden;
+    transition:
+      max-height 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+      padding 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+      opacity 0.2s ease,
+      transform 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-zen-header-hidden="true"]
+    .chatHeader {
+    max-height: 0;
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
   .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame {
     height: auto;
     min-height: 0;
@@ -27902,6 +28308,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     position: absolute;
     bottom: 0;
     z-index: 12;
+  }
+}
+
+@media (max-width: 720px) and (prefers-reduced-motion: reduce) {
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .chatHeader {
+    transition:
+      opacity 0.01s linear,
+      border-color 0.01s linear,
+      box-shadow 0.01s linear;
   }
 }
 

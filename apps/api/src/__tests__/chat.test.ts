@@ -361,6 +361,70 @@ describe("processChatMessage starter prompts", () => {
     );
   });
 
+  it("rejects internal third-person starter choice labels", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of check-in would help you settle in?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (fetchCount === 2) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                '{"suggestions":["The user has chosen the first of the options","The user selected the second option","User picked the third reply"]}',
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: '{"title":"Check In"}' } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "Something weighing on me.",
+      "A decision I keep circling.",
+      "A small moment from today.",
+      "I'm not sure yet.",
+    ]);
+    assert.deepEqual(
+      result.conversation.messages[0]?.askQuestion?.options.map((option) => option.label),
+      [
+        "Something weighing on me.",
+        "A decision I keep circling.",
+        "A small moment from today.",
+      ]
+    );
+    await flushBackgroundTitleJobs();
+  });
+
   it("does not inject first-contact intro instructions for hero-start prompts", async () => {
     const db = createChatTestDb();
     db.prepare(
