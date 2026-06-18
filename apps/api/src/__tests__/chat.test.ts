@@ -16,6 +16,7 @@ import {
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates } from "../memory.ts";
+import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, type LlmProvider } from "../providers.ts";
 const originalFetch = globalThis.fetch;
 
@@ -1861,6 +1862,246 @@ describe("processChatMessage AskQuestion tool", () => {
 
     const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
     assert.equal(lastAssistant?.content, "Helpful context remains.");
+  });
+});
+
+describe("processChatMessage thread compaction context", () => {
+  it("uses compacted summaries instead of pre-compaction transcript rows", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-compact-current-chat";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Compact Current Chat",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    insertMessage.run(
+      "old-user",
+      conversationId,
+      userId,
+      "user",
+      "PRE_COMPACTION_SECRET_ALPHA should stay in the transcript only.",
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "old-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "PRE_COMPACTION_SECRET_BETA should also stay out of live context.",
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    const compactProvider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        return messages[0]?.content.includes("ultra-short internal thought")
+          ? "I'm tracking the compacted plan."
+          : "The compacted summary preserves the early planning decisions.";
+      },
+      async embedText() {
+        return fallbackEmbedding("unused");
+      },
+    };
+    const compacted = await summarizeThreadCompact(
+      db,
+      compactProvider,
+      userId,
+      conversationId,
+      { mode: "chat", reason: "manual", force: true }
+    );
+    assert.equal(compacted.triggered, true);
+    assert.ok(compacted.latestSummaryAt);
+    const summaryTime = Date.parse(compacted.latestSummaryAt ?? "");
+    assert.ok(Number.isFinite(summaryTime));
+    insertMessage.run(
+      "post-user",
+      conversationId,
+      userId,
+      "user",
+      "Post-compaction question about the next step.",
+      new Date(summaryTime + 1000).toISOString()
+    );
+    insertMessage.run(
+      "post-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Post-compaction answer with the latest decision.",
+      new Date(summaryTime + 2000).toISOString()
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Fresh reply after compaction." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "Continue from the compacted context.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Earlier in this thread \(compacted context\):/);
+    assert.match(promptText, /compacted summary preserves the early planning decisions/i);
+    assert.match(promptText, /Post-compaction question about the next step/);
+    assert.match(promptText, /Post-compaction answer with the latest decision/);
+    assert.match(promptText, /Continue from the compacted context/);
+    assert.doesNotMatch(promptText, /PRE_COMPACTION_SECRET_ALPHA/);
+    assert.doesNotMatch(promptText, /PRE_COMPACTION_SECRET_BETA/);
+    const preservedOldRows = db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND content LIKE '%PRE_COMPACTION_SECRET_%'"
+      )
+      .get(conversationId) as { n: number };
+    assert.equal(preservedOldRows.n, 2);
+  });
+
+  it("keeps the recent live tail after milestone compaction", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-milestone-tail";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Milestone Tail",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:40.000Z"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    const messageCount = RECENT_WINDOW_SIZE + 5;
+    for (let index = 0; index < messageCount; index += 1) {
+      const content =
+        index === messageCount - 1
+          ? "RECENT_UNSUMMARIZED_CONTEXT must remain in live history."
+          : `Milestone transcript row ${index}`;
+      insertMessage.run(
+        `milestone-${index}`,
+        conversationId,
+        userId,
+        index % 2 === 0 ? "user" : "assistant",
+        content,
+        new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1000).toISOString()
+      );
+    }
+
+    const compactProvider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        return messages[0]?.content.includes("ultra-short internal thought")
+          ? "I'm tracking the milestone summary."
+          : "Milestone summary covers only the older transcript rows.";
+      },
+      async embedText() {
+        return fallbackEmbedding("unused");
+      },
+    };
+    const compacted = await summarizeThreadCompact(
+      db,
+      compactProvider,
+      userId,
+      conversationId,
+      { mode: "chat", reason: "milestone" }
+    );
+    assert.equal(compacted.triggered, true);
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Fresh reply after milestone." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "Continue after the milestone compaction.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Milestone summary covers only the older transcript rows/);
+    assert.match(promptText, /RECENT_UNSUMMARIZED_CONTEXT must remain in live history/);
+    assert.match(promptText, /Continue after the milestone compaction/);
   });
 });
 

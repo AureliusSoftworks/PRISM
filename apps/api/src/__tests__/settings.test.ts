@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_ZEN_WALLPAPER_OPACITY,
+  MAX_ZEN_WALLPAPER_OPACITY,
+  MIN_ZEN_WALLPAPER_OPACITY,
   parseHiddenBotModelIds,
+  parseHiddenComfyUiWorkflowIds,
   resolveNextSettings,
   sanitizeAnthropicKeyInput,
   sanitizeElevenLabsKeyInput,
@@ -28,6 +32,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     composerWritingAssist: 1,
     fallbackModelMessageStripe: 1,
     hiddenBotModelIds: "[]",
+    hiddenComfyUiWorkflowIds: "[]",
     preferredLocalModel: null,
     preferredOnlineModel: null,
     lenientLocalFallbackModel: null,
@@ -36,6 +41,9 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     comfyUiHost: null,
     preferredLocalImageModel: null,
     preferredOpenAiImageModel: null,
+    preferredZenWallpaperLocalImageModel: null,
+    preferredZenWallpaperOpenAiImageModel: null,
+    zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
@@ -542,6 +550,89 @@ describe("resolveNextSettings — openAiApiKey", () => {
   });
 });
 
+describe("resolveNextSettings — Zen Atmosphere model picks", () => {
+  it("stores preferred local wallpaper image model id", () => {
+    const next = resolveNextSettings(
+      { preferredZenWallpaperLocalImageModel: "comfyui:ambient.safetensors" },
+      baseline()
+    );
+    assert.equal(
+      next.preferredZenWallpaperLocalImageModel,
+      "comfyui:ambient.safetensors"
+    );
+  });
+
+  it("stores preferred OpenAI wallpaper image model id", () => {
+    const next = resolveNextSettings(
+      { preferredZenWallpaperOpenAiImageModel: "gpt-image-2" },
+      baseline()
+    );
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, "gpt-image-2");
+  });
+
+  it("clears wallpaper image model ids with empty strings", () => {
+    const current = baseline({
+      preferredZenWallpaperLocalImageModel: "old-local",
+      preferredZenWallpaperOpenAiImageModel: "old-openai",
+    });
+    const next = resolveNextSettings(
+      {
+        preferredZenWallpaperLocalImageModel: "",
+        preferredZenWallpaperOpenAiImageModel: "",
+      },
+      current
+    );
+    assert.equal(next.preferredZenWallpaperLocalImageModel, null);
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, null);
+  });
+
+  it("keeps stored wallpaper ids when the patch omits them", () => {
+    const current = baseline({
+      preferredZenWallpaperLocalImageModel: "comfyui:ambient.safetensors",
+      preferredZenWallpaperOpenAiImageModel: "gpt-image-2",
+    });
+    const next = resolveNextSettings({ theme: "light" }, current);
+    assert.equal(
+      next.preferredZenWallpaperLocalImageModel,
+      "comfyui:ambient.safetensors"
+    );
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, "gpt-image-2");
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere opacity", () => {
+  it("stores numeric and numeric-string opacity values", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.28 }, baseline()).zenWallpaperOpacity,
+      0.28
+    );
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: "0.22" }, baseline()).zenWallpaperOpacity,
+      0.22
+    );
+  });
+
+  it("clamps opacity to the readable wallpaper range", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.01 }, baseline()).zenWallpaperOpacity,
+      MIN_ZEN_WALLPAPER_OPACITY
+    );
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.9 }, baseline()).zenWallpaperOpacity,
+      MAX_ZEN_WALLPAPER_OPACITY
+    );
+  });
+
+  it("keeps the stored opacity when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperOpacity: 0.19 });
+    assert.equal(resolveNextSettings({}, current).zenWallpaperOpacity, 0.19);
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: "nope" }, current).zenWallpaperOpacity,
+      0.19
+    );
+  });
+});
+
 describe("resolveNextSettings — anthropicApiKey", () => {
   it("non-empty string is a replace", () => {
     const next = resolveNextSettings({ anthropicApiKey: "sk-ant-abc" }, baseline());
@@ -756,6 +847,50 @@ describe("resolveNextSettings — comfyUiWorkflows", () => {
     assert.equal(next.comfyUiWorkflows.length, 1);
     assert.equal(next.comfyUiWorkflows[0]?.remotePath, "default/workflows/foo.json");
     assert.equal(next.comfyUiWorkflows[0]?.workflow, undefined);
+  });
+});
+
+describe("resolveNextSettings — hiddenComfyUiWorkflowIds", () => {
+  it("keeps current hidden workflows when the field is omitted", () => {
+    const current = JSON.stringify(["comfyui-remote:default%2Fworkflows%2Fhidden.json"]);
+    const next = resolveNextSettings(
+      {},
+      baseline({ hiddenComfyUiWorkflowIds: current })
+    );
+    assert.deepEqual(next.hiddenComfyUiWorkflowIds, [
+      "comfyui-remote:default%2Fworkflows%2Fhidden.json",
+    ]);
+  });
+
+  it("accepts only ComfyUI workflow model ids", () => {
+    const next = resolveNextSettings(
+      {
+        hiddenComfyUiWorkflowIds: [
+          " comfyui-remote:default%2Fworkflows%2Fhidden.json ",
+          "comfyui-workflow:legacy",
+          "llama3.2",
+          "not-a-workflow",
+        ],
+      },
+      baseline()
+    );
+    assert.deepEqual(next.hiddenComfyUiWorkflowIds, [
+      "comfyui-remote:default%2Fworkflows%2Fhidden.json",
+      "comfyui-workflow:legacy",
+    ]);
+  });
+
+  it("parses stored hidden workflows defensively", () => {
+    assert.deepEqual(
+      parseHiddenComfyUiWorkflowIds(
+        JSON.stringify([
+          "comfyui-remote:workflows%2Fscene.json",
+          "comfyui-remote:workflows%2Fscene.json",
+          "gpt-5",
+        ])
+      ),
+      ["comfyui-remote:workflows%2Fscene.json"]
+    );
   });
 });
 

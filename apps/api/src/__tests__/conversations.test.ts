@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  clearConversationMessages,
   createDevSeedConversations,
   deleteAllConversations,
   deleteConversation,
@@ -76,6 +77,19 @@ function createTestDb(): DatabaseSync {
       conversation_id TEXT,
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE session_opinions (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      bot_id TEXT,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'warming',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, bot_scope_key)
     );
     CREATE TABLE memories (
       id TEXT PRIMARY KEY,
@@ -413,6 +427,108 @@ describe("deleteConversation", () => {
       .prepare("SELECT id FROM conversations WHERE id = ?")
       .get("chat-2") as { id?: string } | undefined;
     assert.equal(otherChat?.id, "chat-2");
+  });
+});
+
+describe("clearConversationMessages", () => {
+  it("empties a zen chat without deleting the conversation row", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "chat-1");
+    insertLinkedMemory(db, "user-1", "chat-1", "memory-chat-1", ["msg-chat-1"]);
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
+    ).run("chat-1", "user-1");
+    db.prepare(
+      "INSERT INTO session_opinions (user_id, conversation_id, bot_scope_key, score, band, trend, last_reason, recent_reasons, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "user-1",
+      "chat-1",
+      "__default__",
+      64,
+      "open",
+      "warmer",
+      "A prior turn existed.",
+      JSON.stringify(["A prior turn existed."]),
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    const result = clearConversationMessages(db, "user-1", "chat-1");
+
+    assert.deepEqual(result, {
+      deletedMessages: 1,
+      deletedSummaries: 1,
+      deletedExports: 1,
+    });
+    const conversation = db
+      .prepare("SELECT id, title, conversation_mode FROM conversations WHERE id = ?")
+      .get("chat-1") as { id: string; title: string; conversation_mode: string } | undefined;
+    assert.equal(conversation?.id, "chat-1");
+    assert.equal(conversation?.title, "New chat");
+    assert.equal(conversation?.conversation_mode, "zen");
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?")
+        .get("chat-1") as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memory_summaries WHERE conversation_id = ?")
+        .get("chat-1") as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM conversation_exports WHERE conversation_id = ?")
+        .get("chat-1") as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM session_opinions WHERE conversation_id = ?")
+        .get("chat-1") as { n: number }).n,
+      0
+    );
+    const image = db
+      .prepare("SELECT conversation_id FROM images WHERE id = ?")
+      .get("img-chat-1") as { conversation_id: string | null } | undefined;
+    assert.equal(image?.conversation_id, null);
+    const memory = db
+      .prepare("SELECT conversation_id FROM memories WHERE id = ?")
+      .get("memory-chat-1") as { conversation_id: string | null } | undefined;
+    assert.equal(memory?.conversation_id, null);
+  });
+
+  it("leaves other users' chat context untouched", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "chat-1");
+    seedChat(db, "user-2", "chat-2");
+
+    clearConversationMessages(db, "user-1", "chat-1");
+
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM conversations WHERE user_id = ?")
+        .get("user-2") as { n: number }).n,
+      1
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE user_id = ?")
+        .get("user-2") as { n: number }).n,
+      1
+    );
+    const otherSummary = db
+      .prepare("SELECT conversation_id FROM memory_summaries WHERE user_id = ?")
+      .get("user-2") as { conversation_id: string | null } | undefined;
+    assert.equal(otherSummary?.conversation_id, "chat-2");
+  });
+
+  it("rejects Coffee conversations", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "coffee-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'coffee' WHERE id = ? AND user_id = ?"
+    ).run("coffee-1", "user-1");
+
+    assert.throws(
+      () => clearConversationMessages(db, "user-1", "coffee-1"),
+      /Coffee conversations cannot be cleared/
+    );
   });
 });
 

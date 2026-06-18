@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, decryptText, encryptJson, encryptText } from "./security.ts";
 import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
+import { normalizeZenWallpaperOpacity } from "./settings.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
@@ -11,6 +12,7 @@ export interface BackupUserSettings {
   composerWritingAssist: boolean;
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
+  hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string;
   preferredOnlineModel: string;
   lenientLocalFallbackModel: string;
@@ -20,6 +22,9 @@ export interface BackupUserSettings {
   comfyUiWorkflows: unknown[];
   preferredLocalImageModel: string;
   preferredOpenAiImageModel: string;
+  preferredZenWallpaperLocalImageModel: string;
+  preferredZenWallpaperOpenAiImageModel: string;
+  zenWallpaperOpacity: number;
   prismDefaultLlmModel: string;
   prismImageToolLlmModel: string;
   devMemoriesEnabled: boolean;
@@ -128,6 +133,7 @@ export function exportUserSnapshot(
          composer_writing_assist,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
+         hidden_comfyui_workflow_ids,
          preferred_local_model,
          preferred_online_model,
          lenient_local_fallback_model,
@@ -137,6 +143,9 @@ export function exportUserSnapshot(
          comfyui_workflows,
          preferred_local_image_model,
          preferred_openai_image_model,
+         preferred_zen_wallpaper_local_image_model,
+         preferred_zen_wallpaper_openai_image_model,
+         zen_wallpaper_opacity,
          prism_default_llm_model,
          prism_image_tool_llm_model,
          dev_memories_enabled,
@@ -162,6 +171,7 @@ export function exportUserSnapshot(
         composer_writing_assist: number;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
+        hidden_comfyui_workflow_ids: string | null;
         preferred_local_model: string | null;
         preferred_online_model: string | null;
         lenient_local_fallback_model: string | null;
@@ -171,6 +181,9 @@ export function exportUserSnapshot(
         comfyui_workflows: string | null;
         preferred_local_image_model: string | null;
         preferred_openai_image_model: string | null;
+        preferred_zen_wallpaper_local_image_model: string | null;
+        preferred_zen_wallpaper_openai_image_model: string | null;
+        zen_wallpaper_opacity: number | null;
         prism_default_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
         dev_memories_enabled: number;
@@ -195,6 +208,7 @@ export function exportUserSnapshot(
         composerWritingAssist: user.composer_writing_assist !== 0,
         fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
+        hiddenComfyUiWorkflowIds: safeParseStringArray(user.hidden_comfyui_workflow_ids),
         preferredLocalModel: user.preferred_local_model ?? "",
         preferredOnlineModel: user.preferred_online_model ?? "",
         lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
@@ -204,6 +218,13 @@ export function exportUserSnapshot(
         comfyUiWorkflows: safeParseArray(user.comfyui_workflows),
         preferredLocalImageModel: user.preferred_local_image_model ?? "",
         preferredOpenAiImageModel: user.preferred_openai_image_model ?? "",
+        preferredZenWallpaperLocalImageModel:
+          user.preferred_zen_wallpaper_local_image_model ?? "",
+        preferredZenWallpaperOpenAiImageModel:
+          user.preferred_zen_wallpaper_openai_image_model ?? "",
+        zenWallpaperOpacity: normalizeZenWallpaperOpacity(
+          user.zen_wallpaper_opacity
+        ),
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
         devMemoriesEnabled: user.dev_memories_enabled === 1,
@@ -461,6 +482,7 @@ export function importUserSnapshot(
         composer_writing_assist = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
+        hidden_comfyui_workflow_ids = ?,
         preferred_local_model = ?,
         preferred_online_model = ?,
         lenient_local_fallback_model = ?,
@@ -470,6 +492,9 @@ export function importUserSnapshot(
         comfyui_workflows = ?,
         preferred_local_image_model = ?,
         preferred_openai_image_model = ?,
+        preferred_zen_wallpaper_local_image_model = ?,
+        preferred_zen_wallpaper_openai_image_model = ?,
+        zen_wallpaper_opacity = ?,
         prism_default_llm_model = ?,
         prism_image_tool_llm_model = ?,
         dev_memories_enabled = ?,
@@ -500,6 +525,13 @@ export function importUserSnapshot(
             )
           : []
       ),
+      JSON.stringify(
+        Array.isArray(settings.hiddenComfyUiWorkflowIds)
+          ? settings.hiddenComfyUiWorkflowIds.filter(
+              (value): value is string => typeof value === "string" && value.trim().length > 0
+            )
+          : []
+      ),
       settings.preferredLocalModel?.trim() ?? "",
       settings.preferredOnlineModel?.trim() ?? "",
       settings.lenientLocalFallbackModel?.trim() ?? "",
@@ -509,6 +541,9 @@ export function importUserSnapshot(
       JSON.stringify(Array.isArray(settings.comfyUiWorkflows) ? settings.comfyUiWorkflows : []),
       settings.preferredLocalImageModel?.trim() ?? "",
       settings.preferredOpenAiImageModel?.trim() ?? "",
+      settings.preferredZenWallpaperLocalImageModel?.trim() ?? "",
+      settings.preferredZenWallpaperOpenAiImageModel?.trim() ?? "",
+      normalizeZenWallpaperOpacity(settings.zenWallpaperOpacity),
       settings.prismDefaultLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
       settings.devMemoriesEnabled ? 1 : 0,

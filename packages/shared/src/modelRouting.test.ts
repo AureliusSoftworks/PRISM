@@ -1,0 +1,51 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import {
+  defaultHiddenModelIdsForCatalog,
+  isCommonOnlineChatModel,
+} from "./modelRouting.ts";
+
+describe("default online model visibility", () => {
+  it("keeps common OpenAI and Anthropic aliases visible by default", () => {
+    for (const model of [
+      { id: "gpt-5", provider: "openai" as const },
+      { id: "gpt-5-mini", provider: "openai" as const },
+      { id: "gpt-4.1", provider: "openai" as const },
+      { id: "gpt-4.1-mini", provider: "openai" as const },
+      { id: "gpt-4o", provider: "openai" as const },
+      { id: "gpt-4o-mini", provider: "openai" as const },
+      { id: "o3", provider: "openai" as const },
+      { id: "o4-mini", provider: "openai" as const },
+      { id: "claude-sonnet-4-6", provider: "anthropic" as const },
+      { id: "claude-opus-4-8", provider: "anthropic" as const },
+      { id: "claude-3-5-sonnet-latest", provider: "anthropic" as const },
+    ]) {
+      assert.equal(isCommonOnlineChatModel(model), true, model.id);
+    }
+  });
+
+  it("hides dated snapshots, previews, nano, and other edge models by default", () => {
+    const catalog = {
+      online: [
+        { id: "gpt-4o-mini", provider: "openai" as const },
+        { id: "gpt-4o-2024-08-06", provider: "openai" as const },
+        { id: "gpt-4.1-nano", provider: "openai" as const },
+        { id: "gpt-5-nano", provider: "openai" as const },
+        { id: "gpt-4o-mini-search-preview", provider: "openai" as const },
+        { id: "claude-sonnet-4-6", provider: "anthropic" as const },
+        { id: "claude-sonnet-4-5-20250929", provider: "anthropic" as const },
+        { id: "claude-test-model", provider: "anthropic" as const },
+      ],
+    };
+
+    assert.deepEqual(defaultHiddenModelIdsForCatalog(catalog), [
+      "gpt-4o-2024-08-06",
+      "gpt-4.1-nano",
+      "gpt-5-nano",
+      "gpt-4o-mini-search-preview",
+      "claude-sonnet-4-5-20250929",
+      "claude-test-model",
+    ]);
+  });
+});

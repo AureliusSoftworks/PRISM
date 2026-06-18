@@ -72,6 +72,13 @@ export {
 } from "./promptShortcut.js";
 
 export {
+  ELEVENLABS_IMAGE_MODEL_IDS,
+  ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI,
+  isElevenLabsImageModelId,
+  type ElevenLabsImageModelId,
+} from "./elevenLabsImageModels.js";
+
+export {
   OPENAI_IMAGE_MODEL_IDS,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
@@ -101,6 +108,7 @@ export {
   MAX_COMFY_UI_WORKFLOWS_STORED_JSON_BYTES,
   encodeComfyUiRemoteWorkflowModelId,
   encodeComfyUiWorkflowModelId,
+  formatComfyUiRemoteWorkflowLabel,
   findComfyUiWorkflowBindingByRemotePath,
   findComfyUiWorkflowRegistration,
   isComfyUiApiWorkflowNode,
@@ -515,6 +523,14 @@ export interface Conversation {
     promptSeed: string | null;
     generationMessageCount: number | null;
     status: "idle" | "generating" | "ready" | "error";
+    history: Array<{
+      imageId: string;
+      promptSeed: string | null;
+      generationMessageCount: number;
+      revealStartMessageCount?: number;
+      revealFullMessageCount?: number;
+      createdAt?: string;
+    }>;
   };
   createdAt: string;
   updatedAt: string;
@@ -549,10 +565,14 @@ export type MemoryTier = "short_term" | "long_term";
 export {
   REQUIRED_LOCAL_MODELS,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  MODEL_VISIBILITY_DEFAULTS_VERSION,
+  defaultHiddenModelIdsForCatalog,
+  isCommonOnlineChatModel,
   sanitizeHiddenModelIds,
   resolveAutoModel,
   type AutoModelProvider,
   type CatalogShapeForAuto,
+  type ModelForDefaultVisibility,
   type ResolveAutoModelInput,
   type ResolvedAutoModel,
 } from "./modelRouting.js";
@@ -609,7 +629,7 @@ export interface MemoryValidationEvent {
  * Defaults to `"sandbox"` on the server when omitted, so pre-`mode` clients
  * keep the previous cross-session memory behavior.
  */
-export type ChatMode = "chat" | "sandbox" | "coffee";
+export type ChatMode = "zen" | "chat" | "sandbox" | "coffee";
 
 /**
  * Companion-only preferences. These are intentionally "feel" controls, while
@@ -639,7 +659,7 @@ export interface ChatRequestPayload {
   message: string;
   starterPrompt?: boolean;
   mode?: ChatMode;
-  /** Companion-only optional preferences (used only when mode === "chat"). */
+  /** Companion-only optional preferences (used only when mode === "zen"). */
   companionPreferences?: ChatCompanionPreferences;
   /** Advanced controls for runtime routing. */
   sandboxControls?: SandboxRuntimeControls;

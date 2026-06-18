@@ -1,5 +1,9 @@
 import type { ComfyUiWorkflowRegistration } from "@localai/shared";
-import { validateComfyUiWorkflowsPayload } from "@localai/shared";
+import {
+  isComfyUiRemoteWorkflowModelId,
+  isComfyUiWorkflowModelId,
+  validateComfyUiWorkflowsPayload,
+} from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 
 /**
@@ -21,6 +25,10 @@ import { sanitizeHiddenModelIds } from "./model-routing.ts";
 export type Theme = "light" | "dark" | "system";
 export type Provider = "local" | "openai" | "anthropic";
 
+export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
+export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
+export const MAX_ZEN_WALLPAPER_OPACITY = 0.4;
+
 const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
   "localhost",
   "127.0.0.1",
@@ -41,6 +49,7 @@ export interface CurrentSettings {
   /** 1 = show left-edge stripe on assistant bubbles when the copyright lenient fallback answered. */
   fallbackModelMessageStripe: number;
   hiddenBotModelIds: string;
+  hiddenComfyUiWorkflowIds: string;
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
   lenientLocalFallbackModel: string | null;
@@ -49,6 +58,9 @@ export interface CurrentSettings {
   comfyUiHost: string | null;
   preferredLocalImageModel: string | null;
   preferredOpenAiImageModel: string | null;
+  preferredZenWallpaperLocalImageModel: string | null;
+  preferredZenWallpaperOpenAiImageModel: string | null;
+  zenWallpaperOpacity: number | null;
   /** Parsed `users.comfyui_workflows` JSON; empty when unset or invalid. */
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
@@ -68,6 +80,7 @@ export interface NextSettings {
   composerWritingAssist: number;
   fallbackModelMessageStripe: number;
   hiddenBotModelIds: string[];
+  hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
   lenientLocalFallbackModel: string | null;
@@ -76,6 +89,9 @@ export interface NextSettings {
   comfyUiHost: string | null;
   preferredLocalImageModel: string | null;
   preferredOpenAiImageModel: string | null;
+  preferredZenWallpaperLocalImageModel: string | null;
+  preferredZenWallpaperOpenAiImageModel: string | null;
+  zenWallpaperOpacity: number;
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
   prismImageToolLlmModel: string | null;
@@ -256,9 +272,45 @@ export function parseHiddenBotModelIds(raw: string | null | undefined): string[]
   }
 }
 
+function sanitizeHiddenComfyUiWorkflowIds(ids: string[]): string[] {
+  return sanitizeHiddenModelIds(ids).filter(
+    (id) => isComfyUiRemoteWorkflowModelId(id) || isComfyUiWorkflowModelId(id)
+  );
+}
+
+export function parseHiddenComfyUiWorkflowIds(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return sanitizeHiddenComfyUiWorkflowIds(Array.from(
+      new Set(
+        parsed
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      )
+    ));
+  } catch {
+    return [];
+  }
+}
+
 function readHiddenBotModelIds(value: unknown, fallback: string): string[] {
   if (!Array.isArray(value)) return parseHiddenBotModelIds(fallback);
   return sanitizeHiddenModelIds(Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  ));
+}
+
+function readHiddenComfyUiWorkflowIds(value: unknown, fallback: string): string[] {
+  if (!Array.isArray(value)) return parseHiddenComfyUiWorkflowIds(fallback);
+  return sanitizeHiddenComfyUiWorkflowIds(Array.from(
     new Set(
       value
         .filter((item): item is string => typeof item === "string")
@@ -273,6 +325,28 @@ function readPreferredModel(value: unknown, fallback: string | null): string | n
   if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+export function normalizeZenWallpaperOpacity(
+  value: unknown,
+  fallback = DEFAULT_ZEN_WALLPAPER_OPACITY
+): number {
+  const fallbackNumber =
+    typeof fallback === "number" && Number.isFinite(fallback)
+      ? fallback
+      : DEFAULT_ZEN_WALLPAPER_OPACITY;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : fallbackNumber;
+  const clamped = Math.min(
+    MAX_ZEN_WALLPAPER_OPACITY,
+    Math.max(MIN_ZEN_WALLPAPER_OPACITY, normalized)
+  );
+  return Number(clamped.toFixed(2));
 }
 
 function readDisplayName(value: unknown, fallback: string): string {
@@ -363,6 +437,10 @@ export function resolveNextSettings(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
   );
+  const hiddenComfyUiWorkflowIds = readHiddenComfyUiWorkflowIds(
+    body.hiddenComfyUiWorkflowIds,
+    current.hiddenComfyUiWorkflowIds
+  );
   const preferredLocalModel = readPreferredModel(
     body.preferredLocalModel,
     current.preferredLocalModel
@@ -400,6 +478,24 @@ export function resolveNextSettings(
     body.preferredOpenAiImageModel,
     current.preferredOpenAiImageModel
   );
+  const preferredZenWallpaperLocalImageModel = readPreferredModel(
+    body.preferredZenWallpaperLocalImageModel,
+    current.preferredZenWallpaperLocalImageModel
+  );
+  const preferredZenWallpaperOpenAiImageModel = readPreferredModel(
+    body.preferredZenWallpaperOpenAiImageModel,
+    current.preferredZenWallpaperOpenAiImageModel
+  );
+  const currentZenWallpaperOpacity = normalizeZenWallpaperOpacity(
+    current.zenWallpaperOpacity
+  );
+  const zenWallpaperOpacity =
+    body.zenWallpaperOpacity === undefined
+      ? currentZenWallpaperOpacity
+      : normalizeZenWallpaperOpacity(
+          body.zenWallpaperOpacity,
+          currentZenWallpaperOpacity
+        );
   const prismDefaultLlmModel = readPreferredModel(
     body.prismDefaultLlmModel,
     current.prismDefaultLlmModel
@@ -460,6 +556,7 @@ export function resolveNextSettings(
     composerWritingAssist,
     fallbackModelMessageStripe,
     hiddenBotModelIds,
+    hiddenComfyUiWorkflowIds,
     preferredLocalModel,
     preferredOnlineModel,
     lenientLocalFallbackModel,
@@ -468,6 +565,9 @@ export function resolveNextSettings(
     comfyUiHost,
     preferredLocalImageModel,
     preferredOpenAiImageModel,
+    preferredZenWallpaperLocalImageModel,
+    preferredZenWallpaperOpenAiImageModel,
+    zenWallpaperOpacity,
     comfyUiWorkflows,
     prismDefaultLlmModel,
     prismImageToolLlmModel,

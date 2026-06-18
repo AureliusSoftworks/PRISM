@@ -100,6 +100,8 @@ export function createDatabase(): DatabaseSync {
       auto_memory INTEGER NOT NULL DEFAULT 1,
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
+      hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]',
+      model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0,
       preferred_local_model TEXT,
       preferred_online_model TEXT,
       lenient_local_fallback_model TEXT,
@@ -108,6 +110,9 @@ export function createDatabase(): DatabaseSync {
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
       preferred_local_image_model TEXT,
       preferred_openai_image_model TEXT,
+      preferred_zen_wallpaper_local_image_model TEXT,
+      preferred_zen_wallpaper_openai_image_model TEXT,
+      zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -170,6 +175,7 @@ export function createDatabase(): DatabaseSync {
       zen_wallpaper_prompt_seed TEXT,
       zen_wallpaper_message_count INTEGER,
       zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
+      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -431,6 +437,20 @@ export function createDatabase(): DatabaseSync {
   if (!hasHiddenBotModelIds) {
     db.exec("ALTER TABLE users ADD COLUMN hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]';");
   }
+  const hasHiddenComfyUiWorkflowIds = userColumns.some(
+    (column) => column.name === "hidden_comfyui_workflow_ids"
+  );
+  if (!hasHiddenComfyUiWorkflowIds) {
+    db.exec("ALTER TABLE users ADD COLUMN hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]';");
+  }
+  const hasModelVisibilityDefaultsVersion = userColumns.some(
+    (column) => column.name === "model_visibility_defaults_version"
+  );
+  if (!hasModelVisibilityDefaultsVersion) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0;"
+    );
+  }
   const hasSecondaryOllamaHost = userColumns.some((column) => column.name === "secondary_ollama_host");
   if (!hasSecondaryOllamaHost) {
     db.exec("ALTER TABLE users ADD COLUMN secondary_ollama_host TEXT;");
@@ -486,6 +506,24 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasPreferredOpenAiImageModel) {
     db.exec("ALTER TABLE users ADD COLUMN preferred_openai_image_model TEXT;");
+  }
+  const hasPreferredZenWallpaperLocalImageModel = userColumns.some(
+    (column) => column.name === "preferred_zen_wallpaper_local_image_model"
+  );
+  if (!hasPreferredZenWallpaperLocalImageModel) {
+    db.exec("ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_local_image_model TEXT;");
+  }
+  const hasPreferredZenWallpaperOpenAiImageModel = userColumns.some(
+    (column) => column.name === "preferred_zen_wallpaper_openai_image_model"
+  );
+  if (!hasPreferredZenWallpaperOpenAiImageModel) {
+    db.exec("ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_openai_image_model TEXT;");
+  }
+  const hasZenWallpaperOpacity = userColumns.some(
+    (column) => column.name === "zen_wallpaper_opacity"
+  );
+  if (!hasZenWallpaperOpacity) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15;");
   }
   const hasLenientLocalImageFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_image_fallback_model"
@@ -693,6 +731,12 @@ export function createDatabase(): DatabaseSync {
   if (!hasZenWallpaperStatusColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle';");
   }
+  const hasZenWallpaperHistoryColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_history"
+  );
+  if (!hasZenWallpaperHistoryColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_history TEXT NOT NULL DEFAULT '[]';");
+  }
   const coffeeGroupColumns = db
     .prepare("PRAGMA table_info(coffee_groups)")
     .all() as Array<{ name: string }>;
@@ -730,6 +774,11 @@ export function createDatabase(): DatabaseSync {
     UPDATE conversations
     SET conversation_mode = 'sandbox'
     WHERE conversation_mode IS NULL OR trim(conversation_mode) = '';
+  `);
+  db.exec(`
+    UPDATE conversations
+    SET conversation_mode = 'zen'
+    WHERE conversation_mode = 'chat';
   `);
 
   const memoryColumns = db
@@ -1061,8 +1110,8 @@ export function mapConversation(
   messages: ChatMessage[]
 ): Conversation {
   const conversationMode =
-    row.conversation_mode === "chat"
-      ? "chat"
+    row.conversation_mode === "zen" || row.conversation_mode === "chat"
+      ? "zen"
       : row.conversation_mode === "coffee"
         ? "coffee"
         : "sandbox";
@@ -1072,13 +1121,13 @@ export function mapConversation(
     userId: row.user_id,
     title: row.title,
     mode: conversationMode,
-    botId: row.bot_id ?? null,
+    botId: conversationMode === "zen" ? null : row.bot_id ?? null,
     ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
     ...(conversationMode === "coffee" ? { coffeeGroupId: row.coffee_group_id ?? null } : {}),
     ...(conversationMode === "coffee" && isCoffeeSessionDurationMinutes(row.coffee_duration_minutes)
       ? { coffeeSessionDurationMinutes: row.coffee_duration_minutes }
       : {}),
-    incognito: row.incognito === 1,
+    incognito: conversationMode === "zen" ? false : row.incognito === 1,
     lastBotId: row.last_bot_id ?? null,
     lastBotColor: row.last_bot_color ?? null,
     hasAssistantReply: row.has_assistant_reply === 1,

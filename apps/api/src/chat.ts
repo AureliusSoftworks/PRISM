@@ -36,6 +36,7 @@ import {
   RECENT_WINDOW_SIZE,
   summarizeSandboxBotStatus,
   getLatestThreadSummary,
+  getLatestFullThreadCompactionCutoff,
   retrieveMemorySummaries,
   summarizeAndStoreMemories,
   summarizeThreadCompact,
@@ -72,7 +73,11 @@ import {
   tryAcquireImageSlot,
   startChatImageBackgroundJob,
 } from "./image-job-slot.ts";
-import { mapZenWallpaperMetadata } from "./conversations.ts";
+import {
+  mapZenWallpaperMetadata,
+  pruneZenWallpaperHistoryForRestoreWindow,
+  serializeZenWallpaperHistory,
+} from "./conversations.ts";
 
 const config = getAppConfig();
 
@@ -1627,6 +1632,17 @@ export interface UserChatSettings {
 
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
 const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
+const ZEN_RESTORE_MESSAGE_LIMIT = 80;
+
+function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
+  if (mode === "zen" || mode === "chat") return "zen";
+  if (mode === "coffee") return "coffee";
+  return "sandbox";
+}
+
+function isZenMode(mode: ChatMode): boolean {
+  return mode === "zen" || mode === "chat";
+}
 
 /** Appended to assistant prose when `sendGeneratedImage` parsed but image pipeline returned nothing. */
 const ASSISTANT_IMAGE_GEN_UNAVAILABLE_NOTE =
@@ -3385,7 +3401,7 @@ export async function processChatMessage(
     });
   };
   const now = new Date().toISOString();
-  const mode: ChatMode = settings.mode ?? "sandbox";
+  const mode: ChatMode = normalizeChatMode(settings.mode);
   const isStarterPrompt = settings.starterPrompt === true;
   const explicitAskQuestionRequest =
     !isStarterPrompt && userExplicitlyRequestedAskQuestion(message);
@@ -3395,7 +3411,7 @@ export async function processChatMessage(
   // Incognito is a Chat-mode concept (see shared types): keeps the thread
   // client-held and skips all memory. Provider choice remains the normal
   // local/online user setting; Sandbox ignores `incognito` entirely.
-  const incognitoForTurn = mode === "chat" && settings.incognito === true;
+  const incognitoForTurn = false;
   const effectiveProvider = settings.preferredProvider;
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
@@ -3410,7 +3426,7 @@ export async function processChatMessage(
   );
   // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
   // UI surfaces can still choose to lock Chat mode by omitting that field.
-  const activeBotId = settings.botId;
+  const activeBotId = isZenMode(mode) ? null : settings.botId;
   const activeMemoryBotId =
     typeof activeBotId === "string" && activeBotId.trim().length > 0
       ? activeBotId.trim()
@@ -3718,14 +3734,14 @@ export async function processChatMessage(
   }
 
   let activeConversationId = conversationId;
-  if (mode === "chat" && !incognitoForTurn && settings.forceNewConversation !== true) {
+  if (isZenMode(mode) && settings.forceNewConversation !== true) {
     const latestChatConversation = db
       .prepare(
         `SELECT id
            FROM conversations
           WHERE user_id = ?
             AND COALESCE(incognito, 0) = 0
-            AND conversation_mode = 'chat'
+            AND conversation_mode IN ('zen', 'chat')
           ORDER BY updated_at DESC
           LIMIT 1`
       )
@@ -3741,9 +3757,14 @@ export async function processChatMessage(
       if (!requested?.id) {
         throw new Error("Conversation not found for this user.");
       }
-      if (requested.conversation_mode !== "chat") {
+      if (requested.conversation_mode !== "zen" && requested.conversation_mode !== "chat") {
         activeConversationId = latestChatConversation?.id;
       }
+    }
+    if (activeConversationId) {
+      db.prepare(
+        "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ? AND conversation_mode = 'chat'"
+      ).run(activeConversationId, userId);
     }
   }
   if (!activeConversationId) {
@@ -3756,7 +3777,7 @@ export async function processChatMessage(
       isStarterPrompt
         ? generateStarterConversationTitle(settings.starterPromptLabel)
         : generateConversationTitle(message),
-      mode,
+      isZenMode(mode) ? "zen" : mode,
       activeBotId ?? null,
       incognitoForTurn ? 1 : 0,
       now,
@@ -3771,12 +3792,18 @@ export async function processChatMessage(
     }
   }
 
+  const historyCutoff =
+    !incognitoForTurn
+      ? getLatestFullThreadCompactionCutoff(db, userId, activeConversationId, mode)
+      : null;
+
   // Fetch the NEWEST N messages (not the oldest). Prior implementation used
   // ORDER BY ASC LIMIT 30, which once a thread exceeded 30 messages froze
   // the prompt on ancient history and silently dropped every recent turn.
   // We page the latest N, then reverse to chronological order for the
-  // provider. Anything older than this window is covered by the
-  // thread-compaction summary in Sandbox mode.
+  // provider. Once a full thread-compaction summary exists, only messages
+  // created after that summary stay live; older transcript rows remain saved
+  // for UI history, but model context flows through the compacted summary.
   const historyRowsDesc = db
     .prepare(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
@@ -3784,10 +3811,11 @@ export async function processChatMessage(
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
        WHERE m.conversation_id = ? AND m.user_id = ?
+         AND (? IS NULL OR m.created_at > ?)
        ORDER BY m.created_at DESC
        LIMIT ?`
     )
-    .all(activeConversationId, userId, RECENT_WINDOW_SIZE) as MessageRow[];
+    .all(activeConversationId, userId, historyCutoff, historyCutoff, RECENT_WINDOW_SIZE) as MessageRow[];
   const history = hydrateMessages(historyRowsDesc.slice().reverse());
   const memoryIntent = !isStarterPrompt ? analyzeMemoryIntent(message) : null;
   const continueAskQuestion =
@@ -3805,7 +3833,7 @@ export async function processChatMessage(
   let memoryLines: string[] = [];
   if (!incognitoForTurn) {
     const pipelineResult =
-      mode === "chat"
+      isZenMode(mode)
         ? await handleCompanionChatTurn({
             db,
             provider,
@@ -3830,7 +3858,7 @@ export async function processChatMessage(
   pushBackendEvent(
     "context",
     "Loaded model context",
-    `history=${history.length}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}`
+    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}`
   );
 
   const existingSessionOpinion = readSessionOpinion(
@@ -4470,7 +4498,7 @@ export async function processChatMessage(
       inProgress: true,
       reason: "milestone",
     };
-    if (mode === "chat" && settings.autoMemory) {
+    if (isZenMode(mode) && settings.autoMemory) {
       summarizeAndStoreMemories(
         db,
         auxiliaryProvider,
@@ -4536,10 +4564,11 @@ export async function processChatMessage(
   const zenWallpaperSelect = conversationColumnNames.has("zen_wallpaper_enabled")
     ? `c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
               c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
-              c.zen_wallpaper_status,`
+              c.zen_wallpaper_status,
+              ${conversationColumnNames.has("zen_wallpaper_history") ? "c.zen_wallpaper_history" : "'[]' AS zen_wallpaper_history"},`
     : `0 AS zen_wallpaper_enabled, NULL AS zen_wallpaper_image_id,
               NULL AS zen_wallpaper_prompt_seed, NULL AS zen_wallpaper_message_count,
-              'idle' AS zen_wallpaper_status,`;
+              'idle' AS zen_wallpaper_status, '[]' AS zen_wallpaper_history,`;
   const conversationRow = db
     .prepare(
       `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
@@ -4571,6 +4600,7 @@ export async function processChatMessage(
     zen_wallpaper_prompt_seed: string | null;
     zen_wallpaper_message_count: number | null;
     zen_wallpaper_status: string | null;
+    zen_wallpaper_history: string | null;
     last_bot_id: string | null;
     last_bot_color: string | null;
     has_assistant_reply: number;
@@ -4578,28 +4608,62 @@ export async function processChatMessage(
     updated_at: string;
   };
 
-  const messageRows = db
+  const conversationModeOut: ChatMode =
+    conversationRow.conversation_mode === "zen" ||
+    conversationRow.conversation_mode === "chat"
+      ? "zen"
+      : conversationRow.conversation_mode === "coffee"
+        ? "coffee"
+        : "sandbox";
+  const messageRowsDescOrAsc = db
     .prepare(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
        WHERE m.conversation_id = ? AND m.user_id = ?
-       ORDER BY m.created_at ASC`
+       ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"}
+       LIMIT ?`
     )
-    .all(activeConversationId, userId) as MessageRow[];
+    .all(
+      activeConversationId,
+      userId,
+      conversationModeOut === "zen" ? ZEN_RESTORE_MESSAGE_LIMIT : 100000
+    ) as MessageRow[];
+  const messageRows =
+    conversationModeOut === "zen"
+      ? messageRowsDescOrAsc.slice().reverse()
+      : messageRowsDescOrAsc;
+  const totalMessageCount =
+    conversationModeOut === "zen"
+      ? (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?"
+            )
+            .get(activeConversationId, userId) as { n: number }
+        ).n
+      : messageRows.length;
+  const zenWallpaperOut = mapZenWallpaperMetadata(conversationRow);
+  if (conversationModeOut === "zen") {
+    zenWallpaperOut.history = pruneZenWallpaperHistoryForRestoreWindow(
+      serializeZenWallpaperHistory(zenWallpaperOut.history),
+      totalMessageCount,
+      ZEN_RESTORE_MESSAGE_LIMIT
+    );
+  }
 
   const conversationPersisted: Conversation = {
     id: conversationRow.id,
     userId: conversationRow.user_id,
     title: conversationRow.title,
-    mode: conversationRow.conversation_mode === "chat" ? "chat" : "sandbox",
-    botId: conversationRow.bot_id ?? null,
-    incognito: conversationRow.incognito === 1,
+    mode: conversationModeOut,
+    botId: conversationModeOut === "zen" ? null : conversationRow.bot_id ?? null,
+    incognito: conversationModeOut === "zen" ? false : conversationRow.incognito === 1,
     lastBotId: conversationRow.last_bot_id ?? null,
     lastBotColor: conversationRow.last_bot_color ?? null,
     hasAssistantReply: conversationRow.has_assistant_reply === 1,
-    zenWallpaper: mapZenWallpaperMetadata(conversationRow),
+    ...(conversationModeOut === "zen" ? { zenWallpaper: zenWallpaperOut } : {}),
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,
     messages: hydrateMessages(messageRows),

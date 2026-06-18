@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   Suspense,
   Children,
   cloneElement,
@@ -50,6 +51,14 @@ import {
   storyChoiceMissingItemId,
 } from "./story-mode-dialog";
 import {
+  applyOnlineModelChoice,
+  combinedOnlineModelOptions,
+  nextResponseMode,
+  resolveModelChoiceForResponseMode,
+  responseModeForProvider,
+  type ResponseMode,
+} from "./providerMode";
+import {
   Download,
   Image as ImageGlyph,
   LogOut,
@@ -78,9 +87,11 @@ import {
   westernZodiacFromIsoBirthday,
   catalogEntriesMatchingLocalImageHeuristic,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI,
+  isComfyUiModelId,
   normalizeOpenAiImageModelId,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
-  resolveAutoModel,
+  parseComfyUiRemoteWorkflowPath,
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
   PRISM_DEFAULT_STORY_THEME,
@@ -298,6 +309,7 @@ function normalizeTutorialProgress(value: unknown): TutorialProgress {
   }
   const record = value as Record<string, unknown>;
   return {
+    zen: record.zen === true,
     chat: record.chat === true,
     sandbox: record.sandbox === true,
     coffee: record.coffee === true,
@@ -323,11 +335,12 @@ const RECENT_AUTH_USERNAMES_KEY = "prism_recent_auth_usernames_v1";
 const MAX_RECENT_AUTH_USERNAMES = 12;
 const MODE_TUTORIAL_STORAGE_PREFIX = "prism_mode_tutorials_v1";
 
-type TutorialMode = "chat" | "sandbox" | "coffee";
+type TutorialMode = "zen" | "chat" | "sandbox" | "coffee";
 
 type TutorialProgress = Record<TutorialMode, boolean>;
 
 const DEFAULT_TUTORIAL_PROGRESS: TutorialProgress = {
+  zen: false,
   chat: false,
   sandbox: false,
   coffee: false,
@@ -497,6 +510,8 @@ const PRISM_DEV_CHAT_METRICS_STORAGE_KEY = "prism_dev_chat_metrics";
 const PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY = "prism_dev_slash_commands";
 /** When set, Zen mode (`view === "chat"`) shows a local debug echo composer above the default composer. */
 const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
+/** When set, renders the latest thread-compaction payload inside the chat canvas for QA. */
+const PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY = "prism_dev_show_compacted_summary";
 /** Stores the floating dev-tools toggle button's last placed position as `{x,y}` JSON. */
 const PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY = "prism_dev_tools_button_position";
 /** Stores custom short-term memory bubble positions by scope and memory id. */
@@ -637,12 +652,22 @@ type ImageGenerateApiResponse = {
 
 type ZenWallpaperStatus = "idle" | "generating" | "ready" | "error";
 
+interface ZenWallpaperHistoryEntry {
+  imageId: string;
+  promptSeed: string | null;
+  generationMessageCount: number;
+  revealStartMessageCount?: number;
+  revealFullMessageCount?: number;
+  createdAt?: string;
+}
+
 interface ZenWallpaperMetadata {
   enabled: boolean;
   imageId: string | null;
   promptSeed: string | null;
   generationMessageCount: number | null;
   status: ZenWallpaperStatus;
+  history?: ZenWallpaperHistoryEntry[];
 }
 
 type ZenWallpaperApiResponse = {
@@ -668,6 +693,10 @@ const IMAGE_GENERATION_SIZE_BY_VARIANT: Record<ImageGenerationVariant, string> =
   landscape: "1536x1024",
 };
 const ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
+const ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD = 8;
+const ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
+const ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
+const ZEN_IDLE_ERA_GAP_MS = 12 * 60 * 60 * 1000;
 
 const IMAGE_VARIANT_TAGS: Readonly<Record<ImageGenerationVariant, readonly string[]>> = {
   portrait: [
@@ -774,7 +803,7 @@ function parseImageGenerationScopeKey(key: string): {
   };
 }
 
-/** Local GPU backends may idle-load checkpoints — show a warming hint after this delay. */
+/** Local GPU backends may idle-load models — show a warming hint after this delay. */
 const IMAGE_GEN_WARMUP_HINT_AFTER_MS = 22_000;
 
 // ── Prism wordmark ────────────────────────────────────────────────────
@@ -2385,15 +2414,11 @@ type Provider = "local" | "openai" | "anthropic";
 function isProvider(value: unknown): value is Provider {
   return value === "local" || value === "openai" || value === "anthropic";
 }
-const PROVIDER_SEQUENCE: readonly Provider[] = ["local", "openai", "anthropic"];
-function nextProvider(provider: Provider): Provider {
-  const index = PROVIDER_SEQUENCE.indexOf(provider);
-  return PROVIDER_SEQUENCE[(index + 1) % PROVIDER_SEQUENCE.length] ?? "local";
+function responseModeShortLabel(mode: ResponseMode): string {
+  return mode === "local" ? "LOCAL" : "ONLINE";
 }
-function providerShortLabel(provider: Provider): string {
-  if (provider === "local") return "LOCAL";
-  if (provider === "anthropic") return "CLAUDE";
-  return "OPENAI";
+function responseModeDisplayLabel(mode: ResponseMode): string {
+  return mode === "local" ? "Local" : "Online";
 }
 function providerDisplayLabel(provider: Provider): string {
   if (provider === "local") return "Local";
@@ -2959,11 +2984,11 @@ type ParsedGlobalClearCommand =
 
 function parseGlobalClearCommand(text: string): ParsedGlobalClearCommand {
   const trimmed = text.trim();
-  const match = /^\/clear(?:\s|$)/i.exec(trimmed);
+  const match = /^\/(?:clear|cls)(?:\s|$)/i.exec(trimmed);
   if (!match) return { kind: "none" };
   const rest = trimmed.slice(match[0].length).trim();
   if (rest.length > 0) {
-    return { kind: "error", error: "Use `/clear` without extra arguments." };
+    return { kind: "error", error: `Use \`${match[0].trim().toLowerCase()}\` without extra arguments.` };
   }
   return { kind: "ok" };
 }
@@ -3093,7 +3118,7 @@ interface ConversationSummary {
   title: string;
   updatedAt: string;
   createdAt?: string;
-  mode?: "chat" | "sandbox" | "coffee";
+  mode?: "zen" | "chat" | "sandbox" | "coffee";
   /** Bot locked to this chat when it was first created; `null` = default grayscale persona. */
   botId: string | null;
   /** Coffee-only bot lineup frozen when the Coffee Session starts. */
@@ -3157,6 +3182,23 @@ interface Message {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
+}
+
+function messageCreatedAtMs(message: Pick<Message, "createdAt">): number | null {
+  const ms = Date.parse(message.createdAt);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function formatZenEraBoundaryLabel(message: Pick<Message, "createdAt">): string {
+  const ms = messageCreatedAtMs(message);
+  if (ms === null) return "A new stretch begins";
+  const label = new Date(ms).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `A new stretch begins · ${label}`;
 }
 
 function collectGeneratedImageIds(messages: readonly Message[]): string[] {
@@ -3304,7 +3346,6 @@ const SWEEP_UNDO_TOAST_DURATION_MS = 15000;
 const CHAT_MODE_MESSAGE_MANIFEST_MS = 480;
 const CHAT_MODE_OFFSCREEN_VISIBLE_MS = 12000;
 const CHAT_MODE_OFFSCREEN_DISSOLVE_MS = 2200;
-const CHAT_MODE_ARCHIVE_REVEAL_SCROLL_THRESHOLD_PX = 56;
 const CHAT_MODE_ARCHIVE_LOAD_DELAY_MS = 320;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO = 0.5;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
@@ -4457,7 +4498,7 @@ function botOpinionBandTitle(band: BotOpinion["band"]): string {
 interface ConversationDetail {
   id: string;
   title: string;
-  mode?: "chat" | "sandbox" | "coffee";
+  mode?: "zen" | "chat" | "sandbox" | "coffee";
   /** Bot locked to this conversation at start. Null = PRISM Default / no custom bot. */
   botId: string | null;
   /** Coffee-only bot lineup frozen when the Coffee Session starts. */
@@ -4491,7 +4532,7 @@ interface ChatPostEnvelope {
     fallbackModel: string;
   };
   summaryCompaction?: {
-    mode: "chat" | "sandbox";
+    mode: "zen" | "chat" | "sandbox";
     triggered: boolean;
     inProgress: boolean;
     reason: "milestone" | "mode_exit" | "manual";
@@ -4567,6 +4608,7 @@ interface UserSettings {
    */
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
+  hiddenComfyUiWorkflowIds: string[];
   hasOpenAiApiKey: boolean;
   hasAnthropicApiKey: boolean;
   hasElevenLabsApiKey: boolean;
@@ -4584,6 +4626,9 @@ interface UserSettings {
   preferredOnlineModel: string;
   preferredLocalImageModel: string;
   preferredOpenAiImageModel: string;
+  preferredZenWallpaperLocalImageModel: string;
+  preferredZenWallpaperOpenAiImageModel: string;
+  zenWallpaperOpacity: number;
   lenientLocalFallbackModel: string;
   /** Local ComfyUI / Ollama image model used when the primary image call is refused (online or local). */
   lenientLocalImageFallbackModel: string;
@@ -4645,7 +4690,7 @@ function formatBackendDebugLine(prefix: string, event: ChatBackendDebugEvent): s
   return parts.join(" — ");
 }
 interface SummaryCompactionDebug {
-  mode: "chat" | "sandbox";
+  mode: "zen" | "chat" | "sandbox";
   conversationId: string;
   inProgress: boolean;
   latestSummary: string | null;
@@ -4728,7 +4773,8 @@ interface ModelCatalogEntry {
   isDefault?: boolean;
   localHost?: "primary" | "secondary";
   hostLabel?: string;
-  /** Present for image-only catalog rows (ComfyUI checkpoints). */
+  disabledReason?: string;
+  /** Present for image-only catalog rows (ComfyUI workflows). */
   imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
 }
 interface ModelCatalog {
@@ -4851,6 +4897,8 @@ interface CommandCenterStateV1 {
   commands?: unknown;
 }
 
+const BUILT_IN_COMMAND_NAMES = new Set(["help", "compact", "summarize", "clear", "cls"]);
+
 interface BotGroupManifestV1 {
   schema: "prism-bot-group-manifest-v1";
   group?: {
@@ -4952,11 +5000,52 @@ function createBuiltInHelpCommand(): CommandCenterCommand {
   };
 }
 
+function createBuiltInCompactCommand(name: "compact" | "summarize"): CommandCenterCommand {
+  const now = new Date().toISOString();
+  const alias = name === "compact" ? "/summarize" : "/compact";
+  return {
+    id: `builtin:/${name}`,
+    name,
+    title: name,
+    command:
+      `Compacts the current saved chat into thread context without clearing the visible transcript. Alias: ${alias}.`,
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createBuiltInClearCommand(name: "clear" | "cls"): CommandCenterCommand {
+  const now = new Date().toISOString();
+  const alias = name === "clear" ? "/cls" : "/clear";
+  return {
+    id: `builtin:/${name}`,
+    name,
+    title: name,
+    command:
+      `Clears the current chat transcript and saved thread context. Alias: ${alias}.`,
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function normalizeCommandCenterState(raw: unknown): {
   preferredModel: string;
   commands: CommandCenterCommand[];
 } {
   const fallbackHelp = createBuiltInHelpCommand();
+  const builtInCommands = [
+    fallbackHelp,
+    createBuiltInCompactCommand("compact"),
+    createBuiltInCompactCommand("summarize"),
+    createBuiltInClearCommand("clear"),
+    createBuiltInClearCommand("cls"),
+  ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
   const preferredModel = normalizeModelChoice(parsed?.preferredModel);
@@ -4996,26 +5085,31 @@ function normalizeCommandCenterState(raw: unknown): {
             })
             .filter((argument): argument is CommandCenterArgument => Boolean(argument))
         : [],
-      builtIn: record.builtIn === true || normalizedName === "help",
-      readOnly: record.readOnly === true || normalizedName === "help",
+      builtIn: record.builtIn === true || BUILT_IN_COMMAND_NAMES.has(normalizedName),
+      readOnly: record.readOnly === true || BUILT_IN_COMMAND_NAMES.has(normalizedName),
       createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
       updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now,
     });
   }
-  const existingHelp = commands.find((command) => command.name === "help");
-  if (existingHelp) {
-    existingHelp.id = "builtin:/help";
-    existingHelp.title = "help";
-    existingHelp.builtIn = true;
-    existingHelp.readOnly = true;
-    if (!existingHelp.command.trim()) existingHelp.command = fallbackHelp.command;
-    if (existingHelp.arguments.length === 0) existingHelp.arguments = fallbackHelp.arguments;
-  } else {
-    commands.unshift(fallbackHelp);
+  for (const builtIn of builtInCommands) {
+    const existing = commands.find((command) => command.name === builtIn.name);
+    if (existing) {
+      existing.id = builtIn.id;
+      existing.title = builtIn.title;
+      existing.command = builtIn.command;
+      existing.arguments = builtIn.arguments;
+      existing.builtIn = true;
+      existing.readOnly = true;
+      continue;
+    }
+    commands.push(builtIn);
   }
   return {
     preferredModel,
-    commands,
+    commands: [
+      ...builtInCommands,
+      ...commands.filter((command) => !BUILT_IN_COMMAND_NAMES.has(command.name)),
+    ],
   };
 }
 
@@ -5150,6 +5244,12 @@ const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_DARK = 44;
 const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_LIGHT = 46;
 
 const AUTO_MODEL_CHOICE = "auto";
+const AUTO_MODEL_SETTINGS_SUBTEXT = "define preferred model in settings";
+const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
+  "ElevenLabs Image & Video - integration pending";
+const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
+const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
+const MAX_ZEN_WALLPAPER_OPACITY = 0.4;
 
 /**
  * Stable key for remembering LOCAL/ONLINE model picks per open thread
@@ -5454,6 +5554,25 @@ function normalizeModelChoice(value: string | null | undefined): string {
   return trimmed.length > 0 ? trimmed : AUTO_MODEL_CHOICE;
 }
 
+function normalizeZenWallpaperOpacitySetting(value: unknown): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : DEFAULT_ZEN_WALLPAPER_OPACITY;
+  const clamped = Math.min(
+    MAX_ZEN_WALLPAPER_OPACITY,
+    Math.max(MIN_ZEN_WALLPAPER_OPACITY, normalized)
+  );
+  return Number(clamped.toFixed(2));
+}
+
+function formatZenWallpaperOpacity(value: unknown): string {
+  return `${Math.round(normalizeZenWallpaperOpacitySetting(value) * 100)}%`;
+}
+
 function parseCommandCenterModelChoice(
   value: string
 ): { provider: Provider; modelId: string } | null {
@@ -5474,7 +5593,7 @@ function parseCommandCenterModelChoice(
 /** Row to badge in chat model menus: the concrete id saved in Settings (no badge when Auto). */
 function chatSettingsSavedDefaultModelId(
   settings: UserSettings | null,
-  provider: Provider
+  provider: Provider | "online"
 ): string | null {
   if (!settings) return null;
   const raw =
@@ -5516,30 +5635,6 @@ function modelLabelFromId(id: string): string {
         : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`
     )
     .join(" ");
-}
-
-/** Human label for the model id `resolveAutoModel` would pick (matches `/api/chat`). */
-function composeAutoOptionMetaLine(
-  catalog: ModelCatalog | null,
-  settings: UserSettings | null,
-  provider: Provider,
-  bot: Bot | null | undefined
-): string {
-  const sliceLocal = catalog?.local ?? [];
-  const sliceOnline = catalog?.online ?? [];
-  const resolved = resolveAutoModel({
-    provider,
-    explicitModelOverride: null,
-    botPreferredModel:
-      provider === "local"
-        ? (bot?.local_model?.trim() || bot?.model?.trim() || null)
-        : (bot?.online_model?.trim() || null),
-    hiddenModelIds: settings?.hiddenBotModelIds ?? [],
-    catalog: { local: sliceLocal, online: sliceOnline },
-  });
-  const list = provider === "local" ? sliceLocal : sliceOnline;
-  const entry = list.find((m) => m.id === resolved.model);
-  return entry?.label ?? modelLabelFromId(resolved.model);
 }
 
 function localModelDuplicateKey(model: ModelCatalogEntry): string {
@@ -5674,6 +5769,40 @@ function visibleModelChoiceForProvider(
   );
 }
 
+function visibleModelChoicesByProvider(
+  settings: UserSettings | null,
+  choices: Record<Provider, string>
+): Record<Provider, string> {
+  return {
+    local: visibleModelChoiceForProvider(settings, choices.local),
+    openai: visibleModelChoiceForProvider(settings, choices.openai),
+    anthropic: visibleModelChoiceForProvider(settings, choices.anthropic),
+  };
+}
+
+function onlineModelOptionsForPicker(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null
+): ModelCatalogEntry[] {
+  return combinedOnlineModelOptions(
+    availableModelOptionsForProvider(catalog, settings, "openai"),
+    availableModelOptionsForProvider(catalog, settings, "anthropic")
+  ).map((model) => ({
+    ...model,
+    hostLabel: model.hostLabel ?? providerDisplayLabel(model.provider),
+  }));
+}
+
+function modelOptionsForResponseMode(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  responseMode: ResponseMode
+): ModelCatalogEntry[] {
+  return responseMode === "local"
+    ? availableModelOptionsForProvider(catalog, settings, "local")
+    : onlineModelOptionsForPicker(catalog, settings);
+}
+
 function allBotCustomizerModelOptions(
   catalog: ModelCatalog | null,
   settings: UserSettings | null
@@ -5700,6 +5829,22 @@ function includeSelectedModelOption(
     ...options,
     { id: choice, label: choice, provider },
   ];
+}
+
+function visibleLocalImageModelSelectValue(value: string | null | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  return isComfyUiModelId(trimmed) ? "" : trimmed;
+}
+
+function includeSelectedLocalImageModelOption(
+  options: ModelCatalogEntry[],
+  choice: string | null | undefined
+): ModelCatalogEntry[] {
+  return includeSelectedModelOption(
+    options,
+    visibleLocalImageModelSelectValue(choice),
+    "local"
+  );
 }
 
 function uniqueModelOptions(options: ModelCatalogEntry[]): ModelCatalogEntry[] {
@@ -10421,11 +10566,13 @@ function ImageBotDirectoryDropdown({
   );
 }
 
+type ComposerModelPickerProvider = Provider | "online";
+
 interface ComposerModelPickerProps {
   value: string;
   onChange: (nextValue: string) => void;
   options: ModelCatalogEntry[];
-  provider: Provider;
+  provider: ComposerModelPickerProvider;
   disabled?: boolean;
   title?: string;
   ariaLabel: string;
@@ -10433,7 +10580,7 @@ interface ComposerModelPickerProps {
   minMenuWidthPx?: number;
   /** When false, hides the Auto row (used by image model picker). Defaults to true. */
   showAutoOption?: boolean;
-  /** Replaces the default Auto subtitle ("Bot default …") when set (e.g. Images panel). */
+  /** Replaces the default Auto subtitle when a surface needs context-specific copy. */
   autoOptionMetaOverride?: string;
   /**
    * When set, the "Default" badge follows this id (user’s saved Settings choice).
@@ -10460,13 +10607,7 @@ function ComposerModelPicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const autoOptionLabel = "Auto";
-  const autoOptionMeta =
-    provider === "local"
-      ? "Bot default local model"
-      : provider === "anthropic"
-        ? "Bot default Anthropic model"
-        : "Bot default online model";
-  const autoMetaShown = autoOptionMetaOverride ?? autoOptionMeta;
+  const autoMetaShown = autoOptionMetaOverride ?? AUTO_MODEL_SETTINGS_SUBTEXT;
   const selectedModel =
     (value === AUTO_MODEL_CHOICE
       ? null
@@ -10600,6 +10741,7 @@ function ComposerModelPicker({
             )}
             {options.map((model) => {
               const isSelected = value === model.id;
+              const isUnavailable = Boolean(model.disabledReason);
               const showSettingsDefaultBadge =
                 settingsDefaultModelId !== undefined &&
                 settingsDefaultModelId !== null &&
@@ -10608,24 +10750,31 @@ function ComposerModelPicker({
                 settingsDefaultModelId === undefined && Boolean(model.isDefault);
               return (
                 <button
-                  key={model.id}
+                  key={`${model.provider}:${model.id}`}
                   type="button"
-                  className={`${styles.composeBotOption} ${styles.composeModelOption}`}
+                  className={`${styles.composeBotOption} ${styles.composeModelOption} ${
+                    isUnavailable ? styles.composeModelOptionDisabled : ""
+                  }`}
                   role="option"
                   aria-selected={isSelected}
-                  onClick={() => pick(model.id)}
+                  aria-disabled={isUnavailable ? "true" : undefined}
+                  disabled={isUnavailable}
+                  title={model.disabledReason}
+                  onClick={() => {
+                    if (!isUnavailable) pick(model.id);
+                  }}
                 >
                   <span className={styles.composeModelOptionMain}>
                     <span className={styles.composeModelOptionName}>
                       {model.label}
                     </span>
-                    {model.hostLabel && (
+                    {(model.hostLabel || model.disabledReason) && (
                       <span className={styles.composeModelOptionMeta}>
-                        {model.hostLabel}
+                        {model.disabledReason ?? model.hostLabel}
                       </span>
                     )}
                   </span>
-                  {(showSettingsDefaultBadge || showCatalogDefaultBadge) && (
+                  {!isUnavailable && (showSettingsDefaultBadge || showCatalogDefaultBadge) && (
                     <span className={styles.composeModelDefaultBadge}>
                       Default
                     </span>
@@ -12600,6 +12749,66 @@ function findMessageRowById(root: ParentNode, messageId: string): HTMLElement | 
 
 function findChatModeMessageScrollAnchor(row: HTMLElement): HTMLElement {
   return row.querySelector<HTMLElement>('[data-chat-typing-line="true"]') ?? row;
+}
+
+function normalizeZenAtmosphereHistory(
+  metadata: ZenWallpaperMetadata | null | undefined
+): ZenWallpaperHistoryEntry[] {
+  if (!metadata?.enabled) return [];
+  const byImageId = new Map<string, ZenWallpaperHistoryEntry>();
+  const pushEntry = (entry: ZenWallpaperHistoryEntry | null | undefined): void => {
+    const imageId = entry?.imageId?.trim() ?? "";
+    if (!imageId) return;
+    const rawCount = entry?.generationMessageCount;
+    const generationMessageCount =
+      typeof rawCount === "number" && Number.isFinite(rawCount)
+        ? Math.max(0, Math.floor(rawCount))
+        : null;
+    if (generationMessageCount === null) return;
+    const previous = byImageId.get(imageId);
+    const rawRevealStart = entry?.revealStartMessageCount;
+    const revealStartMessageCount =
+      typeof rawRevealStart === "number" && Number.isFinite(rawRevealStart)
+        ? Math.max(0, Math.floor(rawRevealStart))
+        : previous?.revealStartMessageCount ??
+          generationMessageCount + ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
+    const rawRevealFull = entry?.revealFullMessageCount;
+    const revealFullMessageCount =
+      typeof rawRevealFull === "number" && Number.isFinite(rawRevealFull)
+        ? Math.max(revealStartMessageCount, Math.floor(rawRevealFull))
+        : previous?.revealFullMessageCount ??
+          revealStartMessageCount + ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT;
+    byImageId.set(imageId, {
+      imageId,
+      promptSeed:
+        typeof entry?.promptSeed === "string" && entry.promptSeed.trim()
+          ? entry.promptSeed.trim()
+          : previous?.promptSeed ?? null,
+      generationMessageCount,
+      revealStartMessageCount,
+      revealFullMessageCount,
+      ...(entry?.createdAt || previous?.createdAt
+        ? { createdAt: entry?.createdAt ?? previous?.createdAt }
+        : {}),
+    });
+  };
+
+  for (const entry of metadata.history ?? []) {
+    pushEntry(entry);
+  }
+  if (metadata.imageId && typeof metadata.generationMessageCount === "number") {
+    pushEntry({
+      imageId: metadata.imageId,
+      promptSeed: metadata.promptSeed,
+      generationMessageCount: metadata.generationMessageCount,
+    });
+  }
+
+  return [...byImageId.values()].sort((a, b) => {
+    const countDelta = a.generationMessageCount - b.generationMessageCount;
+    if (countDelta !== 0) return countDelta;
+    return (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
+  });
 }
 
 /** Imperative focus for plain textarea vs TipTap WYSIWYG compose field. */
@@ -14796,7 +15005,7 @@ function HomeContent(): React.JSX.Element {
   }, []);
   const triggerConversationModeExitCompaction = useCallback((
     conversationId: string,
-    sourceMode: "chat" | "sandbox"
+    sourceMode: "zen" | "chat" | "sandbox"
   ) => {
     void api(
       `/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`,
@@ -14817,7 +15026,10 @@ function HomeContent(): React.JSX.Element {
         ? detailIdRef.current
         : selectedIdRef.current;
     if (!activeConversationId) return;
-    triggerConversationModeExitCompaction(activeConversationId, sourceView);
+    triggerConversationModeExitCompaction(
+      activeConversationId,
+      sourceView === "chat" ? "zen" : "sandbox"
+    );
   }, [triggerConversationModeExitCompaction]);
   const navigateToView = useCallback((next: View) => {
     if (next === view) return;
@@ -14946,6 +15158,7 @@ function HomeContent(): React.JSX.Element {
     configured: boolean;
     reachable: boolean;
     checkpoints: ModelCatalogEntry[];
+    allCheckpoints?: ModelCatalogEntry[];
   }>({ configured: false, reachable: false, checkpoints: [] });
   const [secondaryOllamaStatus, setSecondaryOllamaStatus] =
     useState<SecondaryOllamaStatus | null>(null);
@@ -15018,6 +15231,13 @@ function HomeContent(): React.JSX.Element {
   const [pendingReplyDenialRisk, setPendingReplyDenialRisk] = useState(false);
   const [pendingReplyStartMessageCount, setPendingReplyStartMessageCount] = useState(0);
   const [sandboxSummaryBusy, setSandboxSummaryBusy] = useState(false);
+  const [manualCompactionStatus, setManualCompactionStatus] = useState<{
+    conversationId: string;
+    mode: "zen" | "chat" | "sandbox";
+    state: "running" | "complete";
+    summary: string | null;
+    summaryAt: string | null;
+  } | null>(null);
   const [sandboxBotStatusBusy, setSandboxBotStatusBusy] = useState(false);
   const [canvasBotSwitchTransitioning, setCanvasBotSwitchTransitioning] = useState(false);
   const [canvasBotSwitchOverlayPhase, setCanvasBotSwitchOverlayPhase] =
@@ -15066,6 +15286,7 @@ function HomeContent(): React.JSX.Element {
   const selectedIdRef = useRef<string | null>(null);
   const chatSummaryRefreshMarkerRef = useRef<string | null>(null);
   const sandboxBotStatusRefreshMarkerRef = useRef<string | null>(null);
+  const zenOpenInFlightRef = useRef(false);
   const [chatAutoRestoreSuppressed, setChatAutoRestoreSuppressed] = useState(false);
   const [forceNewConversationOnNextSend, setForceNewConversationOnNextSend] = useState(false);
   const detailIdRef = useRef<string | null>(null);
@@ -15368,7 +15589,24 @@ function HomeContent(): React.JSX.Element {
   const [zenWallpaperBusyConversationId, setZenWallpaperBusyConversationId] =
     useState<string | null>(null);
   const [zenWallpaperError, setZenWallpaperError] = useState<string | null>(null);
+  const [zenAtmosphereLayerOpacities, setZenAtmosphereLayerOpacities] = useState<Record<string, number>>({});
   const zenWallpaperGenerationInFlightRef = useRef<Set<string>>(new Set());
+  const zenAtmosphereTimeline = useMemo(
+    () => normalizeZenAtmosphereHistory(detail?.zenWallpaper),
+    [detail?.zenWallpaper]
+  );
+  const zenAtmosphereTimelineKey = useMemo(
+    () =>
+      zenAtmosphereTimeline
+        .map(
+          (entry) =>
+            `${entry.imageId}:${entry.generationMessageCount}:${
+              entry.revealStartMessageCount ?? ""
+            }:${entry.revealFullMessageCount ?? ""}:${entry.createdAt ?? ""}`
+        )
+        .join("|"),
+    [zenAtmosphereTimeline]
+  );
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageGlobalPositiveKeywords, setImageGlobalPositiveKeywords] = useState<string[]>(
     []
@@ -15710,6 +15948,7 @@ function HomeContent(): React.JSX.Element {
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const zenAtmosphereScrollFrameRef = useRef<number | null>(null);
   /** Expanded AskQuestion chip rail only — outside-thread taps collapse chips when set. */
   const askQuestionRailRef = useRef<HTMLDivElement | null>(null);
   const chatLastPinnedUserMessageKeyRef = useRef<string | null>(null);
@@ -15771,6 +16010,8 @@ function HomeContent(): React.JSX.Element {
   const [devChatMetricsEnabled, setDevChatMetricsEnabledState] = useState(false);
   const [devSlashCommandsEnabled, setDevSlashCommandsEnabledState] = useState(false);
   const [devDebugComposerEnabled, setDevDebugComposerEnabledState] = useState(false);
+  const [devShowCompactedSummaryInChat, setDevShowCompactedSummaryInChatState] =
+    useState(false);
   const [devChatDebugEvents, setDevChatDebugEvents] = useState<DevChatDebugEvent[]>([]);
   const persistDevToolsBotImportPaste = useCallback((next: boolean) => {
     setDevToolsBotImportPasteEnabledState(next);
@@ -15824,6 +16065,19 @@ function HomeContent(): React.JSX.Element {
       // private mode / quota — preference just won't survive reload
     }
   }, []);
+  const persistDevShowCompactedSummaryInChat = useCallback((next: boolean) => {
+    setDevShowCompactedSummaryInChatState(next);
+    if (typeof window === "undefined") return;
+    try {
+      if (next) {
+        window.localStorage.setItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY, "1");
+      } else {
+        window.localStorage.removeItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY);
+      }
+    } catch {
+      // private mode / quota — preference just won't survive reload
+    }
+  }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -15839,11 +16093,15 @@ function HomeContent(): React.JSX.Element {
       setDevDebugComposerEnabledState(
         window.localStorage.getItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY) === "1"
       );
+      setDevShowCompactedSummaryInChatState(
+        window.localStorage.getItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY) === "1"
+      );
     } catch {
       setDevToolsBotImportPasteEnabledState(false);
       setDevChatMetricsEnabledState(false);
       setDevSlashCommandsEnabledState(false);
       setDevDebugComposerEnabledState(false);
+      setDevShowCompactedSummaryInChatState(false);
     }
   }, []);
   useEffect(() => {
@@ -16815,7 +17073,7 @@ function HomeContent(): React.JSX.Element {
     return () => window.clearTimeout(timer);
   }, [panel, secondaryOllamaDraftHost]);
 
-  // Images panel reads ComfyUI checkpoints from GET /api/models; refresh when opening the panel
+  // Images panel reads ComfyUI workflows from GET /api/models; refresh when opening the panel
   // or when the ComfyUI URL in Settings changes so the picker stays in sync with the status line.
   useEffect(() => {
     if (panel !== "images") return;
@@ -17201,12 +17459,6 @@ function HomeContent(): React.JSX.Element {
     return raw ? normalizeAccentForTheme(raw, resolvedTheme) : null;
   }, [bots, composeBotAccentId, resolvedTheme]);
 
-  /** Bot whose preferred models inform the "Auto" subtitle in compose model pickers. */
-  const composeBotForAutoModelMeta = useMemo<Bot | null>(() => {
-    if (composeBotAccentId === null) return null;
-    return bots.find((b) => b.id === composeBotAccentId) ?? null;
-  }, [bots, composeBotAccentId]);
-
   const composeStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (!selectedComposeBotAccent && mobileKeyboardInset <= 0) return undefined;
     const style = {} as React.CSSProperties & Record<string, string>;
@@ -17297,21 +17549,27 @@ function HomeContent(): React.JSX.Element {
       color: null,
     };
   }, [detail, activeBot, defaultConversationUsesPrismIdentity]);
+  const onlineChatModelOptions = useMemo(
+    () => onlineModelOptionsForPicker(modelCatalog, settings),
+    [modelCatalog, settings]
+  );
   const headerConversationTitle = useMemo(() => {
     if (view === "sandbox") {
       const sandboxTitle = detail?.title?.trim();
       return sandboxTitle && sandboxTitle.length > 0 ? sandboxTitle : null;
     }
-    const modelProvider: Provider = effectivePreferredProvider;
-    const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-    const visibleModelChoice = visibleModelChoiceForProvider(
-      settings,
-      rawModelChoice
-    );
+    const responseMode = responseModeForProvider(effectivePreferredProvider);
+    const resolvedChoice = resolveModelChoiceForResponseMode({
+      responseMode,
+      providerPreference: effectivePreferredProvider,
+      choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const visibleModelChoice = resolvedChoice.modelChoice;
     const modelOptions = includeSelectedModelOption(
-      availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+      modelOptionsForResponseMode(modelCatalog, settings, responseMode),
       visibleModelChoice,
-      modelProvider
+      resolvedChoice.provider
     );
     const selectedModel = modelOptions.find((model) => model.id === visibleModelChoice);
     const modelTitle =
@@ -17324,6 +17582,7 @@ function HomeContent(): React.JSX.Element {
     chatModelChoiceByProvider,
     detail?.title,
     modelCatalog,
+    onlineChatModelOptions,
     settings,
     effectivePreferredProvider,
     view,
@@ -17344,12 +17603,47 @@ function HomeContent(): React.JSX.Element {
       })),
     []
   );
+  const elevenLabsImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
+    () =>
+      ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI.map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        provider: "openai" as const,
+        disabledReason: ELEVENLABS_IMAGE_MENU_DISABLED_REASON,
+      })),
+    []
+  );
+  const onlineImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
+    () => [
+      ...openAiImageModelCatalogEntries,
+      ...elevenLabsImageModelCatalogEntries,
+    ],
+    [openAiImageModelCatalogEntries, elevenLabsImageModelCatalogEntries]
+  );
+  const allComfyUiWorkflowCatalogEntries = useMemo<ModelCatalogEntry[]>(
+    () =>
+      uniqueModelOptions(
+        comfyUiModelsPayload.allCheckpoints ?? comfyUiModelsPayload.checkpoints ?? []
+      ),
+    [comfyUiModelsPayload]
+  );
   const localImageModelCatalogEntries = useMemo(() => {
     const base = availableModelOptionsForProvider(modelCatalog, settings, "local");
     const ollamaImage = catalogEntriesMatchingLocalImageHeuristic(base);
-    const comfy = comfyUiModelsPayload.checkpoints ?? [];
+    const hiddenComfyUiWorkflowIds = new Set(settings?.hiddenComfyUiWorkflowIds ?? []);
+    const comfy = allComfyUiWorkflowCatalogEntries.filter(
+      (model) => !hiddenComfyUiWorkflowIds.has(model.id)
+    );
     return [...ollamaImage, ...comfy];
-  }, [modelCatalog, settings, comfyUiModelsPayload]);
+  }, [allComfyUiWorkflowCatalogEntries, modelCatalog, settings]);
+  const visibleLocalImageModelIds = useMemo(
+    () => new Set(localImageModelCatalogEntries.map((model) => model.id)),
+    [localImageModelCatalogEntries]
+  );
+  const visibleLocalImageModelIdOrEmpty = (modelId: string | null | undefined): string => {
+    const trimmed = modelId?.trim() ?? "";
+    return trimmed.length > 0 && visibleLocalImageModelIds.has(trimmed) ? trimmed : "";
+  };
 
   const hubPreferredLocalOptions = useMemo(
     () =>
@@ -17392,16 +17686,398 @@ function HomeContent(): React.JSX.Element {
       ),
     [modelCatalog, settings]
   );
+  const renderDefaultsAndFallbacksControls = (variant: "settings" | "modal"): React.ReactNode => {
+    if (!settings) return null;
+    const isModal = variant === "modal";
+    return (
+      <div
+        className={`${styles.settingsModelControls} ${
+          isModal ? styles.settingsModelControlsInModal : ""
+        }`}
+      >
+        <div className={styles.settingsSystemModelRow}>
+          <label>
+            Prism internal LLM
+            <select
+              value={(settings.prismDefaultLlmModel ?? "").trim()}
+              onChange={(event) => {
+                const next = event.target.value.trim();
+                setSettings((previous) =>
+                  previous ? { ...previous, prismDefaultLlmModel: next } : previous
+                );
+              }}
+            >
+              <option value="">
+                Auto - server auxiliary (
+                {(settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"})
+              </option>
+              {prismInternalLlmCallOptions.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                  {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Image-request LLM
+            <select
+              value={(settings.prismImageToolLlmModel ?? "").trim()}
+              onChange={(event) => {
+                const next = event.target.value.trim();
+                setSettings((previous) =>
+                  previous ? { ...previous, prismImageToolLlmModel: next } : previous
+                );
+                void persistPrismImageToolLlmModelField(next);
+              }}
+            >
+              <option value="">Auto - hub chat model</option>
+              {prismImageToolLlmCallOptions.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                  {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className={styles.settingsModelMatrix}>
+          <div className={styles.settingsModelPairHeader} aria-hidden="true">
+            <span>Use case</span>
+            <span>Offline</span>
+            <span>Online</span>
+          </div>
+
+          <div className={styles.settingsModelPairRow}>
+            <div className={styles.settingsModelPairTitle}>
+              <span>Chat replies</span>
+            </div>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Offline model</span>
+              <select
+                value={normalizeModelChoice(settings.preferredLocalModel)}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSettings((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          preferredLocalModel:
+                            next === AUTO_MODEL_CHOICE ? "" : next,
+                        }
+                      : previous
+                  );
+                }}
+              >
+                <option value={AUTO_MODEL_CHOICE}>Auto - first visible local model</option>
+                {hubPreferredLocalOptions.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                    {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Online model</span>
+              <select
+                value={normalizeModelChoice(settings.preferredOnlineModel)}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSettings((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          preferredOnlineModel:
+                            next === AUTO_MODEL_CHOICE ? "" : next,
+                        }
+                      : previous
+                  );
+                }}
+              >
+                <option value={AUTO_MODEL_CHOICE}>Auto - first visible online model</option>
+                {hubPreferredOnlineOptions.map((model) => (
+                  <option key={`${model.provider}:${model.id}`} value={model.id}>
+                    {model.label} · {providerDisplayLabel(model.provider)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className={styles.settingsModelPairRow}>
+            <div className={styles.settingsModelPairTitle}>
+              <span>Image generation</span>
+            </div>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Offline model</span>
+              <select
+                value={visibleLocalImageModelSelectValue(settings.preferredLocalImageModel)}
+                disabled={localImageModelCatalogEntries.length === 0}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSettings((previous) =>
+                    previous ? { ...previous, preferredLocalImageModel: next } : previous
+                  );
+                  void persistAccountImageDefaultModelField(
+                    "preferredLocalImageModel",
+                    next
+                  );
+                }}
+              >
+                <option value="">Auto - first detected local image model</option>
+                {(
+                  (settings.preferredLocalImageModel?.trim() ?? "").length > 0
+                    ? includeSelectedLocalImageModelOption(
+                        localImageModelCatalogEntries,
+                        settings.preferredLocalImageModel
+                      )
+                    : localImageModelCatalogEntries
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Online model</span>
+              <select
+                value={
+                  (settings.preferredOpenAiImageModel ?? "").trim().length > 0
+                    ? normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel)
+                    : ""
+                }
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const stored =
+                    next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
+                  setSettings((previous) =>
+                    previous ? { ...previous, preferredOpenAiImageModel: stored } : previous
+                  );
+                  void persistAccountImageDefaultModelField(
+                    "preferredOpenAiImageModel",
+                    next
+                  );
+                }}
+              >
+                <option value="">Auto - {DEFAULT_OPENAI_IMAGE_MODEL_ID}</option>
+                {(
+                  (settings.preferredOpenAiImageModel ?? "").trim().length > 0
+                    ? includeSelectedModelOption(
+                        openAiImageModelCatalogEntries,
+                        normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel),
+                        "openai"
+                      )
+                    : openAiImageModelCatalogEntries
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className={styles.settingsModelPairRow}>
+            <div className={styles.settingsModelPairTitle}>
+              <span>Atmosphere wallpaper</span>
+            </div>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Offline model</span>
+              <select
+                value={visibleLocalImageModelSelectValue(
+                  settings.preferredZenWallpaperLocalImageModel
+                )}
+                disabled={localImageModelCatalogEntries.length === 0}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSettings((previous) =>
+                    previous
+                      ? { ...previous, preferredZenWallpaperLocalImageModel: next }
+                      : previous
+                  );
+                  void persistAccountImageDefaultModelField(
+                    "preferredZenWallpaperLocalImageModel",
+                    next
+                  );
+                }}
+              >
+                <option value="">Auto - use image default</option>
+                {(
+                  (settings.preferredZenWallpaperLocalImageModel?.trim() ?? "").length > 0
+                    ? includeSelectedLocalImageModelOption(
+                        localImageModelCatalogEntries,
+                        settings.preferredZenWallpaperLocalImageModel
+                      )
+                    : localImageModelCatalogEntries
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Online model</span>
+              <select
+                value={
+                  (settings.preferredZenWallpaperOpenAiImageModel ?? "").trim().length > 0
+                    ? normalizeOpenAiImageModelId(
+                        settings.preferredZenWallpaperOpenAiImageModel
+                      )
+                    : ""
+                }
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const stored =
+                    next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
+                  setSettings((previous) =>
+                    previous
+                      ? { ...previous, preferredZenWallpaperOpenAiImageModel: stored }
+                      : previous
+                  );
+                  void persistAccountImageDefaultModelField(
+                    "preferredZenWallpaperOpenAiImageModel",
+                    next
+                  );
+                }}
+              >
+                <option value="">Auto - use image API default</option>
+                {(
+                  (settings.preferredZenWallpaperOpenAiImageModel ?? "").trim().length > 0
+                    ? includeSelectedModelOption(
+                        openAiImageModelCatalogEntries,
+                        normalizeOpenAiImageModelId(
+                          settings.preferredZenWallpaperOpenAiImageModel
+                        ),
+                        "openai"
+                      )
+                    : openAiImageModelCatalogEntries
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div className={styles.settingsFallbackControls}>
+          <div className={styles.settingsFallbackTitle}>Copyright fallback</div>
+          <div className={styles.settingsFallbackGrid}>
+            <label>
+              Text chat offline model
+              <select
+                value={settings.lenientLocalFallbackModel ?? ""}
+                onChange={(event) =>
+                  setSettings((previous) =>
+                    previous
+                      ? { ...previous, lenientLocalFallbackModel: event.target.value }
+                      : previous
+                  )
+                }
+              >
+                <option value="">Disabled</option>
+                {includeSelectedModelOption(
+                  modelOptionsForProvider(modelCatalog, settings, "local"),
+                  settings.lenientLocalFallbackModel ?? "",
+                  "local"
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Images offline model
+              <select
+                value={visibleLocalImageModelSelectValue(
+                  settings.lenientLocalImageFallbackModel
+                )}
+                onChange={(event) =>
+                  setSettings((previous) =>
+                    previous
+                      ? { ...previous, lenientLocalImageFallbackModel: event.target.value }
+                      : previous
+                  )
+                }
+              >
+                <option value="">Disabled</option>
+                {includeSelectedLocalImageModelOption(
+                  localImageModelCatalogEntries,
+                  settings.lenientLocalImageFallbackModel
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <label className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}>
+          <span className={styles.settingsRangeHeader}>
+            <span>Atmosphere wallpaper opacity</span>
+            <span className={styles.settingsRangeValue}>
+              {formatZenWallpaperOpacity(settings.zenWallpaperOpacity)}
+            </span>
+          </span>
+          <input
+            type="range"
+            min={MIN_ZEN_WALLPAPER_OPACITY}
+            max={MAX_ZEN_WALLPAPER_OPACITY}
+            step={0.01}
+            value={normalizeZenWallpaperOpacitySetting(settings.zenWallpaperOpacity)}
+            onChange={(event) => {
+              const next = normalizeZenWallpaperOpacitySetting(event.target.value);
+              setSettings((previous) =>
+                previous ? { ...previous, zenWallpaperOpacity: next } : previous
+              );
+              void persistZenWallpaperOpacityField(next);
+            }}
+          />
+        </label>
+
+        <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+          <input
+            type="checkbox"
+            checked={settings.fallbackModelMessageStripe !== false}
+            onChange={(event) =>
+              setSettings((previous) =>
+                previous
+                  ? { ...previous, fallbackModelMessageStripe: event.target.checked }
+                  : previous
+              )
+            }
+          />
+          Mark fallback replies
+        </label>
+      </div>
+    );
+  };
   const renderProviderModeToggle = (extraClassName = ""): React.ReactNode => {
     // The toggle simply mirrors `effectivePreferredProvider`, which is
     // already pinned to "local" when the active chat bot is offline-only.
     // We keep the lock indicator + disabled flag tied to that same source
     // of truth so it can never disagree with the model pickers below it.
     const lockedByActiveBot = activeBot?.online_enabled === 0;
-    const isLocal = effectivePreferredProvider === "local";
+    const responseMode = responseModeForProvider(effectivePreferredProvider);
+    const isLocal = responseMode === "local";
+    const nextMode = nextResponseMode(responseMode);
+    const nextResolvedProvider = resolveModelChoiceForResponseMode({
+      responseMode: nextMode,
+      providerPreference: effectivePreferredProvider,
+      choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+      onlineOptions: onlineChatModelOptions,
+    }).provider;
     const providerDisabled = !settings || lockedByActiveBot;
-    const activeProviderLabel = providerDisplayLabel(effectivePreferredProvider);
-    const nextProviderLabel = providerDisplayLabel(nextProvider(effectivePreferredProvider));
+    const activeModeLabel = responseModeDisplayLabel(responseMode);
+    const nextModeLabel = responseModeDisplayLabel(nextMode);
     const lockTitle = lockedByActiveBot
       ? `🔒 Locked to LOCAL — ${activeBot?.name ?? "this bot"} is set to Offline only.`
       : null;
@@ -17421,16 +18097,16 @@ function HomeContent(): React.JSX.Element {
           data-protected={lockedByActiveBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
-            void switchProvider(nextProvider(effectivePreferredProvider));
+            void switchProvider(nextResolvedProvider);
           }}
           aria-label={
             lockTitle
               ? `${lockTitle} Toggle disabled.`
-              : `Response mode: ${activeProviderLabel}. Click to switch to ${nextProviderLabel}.`
+              : `Response mode: ${activeModeLabel}. Click to switch to ${nextModeLabel}.`
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={lockTitle ?? `Switch to ${nextProviderLabel}`}
+          title={lockTitle ?? `Switch to ${nextModeLabel}`}
           disabled={providerDisabled}
         >
           <span
@@ -17454,7 +18130,7 @@ function HomeContent(): React.JSX.Element {
               />
             )}
             <span className={styles.modeThumbLabel}>
-              {providerShortLabel(effectivePreferredProvider)}
+              {responseModeShortLabel(responseMode)}
             </span>
           </span>
         </button>
@@ -17471,10 +18147,18 @@ function HomeContent(): React.JSX.Element {
    *  bodies never disagree with the visible state. */
   const renderCoffeeProviderModeToggle = (): React.ReactNode => {
     const lockedByProtectedBot = coffeeAnyOfflineProtected;
-    const isLocal = lockedByProtectedBot ? true : coffeeProvider === "local";
     const effectiveCoffeeProvider = lockedByProtectedBot ? "local" : coffeeProvider;
-    const activeProviderLabel = providerDisplayLabel(effectiveCoffeeProvider);
-    const nextProviderLabel = providerDisplayLabel(nextProvider(effectiveCoffeeProvider));
+    const responseMode = responseModeForProvider(effectiveCoffeeProvider);
+    const isLocal = responseMode === "local";
+    const nextMode = nextResponseMode(responseMode);
+    const nextResolvedProvider = resolveModelChoiceForResponseMode({
+      responseMode: nextMode,
+      providerPreference: effectiveCoffeeProvider,
+      choices: visibleModelChoicesByProvider(settings, coffeeModelChoiceByProvider),
+      onlineOptions: onlineChatModelOptions,
+    }).provider;
+    const activeModeLabel = responseModeDisplayLabel(responseMode);
+    const nextModeLabel = responseModeDisplayLabel(nextMode);
     const providerDisabled = !settings || lockedByProtectedBot;
     const lockTitle = lockedByProtectedBot
       ? "🔒 Locked to LOCAL — at least one seated bot is set to Offline only."
@@ -17495,17 +18179,17 @@ function HomeContent(): React.JSX.Element {
           data-protected={lockedByProtectedBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
-            setCoffeeProvider(nextProvider(effectiveCoffeeProvider));
+            setCoffeeProvider(nextResolvedProvider);
             setCoffeeProviderTouched(true);
           }}
           aria-label={
             lockTitle
               ? `${lockTitle} Toggle disabled.`
-              : `Response mode: ${activeProviderLabel}. Click to switch to ${nextProviderLabel}.`
+              : `Response mode: ${activeModeLabel}. Click to switch to ${nextModeLabel}.`
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={lockTitle ?? `Switch to ${nextProviderLabel}`}
+          title={lockTitle ?? `Switch to ${nextModeLabel}`}
           disabled={providerDisabled}
         >
           <span
@@ -17529,7 +18213,7 @@ function HomeContent(): React.JSX.Element {
               />
             )}
             <span className={styles.modeThumbLabel}>
-              {providerShortLabel(effectiveCoffeeProvider)}
+              {responseModeShortLabel(responseMode)}
             </span>
           </span>
         </button>
@@ -17539,15 +18223,19 @@ function HomeContent(): React.JSX.Element {
   const renderCoffeeHeaderModelPicker = (): React.ReactNode => {
     if (!settings) return null;
     const lockedByProtectedBot = coffeeAnyOfflineProtected;
-    const modelProvider: Provider = lockedByProtectedBot ? "local" : coffeeProvider;
-    const isLocal = modelProvider === "local";
-    const rawModelChoice = coffeeModelChoiceByProvider[modelProvider];
-    const visibleModelChoice = visibleModelChoiceForProvider(
-      settings,
-      rawModelChoice
-    );
+    const effectiveProvider = lockedByProtectedBot ? "local" : coffeeProvider;
+    const responseMode = responseModeForProvider(effectiveProvider);
+    const isLocal = responseMode === "local";
+    const resolvedChoice = resolveModelChoiceForResponseMode({
+      responseMode,
+      providerPreference: effectiveProvider,
+      choices: visibleModelChoicesByProvider(settings, coffeeModelChoiceByProvider),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const modelProvider = resolvedChoice.provider;
+    const visibleModelChoice = resolvedChoice.modelChoice;
     const modelOptions = includeSelectedModelOption(
-      availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+      modelOptionsForResponseMode(modelCatalog, settings, responseMode),
       visibleModelChoice,
       modelProvider
     );
@@ -17555,29 +18243,45 @@ function HomeContent(): React.JSX.Element {
       <ComposerModelPicker
         value={visibleModelChoice}
         onChange={(nextChoice) => {
+          const appliedOnline =
+            responseMode === "online"
+              ? applyOnlineModelChoice({
+                  currentChoices: coffeeModelChoiceByProvider,
+                  nextChoice,
+                  onlineOptions: onlineChatModelOptions,
+                  providerPreference: effectiveProvider,
+                })
+              : null;
           setCoffeeModelChoiceByProvider((previous) => {
-            const next = { ...previous, [modelProvider]: nextChoice };
+            const next =
+              responseMode === "local"
+                ? { ...previous, local: nextChoice }
+                : applyOnlineModelChoice({
+                    currentChoices: previous,
+                    nextChoice,
+                    onlineOptions: onlineChatModelOptions,
+                    providerPreference: effectiveProvider,
+                  }).choices;
             persistCoffeeModelChoicesForScope(next);
             return next;
           });
+          if (appliedOnline) {
+            setCoffeeProvider(appliedOnline.provider);
+            setCoffeeProviderTouched(true);
+          }
         }}
         options={modelOptions}
-        provider={modelProvider}
+        provider={isLocal ? "local" : "online"}
         disabled={coffeeBusy || coffeeAutoBusy}
-        title={`Coffee model (${providerShortLabel(modelProvider)} — overrides each seated bot)`}
+        title={`Coffee model (${responseModeShortLabel(responseMode)} — overrides each seated bot)`}
         ariaLabel={`Coffee session model for ${
-          isLocal ? "local" : providerDisplayLabel(modelProvider)
+          isLocal ? "local" : "online"
         } replies`}
         placement="down"
         minMenuWidthPx={180}
-        autoOptionMetaOverride={
-          modelProvider === "local"
-            ? "Per-bot default local model when Auto"
-            : `Per-bot default ${providerDisplayLabel(modelProvider)} model when Auto`
-        }
         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
           settings,
-          modelProvider
+          isLocal ? "local" : "online"
         )}
       />
     );
@@ -17586,15 +18290,18 @@ function HomeContent(): React.JSX.Element {
     // Use the effective provider so the picker shows local options whenever
     // the active bot is locked offline-only — even if the user's saved
     // global preference is online.
-    const modelProvider: Provider = effectivePreferredProvider;
-    const isLocal = modelProvider === "local";
-    const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-    const visibleModelChoice = visibleModelChoiceForProvider(
-      settings,
-      rawModelChoice
-    );
+    const responseMode = responseModeForProvider(effectivePreferredProvider);
+    const isLocal = responseMode === "local";
+    const resolvedChoice = resolveModelChoiceForResponseMode({
+      responseMode,
+      providerPreference: effectivePreferredProvider,
+      choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const modelProvider = resolvedChoice.provider;
+    const visibleModelChoice = resolvedChoice.modelChoice;
     const modelOptions = includeSelectedModelOption(
-      availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+      modelOptionsForResponseMode(modelCatalog, settings, responseMode),
       visibleModelChoice,
       modelProvider
     );
@@ -17607,33 +18314,47 @@ function HomeContent(): React.JSX.Element {
         <ComposerModelPicker
           value={visibleModelChoice}
           onChange={(nextChoice) => {
+            const appliedOnline =
+              responseMode === "online"
+                ? applyOnlineModelChoice({
+                    currentChoices: chatModelChoiceByProvider,
+                    nextChoice,
+                    onlineOptions: onlineChatModelOptions,
+                    providerPreference: effectivePreferredProvider,
+                  })
+                : null;
             setChatModelChoiceByProvider((previous) => {
-              const next = { ...previous, [modelProvider]: nextChoice };
+              const next =
+                responseMode === "local"
+                  ? { ...previous, local: nextChoice }
+                  : applyOnlineModelChoice({
+                      currentChoices: previous,
+                      nextChoice,
+                      onlineOptions: onlineChatModelOptions,
+                      providerPreference: effectivePreferredProvider,
+                    }).choices;
               persistChatModelChoicesForActiveScope(next);
               return next;
             });
+            if (appliedOnline) {
+              void switchProvider(appliedOnline.provider);
+            }
           }}
           options={modelOptions}
-          provider={modelProvider}
+          provider={isLocal ? "local" : "online"}
           disabled={!settings || pendingReplyVisible}
-          title={`Model for ${providerShortLabel(modelProvider)} replies`}
+          title={`Model for ${responseModeShortLabel(responseMode)} replies`}
           ariaLabel={`Model for ${
-            isLocal ? "local" : providerDisplayLabel(modelProvider)
+            isLocal ? "local" : "online"
           } replies`}
           placement="down"
           minMenuWidthPx={180}
-          autoOptionMetaOverride={composeAutoOptionMetaLine(
-            modelCatalog,
-            settings,
-            modelProvider,
-            composeBotForAutoModelMeta
-          )}
           settingsDefaultModelId={chatSettingsSavedDefaultModelId(
             settings,
-            modelProvider
+            isLocal ? "local" : "online"
           )}
         />
-        {(view === "chat" || view === "sandbox") && bots.length > 0 ? (
+        {view === "sandbox" && bots.length > 0 ? (
           <ComposerBotPicker
             value={selectedBotId ?? ""}
             onChange={handleComposerBotSelectionChange}
@@ -17671,10 +18392,6 @@ function HomeContent(): React.JSX.Element {
     const modelProvider: Provider = isLocal ? "local" : "openai";
     const rawChoice = imageGenModelChoiceByProvider[modelProvider];
     const trimmedChoice = rawChoice?.trim() ?? "";
-    const imagesAutoMeta =
-      imagePanelScope === "bot" && imagePanelBot
-        ? `Per-bot checkpoint, then Settings, then catalog (${imagePanelBot.name})`
-        : "Per-bot checkpoint, then Settings, then catalog";
 
     if (modelProvider === "local" && localImageModelCatalogEntries.length === 0) {
       return (
@@ -17712,7 +18429,7 @@ function HomeContent(): React.JSX.Element {
           : trimmedChoice
         : DEFAULT_OPENAI_IMAGE_MODEL_ID;
     const onlineOpts = includeSelectedModelOption(
-      openAiImageModelCatalogEntries,
+      onlineImageModelCatalogEntries,
       normalizeOpenAiImageModelId(openAiSeedForMenu),
       "openai"
     );
@@ -17722,10 +18439,9 @@ function HomeContent(): React.JSX.Element {
         : localImageModelCatalogEntries.some((entry) => entry.id === trimmedChoice)
           ? trimmedChoice
           : localImageModelCatalogEntries[0]?.id ?? AUTO_MODEL_CHOICE;
-    const localOpts = includeSelectedModelOption(
+    const localOpts = includeSelectedLocalImageModelOption(
       localImageModelCatalogEntries,
-      visibleLocalChoice,
-      "local"
+      visibleLocalChoice
     );
 
     const modelOptions = modelProvider === "openai" ? onlineOpts : localOpts;
@@ -17751,14 +18467,13 @@ function HomeContent(): React.JSX.Element {
             void persistPreferredImageModel(modelProvider, nextChoice);
           }}
           options={modelOptions}
-          provider={modelProvider}
+          provider={isLocal ? "local" : "online"}
           disabled={!settings}
           title={`Image model (${isLocal ? "LOCAL" : "ONLINE"})`}
           ariaLabel={`Image generation model for ${isLocal ? "local" : "online"}`}
           placement="down"
           minMenuWidthPx={180}
           showAutoOption
-          autoOptionMetaOverride={imagesAutoMeta}
           settingsDefaultModelId={imageSettingsSavedDefaultModelId(
             settings,
             modelProvider
@@ -17782,7 +18497,10 @@ function HomeContent(): React.JSX.Element {
       return conversations
         .filter((conversation) => {
           if (conversation.incognito) return false;
-          if (view === "sandbox" && conversation.mode === "chat") {
+          if (
+            view === "sandbox" &&
+            (conversation.mode === "zen" || conversation.mode === "chat")
+          ) {
             return false;
           }
           return true;
@@ -18232,34 +18950,46 @@ function HomeContent(): React.JSX.Element {
     detail?.messages,
     chatArchiveRevealEpoch,
   ]);
-  const latestUserMessageIndex = useMemo<number>(() => {
-    const source = detail?.messages ?? [];
-    for (let i = source.length - 1; i >= 0; i -= 1) {
-      if (source[i]?.role === "user") return i;
-    }
-    return -1;
-  }, [detail?.messages]);
   const chatArchiveLoadingActive =
     Boolean(chatEphemeralMode && detail?.id) &&
     (detail?.id ? chatArchiveLoadingByConversationRef.current.get(detail.id) === true : false);
   const visibleDetailMessages = useMemo(() => {
     const source = detail?.messages ?? [];
     if (!chatEphemeralMode) return source;
-    if (!detail?.id) return source;
-    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
-    if (revealArchived || latestUserMessageIndex <= 0) return source;
-    // Keep only the active turn in memory until the user requests older
-    // history by scrolling upward.
-    return source.slice(latestUserMessageIndex);
-  }, [
-    chatEphemeralMode,
-    detail?.id,
-    detail?.messages,
-    latestUserMessageIndex,
-    chatArchiveRevealEpoch,
-  ]);
+    return source;
+  }, [chatEphemeralMode, detail?.messages]);
+  const zenEraBoundaryLabelByMessageId = useMemo(() => {
+    const labels = new Map<string, string>();
+    if (view !== "chat" || detail?.mode !== "zen") return labels;
+    const source = detail.messages;
+    for (let i = 1; i < source.length; i += 1) {
+      const previousMs = messageCreatedAtMs(source[i - 1]!);
+      const current = source[i]!;
+      const currentMs = messageCreatedAtMs(current);
+      if (previousMs === null || currentMs === null) continue;
+      if (currentMs - previousMs < ZEN_IDLE_ERA_GAP_MS) continue;
+      labels.set(current.id, formatZenEraBoundaryLabel(current));
+    }
+    return labels;
+  }, [view, detail?.mode, detail?.messages]);
+  const zenLatestIdleEraBoundaryMessageCount = useMemo(() => {
+    if (view !== "chat" || detail?.mode !== "zen") return null;
+    const source = detail.messages;
+    for (let i = source.length - 1; i > 0; i -= 1) {
+      const current = source[i]!;
+      if (current.role !== "user") continue;
+      const previousMs = messageCreatedAtMs(source[i - 1]!);
+      const currentMs = messageCreatedAtMs(current);
+      if (previousMs === null || currentMs === null) continue;
+      if (currentMs - previousMs >= ZEN_IDLE_ERA_GAP_MS) return i + 1;
+    }
+    return null;
+  }, [view, detail?.mode, detail?.messages]);
+  const chatStartupSummaryIsDefault =
+    chatStartupSummary === DEFAULT_CHAT_STARTUP_SUMMARY;
   const chatStartupSummaryVisible = Boolean(
     chatStartupSummary &&
+    !chatStartupSummaryIsDefault &&
     !pendingReplyVisible &&
     (!detail || visibleDetailMessages.length === 0)
   );
@@ -18646,6 +19376,88 @@ function HomeContent(): React.JSX.Element {
     view,
     pendingReplyVisible,
     selectedComposeBotAccent,
+  ]);
+  const manualCompactionIndicatorNode = useMemo(() => {
+    const activeConversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    const activeMode: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
+    if (
+      !manualCompactionStatus ||
+      manualCompactionStatus.conversationId !== activeConversationId ||
+      manualCompactionStatus.mode !== activeMode
+    ) {
+      return null;
+    }
+    const style = selectedComposeBotAccent
+      ? ({ ["--typing-accent" as string]: selectedComposeBotAccent } as React.CSSProperties)
+      : undefined;
+    const running = manualCompactionStatus.state === "running";
+    const label = running
+      ? "Compacting this chat context"
+      : "Compacted context is ready";
+    return (
+      <div className={styles.manualCompactionRow}>
+        <hr className={styles.manualCompactionDivider} aria-hidden="true" />
+        <div
+          className={`${styles.typingIndicator} ${styles.manualCompactionIndicator}`}
+          style={style}
+          role="status"
+          aria-live="polite"
+          aria-label={label}
+        >
+          {running ? (
+            <span className={styles.summarySpinnerWheel} aria-hidden="true" />
+          ) : null}
+          <span>{label}</span>
+        </div>
+      </div>
+    );
+  }, [
+    detail?.id,
+    manualCompactionStatus,
+    selectedComposeBotAccent,
+    selectedId,
+    view,
+  ]);
+  const compactedSummaryDebugNode = useMemo(() => {
+    if (!DEV_TOOLS_ENABLED || !devShowCompactedSummaryInChat) return null;
+    const activeConversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (!activeConversationId) return null;
+    const activeMode: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
+    const summaryFromDebug =
+      summaryDebug?.conversationId === activeConversationId &&
+      summaryDebug.mode === activeMode
+        ? summaryDebug.latestSummary
+        : null;
+    const summaryFromManual =
+      manualCompactionStatus?.conversationId === activeConversationId &&
+      manualCompactionStatus.mode === activeMode
+        ? manualCompactionStatus.summary
+        : null;
+    const summaryText = (summaryFromDebug ?? summaryFromManual ?? "").trim();
+    if (!summaryText) return null;
+    const summaryAt =
+      summaryDebug?.conversationId === activeConversationId &&
+      summaryDebug.mode === activeMode
+        ? summaryDebug.latestSummaryAt
+        : manualCompactionStatus?.summaryAt ?? null;
+    return (
+      <div className={styles.compactedSummaryDebugBubble} role="note">
+        <div className={styles.compactedSummaryDebugHeader}>
+          <strong>Compacted context</strong>
+          <span>{activeMode}{summaryAt ? ` - ${summaryAt}` : ""}</span>
+        </div>
+        <pre>{summaryText}</pre>
+      </div>
+    );
+  }, [
+    detail?.id,
+    devShowCompactedSummaryInChat,
+    manualCompactionStatus,
+    selectedId,
+    summaryDebug,
+    view,
   ]);
   // Metrics now live in the floating developer terminal, not inside the chat transcript.
   const devChatDebugEventsNode = null;
@@ -19604,7 +20416,7 @@ function HomeContent(): React.JSX.Element {
     storySelectedBotIds.length <= STORY_BOT_COUNT_MAX;
   const storyAnyOfflineProtected = storySelectedBots.some((bot) => bot.online_enabled === 0);
   const storyEffectiveProvider: Provider = storyAnyOfflineProtected ? "local" : storyProvider;
-  const storyModelProvider: Provider = storyEffectiveProvider;
+  const storyResponseMode = responseModeForProvider(storyEffectiveProvider);
   const storyBaselineLocalModelOption =
     modelCatalog?.local.find((model) => model.id === REQUIRED_PRIMARY_LOCAL_MODEL_ID) ?? {
       id: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
@@ -19612,22 +20424,26 @@ function HomeContent(): React.JSX.Element {
       provider: "local" as const,
       isDefault: true,
     };
-  const storyVisibleModelChoice = visibleModelChoiceForProvider(
-    settings,
-    storyModelChoiceByProvider[storyModelProvider]
-  );
+  const storyResolvedChoice = resolveModelChoiceForResponseMode({
+    responseMode: storyResponseMode,
+    providerPreference: storyEffectiveProvider,
+    choices: visibleModelChoicesByProvider(settings, storyModelChoiceByProvider),
+    onlineOptions: onlineChatModelOptions,
+  });
+  const storyModelProvider = storyResolvedChoice.provider;
+  const storyVisibleModelChoice = storyResolvedChoice.modelChoice;
   const storyEffectiveModelChoice =
-    storyModelProvider === "local" ? REQUIRED_PRIMARY_LOCAL_MODEL_ID : storyVisibleModelChoice;
+    storyResponseMode === "local" ? REQUIRED_PRIMARY_LOCAL_MODEL_ID : storyVisibleModelChoice;
   const storyModelOptions =
-    storyModelProvider === "local"
+    storyResponseMode === "local"
       ? [storyBaselineLocalModelOption]
       : includeSelectedModelOption(
-          availableModelOptionsForProvider(modelCatalog, settings, storyModelProvider),
+          onlineChatModelOptions,
           storyVisibleModelChoice,
           storyModelProvider
         );
   const storyModelOverride =
-    storyModelProvider === "local"
+    storyResponseMode === "local"
       ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
       : storyVisibleModelChoice !== AUTO_MODEL_CHOICE
         ? storyVisibleModelChoice
@@ -19725,7 +20541,7 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify({
             botIds: storySelectedBotIds,
             premise: storyPremise.trim() || undefined,
-            preferredProvider: storyEffectiveProvider,
+            preferredProvider: storyModelProvider,
             ...(storyModelOverride ? { modelOverride: storyModelOverride } : {}),
           }),
         }
@@ -19750,7 +20566,7 @@ function HomeContent(): React.JSX.Element {
     }
   }, [
     storyBusy,
-    storyEffectiveProvider,
+    storyModelProvider,
     storyModelOverride,
     storyPremise,
     storySelectedBotIds,
@@ -20148,22 +20964,26 @@ function HomeContent(): React.JSX.Element {
     coffeeGroups,
   ]);
 
-  const coffeeSessionModelOverride = useMemo((): string | undefined => {
-    if (!settings) return undefined;
-    const locked = coffeeAnyOfflineProtected;
-    const effectiveProv = locked ? "local" : coffeeProvider;
-    const modelProvider: Provider = effectiveProv;
-    const visible = visibleModelChoiceForProvider(
-      settings,
-      coffeeModelChoiceByProvider[modelProvider]
-    );
-    return visible !== AUTO_MODEL_CHOICE ? visible : undefined;
+  const coffeeSessionResolvedChoice = useMemo(() => {
+    const effectiveProvider = coffeeAnyOfflineProtected ? "local" : coffeeProvider;
+    return resolveModelChoiceForResponseMode({
+      responseMode: responseModeForProvider(effectiveProvider),
+      providerPreference: effectiveProvider,
+      choices: visibleModelChoicesByProvider(settings, coffeeModelChoiceByProvider),
+      onlineOptions: onlineChatModelOptions,
+    });
   }, [
     settings,
     coffeeAnyOfflineProtected,
     coffeeProvider,
     coffeeModelChoiceByProvider,
+    onlineChatModelOptions,
   ]);
+  const coffeeSessionProvider = coffeeSessionResolvedChoice.provider;
+  const coffeeSessionModelOverride =
+    coffeeSessionResolvedChoice.modelChoice !== AUTO_MODEL_CHOICE
+      ? coffeeSessionResolvedChoice.modelChoice
+      : undefined;
 
   useEffect(() => {
     if (!coffeeConversation || coffeeSessionPhase !== "finished") return;
@@ -20179,7 +20999,7 @@ function HomeContent(): React.JSX.Element {
           {
             method: "POST",
             body: JSON.stringify({
-              preferredProvider: coffeeProvider,
+              preferredProvider: coffeeSessionProvider,
               ...(coffeeSessionModelOverride
                 ? { modelOverride: coffeeSessionModelOverride }
                 : {}),
@@ -20200,7 +21020,7 @@ function HomeContent(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [coffeeConversation, coffeeProvider, coffeeSessionModelOverride, coffeeSessionPhase]);
+  }, [coffeeConversation, coffeeSessionModelOverride, coffeeSessionPhase, coffeeSessionProvider]);
 
   const coffeeMentionBotPicks = useMemo((): BotMentionPick[] => {
     const out: BotMentionPick[] = [];
@@ -20693,7 +21513,7 @@ function HomeContent(): React.JSX.Element {
       setActiveTutorialMode(null);
       return;
     }
-    const mode = view as TutorialMode;
+    const mode: TutorialMode = view === "chat" ? "zen" : (view as TutorialMode);
     if (!Object.prototype.hasOwnProperty.call(DEFAULT_TUTORIAL_PROGRESS, mode)) {
       return;
     }
@@ -20709,8 +21529,12 @@ function HomeContent(): React.JSX.Element {
   }, [activeTutorialMode, tutorialProgress, user, view]);
   useEffect(() => {
     if (!devToolsOpen) return;
-    void refreshSummaryDebug(view === "chat" ? "chat" : "sandbox");
+    void refreshSummaryDebug(view === "chat" ? "zen" : "sandbox");
   }, [devToolsOpen, view, detail?.id, detail?.messages.length, selectedId]);
+  useEffect(() => {
+    if (!devShowCompactedSummaryInChat) return;
+    void refreshSummaryDebug(view === "chat" ? "zen" : "sandbox");
+  }, [devShowCompactedSummaryInChat, view, detail?.id, selectedId]);
   useEffect(() => {
     return () => {
       if (botLibraryCloseTimerRef.current) {
@@ -21094,11 +21918,11 @@ function HomeContent(): React.JSX.Element {
     return () => window.clearInterval(timer);
   }, [memoryToasts.length, pausedMemoryToastIds]);
 
-  // Every entrance into Sandbox or Chat lands on a fresh, empty surface.
-  // Both modes should open clean, with no prior thread rendered until the
-  // user starts (or explicitly opens) a conversation in that mode.
+  // Every entrance into Sandbox lands on a fresh, empty surface. Zen briefly
+  // clears stale mode state too, then the restore effect below opens the
+  // user's single continuous PRISM conversation.
   // Fires on:
-  //   • Hub → Sandbox / Chat transitions (Hub tile click).
+  //   • Hub → Sandbox / Zen transitions (Hub tile click).
   //   • Direct URL loads at `/?view=sandbox` or `/?view=chat`.
   //   • Cross-mode hops via URL / back-forward nav.
   //
@@ -21122,6 +21946,42 @@ function HomeContent(): React.JSX.Element {
     }
     setError(null);
   }, [view]);
+
+  useEffect(() => {
+    if (view !== "chat" || !user || pendingReplyVisible || selectedId || detail) {
+      return;
+    }
+    let cancelled = false;
+    const openContinuousZen = async () => {
+      if (zenOpenInFlightRef.current) return;
+      zenOpenInFlightRef.current = true;
+      try {
+        setPendingIncognito(false);
+        setSelectedBotId(null);
+        setSandboxGridSelectedBotId(null);
+        setChatBotOverride(undefined);
+        setConversationStarterPrompts(null);
+        const d = await api<{ conversationId: string }>("/api/conversations/zen/open", {
+          method: "POST",
+          body: "{}",
+        });
+        if (cancelled) return;
+        await refreshConversations();
+        if (cancelled) return;
+        await refreshConversation(d.conversationId);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not open Zen.");
+        }
+      } finally {
+        zenOpenInFlightRef.current = false;
+      }
+    };
+    void openContinuousZen();
+    return () => {
+      cancelled = true;
+    };
+  }, [view, user, pendingReplyVisible, selectedId, detail]);
 
   useEffect(() => {
     if (view === "chat") return;
@@ -21151,7 +22011,7 @@ function HomeContent(): React.JSX.Element {
       detail?.id && detail.id !== "pending"
         ? detail.id
         : conversations.find(
-            (conversation) => conversation.mode === "chat" && !conversation.incognito
+            (conversation) => conversation.mode === "zen" && !conversation.incognito
           )?.id ?? null;
     if (!activeConversationId) {
       setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
@@ -21174,12 +22034,12 @@ function HomeContent(): React.JSX.Element {
             `/api/conversations/${encodeURIComponent(activeConversationId)}/summarization-debug`,
             {
               method: "POST",
-              body: JSON.stringify({ action: "run", mode: "chat", reason: "manual" }),
+              body: JSON.stringify({ action: "run", mode: "zen", reason: "manual" }),
             }
           );
         }
         const result = await api<{ summary: string | null }>(
-          `/api/conversations/${encodeURIComponent(activeConversationId)}/summary?mode=chat`
+          `/api/conversations/${encodeURIComponent(activeConversationId)}/summary?mode=zen`
         );
         if (cancelled) return;
         const trimmedSummary = result.summary?.trim() ?? "";
@@ -21390,10 +22250,11 @@ function HomeContent(): React.JSX.Element {
           ? detailIdRef.current
           : selectedIdRef.current;
       if (!activeConversationId) return;
+      const summaryMode = view === "chat" ? "zen" : "sandbox";
       const url = `/api/conversations/${encodeURIComponent(
         activeConversationId
-      )}/summarization-debug?mode=${view}`;
-      const payload = JSON.stringify({ action: "run", mode: view, reason: "mode_exit" });
+      )}/summarization-debug?mode=${summaryMode}`;
+      const payload = JSON.stringify({ action: "run", mode: summaryMode, reason: "mode_exit" });
       navigator.sendBeacon(
         url,
         new Blob([payload], { type: "application/json" })
@@ -21493,7 +22354,7 @@ function HomeContent(): React.JSX.Element {
       //   - else: no replies yet (edge case from a failed send), fall
       //     back to the locked botId so the dropdown reflects the user's
       //     original intent.
-      const nextPickedBotId = d.conversation.mode === "chat"
+      const nextPickedBotId = d.conversation.mode === "zen" || d.conversation.mode === "chat"
         ? null
         : d.conversation.hasAssistantReply
           ? d.conversation.lastBotId
@@ -21530,6 +22391,16 @@ function HomeContent(): React.JSX.Element {
       }
     }
   }
+
+  async function openZenMode(): Promise<void> {
+    setPendingIncognito(false);
+    setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
+    setChatBotOverride(undefined);
+    setConversationStarterPrompts(null);
+    navigateToView("chat");
+  }
+
   async function refreshConversationTitleAfterLeave(conversationId: string): Promise<void> {
     if (titleRefreshInFlightRef.current.has(conversationId)) return;
     titleRefreshInFlightRef.current.add(conversationId);
@@ -21587,6 +22458,9 @@ function HomeContent(): React.JSX.Element {
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
         : [],
+      hiddenComfyUiWorkflowIds: Array.isArray(d.settings.hiddenComfyUiWorkflowIds)
+        ? d.settings.hiddenComfyUiWorkflowIds
+        : [],
       hasOpenAiApiKey: d.settings.hasOpenAiApiKey === true,
       hasAnthropicApiKey: d.settings.hasAnthropicApiKey === true,
       hasElevenLabsApiKey: d.settings.hasElevenLabsApiKey === true,
@@ -21608,6 +22482,17 @@ function HomeContent(): React.JSX.Element {
         typeof d.settings.preferredOpenAiImageModel === "string"
           ? d.settings.preferredOpenAiImageModel
           : "",
+      preferredZenWallpaperLocalImageModel:
+        typeof d.settings.preferredZenWallpaperLocalImageModel === "string"
+          ? d.settings.preferredZenWallpaperLocalImageModel
+          : "",
+      preferredZenWallpaperOpenAiImageModel:
+        typeof d.settings.preferredZenWallpaperOpenAiImageModel === "string"
+          ? d.settings.preferredZenWallpaperOpenAiImageModel
+          : "",
+      zenWallpaperOpacity: normalizeZenWallpaperOpacitySetting(
+        d.settings.zenWallpaperOpacity
+      ),
       lenientLocalFallbackModel,
       lenientLocalImageFallbackModel,
       comfyUiWorkflows: Array.isArray(d.settings.comfyUiWorkflows)
@@ -21667,12 +22552,19 @@ function HomeContent(): React.JSX.Element {
 
   /** Persists image hub defaults from the Defaults modal (immediate save — no main Save click). */
   async function persistAccountImageDefaultModelField(
-    field: "preferredLocalImageModel" | "preferredOpenAiImageModel",
+    field:
+      | "preferredLocalImageModel"
+      | "preferredOpenAiImageModel"
+      | "preferredZenWallpaperLocalImageModel"
+      | "preferredZenWallpaperOpenAiImageModel",
     rawFromSelect: string
   ) {
     if (!settings) return;
+    const isOpenAiField =
+      field === "preferredOpenAiImageModel" ||
+      field === "preferredZenWallpaperOpenAiImageModel";
     const stored =
-      field === "preferredOpenAiImageModel" && rawFromSelect.trim().length > 0
+      isOpenAiField && rawFromSelect.trim().length > 0
         ? normalizeOpenAiImageModelId(rawFromSelect)
         : rawFromSelect.trim();
     try {
@@ -21684,6 +22576,25 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       setPanelError(
         err instanceof Error ? err.message : "Could not save this image default."
+      );
+      await refreshSettings();
+    }
+  }
+
+  async function persistZenWallpaperOpacityField(rawOpacity: unknown) {
+    if (!settings) return;
+    const stored = normalizeZenWallpaperOpacitySetting(rawOpacity);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ zenWallpaperOpacity: stored }),
+      });
+      setSettings((prev) =>
+        prev ? { ...prev, zenWallpaperOpacity: stored } : prev
+      );
+    } catch (err) {
+      setPanelError(
+        err instanceof Error ? err.message : "Could not save Atmosphere opacity."
       );
       await refreshSettings();
     }
@@ -21715,11 +22626,40 @@ function HomeContent(): React.JSX.Element {
     try {
       const d = await api<{
         catalog: ModelCatalog;
-        comfyUi?: { configured: boolean; reachable: boolean; checkpoints: ModelCatalogEntry[] };
+        comfyUi?: {
+          configured: boolean;
+          reachable: boolean;
+          checkpoints: ModelCatalogEntry[];
+          allCheckpoints?: ModelCatalogEntry[];
+        };
+        hiddenBotModelIds?: string[];
+        hiddenComfyUiWorkflowIds?: string[];
       }>(`/api/models${qs}`);
       setModelCatalog(d.catalog);
+      const hiddenBotModelIds = Array.isArray(d.hiddenBotModelIds)
+        ? d.hiddenBotModelIds
+        : null;
+      const hiddenComfyUiWorkflowIds = Array.isArray(d.hiddenComfyUiWorkflowIds)
+        ? d.hiddenComfyUiWorkflowIds
+        : null;
+      if (hiddenBotModelIds || hiddenComfyUiWorkflowIds) {
+        setSettings((previous) =>
+          previous
+            ? {
+                ...previous,
+                ...(hiddenBotModelIds ? { hiddenBotModelIds } : {}),
+                ...(hiddenComfyUiWorkflowIds ? { hiddenComfyUiWorkflowIds } : {}),
+              }
+            : previous
+        );
+      }
       setComfyUiModelsPayload(
-        d.comfyUi ?? { configured: false, reachable: false, checkpoints: [] }
+        d.comfyUi ?? {
+          configured: false,
+          reachable: false,
+          checkpoints: [],
+          allCheckpoints: [],
+        }
       );
     } catch (err) {
       console.warn("[refreshModels]", err);
@@ -21728,6 +22668,7 @@ function HomeContent(): React.JSX.Element {
         configured: Boolean(trimmed.length > 0),
         reachable: false,
         checkpoints: [],
+        allCheckpoints: [],
       });
     }
   }
@@ -21835,7 +22776,7 @@ function HomeContent(): React.JSX.Element {
       await refreshBotMemories(memoryPanelBot.id);
     }
   }
-  async function refreshSummaryDebug(modeOverride?: "chat" | "sandbox"): Promise<void> {
+  async function refreshSummaryDebug(modeOverride?: "zen" | "sandbox"): Promise<void> {
     const conversationId =
       detailIdRef.current && detailIdRef.current !== "pending"
         ? detailIdRef.current
@@ -21846,7 +22787,7 @@ function HomeContent(): React.JSX.Element {
     }
     const modeForDebug =
       modeOverride ??
-      (view === "chat" ? "chat" : "sandbox");
+      (view === "chat" ? "zen" : "sandbox");
     try {
       const d = await api<{ debug: SummaryCompactionDebug }>(
         `/api/conversations/${encodeURIComponent(
@@ -22449,40 +23390,25 @@ function HomeContent(): React.JSX.Element {
       promptShortcut?: PromptShortcutMetadata;
     } = {}
   ): Record<string, unknown> {
-    const isChatMode = view === "chat";
-    const privateForSend = detail?.incognito === true || pendingIncognito;
-    const chatBotIdForSend =
-      chatBotOverride !== undefined
-        ? chatBotOverride
-        : detail?.id !== undefined && detail.id !== "pending"
-          ? detail.botId
-          : (detail?.botId ?? selectedBotId ?? null);
-    const privateBotIdForSend = privateForSend
-      ? chatBotOverride !== undefined
-        ? chatBotOverride
-        : selectedBotId !== null
-          ? selectedBotId
-        : detail?.id !== undefined && detail.id !== "pending"
-          ? detail.botId
-          : (detail?.botId ?? selectedBotId ?? null)
-      : undefined;
-    const mode: "chat" | "sandbox" =
-      isChatMode || privateForSend ? "chat" : "sandbox";
+    const isZenMode = view === "chat";
+    const privateForSend = false;
+    const mode: "zen" | "sandbox" = isZenMode ? "zen" : "sandbox";
     const commandCenterModelChoice = parseCommandCenterModelChoice(
       options.commandCenterModelChoice ?? AUTO_MODEL_CHOICE
     );
-    // Use the effective provider so a chat with an offline-only bot never
-    // even SENDS "openai" — the API would have downgraded it anyway, but
-    // matching the visible LOCAL lock keeps the request body honest.
-    const providerForSend = commandCenterModelChoice?.provider ?? effectivePreferredProvider;
+    // Use the effective response mode so a chat with an offline-only bot never
+    // even SENDS an online provider. In ONLINE mode, resolve the real provider
+    // from the chosen model row (Claude -> Anthropic, GPT -> OpenAI).
+    const resolvedChatChoice = resolveModelChoiceForResponseMode({
+      responseMode: responseModeForProvider(effectivePreferredProvider),
+      providerPreference: effectivePreferredProvider,
+      choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const providerForSend = commandCenterModelChoice?.provider ?? resolvedChatChoice.provider;
     const modelChoice = commandCenterModelChoice
       ? commandCenterModelChoice.modelId
-      : providerForSend
-      ? visibleModelChoiceForProvider(
-          settings,
-          chatModelChoiceByProvider[providerForSend]
-        )
-      : AUTO_MODEL_CHOICE;
+      : resolvedChatChoice.modelChoice;
     const modelOverride =
       modelChoice !== AUTO_MODEL_CHOICE
         ? modelChoice
@@ -22497,7 +23423,7 @@ function HomeContent(): React.JSX.Element {
       ...(options.sessionEnding ? { sessionEnding: true } : {}),
       ...(options.forceNewConversation ? { forceNewConversation: true } : {}),
       mode,
-      ...(mode === "chat"
+      ...(mode === "zen"
         ? {
             companionPreferences: {
               tone: "grounded",
@@ -22508,17 +23434,8 @@ function HomeContent(): React.JSX.Element {
       botId:
         mode === "sandbox"
           ? (selectedBotId ?? undefined)
-          : privateForSend
-            ? privateBotIdForSend
-            : isChatMode
-              ? chatBotIdForSend
-              : undefined,
-      ...(mode === "chat" ? { incognito: privateForSend } : {}),
-      ...(privateForSend
-        ? { ephemeralMessages: options.ephemeralMessages ?? detail?.messages ?? [] }
-        : {}),
-      preferredProvider:
-        mode === "sandbox" || privateForSend || modelOverride ? providerForSend : undefined,
+          : undefined,
+      preferredProvider: providerForSend,
       ...(modelOverride ? { modelOverride } : {}),
       ...(options.promptShortcut ? { promptShortcut: options.promptShortcut } : {}),
     };
@@ -22773,12 +23690,12 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function clearSummariesFromSlashCommand(): Promise<void> {
-    const modeForSummary: "chat" | "sandbox" = view === "chat" ? "chat" : "sandbox";
+    const modeForSummary: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
     const activeConversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
     const fallbackChatConversationId =
-      modeForSummary === "chat"
-        ? conversations.find((conversation) => conversation.mode === "chat" && !conversation.incognito)?.id ?? null
+      modeForSummary === "zen"
+        ? conversations.find((conversation) => conversation.mode === "zen" && !conversation.incognito)?.id ?? null
         : null;
     const conversationId = activeConversationId ?? fallbackChatConversationId;
     // Clear the visible chat startup summary immediately for responsive feedback.
@@ -22798,19 +23715,156 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function compactCurrentChatFromSlashCommand(commandName: "compact" | "summarize"): Promise<void> {
+    const modeForSummary: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
+    const activeConversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (pendingReplyVisible) {
+      setError("Wait for the current reply to finish before compacting this chat.");
+      return;
+    }
+    if (manualCompactionStatus?.state === "running") {
+      setError("This chat is already being compacted.");
+      return;
+    }
+    if (detail?.incognito === true) {
+      setError("Private chats are not saved, so they cannot be compacted.");
+      return;
+    }
+    if (!activeConversationId || activeConversationId === "pending") {
+      setError(`Open a saved chat before using /${commandName}.`);
+      return;
+    }
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    if (modeForSummary === "zen") {
+      setChatStartupSummary(null);
+      chatSummaryRefreshMarkerRef.current = null;
+    }
+    setManualCompactionStatus({
+      conversationId: activeConversationId,
+      mode: modeForSummary,
+      state: "running",
+      summary: null,
+      summaryAt: null,
+    });
+    try {
+      const result = await api<{
+        compacted?: {
+          triggered?: boolean;
+          latestSummary?: string;
+          latestSummaryAt?: string;
+        };
+        debug?: SummaryCompactionDebug;
+      }>(`/api/conversations/${encodeURIComponent(activeConversationId)}/summarization-debug`, {
+        method: "POST",
+        body: JSON.stringify({ action: "run", mode: modeForSummary, reason: "manual" }),
+      });
+      if (result.debug) {
+        setSummaryDebug(result.debug);
+      } else {
+        await refreshSummaryDebug(modeForSummary);
+      }
+      const latestSummary =
+        result.debug?.latestSummary?.trim() ||
+        result.compacted?.latestSummary?.trim() ||
+        null;
+      const latestSummaryAt =
+        result.debug?.latestSummaryAt ??
+        result.compacted?.latestSummaryAt ??
+        null;
+      appendDevChatDebugLines([
+        {
+          kind: "summary",
+          text:
+            `[/${commandName}] compacted current ${modeForSummary} chat` +
+            (latestSummary ? ` - ${latestSummary.length} chars` : ""),
+        },
+      ]);
+      setManualCompactionStatus({
+        conversationId: activeConversationId,
+        mode: modeForSummary,
+        state: "complete",
+        summary: latestSummary,
+        summaryAt: latestSummaryAt,
+      });
+      window.setTimeout(() => {
+        setManualCompactionStatus((current) =>
+          current?.conversationId === activeConversationId && current.state === "complete"
+            ? null
+            : current
+        );
+      }, 1800);
+    } catch (err) {
+      setManualCompactionStatus(null);
+      setError(err instanceof Error ? err.message : "Summary compaction failed.");
+    }
+  }
+
   async function clearConversationFromSlashCommand(): Promise<void> {
+    if (pendingReplyVisible) {
+      setError("Wait for the current reply to finish before clearing this chat.");
+      return;
+    }
     const activeConversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
     const fallbackChatConversationId =
       view === "chat"
-        ? conversations.find((conversation) => conversation.mode === "chat" && !conversation.incognito)?.id ?? null
+        ? conversations.find((conversation) => conversation.mode === "zen" && !conversation.incognito)?.id ?? null
         : null;
     const conversationId = activeConversationId ?? fallbackChatConversationId;
-    if (!conversationId || conversationId === "pending") return;
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    if (!conversationId || conversationId === "pending" || detail?.incognito === true) {
+      clearAllDisplayedConversationState();
+      setForceNewConversationOnNextSend(false);
+      setComposerPrimed(false);
+      return;
+    }
     try {
-      await api(`/api/conversations/${encodeURIComponent(conversationId)}`, {
-        method: "DELETE",
+      await api<{
+        ok: true;
+        deletedMessages: number;
+        deletedSummaries: number;
+        deletedExports: number;
+      }>(`/api/conversations/${encodeURIComponent(conversationId)}/clear`, {
+        method: "POST",
       });
+      setDetail((current) =>
+        current && current.id === conversationId
+          ? {
+              ...current,
+              title: "New chat",
+              hasAssistantReply: false,
+              lastBotId: null,
+              lastBotColor: null,
+              messages: [],
+            }
+          : current
+      );
+      setSessionOpinion(null);
+      setBotOpinion(null);
+      setChatStartupSummary(null);
+      chatSummaryRefreshMarkerRef.current = null;
+      setSummaryDebug((current) =>
+        current?.conversationId === conversationId ? null : current
+      );
+      setManualCompactionStatus((current) =>
+        current?.conversationId === conversationId ? null : current
+      );
+      hardResetChatArchiveStateForConversation(conversationId);
+      setForceNewConversationOnNextSend(false);
+      setComposerPrimed(false);
       await refreshConversations();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Conversation clear failed.");
@@ -22858,6 +23912,36 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  /** Built-in operational slash commands that run locally instead of becoming model input. */
+  async function consumeBuiltInOperationalSlashCommand(trimmedLine: string): Promise<boolean> {
+    const tokens = trimmedLine
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+    if (tokens.length === 0) return false;
+    const normalizedCommand = tokens[0].toLowerCase();
+    if (
+      normalizedCommand !== "/compact" &&
+      normalizedCommand !== "/summarize" &&
+      normalizedCommand !== "/clear" &&
+      normalizedCommand !== "/cls"
+    ) {
+      return false;
+    }
+    if (tokens.length > 1) {
+      setError(`${normalizedCommand} does not take extra text. Use it by itself.`);
+      return true;
+    }
+    if (normalizedCommand === "/clear" || normalizedCommand === "/cls") {
+      await clearConversationFromSlashCommand();
+      return true;
+    }
+    await compactCurrentChatFromSlashCommand(
+      normalizedCommand === "/summarize" ? "summarize" : "compact"
+    );
+    return true;
+  }
+
   /** Local slash commands gated by Dev toggles (e.g. `/forget`, `/forget all`, `/help`). */
   async function consumeDevSlashCommand(trimmedLine: string): Promise<boolean> {
     if (!devSlashCommandsEnabled) return false;
@@ -22881,6 +23965,8 @@ function HomeContent(): React.JSX.Element {
           "**Dev slash commands** (local only)\n\n" +
           "- `/forget` - forgets player-only memory. Clears profile memory and resets summaries, while preserving non-player memories.\n" +
           "- `/forget all` - hard-resets chat for testing. Wipes the active conversation, every extracted memory, every summary fragment (SQLite + Qdrant), and the UI.\n" +
+          "- `/clear` or `/cls` - clears the current chat transcript and saved thread context.\n" +
+          "- `/compact` or `/summarize` - compacts only the current saved chat without clearing the transcript.\n" +
           "- `/help` - shows this command list.",
         createdAt: new Date().toISOString(),
         provider: "local",
@@ -23229,6 +24315,13 @@ function HomeContent(): React.JSX.Element {
     e.preventDefault();
     const rawDraft = options.draftOverride ?? draft;
     const rawTrimmed = rawDraft.trim();
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      await consumeBuiltInOperationalSlashCommand(rawTrimmed)
+    ) {
+      return;
+    }
     const commandCenterResolution =
       rawTrimmed.length > 0 && !options.starterPrompt
         ? resolveCommandCenterSlashCommand(rawTrimmed)
@@ -23408,6 +24501,7 @@ function HomeContent(): React.JSX.Element {
         incognito: optimisticIncognito,
         lastBotId: optimisticLastBotId,
         lastBotColor: optimisticLastBotColor,
+        ...(detail?.zenWallpaper ? { zenWallpaper: detail.zenWallpaper } : {}),
         // hasAssistantReply reflects the PRE-SEND state (whatever detail
         // already had) — the optimistic update only inserts a USER
         // message, not an assistant one. The server's real response
@@ -23959,8 +25053,11 @@ function HomeContent(): React.JSX.Element {
     const prompt = normalizeAskQuestionText(interaction.askQuestion.prompt);
     const answered = interaction.status === "answered";
     const answerMessage = interaction.answerMessage;
+    const canChangeAnsweredAskQuestion = view !== "chat";
     const answerEditable =
-      answerMessage !== null && !String(answerMessage.id).startsWith("pending-");
+      canChangeAnsweredAskQuestion &&
+      answerMessage !== null &&
+      !String(answerMessage.id).startsWith("pending-");
     const changing =
       answered &&
       answerEditable &&
@@ -23981,7 +25078,7 @@ function HomeContent(): React.JSX.Element {
           <span className={styles.askQuestionInlineEyebrow}>
             {answered ? "Answered" : "Choose a reply"}
           </span>
-          {answered ? (
+          {answered && canChangeAnsweredAskQuestion ? (
             <button
               type="button"
               className={styles.askQuestionInlineChangeButton}
@@ -24305,6 +25402,146 @@ function HomeContent(): React.JSX.Element {
     askQuestionUsesMobileRail &&
     pendingAskQuestionInteractiveKey !== null &&
     askQuestionComposerRevealed;
+
+  function applyZenAtmosphereLayerOpacities(next: Record<string, number>): void {
+    setZenAtmosphereLayerOpacities((previous) => {
+      const previousKeys = Object.keys(previous);
+      const nextKeys = Object.keys(next);
+      if (previousKeys.length === nextKeys.length) {
+        const unchanged = nextKeys.every(
+          (key) => Math.abs((previous[key] ?? 0) - next[key]) < 0.005
+        );
+        if (unchanged) return previous;
+      }
+      return next;
+    });
+  }
+
+  function calculateZenAtmosphereLayerOpacities(
+    scrollRoot: HTMLDivElement
+  ): Record<string, number> {
+    if (view !== "chat" || zenAtmosphereTimeline.length === 0) return {};
+    const messages = detail?.messages ?? [];
+    const rootRect = scrollRoot.getBoundingClientRect();
+    const messageCountToY = (messageCount: number): number => {
+      const count = Math.max(0, Math.floor(messageCount));
+      if (messages.length === 0) {
+        return count * Math.max(140, scrollRoot.clientHeight * 0.22);
+      }
+      if (count > 0 && count <= messages.length) {
+        const anchorMessage = messages[count - 1];
+        const row = anchorMessage ? findMessageRowById(scrollRoot, anchorMessage.id) : null;
+        if (row) {
+          const anchor = findChatModeMessageScrollAnchor(row);
+          const anchorRect = anchor.getBoundingClientRect();
+          return (
+            anchorRect.top -
+            rootRect.top +
+            scrollRoot.scrollTop +
+            anchorRect.height / 2
+          );
+        }
+      }
+      if (count <= messages.length) {
+        return (count / Math.max(1, messages.length)) * scrollRoot.scrollHeight;
+      }
+      const averageMessageHeight = Math.max(
+        140,
+        scrollRoot.scrollHeight / Math.max(1, messages.length)
+      );
+      return scrollRoot.scrollHeight + (count - messages.length) * averageMessageHeight;
+    };
+    const anchors = zenAtmosphereTimeline
+      .map((entry) => {
+        const revealStartMessageCount =
+          entry.revealStartMessageCount ??
+          entry.generationMessageCount + ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
+        const revealFullMessageCount = Math.max(
+          revealStartMessageCount,
+          entry.revealFullMessageCount ??
+            revealStartMessageCount + ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
+        );
+        const startY = messageCountToY(revealStartMessageCount);
+        const fullY = Math.max(startY + 1, messageCountToY(revealFullMessageCount));
+        return { ...entry, startY, fullY, revealStartMessageCount, revealFullMessageCount };
+      })
+      .sort((a, b) => {
+        const yDelta = a.startY - b.startY;
+        if (Math.abs(yDelta) > 0.5) return yDelta;
+        return a.revealStartMessageCount - b.revealStartMessageCount;
+      });
+
+    const next: Record<string, number> = {};
+    for (const entry of zenAtmosphereTimeline) {
+      next[entry.imageId] = 0;
+    }
+    const readerY = scrollRoot.scrollTop + scrollRoot.clientHeight * 0.5;
+    if (readerY < anchors[0].startY) {
+      return next;
+    }
+    for (let index = 0; index < anchors.length; index += 1) {
+      const current = anchors[index];
+      const previous = anchors[index - 1] ?? null;
+      const upcoming = anchors[index + 1] ?? null;
+      if (readerY >= current.startY && readerY <= current.fullY) {
+        const progress = Math.max(
+          0,
+          Math.min(1, (readerY - current.startY) / Math.max(1, current.fullY - current.startY))
+        );
+        if (previous) next[previous.imageId] = 1 - progress;
+        next[current.imageId] = progress;
+        return next;
+      }
+      if (readerY > current.fullY && (!upcoming || readerY < upcoming.startY)) {
+        next[current.imageId] = 1;
+        return next;
+      }
+    }
+    next[anchors[anchors.length - 1].imageId] = 1;
+    return next;
+  }
+
+  function updateZenAtmosphereScrollBlend(scrollRoot: HTMLDivElement | null): void {
+    if (!scrollRoot) {
+      applyZenAtmosphereLayerOpacities({});
+      return;
+    }
+    applyZenAtmosphereLayerOpacities(
+      calculateZenAtmosphereLayerOpacities(scrollRoot)
+    );
+  }
+
+  function scheduleZenAtmosphereScrollBlend(scrollRoot: HTMLDivElement | null): void {
+    if (zenAtmosphereScrollFrameRef.current !== null) return;
+    zenAtmosphereScrollFrameRef.current = window.requestAnimationFrame(() => {
+      zenAtmosphereScrollFrameRef.current = null;
+      updateZenAtmosphereScrollBlend(scrollRoot ?? messagesScrollRef.current);
+    });
+  }
+
+  useLayoutEffect(() => {
+    if (view !== "chat" || zenAtmosphereTimeline.length === 0) {
+      applyZenAtmosphereLayerOpacities({});
+      return;
+    }
+    const scrollRoot = messagesScrollRef.current;
+    if (!scrollRoot) return;
+    updateZenAtmosphereScrollBlend(scrollRoot);
+    const frame = window.requestAnimationFrame(() => {
+      updateZenAtmosphereScrollBlend(scrollRoot);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [view, detail?.id, detail?.messages.length, zenAtmosphereTimelineKey]);
+
+  useEffect(() => {
+    return () => {
+      if (zenAtmosphereScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(zenAtmosphereScrollFrameRef.current);
+        zenAtmosphereScrollFrameRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (!askQuestionTailSpaceActive) return;
     const el = messagesScrollRef.current;
@@ -24354,6 +25591,7 @@ function HomeContent(): React.JSX.Element {
   );
 
   function handleMessagesPaneScroll(event: React.UIEvent<HTMLDivElement>): void {
+    scheduleZenAtmosphereScrollBlend(event.currentTarget);
     if (!chatEphemeralMode || !detail?.id) return;
     const el = event.currentTarget;
     const previousScrollTop = chatLastScrollTopByConversationRef.current.get(detail.id);
@@ -24383,29 +25621,9 @@ function HomeContent(): React.JSX.Element {
     chatLastScrollTopByConversationRef.current.set(detail.id, el.scrollTop);
     chatLastScrollHeightByConversationRef.current.set(detail.id, el.scrollHeight);
     if (!scrolledUp) return;
-    const hasArchivedMessages = latestUserMessageIndex > 0;
-    if (!hasArchivedMessages) return;
-    const atTop = el.scrollTop <= CHAT_MODE_ARCHIVE_REVEAL_SCROLL_THRESHOLD_PX;
-    if (!atTop) return;
-    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
-    const loadingArchived = chatArchiveLoadingByConversationRef.current.get(detail.id) === true;
-    if (!revealArchived && !loadingArchived) {
-      startChatArchiveLoadForConversation(detail.id, latestUserMessageId);
-    }
   }
-  function preventChatModeThreadScroll(
-    event: React.WheelEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
-  ): void {
+  function preventChatModeThreadScroll(): void {
     if (!chatEphemeralMode || !detail?.id) return;
-    if (!("deltaY" in event) || event.deltaY >= -0.5) return;
-    if (latestUserMessageIndex <= 0) return;
-    const scrollRoot = messagesScrollRef.current;
-    if (!scrollRoot || scrollRoot.scrollTop > CHAT_MODE_ARCHIVE_REVEAL_SCROLL_THRESHOLD_PX) return;
-    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
-    const loadingArchived = chatArchiveLoadingByConversationRef.current.get(detail.id) === true;
-    if (revealArchived || loadingArchived) return;
-    event.preventDefault();
-    startChatArchiveLoadForConversation(detail.id, latestUserMessageId);
   }
 
   function resetComposerHistoryCursor(): void {
@@ -24840,6 +26058,43 @@ function HomeContent(): React.JSX.Element {
       return {
         ...previous,
         hiddenBotModelIds: Array.from(current),
+      };
+    });
+  }
+
+  function setComfyUiWorkflowVisible(modelId: string, visible: boolean) {
+    if (!visible) {
+      setImageGenModelChoiceByProvider((previous) =>
+        previous.local === modelId
+          ? { ...previous, local: AUTO_MODEL_CHOICE }
+          : previous
+      );
+      setNewBotLocalImageModel((current) =>
+        current === modelId ? AUTO_MODEL_CHOICE : current
+      );
+    }
+    setSettings((previous) => {
+      if (!previous) return previous;
+      const hidden = new Set(previous.hiddenComfyUiWorkflowIds ?? []);
+      if (visible) {
+        hidden.delete(modelId);
+      } else {
+        hidden.add(modelId);
+      }
+      const clearIfHidden = (value: string | null | undefined): string => {
+        const trimmed = value?.trim() ?? "";
+        return !visible && trimmed === modelId ? "" : trimmed;
+      };
+      return {
+        ...previous,
+        hiddenComfyUiWorkflowIds: Array.from(hidden),
+        preferredLocalImageModel: clearIfHidden(previous.preferredLocalImageModel),
+        preferredZenWallpaperLocalImageModel: clearIfHidden(
+          previous.preferredZenWallpaperLocalImageModel
+        ),
+        lenientLocalImageFallbackModel: clearIfHidden(
+          previous.lenientLocalImageFallbackModel
+        ),
       };
     });
   }
@@ -26487,7 +27742,7 @@ function HomeContent(): React.JSX.Element {
   }, [cancelPendingEmptyStateSearchOpen, focusDraftInput, selectedBotId]);
 
   useEffect(() => {
-    if (view !== "chat") return;
+    if (view !== "sandbox") return;
     const botId = pendingImportedChatBotSelectionRef.current;
     if (!botId) return;
     pendingImportedChatBotSelectionRef.current = null;
@@ -26496,14 +27751,12 @@ function HomeContent(): React.JSX.Element {
 
   function selectImportedBotInChatMode(botId: string): void {
     pendingImportedChatBotSelectionRef.current = null;
-    if (view !== "chat") {
+    if (view !== "sandbox") {
       pendingImportedChatBotSelectionRef.current = botId;
-      navigateToView("chat");
+      navigateToView("sandbox");
       return;
     }
     setConversationStarterPrompts(null);
-    setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
-    chatSummaryRefreshMarkerRef.current = null;
     setSelectedId(null);
     setDetail(null);
     setChatBotOverride(undefined);
@@ -27500,7 +28753,7 @@ function HomeContent(): React.JSX.Element {
       const sweepResult = await api<ConversationSweepResponse>("/api/conversations/sweep", {
         method: "POST",
         body: JSON.stringify({
-          mode: view === "chat" ? "chat" : "sandbox",
+          mode: "sandbox",
         }),
       });
       const expiresAtMs = sweepResult.undoExpiresAt
@@ -28246,7 +29499,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function devToolsRunSummaryNow(modeOverride?: "chat" | "sandbox") {
+  async function devToolsRunSummaryNow(modeOverride?: "zen" | "sandbox") {
     const conversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
     if (!conversationId || conversationId === "pending") {
@@ -28254,7 +29507,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const modeForSummary =
-      modeOverride ?? (view === "chat" ? "chat" : "sandbox");
+      modeOverride ?? (view === "chat" ? "zen" : "sandbox");
     setDevToolsBusy(true);
     setDevToolsMessage(null);
     try {
@@ -28281,7 +29534,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function devToolsResetSummary(modeOverride?: "chat" | "sandbox") {
+  async function devToolsResetSummary(modeOverride?: "zen" | "sandbox") {
     const conversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
     if (!conversationId || conversationId === "pending") {
@@ -28289,7 +29542,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const modeForSummary =
-      modeOverride ?? (view === "chat" ? "chat" : "sandbox");
+      modeOverride ?? (view === "chat" ? "zen" : "sandbox");
     setDevToolsBusy(true);
     setDevToolsMessage(null);
     try {
@@ -30107,7 +31360,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  /** Effective checkpoint for generate + overlay: picker (unless Auto) → bot → account Settings → catalog. */
+  /** Effective image model for generate + overlay: picker (unless Auto) → bot → account Settings → catalog. */
   function resolveImagesPanelImageModels(): {
     localModelId: string;
     openAiModelId: ReturnType<typeof normalizeOpenAiImageModelId>;
@@ -30124,12 +31377,12 @@ function HomeContent(): React.JSX.Element {
     const headerLocal =
       headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
         ? ""
-        : headerLocalRaw;
+        : visibleLocalImageModelIdOrEmpty(headerLocalRaw);
 
     const localModelId =
       headerLocal ||
-      botLocalImage ||
-      (settings?.preferredLocalImageModel?.trim() ?? "") ||
+      visibleLocalImageModelIdOrEmpty(botLocalImage) ||
+      visibleLocalImageModelIdOrEmpty(settings?.preferredLocalImageModel) ||
       localImageModelCatalogEntries[0]?.id ||
       "";
 
@@ -30169,11 +31422,12 @@ function HomeContent(): React.JSX.Element {
     const headerLocal =
       headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
         ? ""
-        : headerLocalRaw;
+        : visibleLocalImageModelIdOrEmpty(headerLocalRaw);
     const localModelId =
       headerLocal ||
-      botLocalImage ||
-      (settings?.preferredLocalImageModel?.trim() ?? "") ||
+      visibleLocalImageModelIdOrEmpty(botLocalImage) ||
+      visibleLocalImageModelIdOrEmpty(settings?.preferredZenWallpaperLocalImageModel) ||
+      visibleLocalImageModelIdOrEmpty(settings?.preferredLocalImageModel) ||
       localImageModelCatalogEntries[0]?.id ||
       "";
     const headerOpenAiRaw = imageGenModelChoiceByProvider.openai?.trim() ?? "";
@@ -30184,6 +31438,7 @@ function HomeContent(): React.JSX.Element {
     const openAiModelId = normalizeOpenAiImageModelId(
       headerOpenAi ||
         botOpenAiImage ||
+        (settings?.preferredZenWallpaperOpenAiImageModel?.trim() ?? "") ||
         (settings?.preferredOpenAiImageModel?.trim() ?? "") ||
         DEFAULT_OPENAI_IMAGE_MODEL_ID
     );
@@ -30266,7 +31521,7 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     const zenWallpaper = detail?.zenWallpaper;
     if (view !== "chat") return;
-    if (!detail || detail.mode !== "chat") return;
+    if (!detail || detail.mode !== "zen") return;
     if (!zenWallpaper?.enabled) return;
     if (zenWallpaper.status === "generating" || zenWallpaper.status === "error") return;
     if (zenWallpaperBusyConversationId === detail.id) return;
@@ -30274,11 +31529,23 @@ function HomeContent(): React.JSX.Element {
     const messageCount = detail.messages.length;
     if (messageCount === 0) return;
     const lastGeneratedAt = zenWallpaper.generationMessageCount ?? 0;
-    const shouldGenerate =
-      !zenWallpaper.imageId ||
-      messageCount - lastGeneratedAt >= ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL;
-    if (!shouldGenerate) return;
-    void requestZenWallpaperUpdate(detail.id, { enabled: true });
+    const shouldGenerateInitial = !zenWallpaper.imageId;
+    const shouldGenerateForIdleEra =
+      zenLatestIdleEraBoundaryMessageCount !== null &&
+      lastGeneratedAt < zenLatestIdleEraBoundaryMessageCount;
+    const preGenerationInterval = Math.max(
+      1,
+      ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL - ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD
+    );
+    const shouldPreGenerateNext =
+      !shouldGenerateInitial &&
+      !shouldGenerateForIdleEra &&
+      messageCount - lastGeneratedAt >= preGenerationInterval;
+    if (!shouldGenerateInitial && !shouldGenerateForIdleEra && !shouldPreGenerateNext) return;
+    void requestZenWallpaperUpdate(detail.id, {
+      enabled: true,
+      force: shouldGenerateForIdleEra || shouldPreGenerateNext,
+    });
   }, [
     view,
     detail?.id,
@@ -30288,6 +31555,7 @@ function HomeContent(): React.JSX.Element {
     detail?.zenWallpaper?.imageId,
     detail?.zenWallpaper?.generationMessageCount,
     detail?.zenWallpaper?.status,
+    zenLatestIdleEraBoundaryMessageCount,
     zenWallpaperBusyConversationId,
     settings,
     effectivePreferredProvider,
@@ -30691,11 +31959,11 @@ function HomeContent(): React.JSX.Element {
             : "error";
   const comfyUiStatusText =
     comfyUiUiStatus === "connected"
-      ? `Connected · ${comfyUiStatus?.modelCount ?? 0} checkpoint${
+      ? `Connected · ${comfyUiStatus?.modelCount ?? 0} workflow${
           comfyUiStatus?.modelCount === 1 ? "" : "s"
         }`
       : comfyUiUiStatus === "empty"
-        ? "Connected · no checkpoints"
+        ? "Connected · no workflows"
         : comfyUiUiStatus === "checking"
           ? "Checking..."
           : comfyUiUiStatus === "error"
@@ -30738,6 +32006,23 @@ function HomeContent(): React.JSX.Element {
       TutorialMode,
       { title: string; steps: Array<{ heading: string; body: string }> }
     > = {
+      zen: {
+        title: "Zen walkthrough",
+        steps: [
+          {
+            heading: "Stay with PRISM",
+            body: "Zen is one continuous PRISM-only conversation. There are no bot or model pickers here.",
+          },
+          {
+            heading: "Let context breathe",
+            body: "Recent messages stay visible while older continuity is carried through summaries and memory.",
+          },
+          {
+            heading: "Use Atmosphere gently",
+            body: "Turn Atmosphere on from the header when you want the conversation backdrop to evolve.",
+          },
+        ],
+      },
       chat: {
         title: "Chat mode walkthrough",
         steps: [
@@ -32428,14 +33713,17 @@ function HomeContent(): React.JSX.Element {
     const showToolbarMemoriesButton = view === "chat" || view === "sandbox";
     const showChatThemeButton = view === "chat" || view === "sandbox";
     const showSandboxHubButton = view === "chat" || view === "sandbox";
+    const isZenSurface = view === "chat";
     const gearHidden = sidebarOpen || panel !== null;
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
-    const canBotActions = Boolean(activeBot);
+    const canBotActions = !isZenSurface && Boolean(activeBot);
     const canMemoryActions = true;
-    const canFavoriteActions = Boolean(activeBot);
-    const canExport = Boolean(detail && selectedId);
-    const selectedBotCanDelete = Boolean(activeBot && activeBot.delete_protected !== 1);
-    const canDelete = Boolean((detail && selectedId) || selectedBotCanDelete);
+    const canFavoriteActions = !isZenSurface && Boolean(activeBot);
+    const canExport = !isZenSurface && Boolean(detail && selectedId);
+    const selectedBotCanDelete = Boolean(
+      !isZenSurface && activeBot && activeBot.delete_protected !== 1
+    );
+    const canDelete = Boolean(!isZenSurface && ((detail && selectedId) || selectedBotCanDelete));
     /** Always allow header tools (Sandbox non-zen was the only case that disabled during first reply / pending). */
     const headerActionsDisabled = false;
     const isMobileGear =
@@ -32508,7 +33796,7 @@ function HomeContent(): React.JSX.Element {
     const zenWallpaper = detail?.zenWallpaper;
     const showZenAtmosphereButton = view === "chat";
     const zenAtmosphereHasConversation = Boolean(
-      detail && detail.mode === "chat" && selectedId
+      detail && detail.mode === "zen" && selectedId
     );
     const zenAtmosphereAvailable = zenWallpaperImageGenerationAvailable();
     const zenAtmosphereBusy = Boolean(
@@ -32545,7 +33833,7 @@ function HomeContent(): React.JSX.Element {
           ? "on"
           : "off";
     const toggleZenAtmosphere = () => {
-      if (!detail || detail.mode !== "chat" || zenAtmosphereDisabled) return;
+      if (!detail || detail.mode !== "zen" || zenAtmosphereDisabled) return;
       void requestZenWallpaperUpdate(detail.id, {
         enabled: !zenAtmosphereEnabled,
         force: !zenAtmosphereEnabled,
@@ -32708,29 +33996,31 @@ function HomeContent(): React.JSX.Element {
           aria-disabled={headerActionsDisabled}
         >
           {renderMemoryToasts()}
-          <button
-            type="button"
-            className={styles.headerIconButton}
-            onClick={handleToggleFavorite}
-            aria-label={
-              activeBot
-                ? activeBotIsFavorite
-                  ? `Remove ${activeBot.name} from favorites`
-                  : `Add ${activeBot.name} to favorites`
-                : "Favorites unavailable until a bot is selected"
-            }
-            aria-pressed={activeBot ? activeBotIsFavorite : undefined}
-            data-glyph-tooltip={
-              activeBot
-                ? activeBotIsFavorite
-                  ? "Remove from Favorites"
-                  : "Add to Favorites"
-                : "Select a bot to favorite"
-            }
-            disabled={headerActionsDisabled || !canFavoriteActions}
-          >
-            <StarGlyph />
-          </button>
+          {!isZenSurface ? (
+            <button
+              type="button"
+              className={styles.headerIconButton}
+              onClick={handleToggleFavorite}
+              aria-label={
+                activeBot
+                  ? activeBotIsFavorite
+                    ? `Remove ${activeBot.name} from favorites`
+                    : `Add ${activeBot.name} to favorites`
+                  : "Favorites unavailable until a bot is selected"
+              }
+              aria-pressed={activeBot ? activeBotIsFavorite : undefined}
+              data-glyph-tooltip={
+                activeBot
+                  ? activeBotIsFavorite
+                    ? "Remove from Favorites"
+                    : "Add to Favorites"
+                  : "Select a bot to favorite"
+              }
+              disabled={headerActionsDisabled || !canFavoriteActions}
+            >
+              <StarGlyph />
+            </button>
+          ) : null}
           <button
             type="button"
             className={styles.headerIconButton}
@@ -32811,7 +34101,7 @@ function HomeContent(): React.JSX.Element {
               </button>
             )
           ) : null}
-          {!showSettingsOnly ? (
+          {!showSettingsOnly && !isZenSurface ? (
             <button
               type="button"
               className={styles.headerIconButton}
@@ -32911,22 +34201,24 @@ function HomeContent(): React.JSX.Element {
             >
               Settings
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.chatOverflowMenuItem}
-              disabled={headerActionsDisabled || !canFavoriteActions}
-              onClick={(event) => {
-                swallowMenuEvent(event);
-                handleToggleFavorite();
-              }}
-            >
-              {activeBot
-                ? activeBotIsFavorite
-                  ? `Remove ${activeBot.name} from Favorites`
-                  : `Add ${activeBot.name} to Favorites`
-                : "Select a bot to favorite"}
-            </button>
+            {!isZenSurface ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.chatOverflowMenuItem}
+                disabled={headerActionsDisabled || !canFavoriteActions}
+                onClick={(event) => {
+                  swallowMenuEvent(event);
+                  handleToggleFavorite();
+                }}
+              >
+                {activeBot
+                  ? activeBotIsFavorite
+                    ? `Remove ${activeBot.name} from Favorites`
+                    : `Add ${activeBot.name} to Favorites`
+                  : "Select a bot to favorite"}
+              </button>
+            ) : null}
             <button
               type="button"
               role="menuitem"
@@ -32985,7 +34277,7 @@ function HomeContent(): React.JSX.Element {
                 Edit bot
               </button>
             )}
-            {!showSettingsOnly && (
+            {!showSettingsOnly && !isZenSurface && (
               <button
                 type="button"
                 role="menuitem"
@@ -33113,7 +34405,8 @@ function HomeContent(): React.JSX.Element {
     const showToolbarMemoriesButton = view === "chat" || view === "sandbox";
     const showChatThemeButton = view === "chat" || view === "sandbox";
     const showSandboxHubButton = view === "chat" || view === "sandbox";
-    const canFavoriteActions = Boolean(activeBot);
+    const isZenSurface = view === "chat";
+    const canFavoriteActions = !isZenSurface && Boolean(activeBot);
     const activeBotIsFavorite = Boolean(
       activeBot &&
       botLibraryGroups
@@ -33142,7 +34435,7 @@ function HomeContent(): React.JSX.Element {
     const zenWallpaper = detail?.zenWallpaper;
     const showZenAtmosphereButton = view === "chat";
     const zenAtmosphereHasConversation = Boolean(
-      detail && detail.mode === "chat" && selectedId
+      detail && detail.mode === "zen" && selectedId
     );
     const zenAtmosphereAvailable = zenWallpaperImageGenerationAvailable();
     const zenAtmosphereBusy = Boolean(
@@ -33180,49 +34473,51 @@ function HomeContent(): React.JSX.Element {
             <span>Settings</span>
           </span>
         </button>
-        <button
-          type="button"
-          role="menuitem"
-          disabled={!canFavoriteActions}
-          onClick={() =>
-            runAndClose(() => {
-              if (!activeBot) return;
-              const targetBotId = activeBot.id;
-              setBotLibraryGroups((current) => {
-                const normalized = normalizeBotLibraryGroups(current);
-                const now = new Date().toISOString();
-                let found = false;
-                const next = normalized.map((group) => {
-                  if (group.id !== BOT_LIBRARY_FAVORITES_GROUP_ID) return group;
-                  found = true;
-                  const hasBot = group.botIds.includes(targetBotId);
-                  return {
-                    ...group,
-                    botIds: hasBot
-                      ? group.botIds.filter((id) => id !== targetBotId)
-                      : [...group.botIds, targetBotId],
-                    updatedAt: now,
-                  };
-                });
-                if (!found) {
-                  const favorites = createFavoritesBotGroup();
-                  next.push({
-                    ...favorites,
-                    botIds: [targetBotId],
-                    updatedAt: now,
+        {!isZenSurface ? (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canFavoriteActions}
+            onClick={() =>
+              runAndClose(() => {
+                if (!activeBot) return;
+                const targetBotId = activeBot.id;
+                setBotLibraryGroups((current) => {
+                  const normalized = normalizeBotLibraryGroups(current);
+                  const now = new Date().toISOString();
+                  let found = false;
+                  const next = normalized.map((group) => {
+                    if (group.id !== BOT_LIBRARY_FAVORITES_GROUP_ID) return group;
+                    found = true;
+                    const hasBot = group.botIds.includes(targetBotId);
+                    return {
+                      ...group,
+                      botIds: hasBot
+                        ? group.botIds.filter((id) => id !== targetBotId)
+                        : [...group.botIds, targetBotId],
+                      updatedAt: now,
+                    };
                   });
-                }
-                return normalizeBotLibraryGroups(next);
-              });
-            })
-          }
-        >
-          {activeBot
-            ? activeBotIsFavorite
-              ? `Remove ${activeBot.name} from Favorites`
-              : `Add ${activeBot.name} to Favorites`
-            : "Select a bot to favorite"}
-        </button>
+                  if (!found) {
+                    const favorites = createFavoritesBotGroup();
+                    next.push({
+                      ...favorites,
+                      botIds: [targetBotId],
+                      updatedAt: now,
+                    });
+                  }
+                  return normalizeBotLibraryGroups(next);
+                });
+              })
+            }
+          >
+            {activeBot
+              ? activeBotIsFavorite
+                ? `Remove ${activeBot.name} from Favorites`
+                : `Add ${activeBot.name} to Favorites`
+              : "Select a bot to favorite"}
+          </button>
+        ) : null}
         <button
           type="button"
           role="menuitem"
@@ -33302,7 +34597,7 @@ function HomeContent(): React.JSX.Element {
             Images
           </button>
         ) : null}
-        {!showSettingsOnly ? (
+        {!showSettingsOnly && !isZenSurface ? (
           <button
             type="button"
             role="menuitem"
@@ -33826,6 +35121,22 @@ function HomeContent(): React.JSX.Element {
               </small>
             </span>
           </label>
+          <label className={styles.devTogglesModalOption}>
+            <input
+              type="checkbox"
+              checked={devShowCompactedSummaryInChat}
+              onChange={(event) =>
+                persistDevShowCompactedSummaryInChat(event.currentTarget.checked)
+              }
+            />
+            <span>
+              <strong>Show compacted summary in chat</strong>
+              <small>
+                Renders the latest thread-compaction payload at the bottom of the current chat
+                so context can be inspected after /compact or /summarize.
+              </small>
+            </span>
+          </label>
           <div className={styles.deleteAllModalActions}>
             <button
               type="button"
@@ -33854,8 +35165,8 @@ function HomeContent(): React.JSX.Element {
     const devToolsHasSavedConversation = Boolean(
       (detail?.id && detail.id !== "pending") || (selectedId && selectedId !== "pending")
     );
-    const devToolsSummaryMode: "chat" | "sandbox" =
-      view === "chat" ? "chat" : "sandbox";
+    const devToolsSummaryMode: "zen" | "sandbox" =
+      view === "chat" ? "zen" : "sandbox";
     const devToolsSummaryPreview = summaryDebug?.latestSummary
       ? summaryDebug.latestSummary.length > 220
         ? `${summaryDebug.latestSummary.slice(0, 217)}...`
@@ -33911,7 +35222,8 @@ function HomeContent(): React.JSX.Element {
             <span className={styles.devToolsSectionTitle}>Dev toggles</span>
             <span className={styles.devToolsToggleSummary}>
               Debug composer: <strong>{devDebugComposerEnabled ? "On" : "Off"}</strong> · Paste
-              JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
+              JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong> · Compact
+              view: <strong>{devShowCompactedSummaryInChat ? "On" : "Off"}</strong>
             </span>
           </summary>
           <p className={styles.devToolsSectionHint}>
@@ -35179,7 +36491,7 @@ function HomeContent(): React.JSX.Element {
                             key={`${model.provider}:${model.id}`}
                             value={`${model.provider}:${model.id}`}
                           >
-                            {`${providerShortLabel(model.provider)} - ${model.label}`}
+                            {`${providerDisplayLabel(model.provider)} - ${model.label}`}
                           </option>
                         ))}
                       </select>
@@ -35724,235 +37036,7 @@ function HomeContent(): React.JSX.Element {
                     </div>
                     <small>Some image choices save immediately.</small>
                   </header>
-                  <div className={styles.settingsFieldGrid}>
-                    <label>
-                      Prism internal LLM
-                      <select
-                        value={(settings.prismDefaultLlmModel ?? "").trim()}
-                        onChange={(event) => {
-                          const next = event.target.value.trim();
-                          setSettings((previous) =>
-                            previous ? { ...previous, prismDefaultLlmModel: next } : previous
-                          );
-                        }}
-                      >
-                        <option value="">
-                          Auto - server auxiliary ({(settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"})
-                        </option>
-                        {prismInternalLlmCallOptions.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label}
-                            {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Image-request LLM
-                      <select
-                        value={(settings.prismImageToolLlmModel ?? "").trim()}
-                        onChange={(event) => {
-                          const next = event.target.value.trim();
-                          setSettings((previous) =>
-                            previous ? { ...previous, prismImageToolLlmModel: next } : previous
-                          );
-                          void persistPrismImageToolLlmModelField(next);
-                        }}
-                      >
-                        <option value="">Auto - hub chat model</option>
-                        {prismImageToolLlmCallOptions.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label}
-                            {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      LOCAL hub model
-                      <select
-                        value={normalizeModelChoice(settings.preferredLocalModel)}
-                        onChange={(event) => {
-                          const next = event.target.value;
-                          setSettings((previous) =>
-                            previous
-                              ? {
-                                  ...previous,
-                                  preferredLocalModel:
-                                    next === AUTO_MODEL_CHOICE ? "" : next,
-                                }
-                              : previous
-                          );
-                        }}
-                      >
-                        <option value={AUTO_MODEL_CHOICE}>Auto - first visible local model</option>
-                        {hubPreferredLocalOptions.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label}
-                            {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Online hub model
-                      <select
-                        value={normalizeModelChoice(settings.preferredOnlineModel)}
-                        onChange={(event) => {
-                          const next = event.target.value;
-                          setSettings((previous) =>
-                            previous
-                              ? {
-                                  ...previous,
-                                  preferredOnlineModel:
-                                    next === AUTO_MODEL_CHOICE ? "" : next,
-                                }
-                              : previous
-                          );
-                        }}
-                      >
-                        <option value={AUTO_MODEL_CHOICE}>Auto - first visible online model</option>
-                        {hubPreferredOnlineOptions.map((model) => (
-                          <option key={`${model.provider}:${model.id}`} value={model.id}>
-                            {model.label} · {providerDisplayLabel(model.provider)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Text copyright fallback
-                      <select
-                        value={settings.lenientLocalFallbackModel ?? ""}
-                        onChange={(event) =>
-                          setSettings((previous) =>
-                            previous
-                              ? { ...previous, lenientLocalFallbackModel: event.target.value }
-                              : previous
-                          )
-                        }
-                      >
-                        <option value="">Disabled</option>
-                        {includeSelectedModelOption(
-                          modelOptionsForProvider(modelCatalog, settings, "local"),
-                          settings.lenientLocalFallbackModel ?? "",
-                          "local"
-                        ).map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Image copyright fallback
-                      <select
-                        value={settings.lenientLocalImageFallbackModel ?? ""}
-                        onChange={(event) =>
-                          setSettings((previous) =>
-                            previous
-                              ? { ...previous, lenientLocalImageFallbackModel: event.target.value }
-                              : previous
-                          )
-                        }
-                      >
-                        <option value="">Disabled</option>
-                        {includeSelectedModelOption(
-                          localImageModelCatalogEntries,
-                          settings.lenientLocalImageFallbackModel ?? "",
-                          "local"
-                        ).map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Local image default
-                      <select
-                        value={settings.preferredLocalImageModel?.trim() ?? ""}
-                        disabled={localImageModelCatalogEntries.length === 0}
-                        onChange={(event) => {
-                          const next = event.target.value;
-                          setSettings((previous) =>
-                            previous ? { ...previous, preferredLocalImageModel: next } : previous
-                          );
-                          void persistAccountImageDefaultModelField(
-                            "preferredLocalImageModel",
-                            next
-                          );
-                        }}
-                      >
-                        <option value="">Auto - first detected local image model</option>
-                        {(
-                          (settings.preferredLocalImageModel?.trim() ?? "").length > 0
-                            ? includeSelectedModelOption(
-                                localImageModelCatalogEntries,
-                                settings.preferredLocalImageModel?.trim() ?? "",
-                                "local"
-                              )
-                            : localImageModelCatalogEntries
-                        ).map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Online image API model
-                      <select
-                        value={
-                          (settings.preferredOpenAiImageModel ?? "").trim().length > 0
-                            ? normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel)
-                            : ""
-                        }
-                        onChange={(event) => {
-                          const next = event.target.value;
-                          const stored =
-                            next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
-                          setSettings((previous) =>
-                            previous
-                              ? { ...previous, preferredOpenAiImageModel: stored }
-                              : previous
-                          );
-                          void persistAccountImageDefaultModelField(
-                            "preferredOpenAiImageModel",
-                            next
-                          );
-                        }}
-                      >
-                        <option value="">Auto - {DEFAULT_OPENAI_IMAGE_MODEL_ID}</option>
-                        {(
-                          (settings.preferredOpenAiImageModel ?? "").trim().length > 0
-                            ? includeSelectedModelOption(
-                                openAiImageModelCatalogEntries,
-                                normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel),
-                                "openai"
-                              )
-                            : openAiImageModelCatalogEntries
-                        ).map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
-                    <input
-                      type="checkbox"
-                      checked={settings.fallbackModelMessageStripe !== false}
-                      onChange={(event) =>
-                        setSettings((previous) =>
-                          previous
-                            ? { ...previous, fallbackModelMessageStripe: event.target.checked }
-                            : previous
-                        )
-                      }
-                    />
-                    Mark fallback replies
-                  </label>
+                  {renderDefaultsAndFallbacksControls("settings")}
                   <details className={styles.settingsModelDropdown}>
                     <summary>
                       <span>Bot customizer model list</span>
@@ -35988,6 +37072,49 @@ function HomeContent(): React.JSX.Element {
                         );
                       })}
                     </div>
+                  </details>
+                  <details className={styles.settingsModelDropdown}>
+                    <summary>
+                      <span>ComfyUI workflow list</span>
+                      <small>
+                        {allComfyUiWorkflowCatalogEntries.length === 0
+                          ? "No workflows detected"
+                          : settings.hiddenComfyUiWorkflowIds.length === 0
+                            ? "All visible"
+                            : `${settings.hiddenComfyUiWorkflowIds.length} hidden`}
+                      </small>
+                    </summary>
+                    {allComfyUiWorkflowCatalogEntries.length > 0 ? (
+                      <div className={styles.settingsModelList}>
+                        {allComfyUiWorkflowCatalogEntries.map((model) => {
+                          const visible = !settings.hiddenComfyUiWorkflowIds.includes(model.id);
+                          const remotePath = parseComfyUiRemoteWorkflowPath(model.id);
+                          return (
+                            <label key={model.id} className={styles.settingsModelToggle}>
+                              <input
+                                type="checkbox"
+                                checked={visible}
+                                onChange={(event) =>
+                                  setComfyUiWorkflowVisible(
+                                    model.id,
+                                    event.currentTarget.checked
+                                  )
+                                }
+                              />
+                              <span>{model.label}</span>
+                              <small>
+                                {visible ? "Visible in Images" : "Hidden from Images"}
+                                {remotePath ? ` · ${remotePath}` : ""}
+                              </small>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className={styles.muted} style={{ margin: "10px 0 0" }}>
+                        Connect ComfyUI and refresh models to choose which workflows appear in Images.
+                      </p>
+                    )}
                   </details>
                 </section>
 
@@ -36274,7 +37401,7 @@ function HomeContent(): React.JSX.Element {
                           </span>
                         </span>
                         <small className={styles.settingsHostHint}>
-                          Prism checks this address live and lists detected checkpoints in Images.
+                          Prism checks this address live and lists detected workflows in Images.
                         </small>
                       </label>
                       <p className={styles.muted} style={{ margin: "10px 0 0", maxWidth: 520 }}>
@@ -36328,300 +37455,7 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 </header>
                 <div className={styles.settingsAboutModalBody}>
-                  {settings && (
-                    <div className={`${styles.form} ${styles.formInModal}`}>
-                      <div className={styles.settingsDefaultsModalPairRow}>
-                        <label>
-                          Preferred default Prism LLM (internal calls)
-                          <select
-                            value={(settings.prismDefaultLlmModel ?? "").trim()}
-                            onChange={(event) => {
-                              const next = event.target.value.trim();
-                              setSettings((previous) =>
-                                previous
-                                  ? { ...previous, prismDefaultLlmModel: next }
-                                  : previous
-                              );
-                            }}
-                          >
-                            <option value="">
-                              Auto — server auxiliary (
-                              {(settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"})
-                            </option>
-                            {prismInternalLlmCallOptions.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                                {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Preferred LLM for in-chat image requests
-                          <select
-                            value={(settings.prismImageToolLlmModel ?? "").trim()}
-                            onChange={(event) => {
-                              const next = event.target.value.trim();
-                              setSettings((previous) =>
-                                previous
-                                  ? { ...previous, prismImageToolLlmModel: next }
-                                  : previous
-                              );
-                              void persistPrismImageToolLlmModelField(next);
-                            }}
-                          >
-                            <option value="">
-                              Auto — use hub chat model (no override)
-                            </option>
-                            {prismImageToolLlmCallOptions.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                                {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <div className={styles.settingsDefaultsModalPairRow}>
-                        <label>
-                          Preferred offline model (LOCAL hub)
-                          <select
-                            value={normalizeModelChoice(settings.preferredLocalModel)}
-                            onChange={(event) => {
-                              const next = event.target.value;
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      preferredLocalModel:
-                                        next === AUTO_MODEL_CHOICE ? "" : next,
-                                    }
-                                  : previous
-                              );
-                            }}
-                          >
-                            <option value={AUTO_MODEL_CHOICE}>
-                              Auto — first visible model in your catalog
-                            </option>
-                            {hubPreferredLocalOptions.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                                {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Preferred online model (OpenAI / Anthropic hub)
-                          <select
-                            value={normalizeModelChoice(settings.preferredOnlineModel)}
-                            onChange={(event) => {
-                              const next = event.target.value;
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      preferredOnlineModel:
-                                        next === AUTO_MODEL_CHOICE ? "" : next,
-                                    }
-                                  : previous
-                              );
-                            }}
-                          >
-                            <option value={AUTO_MODEL_CHOICE}>
-                              Auto — first visible model in your catalog
-                            </option>
-                            {hubPreferredOnlineOptions.map((model) => (
-                              <option key={`${model.provider}:${model.id}`} value={model.id}>
-                                {model.label} · {providerDisplayLabel(model.provider)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <div className={styles.settingsDefaultsModalPairRow}>
-                        <label>
-                          Copyright fallback (text chat, local)
-                          <select
-                            value={settings.lenientLocalFallbackModel ?? ""}
-                            onChange={(event) =>
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      lenientLocalFallbackModel: event.target.value,
-                                    }
-                                  : previous
-                              )
-                            }
-                          >
-                            <option value="">Disabled</option>
-                            {includeSelectedModelOption(
-                              modelOptionsForProvider(modelCatalog, settings, "local"),
-                              settings.lenientLocalFallbackModel ?? "",
-                              "local"
-                            ).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Copyright fallback (images, local)
-                          <select
-                            value={settings.lenientLocalImageFallbackModel ?? ""}
-                            onChange={(event) =>
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      lenientLocalImageFallbackModel: event.target.value,
-                                    }
-                                  : previous
-                              )
-                            }
-                          >
-                            <option value="">Disabled</option>
-                            {includeSelectedModelOption(
-                              localImageModelCatalogEntries,
-                              settings.lenientLocalImageFallbackModel ?? "",
-                              "local"
-                            ).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <label
-                        className={styles.checkbox}
-                        style={{ display: "block", marginTop: 10 }}
-                        title="When a reply used your lenient local copyright-fallback model, the assistant bubble gets a diagonal striped accent on the left."
-                      >
-                        <input
-                          type="checkbox"
-                          checked={settings.fallbackModelMessageStripe !== false}
-                          onChange={(event) =>
-                            setSettings((previous) =>
-                              previous
-                                ? {
-                                    ...previous,
-                                    fallbackModelMessageStripe: event.target.checked,
-                                  }
-                                : previous
-                            )
-                          }
-                        />
-                        Show checkerboard stripe on copyright-fallback replies
-                      </label>
-                      <div className={styles.settingsDefaultsModalPairRow}>
-                        <label>
-                          Local default image model
-                          <select
-                            value={settings.preferredLocalImageModel?.trim() ?? ""}
-                            disabled={localImageModelCatalogEntries.length === 0}
-                            onChange={(event) => {
-                              const next = event.target.value;
-                              setSettings((previous) =>
-                                previous
-                                  ? { ...previous, preferredLocalImageModel: next }
-                                  : previous
-                              );
-                              void persistAccountImageDefaultModelField(
-                                "preferredLocalImageModel",
-                                next
-                              );
-                            }}
-                          >
-                            <option value="">
-                              Auto — first detected local image model
-                            </option>
-                            {(
-                              (settings.preferredLocalImageModel?.trim() ?? "").length > 0
-                                ? includeSelectedModelOption(
-                                    localImageModelCatalogEntries,
-                                    settings.preferredLocalImageModel?.trim() ?? "",
-                                    "local"
-                                  )
-                                : localImageModelCatalogEntries
-                            ).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Online image API model
-                          <select
-                            value={
-                              (settings.preferredOpenAiImageModel ?? "").trim().length > 0
-                                ? normalizeOpenAiImageModelId(
-                                    settings.preferredOpenAiImageModel
-                                  )
-                                : ""
-                            }
-                            onChange={(event) => {
-                              const next = event.target.value;
-                              const stored =
-                                next.trim().length > 0
-                                  ? normalizeOpenAiImageModelId(next)
-                                  : "";
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      preferredOpenAiImageModel: stored,
-                                    }
-                                  : previous
-                              );
-                              void persistAccountImageDefaultModelField(
-                                "preferredOpenAiImageModel",
-                                next
-                              );
-                            }}
-                          >
-                            <option value="">
-                              Auto — {DEFAULT_OPENAI_IMAGE_MODEL_ID} when your key is active
-                            </option>
-                            {(
-                              (settings.preferredOpenAiImageModel ?? "").trim().length > 0
-                                ? includeSelectedModelOption(
-                                    openAiImageModelCatalogEntries,
-                                    normalizeOpenAiImageModelId(
-                                      settings.preferredOpenAiImageModel
-                                    ),
-                                    "openai"
-                                  )
-                                : openAiImageModelCatalogEntries
-                            ).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <p className={styles.muted} style={{ margin: 0 }}>
-                        Auto always pins to the top of each list so Prism can pick the first healthy
-                        model instead of a fixed alphabetical order. The image copyright fallback is
-                        used when the primary image request is blocked for policy reasons (local
-                        retry, or switching from online to local when configured).{" "}
-                        <strong>
-                          The Prism internal LLM (titles, summaries, memory hints, Coffee routing,
-                          image prompt suggestions) uses your choice above, or the server auxiliary
-                          model when set to Auto.
-                        </strong>{" "}
-                        <strong>
-                          In-chat image-request LLM and local/online image defaults save as soon as
-                          you change them.
-                        </strong>{" "}
-                        Chat hub defaults and the Prism internal LLM still use Save on the main Settings screen.
-                      </p>
-                    </div>
-                  )}
+                  {renderDefaultsAndFallbacksControls("modal")}
                 </div>
               </div>
             </div>,
@@ -36889,10 +37723,9 @@ function HomeContent(): React.JSX.Element {
           }
           return normalizeOpenAiImageModelId(DEFAULT_OPENAI_IMAGE_MODEL_ID);
         })();
-        const localImageModelOptionsForBot = includeSelectedModelOption(
+        const localImageModelOptionsForBot = includeSelectedLocalImageModelOption(
           localImageModelCatalogEntries,
-          visibleLocalImageModelChoice,
-          "local"
+          visibleLocalImageModelChoice
         );
         const openAiImageModelOptionsForBot = includeSelectedModelOption(
           openAiImageModelCatalogEntries,
@@ -38296,7 +39129,7 @@ function HomeContent(): React.JSX.Element {
       {/* ── Images panel ── */}
       {panel === "images" && (() => {
         // ONLINE → OpenAI images; LOCAL → Ollama when at least one image-capable
-        // checkpoint appears in the catalog (same heuristic as the header picker).
+        // image model appears in the catalog (same heuristic as the header picker).
         const hasLocalImageModels = localImageModelCatalogEntries.length > 0;
         // Honors the offline-only lock — when the active chat bot is
         // protected, we evaluate "can generate?" against LOCAL only.
@@ -38468,7 +39301,7 @@ function HomeContent(): React.JSX.Element {
             ? "Contacting OpenAI…"
             : imageGenLocalInflight && imageGenWarmupHintVisible
               ? "The image engine may still be loading the model into GPU memory — first runs after idle often take 1–5 minutes."
-              : "Working with your prompt and checkpoint…";
+              : "Working with your prompt and image model…";
         const genModelLine = (() => {
           if (!settings) return null;
           const { localModelId, openAiModelId } = resolveImagesPanelImageModels();
@@ -40094,7 +40927,7 @@ function HomeContent(): React.JSX.Element {
       }>(`/api/coffee/sessions/${encodeURIComponent(conversationId)}/continue`, {
         method: "POST",
         body: JSON.stringify({
-          preferredProvider: coffeeProvider,
+          preferredProvider: coffeeSessionProvider,
           userIsComposing: coffeeDraftRef.current.trim().length > 0,
           sessionRemainingMs: currentCoffeeSessionRemainingMs(),
           ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
@@ -40406,7 +41239,7 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify({
           conversationId: activeConversation.id,
           message: trimmed,
-          preferredProvider: coffeeProvider,
+          preferredProvider: coffeeSessionProvider,
           sessionRemainingMs: currentCoffeeSessionRemainingMs(),
           ...(playerInterruption ? { playerInterruption } : {}),
           ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
@@ -43466,9 +44299,17 @@ function HomeContent(): React.JSX.Element {
 
   const renderStoryProviderModeToggle = (): React.ReactNode => {
     const lockedByProtectedBot = storyAnyOfflineProtected;
-    const isLocal = storyEffectiveProvider === "local";
-    const activeProviderLabel = providerDisplayLabel(storyEffectiveProvider);
-    const nextProviderLabel = providerDisplayLabel(nextProvider(storyEffectiveProvider));
+    const responseMode = responseModeForProvider(storyEffectiveProvider);
+    const isLocal = responseMode === "local";
+    const nextMode = nextResponseMode(responseMode);
+    const nextResolvedProvider = resolveModelChoiceForResponseMode({
+      responseMode: nextMode,
+      providerPreference: storyEffectiveProvider,
+      choices: visibleModelChoicesByProvider(settings, storyModelChoiceByProvider),
+      onlineOptions: onlineChatModelOptions,
+    }).provider;
+    const activeModeLabel = responseModeDisplayLabel(responseMode);
+    const nextModeLabel = responseModeDisplayLabel(nextMode);
     const providerDisabled =
       !settings || storyBusy || storySession?.status === "generating" || lockedByProtectedBot;
     const lockTitle = lockedByProtectedBot
@@ -43492,17 +44333,17 @@ function HomeContent(): React.JSX.Element {
           data-protected={lockedByProtectedBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
-            setStoryProvider(nextProvider(storyEffectiveProvider));
+            setStoryProvider(nextResolvedProvider);
             setStoryProviderTouched(true);
           }}
           aria-label={
             lockTitle
               ? `${lockTitle} Toggle disabled.`
-              : `Story generation mode: ${activeProviderLabel}. Click to switch to ${nextProviderLabel}.`
+              : `Story generation mode: ${activeModeLabel}. Click to switch to ${nextModeLabel}.`
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={lockTitle ?? `Switch Story generation to ${nextProviderLabel}`}
+          title={lockTitle ?? `Switch Story generation to ${nextModeLabel}`}
           disabled={providerDisabled}
         >
           <span
@@ -43522,7 +44363,7 @@ function HomeContent(): React.JSX.Element {
                 aria-hidden="true"
               />
             )}
-            <span className={styles.modeThumbLabel}>{providerShortLabel(storyEffectiveProvider)}</span>
+            <span className={styles.modeThumbLabel}>{responseModeShortLabel(responseMode)}</span>
           </span>
         </button>
       </div>
@@ -43535,28 +44376,38 @@ function HomeContent(): React.JSX.Element {
       <ComposerModelPicker
         value={storyEffectiveModelChoice}
         onChange={(nextChoice) => {
-          if (storyModelProvider === "local") return;
-          setStoryModelChoiceByProvider((previous) => ({
-            ...previous,
-            [storyModelProvider]: nextChoice,
-          }));
+          if (storyResponseMode === "local") return;
+          const applied = applyOnlineModelChoice({
+            currentChoices: storyModelChoiceByProvider,
+            nextChoice,
+            onlineOptions: onlineChatModelOptions,
+            providerPreference: storyEffectiveProvider,
+          });
+          setStoryModelChoiceByProvider((previous) =>
+            applyOnlineModelChoice({
+              currentChoices: previous,
+              nextChoice,
+              onlineOptions: onlineChatModelOptions,
+              providerPreference: storyEffectiveProvider,
+            }).choices
+          );
+          setStoryProvider(applied.provider);
+          setStoryProviderTouched(true);
         }}
         options={storyModelOptions}
-        provider={storyModelProvider}
+        provider={storyResponseMode === "local" ? "local" : "online"}
         disabled={!settings || storyBusy || storySession?.status === "generating"}
-        title={`Story model (${providerShortLabel(storyEffectiveProvider)})`}
+        title={`Story model (${responseModeShortLabel(storyResponseMode)})`}
         ariaLabel={`Story generation model for ${
-          storyEffectiveProvider === "local" ? "local" : providerDisplayLabel(storyEffectiveProvider)
+          storyResponseMode === "local" ? "local" : "online"
         } episodes`}
         placement="down"
         minMenuWidthPx={180}
-        showAutoOption={storyModelProvider !== "local"}
-        autoOptionMetaOverride={
-          storyModelProvider === "local"
-            ? "Story local generation is pinned to llama3.2"
-            : "Story uses selected bots' online defaults when Auto"
-        }
-        settingsDefaultModelId={chatSettingsSavedDefaultModelId(settings, storyModelProvider)}
+        showAutoOption={storyResponseMode !== "local"}
+        settingsDefaultModelId={chatSettingsSavedDefaultModelId(
+          settings,
+          storyResponseMode === "local" ? "local" : "online"
+        )}
       />
     </div>
   );
@@ -43685,7 +44536,7 @@ function HomeContent(): React.JSX.Element {
         </label>
         <div className={styles.storySetupFooter}>
           <span>
-            {selectedCount}/{STORY_BOT_COUNT_MAX} bots · {storyEffectiveProvider.toUpperCase()}
+            {selectedCount}/{STORY_BOT_COUNT_MAX} bots · {responseModeShortLabel(storyResponseMode)}
             {storyModelOverride ? ` · ${storyModelOverride}` : " · Auto model"}
           </span>
           <button
@@ -43918,7 +44769,7 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.storyProjectionMask} aria-hidden="true" />
         <div className={styles.storySceneTopline}>
           <span>{storyCurrentLocation?.name ?? scene.title}</span>
-          <span>{session.provider.toUpperCase()} {session.model ?? ""}</span>
+          <span>{responseModeShortLabel(responseModeForProvider(session.provider))} {session.model ?? ""}</span>
         </div>
         {sceneItems.map((item, index) => (
           <button
@@ -44270,7 +45121,7 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={styles.hubTile}
-            onClick={() => navigateToView("chat")}
+            onClick={() => void openZenMode()}
           >
             <div className={styles.hubTileGlyph}>
               <GlyphChat size={88} />
@@ -44443,19 +45294,18 @@ function HomeContent(): React.JSX.Element {
   // controls row exposed so users can pick bot, provider mode, and model
   // directly from Chat.
   if (view === "chat") {
-    const zenAtmosphereImageId =
-      detail?.zenWallpaper?.enabled && detail.zenWallpaper.imageId
-        ? detail.zenWallpaper.imageId
-        : null;
-    const zenAtmosphereImageSrc = zenAtmosphereImageId
-      ? `/api/images/${encodeURIComponent(zenAtmosphereImageId)}/file`
-      : null;
+    const zenAtmosphereBackdropStyle = {
+      "--zen-atmosphere-opacity": String(
+        normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
+      ),
+    } as React.CSSProperties;
     return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
       data-chat-sidebar-hidden="true"
+      data-zen-surface="true"
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onTouchStart={beginSidebarEdgeSwipe}
@@ -44502,28 +45352,7 @@ function HomeContent(): React.JSX.Element {
             </div>
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
-          {view === "chat" || view === "sandbox" ? (
-            renderHeaderModelPicker()
-          ) : shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
-            <h2
-              className={`${styles.chatHeaderTitle} ${
-                headerTitleCollapsedForAccordion
-                  ? styles.chatHeaderTitleCollapsed
-                  : ""
-              }`}
-            >
-              {headerConversationTitle}
-            </h2>
-          ) : (
-            <h2
-              className={`${styles.chatHeaderTitlePlaceholder} ${
-                headerTitleCollapsedForAccordion
-                  ? styles.chatHeaderTitlePlaceholderCollapsed
-                  : ""
-              }`}
-              aria-hidden="true"
-            />
-          )}
+          {renderHeaderModelPicker()}
           {renderChatOverflowGear()}
           {!chatLikeSurface ? (
             <div className={styles.chatHeaderComposeToolsRow}>
@@ -44581,15 +45410,18 @@ function HomeContent(): React.JSX.Element {
                   // Use the effective provider so this picker also reflects
                   // the offline-only lock when the active chat bot is
                   // protected (matches what `renderProviderModeToggle` shows).
-                  const modelProvider: Provider = effectivePreferredProvider;
-                  const isLocal = modelProvider === "local";
-                  const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-                  const visibleModelChoice = visibleModelChoiceForProvider(
-                    settings,
-                    rawModelChoice
-                  );
+                  const responseMode = responseModeForProvider(effectivePreferredProvider);
+                  const isLocal = responseMode === "local";
+                  const resolvedChoice = resolveModelChoiceForResponseMode({
+                    responseMode,
+                    providerPreference: effectivePreferredProvider,
+                    choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+                    onlineOptions: onlineChatModelOptions,
+                  });
+                  const modelProvider = resolvedChoice.provider;
+                  const visibleModelChoice = resolvedChoice.modelChoice;
                   const modelOptions = includeSelectedModelOption(
-                    availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+                    modelOptionsForResponseMode(modelCatalog, settings, responseMode),
                     visibleModelChoice,
                     modelProvider
                   );
@@ -44598,28 +45430,42 @@ function HomeContent(): React.JSX.Element {
                       <ComposerModelPicker
                         value={visibleModelChoice}
                         onChange={(nextChoice) => {
+                          const appliedOnline =
+                            responseMode === "online"
+                              ? applyOnlineModelChoice({
+                                  currentChoices: chatModelChoiceByProvider,
+                                  nextChoice,
+                                  onlineOptions: onlineChatModelOptions,
+                                  providerPreference: effectivePreferredProvider,
+                                })
+                              : null;
                           setChatModelChoiceByProvider((previous) => {
-                            const next = { ...previous, [modelProvider]: nextChoice };
+                            const next =
+                              responseMode === "local"
+                                ? { ...previous, local: nextChoice }
+                                : applyOnlineModelChoice({
+                                    currentChoices: previous,
+                                    nextChoice,
+                                    onlineOptions: onlineChatModelOptions,
+                                    providerPreference: effectivePreferredProvider,
+                                  }).choices;
                             persistChatModelChoicesForActiveScope(next);
                             return next;
                           });
+                          if (appliedOnline) {
+                            void switchProvider(appliedOnline.provider);
+                          }
                         }}
                         options={modelOptions}
-                        provider={modelProvider}
+                        provider={isLocal ? "local" : "online"}
                         disabled={!settings || pendingReply}
-                        title={`Model for ${providerShortLabel(modelProvider)} replies`}
+                        title={`Model for ${responseModeShortLabel(responseMode)} replies`}
                         ariaLabel={`Model for ${
-                          isLocal ? "local" : providerDisplayLabel(modelProvider)
+                          isLocal ? "local" : "online"
                         } replies`}
-                        autoOptionMetaOverride={composeAutoOptionMetaLine(
-                          modelCatalog,
-                          settings,
-                          modelProvider,
-                          composeBotForAutoModelMeta
-                        )}
                         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
                           settings,
-                          modelProvider
+                          isLocal ? "local" : "online"
                         )}
                       />
                       {renderComposeUtilityActions()}
@@ -44640,9 +45486,29 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
-          {zenAtmosphereImageSrc ? (
-            <div className={styles.zenAtmosphereBackdrop} aria-hidden="true">
-              <img src={zenAtmosphereImageSrc} alt="" />
+          {zenAtmosphereTimeline.length > 0 ? (
+            <div
+              className={styles.zenAtmosphereBackdrop}
+              style={zenAtmosphereBackdropStyle}
+              aria-hidden="true"
+            >
+              {zenAtmosphereTimeline.map((entry) => {
+                const layerOpacity =
+                  zenAtmosphereLayerOpacities[entry.imageId] ?? 0;
+                return (
+                  <img
+                    key={`${entry.imageId}:${entry.generationMessageCount}`}
+                    src={`/api/images/${encodeURIComponent(entry.imageId)}/file`}
+                    alt=""
+                    decoding="async"
+                    style={
+                      {
+                        "--zen-atmosphere-layer-opacity": String(layerOpacity),
+                      } as React.CSSProperties
+                    }
+                  />
+                );
+              })}
             </div>
           ) : null}
           {showMessagesFrameStateLoadingOverlay ? (
@@ -44659,7 +45525,9 @@ function HomeContent(): React.JSX.Element {
           ) : null}
           <div
             className={`${styles.messages} ${
-              !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
+              (!detail || detail.messages.length === 0) && !pendingReplyVisible
+                ? styles.messagesEmptyState
+                : ""
             } ${askQuestionTailSpaceActive ? styles.messagesAskQuestionTailSpace : ""} ${
               askQuestionCollapsedBubbleActive ? styles.messagesAskQuestionCollapsedBubbleSpace : ""
             }`}
@@ -44712,7 +45580,7 @@ function HomeContent(): React.JSX.Element {
               </div>
             </div>
           ) : null}
-            {!detail && !pendingReplyVisible && (() => {
+            {(!detail || detail.messages.length === 0) && !pendingReplyVisible && (() => {
             // Chat-mode empty state (personal Chat view):
             //   • Same hero + headline flow as Sandbox, but NO tile grid —
             //     choosing a persona uses ComposerBotPicker in the compose
@@ -44723,47 +45591,25 @@ function HomeContent(): React.JSX.Element {
             // changes the hero, title, hint, or shell accent.
             const suppressHeroCopy = false;
             const isPreviewing = false;
-            const heroBot = activeBot;
-            const privateBotName = pendingIncognito ? heroBot?.name?.trim() : "";
-            const title = pendingIncognito
-              ? privateBotName
-                ? `Private chat with ${privateBotName}`
-                : "Private chat"
-              : heroBot?.name?.trim() || "What\u2019s on your mind?";
-            const descriptionPreview = heroBot
-              ? botHeroPreview(heroBot.system_prompt)
-              : "";
-            const selectedBotPromptPreview =
-              !pendingIncognito && selectedBotId !== null && heroBot?.id === selectedBotId
-                ? descriptionPreview
-                : "";
+            const heroBot: Bot | null = null;
+            const privateBotName = "";
+            const title = "Zen with PRISM";
+            const descriptionPreview = "";
+            const selectedBotPromptPreview = "";
             // While the hue lens has zoomed into a color group AND nothing is
             // armed yet, the hero is just a tinted Prism placeholder
             // — tapping it would commit the user to a "start with default"
             // conversation when their actual intent is "let me pick from this
             // filtered group." Block the click + nudge them to pick a tile.
-            const heroLensPlaceholder =
-              hueFilterCenter !== null && !heroBot;
-            const heroStartLabel = pendingIncognito
-              ? privateBotName
-                ? `Tap the symbol above to begin a private chat with ${privateBotName}.`
-                : "Tap the symbol above to begin a private chat."
-              : heroLensPlaceholder
-                ? "Pick a bot from the menu below to begin."
-                : heroBot?.name?.trim()
-                  ? `Tap the symbol above to have ${heroBot.name.trim()} start the conversation.`
-                  : bots.length > 0
-                    ? "Tap the symbol to start, or choose a bot below."
-                    : "Tap the symbol above to create a bot to get started.";
+            const heroLensPlaceholder = false;
+            const heroStartLabel =
+              "A continuous PRISM-only space for the present thread. Send a message below, or tap the symbol for a gentle opening prompt.";
             const hint = (() => {
-              if (pendingIncognito) return `${heroStartLabel} No memories are saved.`;
               if (selectedBotPromptPreview) return selectedBotPromptPreview;
               if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
               return heroStartLabel;
             })();
-            const emptyStateStyle = heroBot
-              ? botAccentStyle(heroBot.color, resolvedTheme)
-              : undefined;
+            const emptyStateStyle = undefined;
             const emptyStateClassName = [
               styles.emptyState,
               emptyStateSearchActive ? styles.emptyStateSearching : null,
@@ -44774,7 +45620,7 @@ function HomeContent(): React.JSX.Element {
                 bot={isPreviewing ? null : heroBot}
                 previewBot={isPreviewing ? heroBot : null}
                 previewAsBotGlyph={isPreviewing}
-                privateHero={privateChatActive}
+                privateHero={false}
                 /* Triangle hero replaces the rainbow brand mark whenever
                    the surface isn't in home mode and there's no bot
                    armed — its currentColor follows --accent, which
@@ -44782,7 +45628,7 @@ function HomeContent(): React.JSX.Element {
                    interface is currently tinted to (lens hue while
                    engaged, theme fg in private). Drag-mode keeps its
                    override regardless. */
-                forceTrianglePreview={lensInteracting}
+                forceTrianglePreview={false}
                 resolvedTheme={resolvedTheme}
               />
             );
@@ -44790,30 +45636,8 @@ function HomeContent(): React.JSX.Element {
               pendingReply ||
               !isStarterPromptAvailable(draft) ||
               heroLensPlaceholder;
-            const heroStartTitle = heroLensPlaceholder
-              ? "Pick a bot from the menu below to begin"
-              : heroBot?.name?.trim()
-                ? `Tap to have ${heroBot.name.trim()} start the conversation`
-                : "Tap to start the conversation";
-            const heroStartAriaLabel = heroLensPlaceholder
-              ? "Pick a bot from the menu below to begin"
-              : heroBot?.name?.trim()
-                ? `Start conversation with ${heroBot.name.trim()}`
-                : "Start conversation";
-            const heroRecentConversations =
-              !pendingIncognito && heroBot?.id
-                ? conversations
-                    .filter(
-                      (conversation) =>
-                        !conversation.incognito &&
-                        conversationEffectiveBotId(conversation) === heroBot.id
-                    )
-                    .sort(
-                      (a, b) =>
-                        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-                    )
-                    .slice(0, 8)
-                : [];
+            const heroStartTitle = "Start with PRISM";
+            const heroStartAriaLabel = "Start Zen conversation with PRISM";
             const shouldShowHeroNudge =
               !heroStartDisabled &&
               !emptyStateSearchActive &&
@@ -44846,7 +45670,7 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 ) : null}
                 {emptyStateSearchActive ? renderEmptyStateBotSearch() : null}
-                {!emptyStateSearchActive && !suppressHeroCopy && !chatStartupSummary ? (
+                {!emptyStateSearchActive && !suppressHeroCopy && !chatStartupSummaryVisible ? (
                   <button
                     type="button"
                     className={[
@@ -44862,6 +45686,12 @@ function HomeContent(): React.JSX.Element {
                     {renderHero()}
                   </button>
                 ) : null}
+                {!emptyStateSearchActive && !chatStartupSummaryVisible ? (
+                  <div className={styles.emptyStateTitleBlock}>
+                    <div className={styles.emptyStateTitle}>{title}</div>
+                    <p className={styles.emptyStateHint}>{hint}</p>
+                  </div>
+                ) : null}
                 {/* Personal Chat skips the Sandbox tile grid — ComposerBotPicker lives in the compose strip. */}
               </div>
             );
@@ -44872,7 +45702,7 @@ function HomeContent(): React.JSX.Element {
               <span>Loading earlier messages...</span>
             </div>
           ) : null}
-          {visibleDetailMessages.map(msg => {
+          {visibleDetailMessages.map((msg) => {
             const status = getMessageStatus(msg);
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
@@ -45008,9 +45838,15 @@ function HomeContent(): React.JSX.Element {
               msg.role === "assistant" &&
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
+            const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
             return (
+              <Fragment key={msg.id}>
+              {zenEraBoundaryLabel ? (
+                <div className={styles.zenEraBoundary} role="note">
+                  <span>{zenEraBoundaryLabel}</span>
+                </div>
+              ) : null}
               <article
-                key={msg.id}
                 className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${
                   msg.role === "user" ? styles.messageUser : styles.messageAssistant
                 }`}
@@ -45212,8 +46048,11 @@ function HomeContent(): React.JSX.Element {
                   );
                 })()}
               </article>
+              </Fragment>
             );
           })}
+          {manualCompactionIndicatorNode}
+          {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
           {typingIndicatorNode}
           {sandboxSummaryIndicatorNode}
@@ -46238,7 +47077,7 @@ function HomeContent(): React.JSX.Element {
               <span>Loading earlier messages...</span>
             </div>
           ) : null}
-          {visibleDetailMessages.map(msg => {
+          {visibleDetailMessages.map((msg) => {
             const status = getMessageStatus(msg);
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
@@ -46374,9 +47213,15 @@ function HomeContent(): React.JSX.Element {
               msg.role === "assistant" &&
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
+            const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
             return (
+              <Fragment key={msg.id}>
+              {zenEraBoundaryLabel ? (
+                <div className={styles.zenEraBoundary} role="note">
+                  <span>{zenEraBoundaryLabel}</span>
+                </div>
+              ) : null}
               <article
-                key={msg.id}
                 className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${
                   msg.role === "user" ? styles.messageUser : styles.messageAssistant
                 }`}
@@ -46575,8 +47420,11 @@ function HomeContent(): React.JSX.Element {
                   );
                 })()}
               </article>
+              </Fragment>
             );
           })}
+          {manualCompactionIndicatorNode}
+          {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
           {typingIndicatorNode}
           {sandboxSummaryIndicatorNode}
