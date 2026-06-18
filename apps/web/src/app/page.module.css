@@ -7214,6 +7214,14 @@
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.messages[data-chat-ephemeral="true"][data-zen-empty-hero="true"] {
+  --chat-elastic-offset-y: 0px !important;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  transform: none !important;
+}
+
 .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
   /* Live replies need enough tail room for the actively typed line to sit
      in the clear reading band instead of the lower atmosphere fade. */
@@ -11739,6 +11747,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, #fffaf2 78%, transparent);
 }
 
+.zenInitialThinkingOverlay[data-phase="compact"] {
+  z-index: 851;
+  display: block;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  animation: none;
+}
+
 .zenInitialThinkingButton {
   appearance: none;
   border: 0;
@@ -11754,6 +11771,53 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font: inherit;
   text-align: center;
   animation: zenInitialThinkingFloatIn 620ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingButton {
+  --zen-initial-thinking-compact-bottom: max(
+    112px,
+    calc(env(safe-area-inset-bottom, 0px) + 14dvh)
+  );
+  position: fixed;
+  left: 50%;
+  bottom: var(--zen-initial-thinking-compact-bottom);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 13px 8px 8px;
+  border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 74%, transparent),
+      color-mix(in srgb, var(--bg-deep) 84%, transparent)
+    );
+  box-shadow:
+    0 16px 36px rgba(0, 0, 0, 0.28),
+    0 0 34px color-mix(in srgb, #5de6ff 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+  backdrop-filter: blur(10px) saturate(1.08);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+  transform: translateX(-50%);
+  transform-origin: center center;
+  will-change: transform, opacity;
+  animation: zenInitialThinkingDockIn 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.themeLight .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingButton {
+  border-color: color-mix(in srgb, var(--fg) 12%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #fffaf2 78%, transparent),
+      color-mix(in srgb, #f5ead9 88%, transparent)
+    );
+  box-shadow:
+    0 14px 30px rgba(67, 48, 28, 0.14),
+    0 0 30px color-mix(in srgb, #1aa6c3 10%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.56);
 }
 
 .zenInitialThinkingButton:focus-visible {
@@ -11780,6 +11844,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 0 0 1px color-mix(in srgb, #ffffff 14%, transparent);
   isolation: isolate;
   animation: zenInitialThinkingGlyphDrift 2.6s ease-in-out infinite;
+}
+
+.zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo {
+  width: 42px;
+  height: 42px;
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--bg-surface) 54%, transparent) 0 42%,
+      transparent 72%
+    );
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.2),
+    0 0 28px color-mix(in srgb, #5de6ff 20%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 14%, transparent);
+  animation: zenInitialThinkingDockPulse 1.9s ease-in-out infinite;
 }
 
 .zenInitialThinkingGlyphHalo::before,
@@ -11815,6 +11895,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenInitialThinkingRingSpin 4.8s linear infinite;
 }
 
+.zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo::before {
+  inset: -6px;
+  padding: 1.5px;
+  opacity: 0.82;
+}
+
 .zenInitialThinkingGlyphHalo::after {
   inset: -44px;
   z-index: -2;
@@ -11832,6 +11918,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenInitialThinkingAuraPulse 2.8s ease-in-out infinite;
 }
 
+.zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo::after {
+  inset: -18px;
+  filter: blur(16px);
+  opacity: 0.32;
+}
+
 .zenInitialThinkingGlyph {
   width: clamp(42px, 7.2dvh, 56px);
   height: clamp(42px, 7.2dvh, 56px);
@@ -11840,6 +11932,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     drop-shadow(0 0 16px color-mix(in srgb, currentColor 34%, transparent))
     drop-shadow(0 3px 10px rgba(0, 0, 0, 0.34));
   animation: zenInitialThinkingGlyphPulse 1.55s ease-in-out infinite;
+}
+
+.zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyph {
+  width: 20px;
+  height: 20px;
 }
 
 .zenInitialThinkingLabel {
@@ -11853,6 +11950,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 18px color-mix(in srgb, #5de6ff 18%, transparent);
 }
 
+.zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingLabel {
+  font-size: 0.78rem;
+  font-weight: 680;
+  color: color-mix(in srgb, var(--fg) 80%, var(--fg-muted));
+  text-shadow: 0 0 14px color-mix(in srgb, #5de6ff 12%, transparent);
+}
+
 .zenInitialThinkingButton:hover .zenInitialThinkingGlyphHalo,
 .zenInitialThinkingButton:focus-visible .zenInitialThinkingGlyphHalo {
   box-shadow:
@@ -11860,6 +11964,40 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 74px color-mix(in srgb, #5de6ff 34%, transparent),
     0 0 0 4px color-mix(in srgb, #ffffff 8%, transparent),
     inset 0 0 0 1px color-mix(in srgb, #ffffff 18%, transparent);
+}
+
+.zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingButton:hover,
+.zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingButton:focus-visible {
+  border-color: color-mix(in srgb, #5de6ff 28%, var(--fg) 10%);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.32),
+    0 0 42px color-mix(in srgb, #5de6ff 18%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent);
+}
+
+@media (max-width: 720px) {
+  .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingButton {
+    --zen-initial-thinking-compact-bottom: max(
+      112px,
+      calc(env(safe-area-inset-bottom, 0px) + 14dvh)
+    );
+    gap: 8px;
+    padding: 7px 11px 7px 7px;
+  }
+
+  .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo {
+    width: 38px;
+    height: 38px;
+  }
+
+  .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyph {
+    width: 18px;
+    height: 18px;
+  }
+
+  .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingLabel {
+    font-size: 0.72rem;
+  }
 }
 
 @keyframes zenInitialThinkingVeilIn {
@@ -11882,6 +12020,27 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+@keyframes zenInitialThinkingDockIn {
+  from {
+    opacity: 1;
+    transform:
+      translate3d(
+        -50%,
+        calc(var(--zen-initial-thinking-compact-bottom) + 30px - 50dvh),
+        0
+      )
+      scale(2.2);
+  }
+  72% {
+    opacity: 1;
+    transform: translate3d(-50%, -8px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(1);
+  }
+}
+
 @keyframes zenInitialThinkingGlyphDrift {
   0%,
   100% {
@@ -11889,6 +12048,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
   50% {
     transform: translateY(-9px) scale(1.025);
+  }
+}
+
+@keyframes zenInitialThinkingDockPulse {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.04);
   }
 }
 
@@ -12460,6 +12629,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-empty-state-bottom-reserve: clamp(116px, 15dvh, 172px);
   box-sizing: border-box;
   z-index: 4;
+  overflow: hidden;
+  overscroll-behavior: none;
   align-items: center;
   justify-content: center;
   padding:
@@ -12572,9 +12743,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleBlock {
   width: min(680px, calc(100vw - 36px));
   justify-items: center;
-  gap: 10px;
+  gap: clamp(10px, 1.7vh, 16px);
   margin-top: 6px;
-  padding: clamp(18px, 3vw, 28px) clamp(18px, 4vw, 36px);
+  padding:
+    clamp(20px, 3.2vw, 30px)
+    clamp(18px, 4vw, 36px)
+    clamp(16px, 2.8vw, 24px);
   border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
   border-radius: 28px;
   background:
@@ -12617,68 +12791,126 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--fg) 74%, var(--fg-muted));
 }
 
-.zenSplashModelPicker {
-  width: min(520px, calc(100vw - 40px));
-  margin-top: clamp(14px, 3vh, 24px);
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker {
+  width: min(440px, 100%);
+  margin-top: clamp(2px, 1.4vh, 10px);
+  padding-top: clamp(12px, 2.4vh, 18px);
+  border-top: 1px solid color-mix(in srgb, var(--line) 54%, transparent);
   display: flex;
   justify-content: center;
   pointer-events: auto;
 }
 
-.zenSplashModelPicker .chatHeaderModelPicker {
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker {
   max-width: none;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
-.zenSplashModelPicker .modeControl.chatHeaderModeToggle {
-  height: 34px;
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .modeControl.chatHeaderModeToggle {
+  height: 32px;
 }
 
-.zenSplashModelPicker .chatHeaderModeToggle .modeToggleTrack {
-  width: 92px;
-  height: 34px;
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModeToggle .modeToggleTrack {
+  width: 88px;
+  height: 32px;
 }
 
-.zenSplashModelPicker .chatHeaderModeToggle .modeThumb {
-  width: 70px;
-  min-width: 70px;
-  height: 34px;
-  font-size: 12px;
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModeToggle .modeThumb {
+  width: 68px;
+  min-width: 68px;
+  height: 32px;
+  font-size: 11px;
 }
 
-.zenSplashModelPicker .chatHeaderModeToggle .modeThumbOnline {
-  transform: translate3d(22px, 0, 0);
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModeToggle .modeThumbOnline {
+  transform: translate3d(20px, 0, 0);
 }
 
-.zenSplashModelPicker .chatHeaderModelPicker .composeModelControl {
-  height: 38px;
-  max-width: min(18rem, 62vw);
-  border-radius: 12px;
+.appLayout.themeDark[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="local"],
+.appLayout.themeDark[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="online"] {
+  --mode-toggle-track: color-mix(in srgb, var(--accent) 44%, var(--bg-deep) 56%);
+}
+
+.appLayout.themeLight[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="local"],
+.appLayout.themeLight[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="online"] {
+  --mode-toggle-track: color-mix(in srgb, var(--accent) 34%, var(--bg-surface) 66%);
+}
+
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker .composeModelControl {
+  height: 32px;
+  max-width: min(15rem, 56vw);
+  border-radius: 999px;
+  border-color: color-mix(in srgb, var(--line) 68%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 74%, var(--accent) 8%),
+      color-mix(in srgb, var(--bg-deep) 86%, var(--accent) 6%)
+    );
   box-shadow:
-    0 18px 44px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 9%, transparent);
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.12);
 }
 
-.zenSplashModelPicker .chatHeaderModelPicker .composeModelTrigger {
-  min-width: 172px;
-  padding-inline: 14px;
-  gap: 9px;
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker .composeModelTrigger {
+  min-width: 154px;
+  padding-inline: 13px;
+  gap: 8px;
   justify-content: center;
 }
 
-.zenSplashModelPicker .chatHeaderModelPicker .composeControlLabel {
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker .composeControlLabel {
   display: inline;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 620;
   letter-spacing: 0;
-  color: var(--fg-subtle);
+  color: color-mix(in srgb, var(--fg-subtle) 82%, transparent);
 }
 
-.zenSplashModelPicker .chatHeaderModelPicker .composeModelTriggerName {
-  max-width: min(18ch, 42vw);
-  font-size: 13px;
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker .composeModelTriggerName {
+  max-width: min(16ch, 38vw);
+  font-size: 12px;
+}
+
+.composeBotMenu.zenSplashModelMenu {
+  min-width: min(240px, calc(100vw - 24px)) !important;
+  max-width: min(260px, calc(100vw - 24px));
+  max-height: min(228px, calc(100vh - 340px));
+  border-radius: 9px;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent);
+}
+
+.zenSplashModelMenu .composeBotListbox {
+  max-height: min(222px, calc(100vh - 346px));
+  padding: 4px;
+  gap: 1px;
+  border-radius: 7px;
+}
+
+.zenSplashModelMenu .composeModelOption {
+  min-height: 28px;
+  padding: 5px 9px;
+  gap: 9px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+
+.zenSplashModelMenu .composeModelOptionMain {
+  gap: 1px;
+}
+
+.zenSplashModelMenu .composeModelOptionMeta {
+  font-size: 9px;
+  letter-spacing: 0.035em;
+}
+
+.zenSplashModelMenu .composeModelDefaultBadge {
+  padding: 1px 5px;
+  font-size: 8px;
 }
 
 .appLayout[data-zen-surface="true"] .markdownComposerSurface {

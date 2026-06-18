@@ -220,6 +220,7 @@ const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 const CONVERSATION_GROUP_ORDER_STORAGE_KEY = "prism_conversation_group_order";
 const BOT_LIBRARY_GROUPS_STORAGE_KEY = "prism_bot_library_groups";
+const ZEN_INITIAL_STARTER_CACHE_STORAGE_KEY = "prism_zen_initial_starter_cache_v1";
 const BOT_LIBRARY_FAVORITES_GROUP_ID = "builtin:favorites";
 const COMMAND_CENTER_STATE_STORAGE_KEY = "prism_command_center_state";
 const COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX = "cmdprompt:";
@@ -3667,6 +3668,33 @@ function normalizeAskQuestionComparisonText(text: string): string {
     .toLowerCase();
 }
 
+const GENERIC_ASK_QUESTION_PROMPTS = new Set([
+  "choose a reply",
+  "choose your reply",
+  "choose a response",
+  "choose one",
+  "choose an option",
+  "pick a reply",
+  "pick a response",
+  "pick one",
+  "pick an option",
+  "select a reply",
+  "select a response",
+  "select one",
+  "select an option",
+  "which option do you choose",
+  "which one do you choose",
+  "which answer do you choose",
+  "whats your pick",
+  "whats your choice",
+]);
+
+function askQuestionPromptForInlinePanel(text: string): string {
+  const prompt = normalizeAskQuestionText(text);
+  const normalized = normalizeAskQuestionComparisonText(prompt).replace(/[\s:?.-]+$/g, "");
+  return GENERIC_ASK_QUESTION_PROMPTS.has(normalized) ? "" : prompt;
+}
+
 function lineLooksLikeChooserPromptLineClient(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
@@ -4573,6 +4601,90 @@ interface ChatPostEnvelope {
    */
   toolCalls?: ChatToolCallEvent[];
 }
+
+interface ZenInitialStarterCachedReply {
+  v: 1;
+  savedAt: number;
+  envelope: ChatPostEnvelope;
+}
+
+function zenInitialStarterCacheKey(userId: string): string {
+  return `${ZEN_INITIAL_STARTER_CACHE_STORAGE_KEY}:${userId}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isZenInitialStarterCachedReply(
+  value: unknown
+): value is ZenInitialStarterCachedReply {
+  if (!isRecord(value) || value.v !== 1 || typeof value.savedAt !== "number") {
+    return false;
+  }
+  const envelope = value.envelope;
+  if (!isRecord(envelope)) return false;
+  const conversation = envelope.conversation;
+  if (!isRecord(conversation)) return false;
+  if (typeof conversation.id !== "string" || conversation.id.length === 0) {
+    return false;
+  }
+  if (conversation.mode !== "zen" && conversation.mode !== "chat") {
+    return false;
+  }
+  if (!Array.isArray(conversation.messages)) return false;
+  return conversation.messages.some(
+    (message) => isRecord(message) && message.role === "assistant"
+  );
+}
+
+function readZenInitialStarterCachedReply(
+  userId: string
+): ZenInitialStarterCachedReply | null {
+  if (typeof window === "undefined") return null;
+  const key = zenInitialStarterCacheKey(userId);
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (isZenInitialStarterCachedReply(parsed)) return parsed;
+    window.localStorage.removeItem(key);
+    return null;
+  } catch {
+    window.localStorage.removeItem(key);
+    return null;
+  }
+}
+
+function writeZenInitialStarterCachedReply(
+  userId: string,
+  envelope: ChatPostEnvelope
+): void {
+  if (typeof window === "undefined") return;
+  const payload: ZenInitialStarterCachedReply = {
+    v: 1,
+    savedAt: Date.now(),
+    envelope,
+  };
+  try {
+    window.localStorage.setItem(
+      zenInitialStarterCacheKey(userId),
+      JSON.stringify(payload)
+    );
+  } catch {
+    // Storage pressure should never break the chat surface.
+  }
+}
+
+function clearZenInitialStarterCachedReply(userId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(zenInitialStarterCacheKey(userId));
+  } catch {
+    // Ignore unavailable storage.
+  }
+}
+
 interface ChatBackendDebugEvent {
   kind: "route" | "context" | "model" | "memory" | "summary" | "tool";
   message: string;
@@ -10792,6 +10904,7 @@ interface ComposerModelPickerProps {
   ariaLabel: string;
   placement?: "up" | "down";
   minMenuWidthPx?: number;
+  menuClassName?: string;
   /** When false, hides the Auto row (used by image model picker). Defaults to true. */
   showAutoOption?: boolean;
   /** Replaces the default Auto subtitle when a surface needs context-specific copy. */
@@ -10813,6 +10926,7 @@ function ComposerModelPicker({
   ariaLabel,
   placement = "up",
   minMenuWidthPx = COMPOSE_MENU_MODEL_MIN_WIDTH_PX,
+  menuClassName,
   showAutoOption = true,
   autoOptionMetaOverride,
   settingsDefaultModelId,
@@ -10926,7 +11040,9 @@ function ComposerModelPicker({
         createPortal(
           <div
             ref={menuRef}
-            className={`${styles.composeBotMenu} ${styles.composeModelMenu}`}
+            className={`${styles.composeBotMenu} ${styles.composeModelMenu}${
+              menuClassName ? ` ${menuClassName}` : ""
+            }`}
             style={menuPortalStyle}
           >
           <div
@@ -16349,6 +16465,16 @@ function HomeContent(): React.JSX.Element {
     useState(false);
   const pendingReplyAbortControllerRef = useRef<AbortController | null>(null);
   const zenInitialThinkingCancelControllerRef = useRef<AbortController | null>(null);
+  const zenInitialStarterRequestRef = useRef<{
+    id: string;
+    controller: AbortController;
+    conversationId: string | null;
+    pendingDetail: ConversationDetail | null;
+    startedNewConversation: boolean;
+    cancelled: boolean;
+    replayWhenReady: boolean;
+  } | null>(null);
+  const zenInitialStarterLiveEnvelopeRef = useRef<ChatPostEnvelope | null>(null);
   const [composerImageJobOrb, setComposerImageJobOrb] = useState<{
     jobId: string;
     conversationId: string;
@@ -19272,7 +19398,12 @@ function HomeContent(): React.JSX.Element {
       />
     );
   };
-  const renderHeaderModelPicker = (): React.ReactNode => {
+  const renderHeaderModelPicker = (
+    options: {
+      modelMenuClassName?: string;
+      modelMenuWidthPx?: number;
+    } = {}
+  ): React.ReactNode => {
     // Use the effective provider so the picker shows local options whenever
     // the active bot is locked offline-only — even if the user's saved
     // global preference is online.
@@ -19334,7 +19465,8 @@ function HomeContent(): React.JSX.Element {
             isLocal ? "local" : "online"
           } replies`}
           placement="down"
-          minMenuWidthPx={180}
+          minMenuWidthPx={options.modelMenuWidthPx ?? 180}
+          menuClassName={options.modelMenuClassName}
           settingsDefaultModelId={chatSettingsSavedDefaultModelId(
             settings,
             isLocal ? "local" : "online"
@@ -19809,10 +19941,6 @@ function HomeContent(): React.JSX.Element {
         chatArchiveLoadTimerByConversationRef.current.delete(detail.id);
       }
       setChatArchiveRevealEpoch((value) => value + 1);
-      setDetail((current) => {
-        if (!current || current.id !== detail.id) return current;
-        return trimConversationToActiveTurn(current);
-      });
     } else {
       // Non-ephemeral surfaces: aborting a send leaves the optimistic `pending-*`
       // user row in memory — strip it so Resend / Edit never POST /rewind with a
@@ -19830,22 +19958,48 @@ function HomeContent(): React.JSX.Element {
     }
     setError(null);
   }, [chatEphemeralMode, detail?.id]);
+
+  const clearPendingReplyState = useCallback((): void => {
+    setPendingReply(false);
+    setPendingReplyStartedAtMs(null);
+    setPendingReplyDenialRisk(false);
+    setPendingReplyConversationId(null);
+    setPendingReplyIsNewConversation(false);
+  }, []);
+
+  const clearZenInitialStarterSurface = useCallback((): void => {
+    setChatAutoRestoreSuppressed(true);
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setDraft("");
+    setComposerPrimed(false);
+    setStarterComposerRevealed(false);
+    setAskQuestionComposerRevealed(false);
+    setConversationStarterPrompts(null);
+    setChatStartupSummary(null);
+    chatSummaryRefreshMarkerRef.current = null;
+    setError(null);
+  }, []);
+
   const handleZenInitialThinkingCancel = useCallback(
     (event?: React.MouseEvent<HTMLButtonElement>): void => {
+      event?.preventDefault();
       event?.stopPropagation();
-      zenInitialThinkingCancelControllerRef.current =
-        pendingReplyAbortControllerRef.current;
-      stopPendingReply();
-      setSelectedId(null);
-      setDetail(null);
-      setDraft("");
-      setComposerPrimed(false);
-      setConversationStarterPrompts(null);
-      setChatStartupSummary(null);
-      chatSummaryRefreshMarkerRef.current = null;
-      setError(null);
+      const starterRequest = zenInitialStarterRequestRef.current;
+      const activeController = pendingReplyAbortControllerRef.current;
+      if (starterRequest && activeController === starterRequest.controller) {
+        starterRequest.cancelled = true;
+        pendingReplyAbortControllerRef.current = null;
+        clearPendingReplyState();
+      } else {
+        zenInitialThinkingCancelControllerRef.current = activeController;
+        stopPendingReply();
+      }
+      clearZenInitialStarterSurface();
     },
-    [stopPendingReply]
+    [clearPendingReplyState, clearZenInitialStarterSurface, stopPendingReply]
   );
   const assistantWordByWordMode = chatAssistantTypingMechanicsActive;
   const chatMessageTemporalById = useMemo(() => {
@@ -20048,9 +20202,7 @@ function HomeContent(): React.JSX.Element {
       chatAssistantRevealEligibleKeysRef.current.add(revealKey);
       chatCompletedRevealKeysRef.current.delete(revealKey);
       chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
-      if (!chatMessageFirstSeenAtRef.current.has(revealKey)) {
-        chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
-      }
+      chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
     },
     [chatAssistantTypingMechanicsActive]
   );
@@ -20196,22 +20348,49 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralNowMs,
   ]);
   const handleTypingIndicatorPress = useCallback((): void => {
-    if (pendingReplyVisible) {
-      stopPendingReply();
+    const canCutVisibleAssistant =
+      chatAssistantTypingMechanicsActive &&
+      chatAssistantRevealInProgress &&
+      detail?.id &&
+      latestAssistantMessageId;
+    if (!canCutVisibleAssistant) {
+      if (pendingReplyVisible) {
+        stopPendingReply();
+      }
       return;
+    }
+    if (!detail?.id || !latestAssistantMessageId) {
+      if (pendingReplyVisible) {
+        stopPendingReply();
+      }
+      return;
+    }
+    const latestAssistant =
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+    if (!latestAssistant) {
+      if (pendingReplyVisible) {
+        stopPendingReply();
+      }
+      return;
+    }
+    if (pendingReplyVisible) {
+      setPendingReply(false);
+      setPendingReplyStartedAtMs(null);
+      setPendingReplyDenialRisk(false);
+      setPendingReplyConversationId(null);
+      setPendingReplyIsNewConversation(false);
+      pendingReplyAbortControllerRef.current = null;
     }
     if (
       !chatAssistantTypingMechanicsActive ||
-      !chatAssistantRevealInProgress ||
-      !detail?.id ||
-      !latestAssistantMessageId
-    ) return;
+      !chatAssistantRevealInProgress
+    ) {
+      stopPendingReply();
+      return;
+    }
     // Mid-typing interruption keeps only the words that had actually become
     // visible, then breaks the current word like a natural spoken cutoff.
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
-    const latestAssistant =
-      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
-    if (!latestAssistant) return;
     const interruptedText = resolveMessageDisplayContent(latestAssistant);
     const revealTokens = tokenizeMessageReveal(interruptedText);
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now();
@@ -20244,10 +20423,7 @@ function HomeContent(): React.JSX.Element {
     }
     setDetail((current) => {
       if (!current || current.id !== detail.id) return current;
-      const baseConversation = chatEphemeralMode
-        ? trimConversationToActiveTurn(current)
-        : current;
-      const interruptedConversationMessages = baseConversation.messages;
+      const interruptedConversationMessages = current.messages;
       if (interruptedConversationMessages.length === 0) {
         return current;
       }
@@ -20305,6 +20481,29 @@ function HomeContent(): React.JSX.Element {
     chatAssistantTypingMechanicsActive,
     refreshOpenMemoryViews,
   ]);
+
+  const handleZenInitialReplyRevealCancel = useCallback(
+    (event?: React.MouseEvent<HTMLButtonElement>): void => {
+      event?.preventDefault();
+      event?.stopPropagation();
+      const fallbackEnvelope =
+        detail && detail.messages.some((message) => message.role === "assistant")
+          ? ({
+              conversation: detail,
+              ...(conversationStarterPrompts?.conversationId === detail.id
+                ? { conversationStarters: conversationStarterPrompts.prompts }
+                : {}),
+            } satisfies ChatPostEnvelope)
+          : null;
+      const envelope = zenInitialStarterLiveEnvelopeRef.current ?? fallbackEnvelope;
+      if (envelope && user?.id) {
+        writeZenInitialStarterCachedReply(user.id, envelope);
+      }
+      clearZenInitialStarterSurface();
+      setChatEphemeralNowMs(Date.now());
+    },
+    [clearZenInitialStarterSurface, conversationStarterPrompts, detail, user?.id]
+  );
 
   const zenAssistantReplyCount = useMemo(
     () =>
@@ -20398,28 +20597,57 @@ function HomeContent(): React.JSX.Element {
     handleTypingIndicatorPress,
   ]);
   const zenInitialThinkingNode = useMemo(() => {
-    if (!zenInitialThinkingActive) return null;
+    const active = zenInitialThinkingActive || zenInitialReplyRevealActive;
+    if (!active) return null;
+    const compactPhase = zenInitialReplyRevealActive && !zenInitialThinkingActive;
+    const label = "Thinking...";
+    const onActivate = compactPhase
+      ? handleZenInitialReplyRevealCancel
+      : handleZenInitialThinkingCancel;
     return (
       <div
         className={styles.zenInitialThinkingOverlay}
+        data-phase={compactPhase ? "compact" : "thinking"}
         role="status"
         aria-live="polite"
       >
         <button
           type="button"
           className={styles.zenInitialThinkingButton}
-          onClick={handleZenInitialThinkingCancel}
-          aria-label="Cancel reply and return to the Zen start"
-          title="Cancel reply"
+          onPointerDown={(event) => {
+            if (event.pointerType === "mouse" && event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onActivate();
+          }}
+          onClick={(event) => {
+            if (event.detail !== 0) {
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
+            onActivate(event);
+          }}
+          aria-label={
+            compactPhase
+              ? "Stop reply"
+              : "Cancel reply and return to the Zen start"
+          }
+          title={compactPhase ? "Stop reply" : "Cancel reply"}
         >
           <span className={styles.zenInitialThinkingGlyphHalo} aria-hidden="true">
             <PrismTriangleMark className={styles.zenInitialThinkingGlyph} />
           </span>
-          <span className={styles.zenInitialThinkingLabel}>Thinking...</span>
+          <span className={styles.zenInitialThinkingLabel}>{label}</span>
         </button>
       </div>
     );
-  }, [handleZenInitialThinkingCancel, zenInitialThinkingActive]);
+  }, [
+    handleZenInitialReplyRevealCancel,
+    handleZenInitialThinkingCancel,
+    zenInitialReplyRevealActive,
+    zenInitialThinkingActive,
+  ]);
   const sandboxSummaryIndicatorNode = useMemo(() => {
     if (view !== "sandbox") return null;
     const showCompactionSpinner = sandboxSummaryBusy && !pendingReplyVisible;
@@ -22201,6 +22429,12 @@ function HomeContent(): React.JSX.Element {
   }, [hueFilterCenter, viewportWidth]);
   const emptyStateSearchActive =
     emptyStateSearchOpen || normalizedEmptyStateBotNameFilter.length > 0;
+  const zenEmptyHeroVisible =
+    view === "chat" &&
+    (!detail || detail.messages.length === 0) &&
+    !pendingReplyVisible &&
+    !emptyStateSearchActive &&
+    !chatStartupSummaryVisible;
   const emptyStateTypingSearchAvailable =
     view !== "chat" &&
     pickerSourceBots.length > 0 &&
@@ -23123,7 +23357,14 @@ function HomeContent(): React.JSX.Element {
   }, [view]);
 
   useEffect(() => {
-    if (view !== "chat" || !user || pendingReplyVisible || selectedId || detail) {
+    if (
+      view !== "chat" ||
+      !user ||
+      chatAutoRestoreSuppressed ||
+      pendingReplyVisible ||
+      selectedId ||
+      detail
+    ) {
       return;
     }
     let cancelled = false;
@@ -23156,7 +23397,7 @@ function HomeContent(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [view, user, pendingReplyVisible, selectedId, detail]);
+  }, [view, user, chatAutoRestoreSuppressed, pendingReplyVisible, selectedId, detail]);
 
   useEffect(() => {
     if (view === "chat") return;
@@ -25418,6 +25659,102 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
+  function cacheZenInitialStarterReply(envelope: ChatPostEnvelope): void {
+    if (!user?.id) return;
+    writeZenInitialStarterCachedReply(user.id, envelope);
+  }
+
+  function clearZenInitialStarterReplyCache(): void {
+    if (!user?.id) return;
+    clearZenInitialStarterCachedReply(user.id);
+  }
+
+  function commitZenInitialStarterEnvelope(
+    envelope: ChatPostEnvelope,
+    options: { consumeCache: boolean }
+  ): void {
+    const patchedConversation = applyCommandDisplayAliases(
+      applyExplicitAskQuestionFallback(envelope.conversation)
+    );
+    if (options.consumeCache) {
+      clearZenInitialStarterReplyCache();
+    }
+    zenInitialStarterLiveEnvelopeRef.current = {
+      ...envelope,
+      conversation: patchedConversation,
+    };
+    setChatAutoRestoreSuppressed(false);
+    clearPendingReplyState();
+    setPendingReplyStartMessageCount(0);
+    markLatestAssistantRevealEligible(patchedConversation);
+    hardResetChatArchiveStateForConversation(patchedConversation.id);
+    captureFallbackMessageIdFromEnvelope(envelope);
+    setDetail(patchedConversation);
+    setSelectedId(patchedConversation.id);
+    setSessionOpinion(envelope.opinion ?? null);
+    setBotOpinion(envelope.botOpinion ?? null);
+    setDraft("");
+    setComposerPrimed(false);
+    setStarterComposerRevealed(false);
+    setAskQuestionComposerRevealed(false);
+    setChatStartupSummary(null);
+    chatSummaryRefreshMarkerRef.current = null;
+    if (
+      Array.isArray(envelope.conversationStarters) &&
+      envelope.conversationStarters.length >= 3
+    ) {
+      setConversationStarterPrompts({
+        conversationId: patchedConversation.id,
+        prompts: envelope.conversationStarters.slice(0, 3),
+      });
+    } else {
+      setConversationStarterPrompts(null);
+    }
+    wirePendingImageJobFromEnvelope(envelope, {
+      stillViewing: true,
+      activeConversationId: patchedConversation.id,
+    });
+    setChatEphemeralNowMs(Date.now());
+    void refreshConversations();
+    void refreshOpenMemoryViews();
+  }
+
+  function replayCachedZenInitialStarterReply(): boolean {
+    if (!user?.id) return false;
+    const cached = readZenInitialStarterCachedReply(user.id);
+    if (!cached) return false;
+    commitZenInitialStarterEnvelope(cached.envelope, { consumeCache: true });
+    return true;
+  }
+
+  function armCanceledZenInitialStarterReplay(): boolean {
+    const starterRequest = zenInitialStarterRequestRef.current;
+    if (!starterRequest?.cancelled) return false;
+    starterRequest.replayWhenReady = true;
+    setChatAutoRestoreSuppressed(false);
+    setPendingReply(true);
+    setPendingReplyStartedAtMs(Date.now());
+    setPendingReplyDenialRisk(false);
+    setPendingReplyStartMessageCount(0);
+    setPendingReplyConversationId(starterRequest.conversationId);
+    setPendingReplyIsNewConversation(starterRequest.startedNewConversation);
+    setDetail(
+      starterRequest.pendingDetail ?? {
+        id: "pending",
+        title: "New chat",
+        botId: null,
+        incognito: false,
+        lastBotId: null,
+        lastBotColor: null,
+        hasAssistantReply: false,
+        messages: [],
+      }
+    );
+    setSelectedId(starterRequest.conversationId);
+    setError(null);
+    return true;
+  }
+
   function clearAllDisplayedConversationState(): void {
     setDetail((current) =>
       current
@@ -25522,6 +25859,19 @@ function HomeContent(): React.JSX.Element {
     const isStarterPrompt =
       options.starterPrompt === true &&
       (!detail || detail.messages.length === 0);
+    const baselineMessageCount = detail?.messages.length ?? 0;
+    const isInitialZenStarterPrompt =
+      view === "chat" &&
+      isStarterPrompt &&
+      baselineMessageCount === 0 &&
+      detail?.hasAssistantReply !== true;
+    if (isInitialZenStarterPrompt) {
+      if (replayCachedZenInitialStarterReply()) return;
+      if (armCanceledZenInitialStarterReplay()) return;
+    } else if (!isStarterPrompt && view === "chat") {
+      clearZenInitialStarterReplyCache();
+      zenInitialStarterLiveEnvelopeRef.current = null;
+    }
     const forceNewConversation = !isStarterPrompt && forceNewConversationOnNextSend;
     // `/dev …` bypasses pendingReply — otherwise tooling looks "broken"
     // while the model is streaming or between turns.
@@ -25611,7 +25961,6 @@ function HomeContent(): React.JSX.Element {
       // Every new send starts from the compact active-turn view again.
       hardResetChatArchiveStateForConversation(archiveConversationId);
     }
-    const baselineMessageCount = detail?.messages.length ?? 0;
     const chatRequestController = new AbortController();
     pendingReplyAbortControllerRef.current = chatRequestController;
     const clearPendingReplyVisuals = () => {
@@ -25647,8 +25996,10 @@ function HomeContent(): React.JSX.Element {
       ?? (optimisticLastBotId
             ? bots.find(b => b.id === optimisticLastBotId)?.color ?? null
             : null);
+    let initialZenStarterPendingDetail: ConversationDetail | null =
+      isInitialZenStarterPrompt && detail ? detail : null;
     if (isStarterPrompt && requestStartedNewConversation) {
-      setDetail({
+      const pendingStarterDetail: ConversationDetail = {
         id: "pending",
         title: "New chat",
         botId: optimisticBotId,
@@ -25657,7 +26008,11 @@ function HomeContent(): React.JSX.Element {
         lastBotColor: optimisticLastBotColor,
         hasAssistantReply: false,
         messages: [],
-      });
+      };
+      initialZenStarterPendingDetail = isInitialZenStarterPrompt
+        ? pendingStarterDetail
+        : initialZenStarterPendingDetail;
+      setDetail(pendingStarterDetail);
     } else if (!isStarterPrompt) {
       const optimisticMessage: Message = {
         id: `pending-${Date.now()}`,
@@ -25695,6 +26050,21 @@ function HomeContent(): React.JSX.Element {
         messages: [...(detail?.messages ?? []), optimisticMessage],
       });
     }
+    const zenInitialStarterRequestId = isInitialZenStarterPrompt
+      ? `zen-starter-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      : null;
+    if (zenInitialStarterRequestId) {
+      zenInitialStarterRequestRef.current = {
+        id: zenInitialStarterRequestId,
+        controller: chatRequestController,
+        conversationId: requestConversationId,
+        pendingDetail: initialZenStarterPendingDetail,
+        startedNewConversation: requestStartedNewConversation,
+        cancelled: false,
+        replayWhenReady: false,
+      };
+      zenInitialStarterLiveEnvelopeRef.current = null;
+    }
     if (!isStarterPrompt && !editingMessageId) {
       appendComposerHistoryEntry(rawDraft);
     }
@@ -25721,6 +26091,21 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify(chatBody),
         signal: chatRequestController.signal,
       });
+      const activeInitialStarterRequest = zenInitialStarterRequestId
+        ? zenInitialStarterRequestRef.current
+        : null;
+      if (
+        activeInitialStarterRequest?.id === zenInitialStarterRequestId &&
+        activeInitialStarterRequest.cancelled
+      ) {
+        if (activeInitialStarterRequest.replayWhenReady) {
+          commitZenInitialStarterEnvelope(d, { consumeCache: true });
+        } else {
+          cacheZenInitialStarterReply(d);
+          setChatAutoRestoreSuppressed(true);
+        }
+        return;
+      }
       captureFallbackMessageIdFromEnvelope(d);
       pushMemoryToasts(d.memoryLearned);
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
@@ -25740,6 +26125,12 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = applyCommandDisplayAliases(
           applyExplicitAskQuestionFallback(d.conversation)
         );
+        if (isInitialZenStarterPrompt) {
+          zenInitialStarterLiveEnvelopeRef.current = {
+            ...d,
+            conversation: patchedConversation,
+          };
+        }
         markLatestAssistantRevealEligible(patchedConversation);
         if (view === "chat") {
           hardResetChatArchiveStateForConversation(d.conversation.id);
@@ -25909,6 +26300,9 @@ function HomeContent(): React.JSX.Element {
     } finally {
       if (zenInitialThinkingCancelControllerRef.current === chatRequestController) {
         zenInitialThinkingCancelControllerRef.current = null;
+      }
+      if (zenInitialStarterRequestRef.current?.controller === chatRequestController) {
+        zenInitialStarterRequestRef.current = null;
       }
       clearPendingReplyVisuals();
       if (successfulConversationId) {
@@ -26332,7 +26726,7 @@ function HomeContent(): React.JSX.Element {
     const prompt =
       interaction.source === "starter"
         ? ""
-        : normalizeAskQuestionText(interaction.askQuestion.prompt);
+        : askQuestionPromptForInlinePanel(interaction.askQuestion.prompt);
     const answered = interaction.status === "answered";
     const answerMessage = interaction.answerMessage;
     const canChangeAnsweredAskQuestion = view !== "chat";
@@ -27023,6 +27417,14 @@ function HomeContent(): React.JSX.Element {
     setChatModeScrollElasticOffset(scrollRoot, 0, false);
   }
 
+  useEffect(() => {
+    if (!zenEmptyHeroVisible) return;
+    const scrollRoot = messagesScrollRef.current;
+    if (!scrollRoot) return;
+    scrollRoot.scrollTop = 0;
+    resetChatModeScrollElastic(scrollRoot);
+  }, [zenEmptyHeroVisible]);
+
   function queueChatModeScrollElasticReset(scrollRoot: HTMLDivElement): void {
     clearChatModeScrollElasticResetTimer();
     chatScrollElasticResetTimerRef.current = window.setTimeout(() => {
@@ -27051,6 +27453,14 @@ function HomeContent(): React.JSX.Element {
   }
 
   function handleMessagesPaneScroll(event: React.UIEvent<HTMLDivElement>): void {
+    if (zenEmptyHeroVisible) {
+      const el = event.currentTarget;
+      if (el.scrollTop !== 0) {
+        el.scrollTop = 0;
+      }
+      resetChatModeScrollElastic(el);
+      return;
+    }
     scheduleZenAtmosphereScrollBlend(event.currentTarget);
     if (!chatEphemeralMode || !detail?.id) return;
     const el = event.currentTarget;
@@ -27086,14 +27496,20 @@ function HomeContent(): React.JSX.Element {
     if (!scrolledUp) return;
   }
   function disarmChatModeAutoscrollFromUserGesture(): void {
+    if (zenEmptyHeroVisible) return;
     if (!chatEphemeralMode || !detail?.id) return;
     chatAutoscrollUserDisarmedByConversationRef.current.set(detail.id, true);
     chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
     hideAskQuestionComposerForReading();
   }
   function handleChatModeThreadWheel(event: React.WheelEvent<HTMLDivElement>): void {
-    if (!chatEphemeralMode || !detail?.id) return;
     const el = event.currentTarget;
+    if (zenEmptyHeroVisible) {
+      event.preventDefault();
+      resetChatModeScrollElastic(el);
+      return;
+    }
+    if (!chatEphemeralMode || !detail?.id) return;
     const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
     const atTop = el.scrollTop <= 0.5;
     const atBottom = el.scrollTop >= maxScrollTop - 0.5;
@@ -27125,12 +27541,22 @@ function HomeContent(): React.JSX.Element {
     }
   }
   function handleChatModeThreadTouchStart(event: React.TouchEvent<HTMLDivElement>): void {
+    if (zenEmptyHeroVisible) {
+      chatTouchScrollLastYRef.current = null;
+      resetChatModeScrollElastic(event.currentTarget);
+      return;
+    }
     clearChatModeScrollElasticResetTimer();
     chatTouchScrollLastYRef.current = event.touches[0]?.clientY ?? null;
   }
   function handleChatModeThreadTouchMove(event: React.TouchEvent<HTMLDivElement>): void {
-    if (!chatEphemeralMode || !detail?.id) return;
     const el = event.currentTarget;
+    if (zenEmptyHeroVisible) {
+      event.preventDefault();
+      resetChatModeScrollElastic(el);
+      return;
+    }
+    if (!chatEphemeralMode || !detail?.id) return;
     const nextY = event.touches[0]?.clientY ?? null;
     const previousY = chatTouchScrollLastYRef.current;
     chatTouchScrollLastYRef.current = nextY;
@@ -27538,8 +27964,11 @@ function HomeContent(): React.JSX.Element {
     event: React.MouseEvent<HTMLButtonElement>
   ): void {
     event.stopPropagation();
+    if (replayCachedZenInitialStarterReply()) return;
+    if (armCanceledZenInitialStarterReplay()) return;
     if (pendingReply) return;
     if (!isStarterPromptAvailable(draft)) return;
+    setChatAutoRestoreSuppressed(false);
     void sendMessage(
       { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>,
       { starterPrompt: true, starterPromptWarrantsIntro: true }
@@ -47827,10 +48256,7 @@ function HomeContent(): React.JSX.Element {
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
       ),
     } as React.CSSProperties;
-    const zenSplashModelPickerActive =
-      (!detail || detail.messages.length === 0) &&
-      !pendingReplyVisible &&
-      !chatStartupSummaryVisible;
+    const zenSplashModelPickerActive = zenEmptyHeroVisible;
     return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
@@ -48076,6 +48502,7 @@ function HomeContent(): React.JSX.Element {
             }`}
             ref={messagesScrollRef}
             data-chat-ephemeral={chatLikeSurface ? "true" : undefined}
+            data-zen-empty-hero={zenEmptyHeroVisible ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
             data-drag-selecting={
@@ -48236,11 +48663,14 @@ function HomeContent(): React.JSX.Element {
                   <div className={styles.emptyStateTitleBlock}>
                     <div className={styles.emptyStateTitle}>{title}</div>
                     <p className={styles.emptyStateHint}>{hint}</p>
-                  </div>
-                ) : null}
-                {zenSplashModelPickerActive ? (
-                  <div className={styles.zenSplashModelPicker}>
-                    {renderHeaderModelPicker()}
+                    {zenSplashModelPickerActive ? (
+                      <div className={styles.zenSplashModelPicker}>
+                        {renderHeaderModelPicker({
+                          modelMenuClassName: styles.zenSplashModelMenu,
+                          modelMenuWidthPx: 220,
+                        })}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
                 {/* Personal Chat skips the Sandbox tile grid — ComposerBotPicker lives in the compose strip. */}
