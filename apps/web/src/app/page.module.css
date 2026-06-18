@@ -11434,6 +11434,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding-bottom: 104px;
 }
 
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
+  --zen-prose-runway-top: clamp(96px, 14dvh, 168px);
+  --zen-prose-runway-bottom: clamp(132px, 22dvh, 248px);
+  padding-top: max(76px, var(--zen-prose-runway-top));
+  padding-bottom: max(104px, var(--zen-prose-runway-bottom));
+  scroll-padding-top: var(--zen-prose-runway-top);
+  scroll-padding-bottom: var(--zen-prose-runway-bottom);
+}
+
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .message,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .zenEraBoundary {
+  scroll-margin-block: clamp(36px, 10dvh, 128px);
+}
+
 .appLayout[data-zen-surface="true"] .messagesEmptyState > .emptyState {
   justify-content: center;
   padding:
@@ -11523,6 +11537,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
   padding-bottom: max(32dvh, 104px);
   scroll-behavior: auto;
+}
+
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+  padding-bottom: max(36dvh, var(--zen-prose-runway-bottom), 132px);
+  scroll-padding-bottom: max(36dvh, var(--zen-prose-runway-bottom));
 }
 
 .appLayout[data-private-active="true"] .compose {
@@ -26727,8 +26746,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     padding-bottom: max(32px, calc(env(safe-area-inset-bottom) + 24px));
   }
 
+  .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
+    --zen-prose-runway-top: clamp(40px, 10dvh, 92px);
+    --zen-prose-runway-bottom: clamp(72px, 16dvh, 140px);
+    padding-top: var(--zen-prose-runway-top);
+    padding-bottom: max(
+      var(--zen-prose-runway-bottom),
+      calc(env(safe-area-inset-bottom) + 48px)
+    );
+    scroll-padding-top: var(--zen-prose-runway-top);
+    scroll-padding-bottom: var(--zen-prose-runway-bottom);
+  }
+
+  .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .message,
+  .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .zenEraBoundary {
+    scroll-margin-block: clamp(28px, 8dvh, 76px);
+  }
+
   .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
     padding-bottom: max(32dvh, calc(env(safe-area-inset-bottom) + 24px));
+  }
+
+  .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+    padding-bottom: max(
+      32dvh,
+      var(--zen-prose-runway-bottom),
+      calc(env(safe-area-inset-bottom) + 48px)
+    );
+    scroll-padding-bottom: max(32dvh, var(--zen-prose-runway-bottom));
   }
 
   .appLayout[data-chat-sidebar-hidden="true"] .compose {
