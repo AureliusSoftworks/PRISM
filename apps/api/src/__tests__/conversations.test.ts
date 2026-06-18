@@ -11,6 +11,7 @@ import {
   getConversationSweepState,
   listConversationSummaries,
   rewindConversation,
+  setZenStarterConversationSuppression,
   sweepConversations,
   undoLatestConversationSweep,
 } from "../conversations.ts";
@@ -222,6 +223,29 @@ function seedListConversation(
   }
 }
 
+function seedStarterOnlyZenConversation(
+  db: DatabaseSync,
+  options: {
+    id: string;
+    userId: string;
+    archivedAt?: string | null;
+    includeUserMessage?: boolean;
+  }
+): void {
+  const now = "2026-01-01T00:00:00.000Z";
+  db.prepare(
+    "INSERT INTO conversations (id, user_id, title, conversation_mode, archived_at, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', ?, 0, ?, ?)"
+  ).run(options.id, options.userId, "Zen", options.archivedAt ?? null, now, now);
+  db.prepare(
+    "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, 'assistant', ?, ?)"
+  ).run(`assistant-${options.id}`, options.id, options.userId, "hello", now);
+  if (options.includeUserMessage) {
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, 'user', ?, ?)"
+    ).run(`user-${options.id}`, options.id, options.userId, "follow up", now);
+  }
+}
+
 describe("listConversationSummaries", () => {
   it("excludes persisted private conversations from the sidebar list", () => {
     const db = createTestDb();
@@ -302,6 +326,53 @@ describe("listConversationSummaries", () => {
 
     const conversations = listConversationSummaries(db, "user-1");
     assert.deepEqual(conversations.map((conversation) => conversation.id), ["active-1"]);
+  });
+});
+
+describe("setZenStarterConversationSuppression", () => {
+  it("archives and promotes an uncontinued Zen starter conversation", () => {
+    const db = createTestDb();
+    seedStarterOnlyZenConversation(db, { id: "zen-1", userId: "user-1" });
+
+    const suppressed = setZenStarterConversationSuppression(
+      db,
+      "user-1",
+      "zen-1",
+      true
+    );
+
+    assert.deepEqual(suppressed, { conversationId: "zen-1", suppressed: true });
+    const archived = db
+      .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+      .get("zen-1") as { archived_at: string | null };
+    assert.ok(archived.archived_at, "starter should be hidden from Zen auto-open");
+
+    const promoted = setZenStarterConversationSuppression(
+      db,
+      "user-1",
+      "zen-1",
+      false
+    );
+
+    assert.deepEqual(promoted, { conversationId: "zen-1", suppressed: false });
+    const restored = db
+      .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+      .get("zen-1") as { archived_at: string | null };
+    assert.equal(restored.archived_at, null);
+  });
+
+  it("rejects Zen conversations that already have a user turn", () => {
+    const db = createTestDb();
+    seedStarterOnlyZenConversation(db, {
+      id: "zen-1",
+      userId: "user-1",
+      includeUserMessage: true,
+    });
+
+    assert.throws(
+      () => setZenStarterConversationSuppression(db, "user-1", "zen-1", true),
+      /Only uncontinued Zen starter conversations/
+    );
   });
 });
 

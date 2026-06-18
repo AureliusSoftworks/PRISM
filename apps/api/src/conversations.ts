@@ -926,6 +926,67 @@ export function clearConversationMessages(
   }
 }
 
+export function setZenStarterConversationSuppression(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  suppressed: boolean
+): { conversationId: string; suppressed: boolean } {
+  const conversation = db
+    .prepare(
+      `SELECT c.id,
+              c.conversation_mode,
+              c.incognito,
+              c.archived_at,
+              COUNT(m.id) AS message_count,
+              SUM(CASE WHEN m.role = 'assistant' THEN 1 ELSE 0 END) AS assistant_count,
+              SUM(CASE WHEN m.id IS NOT NULL AND m.role <> 'assistant' THEN 1 ELSE 0 END) AS non_assistant_count
+         FROM conversations c
+         LEFT JOIN messages m
+           ON m.conversation_id = c.id
+          AND m.user_id = c.user_id
+        WHERE c.id = ?
+          AND c.user_id = ?
+        GROUP BY c.id`
+    )
+    .get(conversationId, userId) as
+    | {
+        id?: string;
+        conversation_mode?: string | null;
+        incognito?: number | null;
+        archived_at?: string | null;
+        message_count?: number | null;
+        assistant_count?: number | null;
+        non_assistant_count?: number | null;
+      }
+    | undefined;
+  if (!conversation?.id) {
+    throw new Error("Conversation not found.");
+  }
+  if (
+    conversation.conversation_mode !== "zen" &&
+    conversation.conversation_mode !== "chat"
+  ) {
+    throw new Error("Only Zen starter conversations can be suppressed.");
+  }
+  const messageCount = Number(conversation.message_count ?? 0);
+  const assistantCount = Number(conversation.assistant_count ?? 0);
+  const nonAssistantCount = Number(conversation.non_assistant_count ?? 0);
+  if (
+    conversation.incognito === 1 ||
+    messageCount !== 1 ||
+    assistantCount !== 1 ||
+    nonAssistantCount !== 0
+  ) {
+    throw new Error("Only uncontinued Zen starter conversations can be suppressed.");
+  }
+  const nextArchivedAt = suppressed ? (conversation.archived_at ?? new Date().toISOString()) : null;
+  db.prepare(
+    "UPDATE conversations SET archived_at = ? WHERE id = ? AND user_id = ?"
+  ).run(nextArchivedAt, conversationId, userId);
+  return { conversationId, suppressed };
+}
+
 /**
  * Permanently remove all saved chats in one bot/default conversation group.
  *

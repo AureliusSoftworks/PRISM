@@ -12356,6 +12356,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .compose {
+  --compose-user-send-color-bright: color-mix(in srgb, #ffffff 92%, var(--fg) 8%);
+  --compose-user-send-color-dark: var(--fg);
+  --compose-user-send-color: var(--compose-user-send-color-bright);
+  --compose-send-ink: var(--fg);
+  --compose-send-ink-muted: var(--fg-muted);
+  --compose-send-glow: color-mix(in srgb, var(--compose-send-ink) 20%, transparent);
   min-width: 0;
   width: 100%;
   /* Do not set overflow-x here: any non-visible overflow-x pairs with
@@ -12372,6 +12378,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--bg-surface);
   box-shadow:
     0 -8px 24px -22px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.themeLight .compose {
+  --compose-user-send-color: var(--compose-user-send-color-dark);
+}
+
+.compose[data-compose-send-tint="true"] {
+  --compose-send-ink: var(--compose-user-send-color);
+  --compose-send-ink-muted: color-mix(in srgb, var(--compose-user-send-color) 70%, var(--fg-muted));
+  --compose-send-glow: color-mix(in srgb, var(--compose-user-send-color) 28%, transparent);
 }
 
 .compose[data-choice-composer-hidden="true"] {
@@ -12914,11 +12930,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-zen-surface="true"] .markdownComposerSurface {
-  border-color: color-mix(in srgb, var(--fg) 34%, var(--line));
+  border-color: color-mix(in srgb, var(--compose-send-ink) 34%, var(--line));
   background:
     radial-gradient(
       ellipse 64% 120% at 96% 50%,
-      color-mix(in srgb, var(--accent) 10%, transparent),
+      color-mix(in srgb, var(--compose-send-ink) 10%, transparent),
       transparent 72%
     ),
     linear-gradient(
@@ -12928,9 +12944,89 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     );
   box-shadow:
     0 18px 64px rgba(0, 0, 0, 0.24),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 9%, transparent);
+    inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 11%, transparent);
   backdrop-filter: blur(18px) saturate(1.08);
   -webkit-backdrop-filter: blur(18px) saturate(1.08);
+  transition:
+    border-color 0.34s ease,
+    background 0.34s ease,
+    box-shadow 0.34s ease;
+}
+
+.appLayout[data-zen-surface="true"] .markdownComposerSurface:focus-within {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 72%, var(--line));
+  box-shadow:
+    0 0 0 3px var(--compose-send-glow),
+    0 18px 64px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 14%, transparent);
+}
+
+.appLayout[data-zen-surface="true"] .markdownRichEditorHost :global(.tiptap),
+.appLayout[data-zen-surface="true"] .markdownComposerInputRow textarea {
+  color: var(--compose-send-ink);
+  transition: color 0.34s ease;
+}
+
+.appLayout[data-zen-surface="true"]
+  .markdownRichEditorHost
+  :global(.tiptap p.is-editor-empty.is-empty::before),
+.appLayout[data-zen-surface="true"] .markdownComposerInputRow textarea::placeholder {
+  color: var(--compose-send-ink-muted);
+  transition: color 0.34s ease;
+}
+
+.appLayout[data-zen-surface="true"] .markdownComposerInputRow > button {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 44%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 74%, var(--compose-send-ink) 16%),
+      color-mix(in srgb, var(--bg) 84%, var(--compose-send-ink) 12%)
+    );
+  color: var(--compose-send-ink);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 14%, transparent);
+  transition:
+    background 0.34s ease,
+    border-color 0.34s ease,
+    color 0.34s ease,
+    box-shadow 0.34s ease,
+    filter 0.18s ease,
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.appLayout[data-zen-surface="true"]
+  .compose[data-compose-ready="true"]
+  .markdownComposerInputRow
+  > button:not(:disabled) {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 72%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 62%, var(--compose-send-ink) 28%),
+      color-mix(in srgb, var(--bg) 72%, var(--compose-send-ink) 22%)
+    );
+  color: var(--compose-send-ink);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 24px color-mix(in srgb, var(--compose-send-ink) 16%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 18%, transparent);
+}
+
+.appLayout[data-zen-surface="true"] .markdownComposerInputRow > button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 84%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 54%, var(--compose-send-ink) 36%),
+      color-mix(in srgb, var(--bg) 66%, var(--compose-send-ink) 28%)
+    );
+}
+
+.appLayout[data-zen-surface="true"] .markdownComposerInputRow > button:disabled {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 18%, var(--line));
+  background: color-mix(in srgb, var(--bg-deep) 86%, var(--compose-send-ink) 14%);
+  color: color-mix(in srgb, var(--compose-send-ink-muted) 82%, var(--fg-muted));
 }
 
 /* While the bot is streaming, give the messages pane enough tail padding

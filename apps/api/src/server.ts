@@ -64,6 +64,7 @@ import {
   pruneZenWallpaperHistoryForRestoreWindow,
   rewindConversation,
   serializeZenWallpaperHistory,
+  setZenStarterConversationSuppression,
   sweepConversations,
   undoLatestConversationSweep,
 } from "./conversations.ts";
@@ -1307,6 +1308,21 @@ function buildRoutes(): RouteDefinition[] {
         ) VALUES (?, ?, 'Zen', 'zen', NULL, 0, ?, ?)`
       ).run(conversationId, userId, now, now);
       json(ctx.res, 200, { ok: true, conversationId });
+    }),
+    route("POST", "/api/conversations/:id/zen-starter-replay", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const action = body.action;
+      if (action !== "suppress" && action !== "promote") {
+        throw new HttpError(400, "Expected action to be suppress or promote.");
+      }
+      const result = setZenStarterConversationSuppression(
+        db,
+        userId,
+        ctx.params.id,
+        action === "suppress"
+      );
+      json(ctx.res, 200, { ok: true, ...result });
     }),
     route("GET", "/api/conversations/:id", async (ctx) => {
       const userId = requireAuth(ctx);
