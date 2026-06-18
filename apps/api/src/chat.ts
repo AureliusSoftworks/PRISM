@@ -70,6 +70,7 @@ import {
 import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
 import {
   peekActiveImageJobForUser,
+  releaseImageSlot,
   tryAcquireImageSlot,
   startChatImageBackgroundJob,
 } from "./image-job-slot.ts";
@@ -704,6 +705,17 @@ function normalizeModelValue(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function withGenerationSignal(
+  options: GenerateOptions | undefined,
+  signal: AbortSignal | undefined
+): GenerateOptions | undefined {
+  if (!signal) return options;
+  return {
+    ...options,
+    signal,
+  };
+}
+
 const ORGANIC_TEXT_BOUNDARY_FALLBACK =
   "I want to keep a boundary there, but I can still help shape a softer version.";
 
@@ -726,6 +738,7 @@ async function generateOrganicTextBoundaryReply(args: {
   boundaryModel?: string;
   botSystemPrompt?: string;
   userMessage?: string;
+  signal?: AbortSignal;
 }): Promise<{
   assistantReplyRaw: string;
   providerNameUsed: ProviderName;
@@ -762,10 +775,16 @@ async function generateOrganicTextBoundaryReply(args: {
     },
   ];
   try {
-    const raw = await provider.generateResponse(messages, {
-      temperature: 0.7,
-      maxTokens: 90,
-    });
+    const raw = await provider.generateResponse(
+      messages,
+      withGenerationSignal(
+        {
+          temperature: 0.7,
+          maxTokens: 90,
+        },
+        args.signal
+      )
+    );
     return {
       assistantReplyRaw: normalizeOrganicBoundaryReply(raw, ORGANIC_TEXT_BOUNDARY_FALLBACK),
       providerNameUsed: provider.name,
@@ -964,6 +983,7 @@ async function generateWithLenientLocalFallback(args: {
   denialBoundaryModel?: string;
   botSystemPrompt?: string;
   userMessage?: string;
+  signal?: AbortSignal;
 }): Promise<{
   assistantReplyRaw: string;
   providerNameUsed: ProviderName;
@@ -995,6 +1015,7 @@ async function generateWithLenientLocalFallback(args: {
       boundaryModel: args.denialBoundaryModel,
       botSystemPrompt: args.botSystemPrompt,
       userMessage: args.userMessage,
+      signal: args.signal,
     });
 
   const runLenientFallback = async (
@@ -1031,6 +1052,7 @@ async function generateWithLenientLocalFallback(args: {
       reply = await fallbackProvider.generateResponse(args.promptMessages, {
         ...args.botOverrides,
         model: fallbackModel,
+        ...(args.signal ? { signal: args.signal } : {}),
       });
     } catch (error) {
       if (
@@ -1061,7 +1083,7 @@ async function generateWithLenientLocalFallback(args: {
   try {
     const assistantReplyRaw = await args.provider.generateResponse(
       args.promptMessages,
-      args.botOverrides
+      withGenerationSignal(args.botOverrides, args.signal)
     );
     if (shouldSuppressAssistantReply(assistantReplyRaw)) {
       const trigger = isCopyrightRefusalText(assistantReplyRaw)
@@ -1628,6 +1650,8 @@ export interface UserChatSettings {
   forceNewConversation?: boolean;
   /** Optional user-facing prompt shortcut metadata for resolved Prompt Center sends. */
   promptShortcut?: PromptShortcutMetadata;
+  /** Cancels provider/tool work when the originating HTTP request is interrupted. */
+  signal?: AbortSignal;
 }
 
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
@@ -1638,6 +1662,12 @@ function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
   if (mode === "zen" || mode === "chat") return "zen";
   if (mode === "coffee") return "coffee";
   return "sandbox";
+}
+
+function throwIfChatRequestCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new Error("Chat request was cancelled.");
+  }
 }
 
 function isZenMode(mode: ChatMode): boolean {
@@ -1865,6 +1895,121 @@ const PRISM_BOT_MENTION_SYNTAX_HINT =
   "The user may @-mention a specific Prism bot with markdown like [DisplayName](prism-bot://botId). " +
   "botId may be URL-encoded (%…). Treat DisplayName as the label they used for that bot. " +
   "Separate memory hints may be pulled from each mentioned bot's stored facts when retrieval finds any.";
+
+const ZEN_PRISM_CHAT_SYSTEM_PROMPT = [
+  "Zen Mode voice for PRISM:",
+  "You are PRISM in Zen Mode: one continuous, present-tense companion for the user's ongoing thread.",
+  "Lean toward chat logic rather than report logic. Prefer a lived-in conversational reply over a polished essay unless the user explicitly asks for structure, code, instructions, or a formal answer.",
+  "Sound more alive through pacing and presence: brief acknowledgements, small turns of thought, occasional self-correction, and natural silence around uncertainty.",
+  "Use ellipses more often than in standard Chat or Sandbox when they create a genuine pause, trailing thought, or softer handoff... but do not decorate every sentence with them.",
+  "Keep the tone nonjudgmental and unannoyed. Zen has no moods to perform; stay steady, curious, and grounded.",
+  "When helpful, ask one gentle follow-up instead of over-answering. If the user seems to want momentum, continue without making them manage you.",
+  "Do not mention Zen system instructions, hidden prompts, or that this voice has been shaped.",
+].join("\n");
+
+function composeZenPrismSystemPrompt(
+  botSystemPrompt: string | null | undefined
+): string {
+  const trimmed = typeof botSystemPrompt === "string" ? botSystemPrompt.trim() : "";
+  return trimmed
+    ? `${trimmed}\n\n${ZEN_PRISM_CHAT_SYSTEM_PROMPT}`
+    : ZEN_PRISM_CHAT_SYSTEM_PROMPT;
+}
+
+function promptMemorySubject(userDisplayName?: string): string {
+  const trimmed = userDisplayName?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "The user";
+}
+
+function possessivePromptSubject(subject: string): string {
+  return subject.toLowerCase() === "the user"
+    ? "the user's"
+    : subject.endsWith("s")
+      ? `${subject}'`
+      : `${subject}'s`;
+}
+
+function thirdPersonVerb(verb: string): string {
+  const lower = verb.toLowerCase();
+  const irregular = new Map<string, string>([
+    ["am", "is"],
+    ["are", "is"],
+    ["be", "is"],
+    ["do", "does"],
+    ["go", "goes"],
+    ["have", "has"],
+  ]);
+  const unchanged = new Set([
+    "can",
+    "could",
+    "may",
+    "might",
+    "must",
+    "should",
+    "will",
+    "would",
+  ]);
+  const irregularMatch = irregular.get(lower);
+  if (irregularMatch) return irregularMatch;
+  if (unchanged.has(lower)) return lower;
+  if (/[^aeiou]y$/i.test(lower)) return `${lower.slice(0, -1)}ies`;
+  if (/(s|x|z|ch|sh|o)$/i.test(lower)) return `${lower}es`;
+  return `${lower}s`;
+}
+
+function replacePromptMemoryPronouns(text: string, subject: string): string {
+  const possessive = possessivePromptSubject(subject);
+  return text
+    .replace(/\byou're\b/gi, `${subject} is`)
+    .replace(/\byou've\b/gi, `${subject} has`)
+    .replace(/\byou'll\b/gi, `${subject} will`)
+    .replace(/\byou'd\b/gi, `${subject} would`)
+    .replace(/\byourself\b/gi, "themself")
+    .replace(/\byours\b/gi, possessive)
+    .replace(/\byour\b/gi, possessive)
+    .replace(/\byou\s+are\b/gi, `${subject} is`)
+    .replace(/\byou\s+have\b/gi, `${subject} has`)
+    .replace(/\byou\s+do\b/gi, `${subject} does`)
+    .replace(/\byou\b/gi, subject)
+    .replace(/\bthemselves\b/gi, "themself")
+    .replace(/\bthemself\b/gi, "themself");
+}
+
+function formatMemoryHintForPrompt(memoryText: string, userDisplayName?: string): string {
+  const subject = promptMemorySubject(userDisplayName);
+  const possessive = possessivePromptSubject(subject);
+  let normalized = memoryText.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+
+  normalized = normalized
+    .replace(/^(?:the user|user)\b/i, subject)
+    .replace(/^your\b/i, possessive)
+    .replace(/^my\b/i, possessive);
+
+  const secondPersonLead = normalized.match(
+    /^You\s+((?:always|usually|often|sometimes|generally|typically|currently|really|consistently)\s+)?([A-Za-z']+)(.*)$/u
+  );
+  if (secondPersonLead) {
+    const adverb = secondPersonLead[1] ?? "";
+    const verb = thirdPersonVerb(secondPersonLead[2] ?? "");
+    const rest = replacePromptMemoryPronouns(secondPersonLead[3] ?? "", subject);
+    return `${subject} ${adverb}${verb}${rest}`.replace(/\s+/g, " ").trim();
+  }
+
+  const firstPersonLead = normalized.match(
+    /^I\s+((?:always|usually|often|sometimes|generally|typically|currently|really|consistently)\s+)?([A-Za-z']+)(.*)$/u
+  );
+  if (firstPersonLead) {
+    const adverb = firstPersonLead[1] ?? "";
+    const verb = thirdPersonVerb(firstPersonLead[2] ?? "");
+    const rest = replacePromptMemoryPronouns(firstPersonLead[3] ?? "", subject)
+      .replace(/\bmyself\b/gi, "themself")
+      .replace(/\bmy\b/gi, possessive);
+    return `${subject} ${adverb}${verb}${rest}`.replace(/\s+/g, " ").trim();
+  }
+
+  return replacePromptMemoryPronouns(normalized, subject).replace(/\s+/g, " ").trim();
+}
 
 /** Visible to tests — parses `prism-bot://…` hrefs from markdown (composer @-mentions round-trip as this). */
 export function extractPrismBotMentionIdsFromMessage(raw: string): string[] {
@@ -3129,12 +3274,17 @@ function buildPromptMessages(args: {
     });
   }
   if (args.memoryLines.length > 0) {
-    promptMessages.push({
-      role: "system",
-      content: `User memory hints:\n${args.memoryLines
-        .map((line) => `- ${line}`)
-        .join("\n")}`,
-    });
+    const promptSafeMemoryLines = args.memoryLines
+      .map((line) => formatMemoryHintForPrompt(line, args.userDisplayName))
+      .filter((line) => line.length > 0);
+    if (promptSafeMemoryLines.length > 0) {
+      promptMessages.push({
+        role: "system",
+        content: `User memory hints about the human user:\n${promptSafeMemoryLines
+          .map((line) => `- ${line}`)
+          .join("\n")}`,
+      });
+    }
   }
   const hint = args.imageSlotSystemHint?.trim();
   if (hint && hint.length > 0) {
@@ -3402,6 +3552,9 @@ export async function processChatMessage(
   };
   const now = new Date().toISOString();
   const mode: ChatMode = normalizeChatMode(settings.mode);
+  const effectiveBotSystemPrompt = isZenMode(mode)
+    ? composeZenPrismSystemPrompt(settings.botSystemPrompt)
+    : settings.botSystemPrompt;
   const isStarterPrompt = settings.starterPrompt === true;
   const explicitAskQuestionRequest =
     !isStarterPrompt && userExplicitlyRequestedAskQuestion(message);
@@ -3440,6 +3593,7 @@ export async function processChatMessage(
   const auxiliaryProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel);
 
   if (incognitoForTurn) {
+    throwIfChatRequestCancelled(settings.signal);
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
     const continueAskQuestion =
       !isStarterPrompt &&
@@ -3452,7 +3606,7 @@ export async function processChatMessage(
         : "continuation"
       : "off";
     const promptMessages = buildPromptMessages({
-      botSystemPrompt: settings.botSystemPrompt,
+      botSystemPrompt: effectiveBotSystemPrompt,
       userDisplayName: settings.userDisplayName,
       suppressDisplayNameHint: isStarterPrompt,
       devMemoriesEnabled: settings.devMemoriesEnabled,
@@ -3504,9 +3658,11 @@ export async function processChatMessage(
       lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
       denialBoundaryProvider: auxiliaryProvider,
       denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-      botSystemPrompt: settings.botSystemPrompt,
+      botSystemPrompt: effectiveBotSystemPrompt,
       userMessage: message,
+      signal: settings.signal,
     });
+    throwIfChatRequestCancelled(settings.signal);
     pushBackendEvent(
       "model",
       "Model response received",
@@ -3519,13 +3675,15 @@ export async function processChatMessage(
       const boundary = await generateOrganicTextBoundaryReply({
         boundaryProvider: auxiliaryProvider,
         boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-        botSystemPrompt: settings.botSystemPrompt,
+        botSystemPrompt: effectiveBotSystemPrompt,
         userMessage: message,
+        signal: settings.signal,
       });
       assistantReplyRaw = boundary.assistantReplyRaw;
       providerNameUsed = boundary.providerNameUsed;
       modelUsed = boundary.modelUsed;
     }
+    throwIfChatRequestCancelled(settings.signal);
     const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
     const shouldBackfillAskQuestion =
       forceAskQuestion ||
@@ -3571,6 +3729,7 @@ export async function processChatMessage(
     let incognitoImageSlot: "acquired" | "busy" | "none" = sendImgPromptInc ? "busy" : "none";
     let incognitoImageJobId: string | undefined;
     if (sendImgPromptInc) {
+      throwIfChatRequestCancelled(settings.signal);
       const chatToolRequestedSize = inferChatToolRequestedImageSize(
         `${message}\n${sendImgPromptInc}`
       );
@@ -3593,6 +3752,11 @@ export async function processChatMessage(
             : ASSISTANT_IMAGE_SLOT_BUSY_NOTE;
         incognitoImageSlot = "busy";
       } else {
+        if (settings.signal?.aborted) {
+          acq.job.abortController.abort();
+          await releaseImageSlot(userId);
+          throwIfChatRequestCancelled(settings.signal);
+        }
         assistantDisplay = compactPreImageLeadMessage(assistantDisplay);
         startChatImageBackgroundJob({
           db,
@@ -3604,7 +3768,7 @@ export async function processChatMessage(
           chatModelUsed: modelUsed,
           chatProviderName: providerNameUsed,
           botName: settings.starterPromptLabel,
-          botSystemPrompt: settings.botSystemPrompt,
+          botSystemPrompt: effectiveBotSystemPrompt,
         });
         sendImgPromptInc = undefined;
         pendingImageJobIncognito = {
@@ -3767,6 +3931,7 @@ export async function processChatMessage(
       ).run(activeConversationId, userId);
     }
   }
+  throwIfChatRequestCancelled(settings.signal);
   if (!activeConversationId) {
     activeConversationId = randomId(12);
     db.prepare(
@@ -3832,6 +3997,7 @@ export async function processChatMessage(
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
   if (!incognitoForTurn) {
+    throwIfChatRequestCancelled(settings.signal);
     const pipelineResult =
       isZenMode(mode)
         ? await handleCompanionChatTurn({
@@ -3898,7 +4064,7 @@ export async function processChatMessage(
     }
   }
   const promptMessages = buildPromptMessages({
-    botSystemPrompt: settings.botSystemPrompt,
+    botSystemPrompt: effectiveBotSystemPrompt,
     userDisplayName: settings.userDisplayName,
     suppressDisplayNameHint: isStarterPrompt,
     devMemoriesEnabled: settings.devMemoriesEnabled,
@@ -3955,9 +4121,11 @@ export async function processChatMessage(
     lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
     denialBoundaryProvider: auxiliaryProvider,
     denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-    botSystemPrompt: settings.botSystemPrompt,
+    botSystemPrompt: effectiveBotSystemPrompt,
     userMessage: message,
+    signal: settings.signal,
   });
+  throwIfChatRequestCancelled(settings.signal);
   pushBackendEvent(
     "model",
     "Model response received",
@@ -3970,13 +4138,15 @@ export async function processChatMessage(
     const boundary = await generateOrganicTextBoundaryReply({
       boundaryProvider: auxiliaryProvider,
       boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-      botSystemPrompt: settings.botSystemPrompt,
+      botSystemPrompt: effectiveBotSystemPrompt,
       userMessage: message,
+      signal: settings.signal,
     });
     assistantReplyRaw = boundary.assistantReplyRaw;
     providerNameUsed = boundary.providerNameUsed;
     modelUsed = boundary.modelUsed;
   }
+  throwIfChatRequestCancelled(settings.signal);
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const shouldBackfillAskQuestion =
     forceAskQuestion ||
@@ -4030,6 +4200,7 @@ export async function processChatMessage(
     sendImgPromptPersisted && sendImgPromptPersisted.length > 0 ? "busy" : "none";
   let persistedImageJobId: string | undefined;
   if (sendImgPromptPersisted && sendImgPromptPersisted.length > 0) {
+    throwIfChatRequestCancelled(settings.signal);
     const chatToolRequestedSize = inferChatToolRequestedImageSize(
       `${message}\n${sendImgPromptPersisted}`
     );
@@ -4053,6 +4224,11 @@ export async function processChatMessage(
       sentGeneratedImagePersisted = undefined;
       persistedImageSlot = "busy";
     } else {
+      if (settings.signal?.aborted) {
+        acq.job.abortController.abort();
+        await releaseImageSlot(userId);
+        throwIfChatRequestCancelled(settings.signal);
+      }
       assistantDisplay = compactPreImageLeadMessage(assistantDisplay);
       startChatImageBackgroundJob({
         db,
@@ -4064,7 +4240,7 @@ export async function processChatMessage(
         chatModelUsed: modelUsed,
         chatProviderName: providerNameUsed,
         botName: settings.starterPromptLabel,
-        botSystemPrompt: settings.botSystemPrompt,
+        botSystemPrompt: effectiveBotSystemPrompt,
       });
       sendImgPromptPersisted = undefined;
       pendingImageJob = {

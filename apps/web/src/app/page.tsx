@@ -16,6 +16,7 @@ import {
   forwardRef,
   useSyncExternalStore,
   useTransition,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -131,6 +132,7 @@ import {
 } from "./prismDevChatCommands";
 import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
+  findLeadingDevCommandTokenRange,
   hasLeadingDevCommand,
   PrismDevCommandHighlight,
 } from "./tiptapPrismDevCommandHighlight";
@@ -144,13 +146,19 @@ import {
   getBotMentionDisplayLength,
   type BotMentionPick,
 } from "./botMention";
-import { applyPrismBotLinkBackspace } from "./botMentionTipTapBackspace";
+import {
+  applyPrismBotLinkBackspace,
+  applyPrismBotLinkBoundaryDelete,
+} from "./botMentionTipTapBackspace";
 import {
   applyPrismBotLinkArrowKey,
   isCollapsedCaretInsidePrismBotLink,
   shouldBlockPrintableInPrismBotLink,
 } from "./botMentionTipTapArrow";
-import { applyTaggedMentionWordBackspace } from "./plainTextWordBackspace";
+import {
+  applyTaggedMentionBoundaryDelete,
+  applyTaggedMentionWordBackspace,
+} from "./plainTextWordBackspace";
 import {
   isCaretInPrismBotMarkdownLockedRegion,
   prismBotMarkdownArrowCaret,
@@ -160,6 +168,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   applyComposeMentionTabToEditor,
   applyMentionTabToEditor,
+  editorInFenceLikeContext,
   getAtMentionFromEditor,
 } from "./botMentionTipTap";
 import { ComposerBotMentionPopover } from "./ComposerBotMentionPopover";
@@ -213,6 +222,11 @@ const CONVERSATION_GROUP_ORDER_STORAGE_KEY = "prism_conversation_group_order";
 const BOT_LIBRARY_GROUPS_STORAGE_KEY = "prism_bot_library_groups";
 const BOT_LIBRARY_FAVORITES_GROUP_ID = "builtin:favorites";
 const COMMAND_CENTER_STATE_STORAGE_KEY = "prism_command_center_state";
+const COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX = "cmdprompt:";
+
+function commandCenterPromptDeleteKey(commandId: string): string {
+  return `${COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX}${commandId}`;
+}
 
 // Namespace bot-delete keys so they can share the same single "armed" state
 // slot used for conversation deletion without id collisions.
@@ -356,11 +370,34 @@ const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
-const DEV_TOOLS_BUTTON_DEFAULT_X = 14;
-const DEV_TOOLS_BUTTON_DEFAULT_Y = 76;
-const DEV_TOOLS_BUTTON_SIZE = 44;
+const DEV_TOOLS_NAV_ITEMS = [
+  {
+    id: "observe",
+    label: "Observe",
+    description: "Live traces, viewport, and surface diagnostics",
+  },
+  {
+    id: "seed",
+    label: "Seed",
+    description: "Bots, chats, and density stress states",
+  },
+  {
+    id: "conversation",
+    label: "Conversation",
+    description: "Connection, opinion, and summaries",
+  },
+  {
+    id: "memory",
+    label: "Memory",
+    description: "Seed, inspect, and clear test memories",
+  },
+  {
+    id: "system",
+    label: "System",
+    description: "Local toggles and global dev rules",
+  },
+] as const;
 const IMAGE_KEYWORD_EDITOR_SIDE_LAYOUT_MIN_VIEWPORT_PX = 1260;
-const DEV_TOOLS_BUTTON_DRAG_SUPPRESS_CLICK_PX = 4;
 const DEV_TOOLS_CONNECTION_PRESETS = [
   {
     id: "careful",
@@ -512,8 +549,6 @@ const PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY = "prism_dev_slash_commands";
 const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
 /** When set, renders the latest thread-compaction payload inside the chat canvas for QA. */
 const PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY = "prism_dev_show_compacted_summary";
-/** Stores the floating dev-tools toggle button's last placed position as `{x,y}` JSON. */
-const PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY = "prism_dev_tools_button_position";
 /** Stores custom short-term memory bubble positions by scope and memory id. */
 const PRISM_MEMORY_BUBBLE_LAYOUT_STORAGE_KEY = "prism_memory_bubble_layout_v1";
 const MEMORY_RATIO_EMPTY_SIZE = 42;
@@ -533,6 +568,7 @@ type DevToolsBotQuantity = number | "";
 type DevToolsMemorySeedSource = "direct" | "inferred" | "compiled";
 type DevToolsConnectionPreset = (typeof DEV_TOOLS_CONNECTION_PRESETS)[number];
 type DevToolsBotOpinionPreset = (typeof DEV_TOOLS_BOT_OPINION_PRESETS)[number];
+type DevToolsActiveSection = (typeof DEV_TOOLS_NAV_ITEMS)[number]["id"];
 type DevToolsPanelPosition = { x: number; y: number };
 type DevToolsPanelDragState = {
   pointerId: number;
@@ -544,10 +580,6 @@ type CoffeePollPanelDragState = {
   pointerId: number;
   offsetX: number;
   offsetY: number;
-  startClientX: number;
-  startClientY: number;
-};
-type DevToolsButtonDragState = DevToolsPanelDragState & {
   startClientX: number;
   startClientY: number;
 };
@@ -633,6 +665,14 @@ const PRISM_NOTICE_PALETTE = [
   PRISM_COLORS.i,
   PRISM_COLORS.s,
   PRISM_COLORS.m,
+] as const;
+
+const ZEN_USER_MESSAGE_PRISM_PALETTE = [
+  { bright: "#44d7e6", dark: "#006f7a" },
+  { bright: "#886cff", dark: "#4931c6" },
+  { bright: "#ff5f7c", dark: "#b31b3b" },
+  { bright: "#ffa933", dark: "#944600" },
+  { bright: "#bfeb4e", dark: "#5b7300" },
 ] as const;
 
 type ImageReadyNoticeItem = { botId: string | null; imageId: string };
@@ -883,34 +923,6 @@ function clampDevToolsPanelPosition(
     x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
     y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
   };
-}
-
-// Reads the persisted dev-tools button position from localStorage. Returns
-// null when nothing is stored, the JSON is malformed, or storage access
-// throws (e.g. private browsing). Callers fall back to the default anchor.
-function readStoredDevToolsButtonPosition(): DevToolsPanelPosition | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(
-      PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY
-    );
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") {
-      const candidate = parsed as { x?: unknown; y?: unknown };
-      if (
-        typeof candidate.x === "number" &&
-        typeof candidate.y === "number" &&
-        Number.isFinite(candidate.x) &&
-        Number.isFinite(candidate.y)
-      ) {
-        return { x: candidate.x, y: candidate.y };
-      }
-    }
-  } catch {
-    // localStorage / JSON failure; fall through to default anchor.
-  }
-  return null;
 }
 
 function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
@@ -3348,6 +3360,7 @@ const CHAT_MODE_OFFSCREEN_VISIBLE_MS = 12000;
 const CHAT_MODE_OFFSCREEN_DISSOLVE_MS = 2200;
 const CHAT_MODE_ARCHIVE_LOAD_DELAY_MS = 320;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO = 0.5;
+const CHAT_MODE_NEW_TURN_START_RATIO = 0.46;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.46;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
@@ -3358,16 +3371,16 @@ const CHAT_MODE_ASSISTANT_AUTOSCROLL_MIN_CORRECTION_PX = 8;
 const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
 const CHAT_MODE_USER_MESSAGE_FADE_MS = 540;
-const CHAT_MODE_USER_ANCHOR_FADE_DELAY_MS = 1800;
-const CHAT_MODE_USER_ANCHOR_FADE_DURATION_MS = 1400;
-const CHAT_MODE_USER_ANCHOR_FADE_MIN_OPACITY = 0.18;
-const CHAT_MODE_USER_ANCHOR_FADE_CONTINUE_MS = 5200;
-const CHAT_MODE_USER_ANCHOR_FADE_FINAL_OPACITY = 0.05;
-const CHAT_MODE_INTERRUPTION_FOLLOWUP_DELAY_MS = 700;
 const CHAT_MODE_EPHEMERAL_TICK_MS = 120;
-const CHAT_MODE_WORD_REVEAL_MS = 140;
-const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 140;
-const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_DOT_STEP_MS * 4;
+const CHAT_MODE_WORD_REVEAL_MS = 78;
+const CHAT_MODE_LETTER_REVEAL_MS = 170;
+const CHAT_MODE_LETTER_REVEAL_STEP_MS = 18;
+const CHAT_MODE_WORD_REVEAL_SETTLE_MS = 12;
+const CHAT_MODE_COMMA_PAUSE_MS = 140;
+const CHAT_MODE_PERIOD_PAUSE_MS = 260;
+const CHAT_MODE_ELLIPSIS_PAUSE_MS = 720;
+const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 240;
+const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_PAUSE_MS;
 const CHAT_MODE_ELLIPSIS_TOKEN_PATTERN = /^(?:\.\.\.|…)\s*$/;
 const CHAT_MODE_FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/;
 const CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN = /```[^\n\r]*\r?\n([\s\S]*?)```/g;
@@ -3399,11 +3412,11 @@ const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_P
 const CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT = 0.6;
 const CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE = 34;
 const CHAT_MODE_MOOD_WORD_REVEAL_MS: Record<MessageMoodKey, number> = {
-  joyful: 95,
-  warm: 115,
+  joyful: 58,
+  warm: 68,
   neutral: CHAT_MODE_WORD_REVEAL_MS,
-  guarded: 170,
-  strained: 210,
+  guarded: 104,
+  strained: 132,
 };
 const DEFAULT_CHAT_STARTUP_SUMMARY = "Type a message below to start the conversation.";
 const CHAT_MODE_LINE_DISSOLVE_STAGGER_MS = 140;
@@ -4057,148 +4070,136 @@ function promptLooksDenialProne(text: string): boolean {
 }
 
 type MessageMoodKey = NonNullable<Message["moodKey"]>;
-type InterruptionTone = "gentle" | "miffed" | "firm";
+type InterruptionTone = "gentle" | "steady" | "firm";
 type InterruptionLengthBand = "short" | "medium" | "long";
-const INTERRUPTION_LENGTH_WORD_THRESHOLD_MIFFED = 70;
+const INTERRUPTION_LENGTH_WORD_THRESHOLD_STEADY = 70;
 const INTERRUPTION_LENGTH_WORD_THRESHOLD_FIRM = 140;
+
+const INTERRUPTION_SHORT_REMARKS = [
+  "I will pause here.",
+  "Pausing here. Take your time.",
+  "I can hold that thought.",
+  "Stopping at this point.",
+  "I will leave space here.",
+  "The thread can rest for a moment.",
+] as const;
+
+const INTERRUPTION_MEDIUM_REMARKS = [
+  "I will pause and let the moment breathe.",
+  "Stopping here. We can continue from this point.",
+  "I can leave the rest unspoken for now.",
+  "Pausing cleanly. Take the lead when you are ready.",
+  "I will set that thought down here.",
+  "Holding the rest until you want it.",
+] as const;
+
+const INTERRUPTION_LONG_REMARKS = [
+  "I will stop here and keep the rest quiet.",
+  "Pausing the longer thread. We can return only if you want.",
+  "I will leave the unfinished part unfinished.",
+  "Stopping cleanly before this gets too dense.",
+  "I can let the rest fade out here.",
+  "Holding the longer thought at the edge.",
+] as const;
 
 const INTERRUPTION_REMARKS: Record<
   InterruptionTone,
   Record<MessageMoodKey, readonly string[]>
 > = {
   gentle: {
-    joyful: [
-      "Sorry, what was that?",
-      "Okay, okay, I can pause there.",
-    ],
-    warm: [
-      "Sorry, what was that?",
-      "No worries, want the short version instead?",
-    ],
-    neutral: [
-      "Sorry, what was that?",
-      "Okay, I can pause there.",
-    ],
-    guarded: [
-      "Interrupted me there - did you want to jump in?",
-      "All good, should I stop here?",
-    ],
-    strained: [
-      "You cut me off - should I continue or stop?",
-      "I can stop there if you'd rather.",
-    ],
+    joyful: INTERRUPTION_SHORT_REMARKS,
+    warm: INTERRUPTION_SHORT_REMARKS,
+    neutral: INTERRUPTION_SHORT_REMARKS,
+    guarded: INTERRUPTION_SHORT_REMARKS,
+    strained: INTERRUPTION_SHORT_REMARKS,
   },
-  miffed: {
-    joyful: [
-      "Heh, got interrupted there - what did you need?",
-      "All right, I'll pause. What changed?",
-    ],
-    warm: [
-      "Okay, I got cut off - what did you want to add?",
-      "No problem, I'll pause. Want me to continue?",
-    ],
-    neutral: [
-      "Okay, that interruption threw me off - continue or stop?",
-      "All right, I'll pause. What did you need?",
-    ],
-    guarded: [
-      "That was the second interruption - want me brief and direct?",
-      "Okay, stopping there. Should I continue at all?",
-    ],
-    strained: [
-      "That interruption landed a little sharp. Continue or stop?",
-      "I'm pausing. If you want me to proceed, say the word.",
-    ],
+  steady: {
+    joyful: INTERRUPTION_MEDIUM_REMARKS,
+    warm: INTERRUPTION_MEDIUM_REMARKS,
+    neutral: INTERRUPTION_MEDIUM_REMARKS,
+    guarded: INTERRUPTION_MEDIUM_REMARKS,
+    strained: INTERRUPTION_MEDIUM_REMARKS,
   },
   firm: {
-    joyful: [
-      "Okay, okay - I'll be quiet. Want to take it from here?",
-      "Fair enough, I'll stop yapping. Need anything specific?",
-    ],
-    warm: [
-      "Okay, I'll be quiet for now. Want me to continue later?",
-      "All right, I'll hold it there. What do you need?",
-    ],
-    neutral: [
-      "Okay, never mind then. Want me to keep going or drop it?",
-      "Got it, I'll stop there. Continue or move on?",
-    ],
-    guarded: [
-      "Well, that was rude - but I'll stop there. Continue or no?",
-      "Interrupted again. I'll stay quiet unless you ask.",
-    ],
-    strained: [
-      "Interrupted again. I'll stop here unless you explicitly want more.",
-      "Okay. I'm done speaking for now - your call.",
-    ],
+    joyful: INTERRUPTION_LONG_REMARKS,
+    warm: INTERRUPTION_LONG_REMARKS,
+    neutral: INTERRUPTION_LONG_REMARKS,
+    guarded: INTERRUPTION_LONG_REMARKS,
+    strained: INTERRUPTION_LONG_REMARKS,
   },
 } as const;
 
 const INTERRUPTION_OPENERS: Record<InterruptionTone, readonly string[]> = {
   gentle: [
-    "Whoa, tiny pause.",
-    "Got it, I can pause here.",
-    "Okay, cutting myself off there.",
-    "All right, I can stop for a second.",
-    "Sure, I can hold that thought.",
-    "No stress, pausing there.",
-    "Yep, stopping right there.",
+    "Pausing here.",
+    "Holding that thought.",
+    "Setting this down for a moment.",
+    "Stopping at the edge of that thought.",
+    "Leaving a little space here.",
+    "Letting the sentence rest.",
+    "I can pause at this point.",
+    "The thought can stay unfinished.",
   ],
-  miffed: [
-    "Okay, that broke my flow.",
-    "Right, you jumped in there.",
-    "All right, that interruption threw me off.",
-    "Yep, interruption received.",
-    "Okay, that was abrupt.",
-    "Got it, we got cut in mid-thought.",
-    "All right, hard pause.",
+  steady: [
+    "Pausing again.",
+    "Holding the thread here.",
+    "Stopping before the thought gets ahead of us.",
+    "Letting the unfinished part stay unfinished.",
+    "Leaving this branch quiet for now.",
+    "Resting the answer here.",
+    "I can make room for the next turn.",
+    "The rest can wait.",
   ],
   firm: [
-    "All right, that's another cutoff.",
-    "Okay, hard stop then.",
-    "Got it, interrupted again.",
-    "Fine, pausing right now.",
-    "All right, we're stopping here.",
-    "Yep, that was a sharp interruption.",
-    "Understood, full stop.",
+    "Full pause.",
+    "Stopping completely here.",
+    "Letting the thread go quiet.",
+    "Setting the whole answer down.",
+    "Holding the rest outside the room.",
+    "Ending this pass here.",
+    "I will leave that thought unrecovered.",
+    "The unfinished part can disappear.",
   ],
 };
 
 const INTERRUPTION_REACTIONS: Record<MessageMoodKey, readonly string[]> = {
   joyful: [
-    "I can switch gears quickly.",
-    "I can keep this light.",
-    "I can roll with that.",
-    "I can pivot without drama.",
-    "I can keep it snappy.",
+    "We can move from here.",
+    "I can follow the next thread.",
+    "There is no rush to finish it.",
+    "The next turn can shape the conversation.",
+    "I can keep this spacious.",
   ],
   warm: [
-    "I can keep this easy.",
-    "I can make it simpler from here.",
-    "I can keep this short and clear.",
-    "I can slow down and keep it clean.",
-    "I can tighten this up for you.",
+    "We can keep this easy.",
+    "I can stay with the present turn.",
+    "I can let the rest go.",
+    "There is room to redirect.",
+    "I can keep the next part gentle.",
   ],
   neutral: [
-    "I can be brief from here.",
-    "I can reset and continue cleanly.",
-    "I can continue with less detail.",
-    "I can keep it direct.",
-    "I can summarize the rest.",
+    "We can continue from the next message.",
+    "I can stay quiet until needed.",
+    "I can follow whatever comes next.",
+    "The unfinished text is gone from here.",
+    "The conversation can continue cleanly.",
+    "I can keep the next turn simple.",
+    "Nothing needs to be recovered.",
+    "This can become a clean break.",
   ],
   guarded: [
-    "I can stay concise if you want.",
-    "I can keep this strictly to the point.",
-    "I can continue with just the essentials.",
-    "I can keep it short and functional.",
-    "I can avoid extra detail.",
+    "We can continue from the next message.",
+    "I can stay quiet until needed.",
+    "I can follow whatever comes next.",
+    "The unfinished text is gone from here.",
+    "The conversation can continue cleanly.",
   ],
   strained: [
-    "I can keep this very short.",
-    "I can continue, but only the essentials.",
-    "I can wrap this in one tight pass.",
-    "I can keep it minimal from here.",
-    "I can stop unless you want the rest.",
+    "We can continue from the next message.",
+    "I can stay quiet until needed.",
+    "I can follow whatever comes next.",
+    "The unfinished text is gone from here.",
+    "The conversation can continue cleanly.",
   ],
 };
 
@@ -4208,69 +4209,69 @@ const INTERRUPTION_CLOSERS: Record<
 > = {
   gentle: {
     short: [
-      "Want me to finish this thought?",
-      "Do you want the short version?",
-      "Should I keep going?",
-      "Want me to continue?",
+      "I will wait here.",
+      "Take the lead.",
+      "Send the next thought when you are ready.",
+      "We can continue from your next message.",
     ],
     medium: [
-      "Want me to give you the compact version?",
-      "Should I continue, but shorter?",
-      "Want the headline version only?",
-      "Should I trim this down and continue?",
+      "I will keep the rest quiet.",
+      "The next message can steer us.",
+      "We can pick up only what matters next.",
+      "I will wait for your direction.",
     ],
     long: [
-      "Want the rest as a quick summary?",
-      "Should I skip to the key points only?",
-      "Want me to compress the rest into bullets?",
-      "Should I continue with just essentials?",
+      "I will not restore the rest.",
+      "The unfinished part can stay gone.",
+      "We can begin again from the next prompt.",
+      "I will leave the longer thread behind.",
     ],
   },
-  miffed: {
+  steady: {
     short: [
-      "Continue or stop?",
-      "Do you want me to keep going?",
-      "Should I finish or drop it?",
-      "Need me to continue?",
+      "I will wait here.",
+      "The next turn is yours.",
+      "We can move cleanly from here.",
+      "I will leave space for you.",
     ],
     medium: [
-      "Want me to continue in strict short mode?",
-      "Should I finish this in one quick pass?",
-      "Do you want a tight summary instead?",
-      "Continue, or do we move on?",
+      "The answer can stay unfinished.",
+      "I will keep this quiet unless you return to it.",
+      "We can let this branch dissolve.",
+      "I will follow your next cue.",
     ],
     long: [
-      "Want only the key points from the rest?",
-      "Should I compress the rest aggressively?",
-      "Do you want the short version and nothing extra?",
-      "Continue with essentials only?",
+      "I will not pull the rest back in.",
+      "The longer thread can stay outside the chat.",
+      "We can continue without recovering it.",
+      "I will wait for the next shape of the conversation.",
     ],
   },
   firm: {
     short: [
-      "Say continue if you want more.",
-      "Want me to proceed, yes or no?",
-      "Should I continue at all?",
-      "Need the rest, or done?",
+      "I will be still here.",
+      "Take the next turn when you want.",
+      "This is a clean stop.",
+      "I will not continue that sentence.",
     ],
     medium: [
-      "If you want more, tell me to continue.",
-      "Want me to continue with bare essentials only?",
-      "Proceed or drop it?",
-      "Should I finish this in one short sweep?",
+      "I will leave the rest unspoken.",
+      "The unfinished reply stays behind us.",
+      "We can start from the next message.",
+      "I will hold silence until then.",
     ],
     long: [
-      "If you actually want the rest, say continue.",
-      "Want me to finish this with only critical points?",
-      "Should I reduce this to a strict summary?",
-      "Continue, or are we done here?",
+      "I will not recover that answer.",
+      "The rest is gone from the thread.",
+      "We can begin again from wherever you point.",
+      "I will keep this boundary intact.",
     ],
   },
 };
 
 function interruptionToneForCount(interruptCount: number): InterruptionTone {
   if (interruptCount >= 3) return "firm";
-  if (interruptCount >= 2) return "miffed";
+  if (interruptCount >= 2) return "steady";
   return "gentle";
 }
 
@@ -4278,24 +4279,22 @@ function interruptionMoodForCount(
   baseMood: MessageMoodKey,
   interruptCount: number
 ): MessageMoodKey {
-  if (interruptCount >= 3) return "strained";
-  if (interruptCount >= 2 && (baseMood === "joyful" || baseMood === "warm")) {
-    return "guarded";
-  }
-  return baseMood;
+  void baseMood;
+  void interruptCount;
+  return "neutral";
 }
 
 function interruptionLengthBumpForText(text: string): number {
   const wordCount = text.match(/\S+/g)?.length ?? 0;
   if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_FIRM) return 2;
-  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_MIFFED) return 1;
+  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_STEADY) return 1;
   return 0;
 }
 
 function interruptionLengthBandForText(text: string): InterruptionLengthBand {
   const wordCount = text.match(/\S+/g)?.length ?? 0;
   if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_FIRM) return "long";
-  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_MIFFED) return "medium";
+  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_STEADY) return "medium";
   return "short";
 }
 
@@ -4311,12 +4310,12 @@ function interruptionCountLead(
 ): string {
   if (effectiveInterruptCount <= 1) return "";
   if (effectiveInterruptCount === 2) {
-    return tone === "gentle" ? "Second interruption, noted. " : "That is twice now. ";
+    return tone === "gentle" ? "Another pause. " : "Pausing again. ";
   }
   if (effectiveInterruptCount === 3) {
-    return lengthBump > 0 ? "Long reply interrupted. " : "Interrupted again. ";
+    return lengthBump > 0 ? "Longer thread paused. " : "Another clean pause. ";
   }
-  return tone === "firm" ? "Interrupted again. " : "Cut off again. ";
+  return tone === "firm" ? "Keeping the boundary. " : "Pausing once more. ";
 }
 
 function buildGeneratedInterruptionOptions(input: {
@@ -4402,9 +4401,9 @@ function interruptedMidWordSnippet(fullText: string, visibleTokenCount: number):
     .replace(/\*+/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  const tokens = displayText.match(/\S+\s*/g) ?? [];
+  const tokens = tokenizeMessageReveal(displayText);
   const visible = tokens.slice(0, Math.max(1, visibleTokenCount)).join("").trimEnd();
-  if (visible.length === 0) return "…";
+  if (visible.length === 0) return "—";
   const lastWordMatch = visible.match(/(\S+)$/);
   if (!lastWordMatch) return `${visible}—`;
   const fullWord = lastWordMatch[1];
@@ -4884,6 +4883,7 @@ interface CommandCenterCommand {
   name: string;
   title: string;
   command: string;
+  aliases: string[];
   arguments: CommandCenterArgument[];
   builtIn: boolean;
   readOnly: boolean;
@@ -4897,7 +4897,8 @@ interface CommandCenterStateV1 {
   commands?: unknown;
 }
 
-const BUILT_IN_COMMAND_NAMES = new Set(["help", "compact", "summarize", "clear", "cls"]);
+const BUILT_IN_COMMAND_NAMES = new Set(["help", "compact", "clear"]);
+const BUILT_IN_COMMAND_RESERVED_NAMES = new Set(["help", "compact", "summarize", "clear", "cls"]);
 
 interface BotGroupManifestV1 {
   schema: "prism-bot-group-manifest-v1";
@@ -4987,28 +4988,8 @@ function createBuiltInHelpCommand(): CommandCenterCommand {
     id: "builtin:/help",
     name: "help",
     title: "help",
-    command:
-      "Take the following request from the user and break it down for them in a way that is easy to understand, as if they were a 'layman'. If nothing else follows the command, please tell the user how the PRISM app works, and where to get started.",
-    arguments: [
-      { key: "f", value: "Please be concise" },
-      { key: "v", value: "Please be verbose" },
-    ],
-    builtIn: true,
-    readOnly: true,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function createBuiltInCompactCommand(name: "compact" | "summarize"): CommandCenterCommand {
-  const now = new Date().toISOString();
-  const alias = name === "compact" ? "/summarize" : "/compact";
-  return {
-    id: `builtin:/${name}`,
-    name,
-    title: name,
-    command:
-      `Compacts the current saved chat into thread context without clearing the visible transcript. Alias: ${alias}.`,
+    command: "Opens a list of available commands and prompts.",
+    aliases: [],
     arguments: [],
     builtIn: true,
     readOnly: true,
@@ -5017,21 +4998,87 @@ function createBuiltInCompactCommand(name: "compact" | "summarize"): CommandCent
   };
 }
 
-function createBuiltInClearCommand(name: "clear" | "cls"): CommandCenterCommand {
+function createBuiltInCompactCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
-  const alias = name === "clear" ? "/cls" : "/clear";
   return {
-    id: `builtin:/${name}`,
-    name,
-    title: name,
+    id: "builtin:/compact",
+    name: "compact",
+    title: "compact",
     command:
-      `Clears the current chat transcript and saved thread context. Alias: ${alias}.`,
+      "Compacts the current saved chat into thread context without clearing the visible transcript.",
+    aliases: ["summarize"],
     arguments: [],
     builtIn: true,
     readOnly: true,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function createBuiltInClearCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/clear",
+    name: "clear",
+    title: "clear",
+    command:
+      "Clears the current chat transcript and saved thread context.",
+    aliases: ["cls"],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function normalizeCommandAliasList(
+  aliases: unknown,
+  primaryName: string
+): string[] {
+  if (!Array.isArray(aliases)) return [];
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const alias of aliases) {
+    if (typeof alias !== "string") continue;
+    const name = normalizeCommandNameInput(alias);
+    if (!name || name === primaryName || seen.has(name)) continue;
+    seen.add(name);
+    normalized.push(name);
+  }
+  return normalized.slice(0, 8);
+}
+
+function sanitizeCommandAliasesForList(
+  commands: readonly CommandCenterCommand[]
+): CommandCenterCommand[] {
+  const primaryNames = new Set(commands.map((command) => command.name));
+  const claimedAliases = new Set<string>();
+  return commands.map((command) => {
+    const aliases: string[] = [];
+    for (const alias of command.aliases) {
+      if (!alias || alias === command.name) continue;
+      if (primaryNames.has(alias)) continue;
+      if (claimedAliases.has(alias)) continue;
+      if (!command.builtIn && BUILT_IN_COMMAND_RESERVED_NAMES.has(alias)) continue;
+      claimedAliases.add(alias);
+      aliases.push(alias);
+    }
+    return { ...command, aliases };
+  });
+}
+
+function commandInvocationNames(command: CommandCenterCommand): string[] {
+  return [command.name, ...command.aliases].filter(Boolean);
+}
+
+function commandMatchesSlashName(
+  command: CommandCenterCommand,
+  normalizedSlashName: string
+): boolean {
+  return commandInvocationNames(command).some(
+    (name) => name.toLowerCase() === normalizedSlashName.toLowerCase()
+  );
 }
 
 function normalizeCommandCenterState(raw: unknown): {
@@ -5041,10 +5088,8 @@ function normalizeCommandCenterState(raw: unknown): {
   const fallbackHelp = createBuiltInHelpCommand();
   const builtInCommands = [
     fallbackHelp,
-    createBuiltInCompactCommand("compact"),
-    createBuiltInCompactCommand("summarize"),
-    createBuiltInClearCommand("clear"),
-    createBuiltInClearCommand("cls"),
+    createBuiltInCompactCommand(),
+    createBuiltInClearCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
@@ -5073,20 +5118,13 @@ function normalizeCommandCenterState(raw: unknown): {
           ? record.title.trim()
           : normalizedName,
       command: typeof record.command === "string" ? record.command : "",
-      arguments: Array.isArray(record.arguments)
-        ? record.arguments
-            .map((argument): CommandCenterArgument | null => {
-              if (!argument || typeof argument !== "object") return null;
-              const entry = argument as Partial<CommandCenterArgument>;
-              return {
-                key: typeof entry.key === "string" ? entry.key.trim() : "",
-                value: typeof entry.value === "string" ? entry.value.trim() : "",
-              };
-            })
-            .filter((argument): argument is CommandCenterArgument => Boolean(argument))
-        : [],
-      builtIn: record.builtIn === true || BUILT_IN_COMMAND_NAMES.has(normalizedName),
-      readOnly: record.readOnly === true || BUILT_IN_COMMAND_NAMES.has(normalizedName),
+      aliases: normalizeCommandAliasList(
+        (record as Partial<CommandCenterCommand> & { aliases?: unknown }).aliases,
+        normalizedName
+      ),
+      arguments: [],
+      builtIn: record.builtIn === true || BUILT_IN_COMMAND_RESERVED_NAMES.has(normalizedName),
+      readOnly: record.readOnly === true || BUILT_IN_COMMAND_RESERVED_NAMES.has(normalizedName),
       createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
       updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now,
     });
@@ -5097,6 +5135,7 @@ function normalizeCommandCenterState(raw: unknown): {
       existing.id = builtIn.id;
       existing.title = builtIn.title;
       existing.command = builtIn.command;
+      existing.aliases = builtIn.aliases;
       existing.arguments = builtIn.arguments;
       existing.builtIn = true;
       existing.readOnly = true;
@@ -5106,20 +5145,27 @@ function normalizeCommandCenterState(raw: unknown): {
   }
   return {
     preferredModel,
-    commands: [
+    commands: sanitizeCommandAliasesForList([
       ...builtInCommands,
-      ...commands.filter((command) => !BUILT_IN_COMMAND_NAMES.has(command.name)),
-    ],
+      ...commands.filter((command) => !BUILT_IN_COMMAND_RESERVED_NAMES.has(command.name)),
+    ]),
   };
 }
 
 function createUserCommandDraft(existingCommands: readonly CommandCenterCommand[]): CommandCenterCommand {
-  const existing = new Set(existingCommands.map((command) => command.name.trim().toLowerCase()));
+  const existing = new Set(
+    existingCommands.flatMap((command) =>
+      commandInvocationNames(command).map((name) => name.trim().toLowerCase())
+    )
+  );
+  for (const reserved of BUILT_IN_COMMAND_RESERVED_NAMES) {
+    existing.add(reserved);
+  }
   let index = 1;
-  let nextName = "command";
+  let nextName = "prompt";
   while (existing.has(nextName)) {
     index += 1;
-    nextName = `command-${index}`;
+    nextName = `prompt-${index}`;
   }
   const now = new Date().toISOString();
   const id =
@@ -5131,6 +5177,7 @@ function createUserCommandDraft(existingCommands: readonly CommandCenterCommand[
     name: nextName,
     title: nextName,
     command: "",
+    aliases: [],
     arguments: [],
     builtIn: false,
     readOnly: false,
@@ -5149,13 +5196,18 @@ function uniqueCommandNameForList(
   commands: readonly CommandCenterCommand[],
   editingCommandId: string
 ): string {
-  const base = normalizeCommandNameInput(requestedName) || "command";
+  const base = normalizeCommandNameInput(requestedName) || "prompt";
   const used = new Set(
     commands
       .filter((command) => command.id !== editingCommandId)
-      .map((command) => command.name.trim().toLowerCase())
+      .flatMap((command) =>
+        commandInvocationNames(command).map((name) => name.trim().toLowerCase())
+      )
       .filter(Boolean)
   );
+  for (const reserved of BUILT_IN_COMMAND_RESERVED_NAMES) {
+    used.add(reserved);
+  }
   if (!used.has(base)) return base;
   let index = 2;
   let candidate = `${base}-${index}`;
@@ -5164,10 +5216,6 @@ function uniqueCommandNameForList(
     candidate = `${base}-${index}`;
   }
   return candidate;
-}
-
-function normalizeCommandArgumentKeyInput(value: string): string {
-  return value.trim().replace(/^[-/]+/, "").replace(/\s+/g, "-").toLowerCase();
 }
 
 function botImportUtf8ByteLength(text: string): number {
@@ -9809,9 +9857,14 @@ const COMPOSE_MENU_MAX_WIDTH_PX = 360;
 /** Minimum popover width when the trigger is very narrow (matches CSS floors). */
 const COMPOSE_MENU_BOT_MIN_WIDTH_PX = 260;
 const COMPOSE_MENU_MODEL_MIN_WIDTH_PX = 300;
+const COMPOSE_COMMAND_MENU_MIN_WIDTH_PX = 320;
 const COMPOSE_MENU_PORTAL_Z_INDEX_BOT = 2500;
 /** Slightly above bot menu so both open pickers stack predictably over the rail. */
 const COMPOSE_MENU_PORTAL_Z_INDEX_MODEL = 2600;
+/** Matches `.composeBotMenu { max-height: min(420px, …) }` for caret popovers. */
+const COMPOSE_CARET_MENU_MAX_HEIGHT_CAP_PX = 420;
+/** Minimum space below the caret before the caret popover prefers opening downward. */
+const COMPOSE_CARET_MENU_MIN_OPEN_BELOW_PX = 160;
 const COMPOSE_MENU_PORTAL_THEME_VARS = [
   "--bg",
   "--bg-surface",
@@ -9907,6 +9960,135 @@ function useComposeMenuPortalStyle(
   }, [menuOpen, floorMinWidth, placement, portalZIndex, triggerRef]);
 
   return menuOpen ? fixedStyle : undefined;
+}
+
+function computeMentionMenuFixedStyle(
+  caretRect: DOMRect,
+  themeSource: Element | null,
+  floorMinWidth: number
+): React.CSSProperties {
+  const vw = globalThis.window.innerWidth;
+  const vh = globalThis.window.innerHeight;
+  const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
+  const gap = 6;
+  const maxW = Math.min(COMPOSE_MENU_MAX_WIDTH_PX, vw - pad * 2);
+  const minWidth = Math.min(Math.max(caretRect.width || 0, floorMinWidth), maxW);
+  const left = Math.max(pad, Math.min(caretRect.left, vw - maxW - pad));
+  const maxHeightCap = Math.min(
+    COMPOSE_CARET_MENU_MAX_HEIGHT_CAP_PX,
+    Math.max(0, vh - 2 * pad)
+  );
+  const topIfBelow = caretRect.bottom + gap;
+  const spaceBelow = vh - pad - topIfBelow;
+  const spaceAbove = caretRect.top - pad - gap;
+
+  let top: number;
+  let maxHeight: number;
+
+  if (
+    spaceBelow >= COMPOSE_CARET_MENU_MIN_OPEN_BELOW_PX ||
+    spaceBelow >= spaceAbove
+  ) {
+    top = topIfBelow;
+    maxHeight = Math.min(maxHeightCap, Math.max(80, spaceBelow));
+  } else {
+    maxHeight = Math.min(maxHeightCap, Math.max(80, spaceAbove));
+    top = Math.max(pad, caretRect.top - gap - maxHeight);
+  }
+
+  if (top + maxHeight + pad > vh) {
+    maxHeight = Math.max(80, vh - pad - top);
+  }
+  if (top < pad) {
+    top = pad;
+    maxHeight = Math.min(maxHeightCap, Math.max(80, vh - pad - top));
+  }
+
+  const themeVars: Record<string, string> = {};
+  if (themeSource) {
+    const computedStyle = globalThis.window.getComputedStyle(themeSource);
+    for (const varName of COMPOSE_MENU_PORTAL_THEME_VARS) {
+      const value = computedStyle.getPropertyValue(varName).trim();
+      if (value) {
+        themeVars[varName] = value;
+      }
+    }
+  }
+  return {
+    position: "fixed",
+    left,
+    top,
+    bottom: "auto",
+    minWidth,
+    maxWidth: maxW,
+    maxHeight,
+    overflow: "hidden",
+    zIndex: COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
+    ...themeVars,
+  } as React.CSSProperties;
+}
+
+function computeCommandMenuFixedStyle(
+  anchorRect: DOMRect,
+  themeSource: Element | null
+): React.CSSProperties {
+  const vw = globalThis.window.innerWidth;
+  const vh = globalThis.window.innerHeight;
+  const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
+  const gap = 8;
+  const availableWidth = Math.max(0, vw - pad * 2);
+  const floorWidth = Math.min(COMPOSE_COMMAND_MENU_MIN_WIDTH_PX, availableWidth);
+  const width = Math.min(
+    Math.max(anchorRect.width || 0, floorWidth),
+    availableWidth
+  );
+  const left = Math.max(pad, Math.min(anchorRect.left, vw - width - pad));
+  const desiredBottom = vh - anchorRect.top + gap;
+  const availableAbove = Math.max(0, anchorRect.top - pad - gap);
+  const maxHeight = Math.min(
+    COMPOSE_CARET_MENU_MAX_HEIGHT_CAP_PX,
+    Math.max(80, availableAbove)
+  );
+  const bottom = Math.max(
+    pad,
+    Math.min(desiredBottom, Math.max(pad, vh - pad - maxHeight))
+  );
+
+  const themeVars: Record<string, string> = {};
+  if (themeSource) {
+    const computedStyle = globalThis.window.getComputedStyle(themeSource);
+    for (const varName of COMPOSE_MENU_PORTAL_THEME_VARS) {
+      const value = computedStyle.getPropertyValue(varName).trim();
+      if (value) {
+        themeVars[varName] = value;
+      }
+    }
+  }
+
+  return {
+    position: "fixed",
+    left,
+    top: "auto",
+    bottom,
+    width,
+    minWidth: width,
+    maxWidth: width,
+    maxHeight,
+    overflow: "hidden",
+    zIndex: COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
+    ...themeVars,
+  } as React.CSSProperties;
+}
+
+function getComposerCommandMenuAnchorRect(
+  anchor: Element | null,
+  fallbackRect: DOMRect
+): DOMRect {
+  const rect = anchor?.getBoundingClientRect();
+  if (rect && rect.width > 0 && rect.height > 0) {
+    return new DOMRect(rect.left, rect.top, rect.width, rect.height);
+  }
+  return fallbackRect;
 }
 
 // ── Composer bot picker (custom dropdown) ────────────────────────────
@@ -12050,6 +12232,8 @@ interface MessageBodyProps {
   revealWordByWord?: boolean;
   /** Chat-mode effect: render each line as a distinct canvas row. */
   renderAsEphemeralLines?: boolean;
+  /** Zen keeps decorative color on user prose only. */
+  suppressDecorativePrismText?: boolean;
   /** Current temporal phase for line-by-line dissolve choreography. */
   chatPhase?: ChatMessageTemporalPhase;
   /** Optional externally-driven token count for deterministic word reveal. */
@@ -12155,15 +12339,6 @@ function PromptShortcutMessage({
               </button>
             </span>
           </span>
-          {promptShortcut.flags.length > 0 && (
-            <span className={styles.promptShortcutPreviewMeta}>
-              {promptShortcut.flags.map((flag) => (
-                <span key={`${flag.key}:${flag.value}`} className={styles.promptShortcutFlag}>
-                  -{flag.key}
-                </span>
-              ))}
-            </span>
-          )}
           {promptShortcut.passthrough && (
             <span className={styles.promptShortcutPreviewSection}>
               <span>User request</span>
@@ -12620,8 +12795,23 @@ function resolveMessageDisplayContent(message: Message): string {
     : message.content;
 }
 
+function splitChatModeRevealTokenForEllipsis(token: string): string[] {
+  const trailingWhitespace = token.match(/\s+$/u)?.[0] ?? "";
+  const core = trailingWhitespace ? token.slice(0, -trailingWhitespace.length) : token;
+  if (core.length === 0) return [token];
+  if (isChatModeEllipsisToken(token)) return [token];
+  if (core.endsWith("...") && core.length > 3) {
+    return [core.slice(0, -3), `...${trailingWhitespace}`];
+  }
+  if (core.endsWith("…") && core.length > 1) {
+    return [core.slice(0, -1), `…${trailingWhitespace}`];
+  }
+  return [token];
+}
+
 function tokenizeMessageReveal(text: string): string[] {
-  return text.match(/\S+\s*/g) ?? [];
+  const rawTokens = text.match(/\S+\s*/g) ?? [];
+  return rawTokens.flatMap(splitChatModeRevealTokenForEllipsis);
 }
 
 function resolveRevealWordDelayMsByMood(
@@ -12631,13 +12821,42 @@ function resolveRevealWordDelayMsByMood(
   return CHAT_MODE_MOOD_WORD_REVEAL_MS[normalizedMood] ?? CHAT_MODE_WORD_REVEAL_MS;
 }
 
+function resolveTokenLetterRevealDurationMs(token: string): number {
+  const isEllipsis = isChatModeEllipsisToken(token);
+  const displayToken = formatChatModeTypedTokenDisplay(token, isEllipsis).trimEnd();
+  if (displayToken.length === 0) return 0;
+  if (isEllipsis) {
+    const dotCount = displayToken.match(/\./g)?.length ?? 1;
+    return CHAT_MODE_LETTER_REVEAL_MS + Math.max(0, dotCount - 1) * CHAT_MODE_ELLIPSIS_DOT_STEP_MS;
+  }
+  return (
+    CHAT_MODE_LETTER_REVEAL_MS +
+    Math.max(0, Array.from(displayToken).length - 1) * CHAT_MODE_LETTER_REVEAL_STEP_MS
+  );
+}
+
+function resolveTokenPunctuationPauseMs(token: string): number {
+  if (isChatModeEllipsisToken(token)) return CHAT_MODE_ELLIPSIS_PAUSE_MS;
+  const displayToken = formatChatModeTypedTokenDisplay(token, false)
+    .trimEnd()
+    .replace(/[)"'\]}»”’]+$/u, "");
+  if (displayToken.endsWith(",")) return CHAT_MODE_COMMA_PAUSE_MS;
+  if (displayToken.endsWith(".")) return CHAT_MODE_PERIOD_PAUSE_MS;
+  return 0;
+}
+
 function resolveRevealStepDelayMs(
   previousToken: string,
   moodKey?: NonNullable<Message["moodKey"]>
 ): number {
-  return isChatModeEllipsisToken(previousToken)
-    ? CHAT_MODE_ELLIPSIS_WORD_HOLD_MS
-    : resolveRevealWordDelayMsByMood(moodKey);
+  if (isChatModeEllipsisToken(previousToken)) {
+    return CHAT_MODE_ELLIPSIS_WORD_HOLD_MS;
+  }
+  const minimumDelayMs = resolveRevealWordDelayMsByMood(moodKey);
+  return Math.max(
+    minimumDelayMs,
+    resolveTokenLetterRevealDurationMs(previousToken) + CHAT_MODE_WORD_REVEAL_SETTLE_MS
+  ) + resolveTokenPunctuationPauseMs(previousToken);
 }
 
 function resolveVisibleTokenCountAtElapsedMs(
@@ -12748,7 +12967,8 @@ function findMessageRowById(root: ParentNode, messageId: string): HTMLElement | 
 }
 
 function findChatModeMessageScrollAnchor(row: HTMLElement): HTMLElement {
-  return row.querySelector<HTMLElement>('[data-chat-typing-line="true"]') ?? row;
+  const typingLines = row.querySelectorAll<HTMLElement>('[data-chat-typing-line="true"]');
+  return typingLines[typingLines.length - 1] ?? row;
 }
 
 function normalizeZenAtmosphereHistory(
@@ -12833,6 +13053,195 @@ interface ComposerInputProps {
   hideSubmitButton?: boolean;
   resolvedTheme: "light" | "dark";
   mentionBots: readonly BotMentionPick[];
+  commandPicks?: readonly CommandCenterCommand[];
+}
+
+interface SlashCommandToken {
+  from: number;
+  to: number;
+  query: string;
+}
+
+function normalizeSlashCommandQuery(value: string): string {
+  return value.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function filterCommandPicksForSlashQuery(
+  commands: readonly CommandCenterCommand[],
+  query: string
+): CommandCenterCommand[] {
+  const normalizedQuery = normalizeSlashCommandQuery(query);
+  const seen = new Set<string>();
+  const candidates = commands.filter((command) => {
+    const name = command.name.trim().toLowerCase();
+    if (!name || seen.has(name)) return false;
+    seen.add(name);
+    if (!normalizedQuery) return true;
+    const title = command.title.trim().toLowerCase();
+    const aliases = command.aliases.map((alias) => alias.trim().toLowerCase());
+    return (
+      name.includes(normalizedQuery) ||
+      title.includes(normalizedQuery) ||
+      aliases.some((alias) => alias.includes(normalizedQuery))
+    );
+  });
+  return candidates
+    .sort((a, b) => {
+      if (!normalizedQuery) return 0;
+      const aNames = commandInvocationNames(a).map((name) => name.toLowerCase());
+      const bNames = commandInvocationNames(b).map((name) => name.toLowerCase());
+      const aName = a.name.toLowerCase();
+      const bName = b.name.toLowerCase();
+      const aBest = Math.min(
+        ...aNames.map((name) => {
+          const index = name.indexOf(normalizedQuery);
+          return index < 0 ? Number.POSITIVE_INFINITY : index;
+        })
+      );
+      const bBest = Math.min(
+        ...bNames.map((name) => {
+          const index = name.indexOf(normalizedQuery);
+          return index < 0 ? Number.POSITIVE_INFINITY : index;
+        })
+      );
+      const aStarts = aName.startsWith(normalizedQuery);
+      const bStarts = bName.startsWith(normalizedQuery);
+      if (aStarts !== bStarts) return aStarts ? -1 : 1;
+      if (aBest !== bBest) return aBest - bBest;
+      return aName.localeCompare(bName);
+    })
+    .slice(0, 10);
+}
+
+function slashCommandTokenFromLinePrefix(
+  textToCaret: string,
+  lineStartOffset = 0
+): SlashCommandToken | null {
+  const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
+  const lineToCaret = textToCaret.slice(lineStartInText);
+  const match = /^(\s*)\/([a-z0-9-]*)$/iu.exec(lineToCaret);
+  if (!match) return null;
+  const from = lineStartOffset + lineStartInText + (match[1]?.length ?? 0);
+  return {
+    from,
+    to: lineStartOffset + textToCaret.length,
+    query: match[2] ?? "",
+  };
+}
+
+function getSlashCommandFromEditor(editor: Editor): SlashCommandToken | null {
+  const fromSel = editor.state.selection.from;
+  if (editorInFenceLikeContext(editor, fromSel)) return null;
+  const $pos = editor.state.doc.resolve(fromSel);
+  if (!$pos.parent.isTextblock) return null;
+  const blockStart = $pos.start();
+  const textToCaret = editor.state.doc.textBetween(blockStart, fromSel, "\n", "\n");
+  const token = slashCommandTokenFromLinePrefix(textToCaret, blockStart);
+  if (!token) return null;
+  const codeMark = editor.state.schema.marks.code;
+  if (codeMark && editor.state.doc.rangeHasMark(token.from, token.to, codeMark)) {
+    return null;
+  }
+  return token;
+}
+
+function getSlashCommandFromTextarea(
+  text: string,
+  caret: number
+): SlashCommandToken | null {
+  return slashCommandTokenFromLinePrefix(text.slice(0, caret), 0);
+}
+
+function insertSlashCommandInEditor(
+  editor: Editor,
+  command: CommandCenterCommand
+): boolean {
+  const token = getSlashCommandFromEditor(editor);
+  if (!token) return false;
+  const replacement = `/${command.name} `;
+  editor
+    .chain()
+    .focus()
+    .deleteRange({ from: token.from, to: token.to })
+    .insertContentAt(token.from, replacement)
+    .run();
+  return true;
+}
+
+function replaceTextareaSlashCommand(
+  text: string,
+  caret: number,
+  command: CommandCenterCommand
+): { value: string; caret: number } | null {
+  const token = getSlashCommandFromTextarea(text, caret);
+  if (!token) return null;
+  const replacement = `/${command.name} `;
+  const value = `${text.slice(0, token.from)}${replacement}${text.slice(token.to)}`;
+  return {
+    value,
+    caret: token.from + replacement.length,
+  };
+}
+
+function shouldAcceptSlashCommandCompletionKey(event: {
+  key: string;
+  shiftKey: boolean;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}): boolean {
+  if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
+  return event.key === "Tab" || event.key === " " || event.key === "Spacebar";
+}
+
+function applyLeadingDevCommandBoundaryDelete(
+  editor: Editor,
+  direction: "backward" | "forward",
+  commandNames: readonly string[]
+): boolean {
+  const sel = editor.state.selection;
+  if (!sel.empty) return false;
+  const commandRange = findLeadingDevCommandTokenRange(editor.state.doc, commandNames);
+  if (!commandRange) return false;
+
+  const caret = sel.from;
+  let from = commandRange.from;
+  let to = commandRange.to;
+  if (direction === "backward") {
+    const nextChar =
+      commandRange.to < editor.state.doc.content.size
+        ? editor.state.doc.textBetween(commandRange.to, commandRange.to + 1, "\n", "\n")
+        : "";
+    if (caret === commandRange.to + 1 && nextChar === " ") {
+      to += 1;
+    } else if (caret !== commandRange.to) {
+      return false;
+    }
+  } else if (caret !== commandRange.from) {
+    return false;
+  } else {
+    const nextChar =
+      commandRange.to < editor.state.doc.content.size
+        ? editor.state.doc.textBetween(commandRange.to, commandRange.to + 1, "\n", "\n")
+        : "";
+    if (nextChar === " ") to += 1;
+  }
+
+  editor.chain().focus().deleteRange({ from, to }).run();
+  return true;
+}
+
+function getMountedEditorView(editor: Editor | null | undefined): Editor["view"] | null {
+  if (!editor || editor.isDestroyed) return null;
+  try {
+    return editor.view;
+  } catch {
+    return null;
+  }
+}
+
+function getMountedEditorDom(editor: Editor | null | undefined): HTMLElement | null {
+  return (getMountedEditorView(editor)?.dom as HTMLElement | undefined) ?? null;
 }
 
 interface ProseMirrorSelectionState {
@@ -12919,12 +13328,171 @@ function useMobileKeyboardInset(active: boolean): number {
   return active ? inset : 0;
 }
 
+interface ComposerCommandPopoverProps {
+  open: boolean;
+  anchorRect: DOMRect | null;
+  themeSource: Element | null;
+  commands: readonly CommandCenterCommand[];
+  highlightIndex: number;
+  onHighlightIndexChange: (next: number) => void;
+  onPickCommand: (command: CommandCenterCommand) => void;
+  excludeInteractionRef?: RefObject<Element | null>;
+  onDismiss?: () => void;
+}
+
+function commandPickDescription(command: CommandCenterCommand): string {
+  const aliasText =
+    command.aliases.length > 0
+      ? `Aliases: ${command.aliases.map((alias) => `/${alias}`).join(", ")}`
+      : "";
+  const title = command.title.trim();
+  if (title && title.toLowerCase() !== command.name.toLowerCase()) {
+    return aliasText ? `${aliasText} · ${title}` : title;
+  }
+  if (aliasText) return aliasText;
+  return command.command.trim().replace(/\s+/g, " ").slice(0, 96);
+}
+
+function ComposerCommandPopover({
+  open,
+  anchorRect,
+  themeSource,
+  commands,
+  highlightIndex,
+  onHighlightIndexChange,
+  onPickCommand,
+  excludeInteractionRef,
+  onDismiss,
+}: ComposerCommandPopoverProps): React.JSX.Element | null {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const portalStyle = useMemo(() => {
+    if (!open || !anchorRect) return null;
+    return computeCommandMenuFixedStyle(anchorRect, themeSource);
+  }, [anchorRect, open, themeSource]);
+  const [viewportNudge, setViewportNudge] = useState({ x: 0, y: 0 });
+  const adjustedStyle = useMemo((): React.CSSProperties | null => {
+    if (!portalStyle) return null;
+    const left = typeof portalStyle.left === "number" ? portalStyle.left : Number(portalStyle.left);
+    const top = typeof portalStyle.top === "number" ? portalStyle.top : Number(portalStyle.top);
+    const bottom =
+      typeof portalStyle.bottom === "number"
+        ? portalStyle.bottom
+        : Number(portalStyle.bottom);
+    const next: React.CSSProperties = { ...portalStyle };
+    if (Number.isFinite(left)) {
+      next.left = left + viewportNudge.x;
+    }
+    if (Number.isFinite(top)) {
+      next.top = top + viewportNudge.y;
+    } else if (Number.isFinite(bottom)) {
+      next.bottom = bottom - viewportNudge.y;
+    }
+    return next;
+  }, [portalStyle, viewportNudge]);
+  const safeHighlight = Math.max(
+    0,
+    Math.min(highlightIndex, Math.max(0, commands.length - 1))
+  );
+
+  useLayoutEffect(() => {
+    if (!open || !anchorRect || !portalStyle) return;
+    const menu = menuRef.current;
+    if (!menu) return;
+    const r = menu.getBoundingClientRect();
+    const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
+    const vw = globalThis.window.innerWidth;
+    const vh = globalThis.window.innerHeight;
+    let x = 0;
+    let y = 0;
+    if (r.right > vw - pad) x += vw - pad - r.right;
+    if (r.left + x < pad) x = pad - r.left;
+    if (r.bottom > vh - pad) y += vh - pad - r.bottom;
+    if (r.top + y < pad) y = pad - r.top;
+    const frame = window.requestAnimationFrame(() => {
+      setViewportNudge((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, anchorRect, portalStyle, commands.length]);
+
+  useEffect(() => {
+    if (!open || commands.length === 0) return;
+    const row = menuRef.current?.querySelector<HTMLElement>(
+      `[data-command-index="${safeHighlight}"]`
+    );
+    row?.scrollIntoView({ block: "nearest" });
+  }, [open, commands.length, safeHighlight, viewportNudge]);
+
+  useEffect(() => {
+    if (!open || !onDismiss) return;
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (menuRef.current?.contains(target)) return;
+      const shell = excludeInteractionRef?.current;
+      if (shell?.contains(target)) return;
+      onDismiss();
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [open, onDismiss, excludeInteractionRef]);
+
+  if (!open || !adjustedStyle || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className={`${styles.composeBotMenu} ${styles.composeCommandMenu}`}
+      style={adjustedStyle}
+      role="listbox"
+      aria-label="Choose a command"
+    >
+      <div className={styles.composeBotListbox}>
+        {commands.length === 0 && (
+          <div className={styles.composeBotNoMatches} role="presentation">
+            No commands match.
+          </div>
+        )}
+        {commands.map((command, index) => {
+          const active = index === safeHighlight;
+          const description = commandPickDescription(command);
+          return (
+            <button
+              key={command.id}
+              type="button"
+              data-command-index={index}
+              role="option"
+              aria-selected={active ? "true" : "false"}
+              className={`${styles.composeBotOption} ${styles.composeCommandOption}`}
+              onMouseEnter={() => onHighlightIndexChange(index)}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                onPickCommand(command);
+              }}
+            >
+              <span className={styles.composeCommandSlash} aria-hidden="true">/</span>
+              <span className={styles.composeCommandText}>
+                <span className={styles.composeBotOptionName}>{command.name}</span>
+                {description ? (
+                  <span className={styles.composeCommandMeta}>{description}</span>
+                ) : null}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function resolveTypedLineStartIndexes(lines: string[]): number[] {
   let cursor = 0;
   return lines.map((line) => {
     const headingInfo = parseChatModeHashHeadingLine(line);
     const displayLine = headingInfo?.text ?? line;
-    const wordTokens = displayLine.match(/\S+\s*/g) ?? [];
+    const wordTokens = tokenizeMessageReveal(displayLine);
     const lineStartIndex = cursor;
     cursor += wordTokens.length;
     return lineStartIndex;
@@ -12958,6 +13526,7 @@ function MarkdownMessageBody({
   maxParagraphs,
   revealWordByWord,
   renderAsEphemeralLines,
+  suppressDecorativePrismText,
   chatPhase,
   forcedVisibleTokenCount,
   revealMoodKey,
@@ -12988,7 +13557,7 @@ function MarkdownMessageBody({
         : normalizedSource,
     [normalizedSource, renderAsEphemeralLines]
   );
-  const tokens = useMemo(() => chatModeSource.match(/\S+\s*/g) ?? [], [chatModeSource]);
+  const tokens = useMemo(() => tokenizeMessageReveal(chatModeSource), [chatModeSource]);
   const [visibleTokenCount, setVisibleTokenCount] = useState(() =>
     revealWordByWord ? 1 : tokens.length
   );
@@ -13006,50 +13575,52 @@ function MarkdownMessageBody({
     () => buildCodeBlockRevealPlan(chatModeSource),
     [chatModeSource]
   );
-  const effectiveVisibleTokenCount =
-    !preferLocalProgressiveReveal && forcedVisibleTokenCount !== undefined
+  const shouldUseForcedVisibleTokenCount = Boolean(
+    !preferLocalProgressiveReveal &&
+    forcedVisibleTokenCount !== undefined
+  );
+  const clampedForcedVisibleTokenCount =
+    shouldUseForcedVisibleTokenCount && forcedVisibleTokenCount !== undefined
       ? Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length))
-      : visibleTokenCount;
+      : null;
+  const effectiveVisibleTokenCount = clampedForcedVisibleTokenCount ?? visibleTokenCount;
 
   useEffect(() => {
-    const deferVisibleCount = (next: number) => {
-      window.setTimeout(() => {
-        setVisibleTokenCount(next);
-      }, 0);
-    };
-    if (!preferLocalProgressiveReveal && forcedVisibleTokenCount !== undefined) {
-      deferVisibleCount(Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length)));
+    if (clampedForcedVisibleTokenCount !== null) {
+      setVisibleTokenCount(clampedForcedVisibleTokenCount);
       return;
     }
     if ((!revealWordByWord && !preferLocalProgressiveReveal) || tokens.length <= 1) {
-      deferVisibleCount(tokens.length);
+      setVisibleTokenCount(tokens.length);
       return;
     }
-    deferVisibleCount(1);
-    let nextCount = 1;
+    const clampedVisibleTokenCount = Math.max(1, Math.min(visibleTokenCount, tokens.length));
+    if (clampedVisibleTokenCount !== visibleTokenCount) {
+      setVisibleTokenCount(clampedVisibleTokenCount);
+      return;
+    }
+    if (clampedVisibleTokenCount >= tokens.length) return;
     let timer: number | null = null;
-    const scheduleNextReveal = () => {
-      if (nextCount >= tokens.length) return;
-      const priorToken = tokens[nextCount - 1] ?? "";
-      const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey);
-      timer = window.setTimeout(() => {
-        nextCount += 1;
-        deferVisibleCount(Math.min(nextCount, tokens.length));
-        scheduleNextReveal();
-      }, delayMs);
-    };
-    scheduleNextReveal();
+    const priorToken = tokens[clampedVisibleTokenCount - 1] ?? "";
+    const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey);
+    timer = window.setTimeout(() => {
+      setVisibleTokenCount((current) => Math.min(Math.max(1, current) + 1, tokens.length));
+    }, delayMs);
     return () => {
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [
     forcedVisibleTokenCount,
+    clampedForcedVisibleTokenCount,
     preferLocalProgressiveReveal,
     revealMoodKey,
     revealWordByWord,
+    shouldUseForcedVisibleTokenCount,
     tokens,
+    visibleTokenCount,
   ]);
   const typedTokenMeta = useMemo(() => resolveChatModeTypedTokenMeta(tokens), [tokens]);
+  const allowDecorativePrismText = suppressDecorativePrismText !== true;
   const renderVisibleTokenCount = effectiveVisibleTokenCount;
   const shouldProgressiveFenceReveal = Boolean(
     renderAsEphemeralLines &&
@@ -13083,7 +13654,7 @@ function MarkdownMessageBody({
         {lines.map((line, index) => {
           const headingInfo = parseChatModeHashHeadingLine(line);
           const displayLine = headingInfo?.text ?? line;
-          const wordTokens = displayLine.match(/\S+\s*/g) ?? [];
+          const wordTokens = tokenizeMessageReveal(displayLine);
           const lineNoLetterFade = isChatModeHeadingLikeLine(line);
           const lineIsPullQuoteInline = isChatModePullQuoteInlineLine(line);
           const lineStartIndex = lineStartIndexes[index] ?? 0;
@@ -13137,7 +13708,9 @@ function MarkdownMessageBody({
               const letterNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noLetterFade;
               const wordClassName = [
                 styles.chatEphemeralTypedWord,
-                tokenMeta?.style === "rainbow" ? styles.chatEphemeralTypedWordRainbow : "",
+                allowDecorativePrismText && tokenMeta?.style === "rainbow"
+                  ? styles.chatEphemeralTypedWordRainbow
+                  : "",
                 tokenMeta?.isQuote ? styles.chatEphemeralTypedWordQuote : "",
                 tokenMeta?.isItalic ? styles.chatEphemeralTypedWordItalic : "",
                 tokenMeta?.isBold ? styles.chatEphemeralTypedWordBold : "",
@@ -13169,7 +13742,9 @@ function MarkdownMessageBody({
                               ...(tokenMeta?.isEllipsis
                                 ? { ["--char-step-ms" as string]: `${CHAT_MODE_ELLIPSIS_DOT_STEP_MS}ms` }
                                 : {}),
-                              ...(tokenMeta?.style === "rainbow" && char.trim().length > 0
+                              ...(allowDecorativePrismText &&
+                              tokenMeta?.style === "rainbow" &&
+                              char.trim().length > 0
                                 ? {
                                     color: prismPaletteColorForLetterIndex(charIndex),
                                     WebkitTextFillColor: prismPaletteColorForLetterIndex(charIndex),
@@ -13385,6 +13960,8 @@ interface DesktopMarkdownComposerProps {
   resolvedTheme: "light" | "dark";
   /** Chat-enabled bots available for `@` mentions (empty disables). */
   mentionBots: readonly BotMentionPick[];
+  /** Slash commands shown in the composer autocomplete menu. */
+  commandPicks?: readonly CommandCenterCommand[];
   /** When true, the editor is locked (read-only) and visually muted. */
   disabled?: boolean;
 }
@@ -13404,6 +13981,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       hideSubmitButton,
       resolvedTheme,
       mentionBots,
+      commandPicks = [],
       disabled = false,
     },
     ref
@@ -13412,22 +13990,37 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const onValueChangeRef = useRef(onValueChange);
     const onFocusRef = useRef(onFocus);
     const editorRef = useRef<Editor | null>(null);
+    const markdownComposerSurfaceRef = useRef<HTMLDivElement | null>(null);
     const pendingValueRef = useRef<string | null>(null);
     const pendingValueTimerRef = useRef<number | null>(null);
     const mentionBotsRef = useRef(mentionBots);
+    const commandPicksRef = useRef(commandPicks);
     const [mentionUi, setMentionUi] = useState<{
       open: boolean;
       caretRect: DOMRect | null;
       filtered: BotMentionPick[];
       highlight: number;
     }>({ open: false, caretRect: null, filtered: [], highlight: 0 });
+    const [commandUi, setCommandUi] = useState<{
+      open: boolean;
+      caretRect: DOMRect | null;
+      filtered: CommandCenterCommand[];
+      highlight: number;
+    }>({ open: false, caretRect: null, filtered: [], highlight: 0 });
     const mentionUiRef = useRef(mentionUi);
+    const commandUiRef = useRef(commandUi);
     useLayoutEffect(() => {
       mentionBotsRef.current = mentionBots;
     }, [mentionBots]);
     useLayoutEffect(() => {
+      commandPicksRef.current = commandPicks;
+    }, [commandPicks]);
+    useLayoutEffect(() => {
       mentionUiRef.current = mentionUi;
     }, [mentionUi]);
+    useLayoutEffect(() => {
+      commandUiRef.current = commandUi;
+    }, [commandUi]);
 
     const dismissMentionPopover = useCallback(() => {
       const ed = editorRef.current;
@@ -13436,6 +14029,12 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         applyMentionTabToEditor(ed, mentionBotsRef.current);
       }
       setMentionUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+    }, []);
+
+    const dismissCommandPopover = useCallback(() => {
+      setCommandUi((s) =>
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
       );
     }, []);
@@ -13455,8 +14054,18 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         );
         return;
       }
+      setCommandUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
       const filtered = filterBotsForMentionQuery(bots, tok.query);
-      const coords = ed.view.coordsAtPos(tok.to);
+      const view = getMountedEditorView(ed);
+      if (!view) {
+        setMentionUi((s) =>
+          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+        );
+        return;
+      }
+      const coords = view.coordsAtPos(tok.to);
       const caretRect = new DOMRect(
         coords.left,
         coords.top,
@@ -13480,10 +14089,81 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       });
     }, []);
 
+    const syncCommandPopover = useCallback((ed: Editor) => {
+      const commands = commandPicksRef.current;
+      if (!commands.length) {
+        setCommandUi((s) =>
+          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+        );
+        return;
+      }
+      const tok = getSlashCommandFromEditor(ed);
+      if (!tok) {
+        setCommandUi((s) =>
+          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+        );
+        return;
+      }
+      setMentionUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+      const filtered = filterCommandPicksForSlashQuery(commands, tok.query);
+      const view = getMountedEditorView(ed);
+      if (!view) {
+        setCommandUi((s) =>
+          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+        );
+        return;
+      }
+      const coords = view.coordsAtPos(tok.to);
+      const caretRect = new DOMRect(
+        coords.left,
+        coords.top,
+        1,
+        Math.max(1, coords.bottom - coords.top)
+      );
+      const anchorRect = getComposerCommandMenuAnchorRect(
+        markdownComposerSurfaceRef.current,
+        caretRect
+      );
+      setCommandUi((prev) => {
+        const sameLength = prev.filtered.length === filtered.length;
+        const sameIds =
+          sameLength &&
+          prev.filtered.every((command, i) => command.id === filtered[i]?.id);
+        const highlight = sameIds
+          ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
+          : 0;
+        return {
+          open: true,
+          caretRect: anchorRect,
+          filtered,
+          highlight,
+        };
+      });
+    }, []);
+
+    const syncComposerPopovers = useCallback((ed: Editor) => {
+      const slashToken = getSlashCommandFromEditor(ed);
+      if (slashToken && commandPicksRef.current.length > 0) {
+        syncCommandPopover(ed);
+        return;
+      }
+      syncMentionPopover(ed);
+      setCommandUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+    }, [syncCommandPopover, syncMentionPopover]);
+
     useLayoutEffect(() => {
       onValueChangeRef.current = onValueChange;
       onFocusRef.current = onFocus;
     }, [onFocus, onValueChange]);
+
+    const commandNamesForHighlight = useMemo(
+      () => commandPicks.flatMap((command) => commandInvocationNames(command)),
+      [commandPicks]
+    );
 
     const editor = useEditor(
       {
@@ -13498,7 +14178,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             autolink: true,
             defaultProtocol: "https",
           }),
-          PrismDevCommandHighlight,
+          PrismDevCommandHighlight.configure({
+            commandNames: commandNamesForHighlight,
+          }),
           Placeholder.configure({ placeholder }),
           Markdown.configure({
             markedOptions: {
@@ -13560,7 +14242,44 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             ) {
               if (applyPrismBotLinkBackspace(activeEditor)) {
                 event.preventDefault();
-                queueMicrotask(() => syncMentionPopover(activeEditor));
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyLeadingDevCommandBoundaryDelete(
+                  activeEditor,
+                  "backward",
+                  commandNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+            }
+            if (
+              activeEditor &&
+              event.key === "Delete" &&
+              !event.shiftKey &&
+              !event.altKey &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !(event as globalThis.KeyboardEvent).isComposing
+            ) {
+              if (applyPrismBotLinkBoundaryDelete(activeEditor, "forward")) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyLeadingDevCommandBoundaryDelete(
+                  activeEditor,
+                  "forward",
+                  commandNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
               }
             }
@@ -13576,7 +14295,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               const dir = event.key === "ArrowLeft" ? "left" : "right";
               if (applyPrismBotLinkArrowKey(activeEditor, dir)) {
                 event.preventDefault();
-                queueMicrotask(() => syncMentionPopover(activeEditor));
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
               }
             }
@@ -13588,6 +14307,24 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               return true;
             }
             if (activeEditor && !event.shiftKey) {
+              if (
+                shouldAcceptSlashCommandCompletionKey(event) &&
+                commandUiRef.current.open &&
+                commandUiRef.current.filtered.length > 0
+              ) {
+                event.preventDefault();
+                const filtered = commandUiRef.current.filtered;
+                const hi =
+                  ((commandUiRef.current.highlight % filtered.length) + filtered.length) %
+                  filtered.length;
+                if (insertSlashCommandInEditor(activeEditor, filtered[hi]!)) {
+                  setCommandUi((s) =>
+                    s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                  );
+                  queueMicrotask(() => syncComposerPopovers(activeEditor));
+                }
+                return true;
+              }
               if (event.key === "Tab") {
                 if (mentionUiRef.current.open) {
                   event.preventDefault();
@@ -13596,15 +14333,36 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                     mentionBotsRef.current,
                     mentionUiRef.current.highlight
                   );
-                  queueMicrotask(() => syncMentionPopover(activeEditor));
+                  queueMicrotask(() => syncComposerPopovers(activeEditor));
                   return true;
                 }
+              }
+              if (event.key === "Escape" && commandUiRef.current.open) {
+                event.preventDefault();
+                setCommandUi((s) =>
+                  s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                );
+                return true;
               }
               if (event.key === "Escape" && mentionUiRef.current.open) {
                 event.preventDefault();
                 setMentionUi((s) =>
                   s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
                 );
+                return true;
+              }
+              if (
+                (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+                commandUiRef.current.open &&
+                commandUiRef.current.filtered.length > 0
+              ) {
+                event.preventDefault();
+                const delta = event.key === "ArrowDown" ? 1 : -1;
+                const len = commandUiRef.current.filtered.length;
+                setCommandUi((s) => ({
+                  ...s,
+                  highlight: (s.highlight + delta + len) % len,
+                }));
                 return true;
               }
               if (
@@ -13661,7 +14419,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           const md = ed.getMarkdown();
           pendingValueRef.current = md;
           queueMicrotask(() => {
-            syncMentionPopover(ed);
+            syncComposerPopovers(ed);
           });
           if (pendingValueTimerRef.current !== null) return;
           pendingValueTimerRef.current = window.setTimeout(() => {
@@ -13675,7 +14433,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           }, 90);
         },
       },
-      [placeholder, syncMentionPopover]
+      [placeholder, syncComposerPopovers, commandNamesForHighlight]
     );
 
     const mentionBotsByIdForTipTap = useMemo(() => {
@@ -13693,7 +14451,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
 
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
-      const dom = editor.view.dom as HTMLElement;
+      const dom = getMountedEditorDom(editor);
+      if (!dom) return;
       const run = (): void => {
         syncPrismBotMentionMarksInEditorDom(dom, mentionBotsByIdForTipTap, {
           resolvedTheme,
@@ -13713,16 +14472,16 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
       const run = (): void => {
-        syncMentionPopover(editor);
+        syncComposerPopovers(editor);
       };
       editor.on("transaction", run);
       return () => {
         editor.off("transaction", run);
       };
-    }, [editor, syncMentionPopover]);
+    }, [editor, syncComposerPopovers]);
 
     useEffect(() => {
-      const root = editor?.view.dom;
+      const root = getMountedEditorDom(editor);
       if (!root) return;
       root.setAttribute("spellcheck", writingAssistEnabled ? "true" : "false");
       root.setAttribute("autocorrect", writingAssistEnabled ? "on" : "off");
@@ -13773,7 +14532,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       ref,
       () => ({
         focus: (options?: FocusOptions) => {
-          const dom = editor?.view.dom;
+          const dom = getMountedEditorDom(editor);
           if (dom && typeof dom.focus === "function") {
             dom.focus(options);
           } else {
@@ -13781,7 +14540,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           }
         },
         blur: () => {
-          const dom = editor?.view.dom as HTMLElement | undefined;
+          const dom = getMountedEditorDom(editor);
           dom?.blur();
         },
         getValue: () => {
@@ -13798,6 +14557,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const handleRichEditorKeyDownCapture = useCallback(
       (event: React.KeyboardEvent<HTMLDivElement>) => {
         if (event.key !== "Enter") return;
+        if (
+          !event.shiftKey &&
+          commandUiRef.current.open &&
+          commandUiRef.current.filtered.length > 0
+        ) {
+          return;
+        }
 
         const activeEditor = editor;
         const root = event.currentTarget;
@@ -13835,8 +14601,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       [editor]
     );
 
-    const composeFormForTheme = editor?.view.dom?.closest("form") ?? null;
-    const markdownComposerSurfaceRef = useRef<HTMLDivElement | null>(null);
+    const composeFormForTheme = getMountedEditorDom(editor)?.closest("form") ?? null;
     return (
       <div
         ref={markdownComposerSurfaceRef}
@@ -13883,7 +14648,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             if (!ed) return;
             if (applyMentionTabToEditor(ed, mentionBotsRef.current)) {
               queueMicrotask(() => {
-                syncMentionPopover(ed);
+                syncComposerPopovers(ed);
               });
             }
           }}
@@ -13895,6 +14660,28 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           ensureContrast={ensureContrast}
           excludeInteractionRef={markdownComposerSurfaceRef}
           onDismiss={dismissMentionPopover}
+        />
+        <ComposerCommandPopover
+          open={commandUi.open}
+          anchorRect={commandUi.caretRect}
+          themeSource={composeFormForTheme}
+          commands={commandUi.filtered}
+          highlightIndex={commandUi.highlight}
+          onHighlightIndexChange={(next) =>
+            setCommandUi((s) => ({ ...s, highlight: next }))
+          }
+          onPickCommand={(command) => {
+            const ed = editorRef.current;
+            if (!ed) return;
+            if (insertSlashCommandInEditor(ed, command)) {
+              setCommandUi((s) =>
+                s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+              );
+              queueMicrotask(() => syncComposerPopovers(ed));
+            }
+          }}
+          excludeInteractionRef={markdownComposerSurfaceRef}
+          onDismiss={dismissCommandPopover}
         />
       </div>
     );
@@ -13919,6 +14706,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     hideSubmitButton,
     resolvedTheme,
     mentionBots,
+    commandPicks = [],
   },
   ref
 ): React.JSX.Element {
@@ -13926,6 +14714,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const composeEditorShellRef = useRef<HTMLDivElement | null>(null);
   const wysiwygRef = useRef<DesktopMarkdownComposerHandle | null>(null);
   const mentionBotsRef = useRef(mentionBots);
+  const commandPicksRef = useRef(commandPicks);
   const pendingTextareaCaretRef = useRef<number | null>(null);
   const [taMention, setTaMention] = useState<{
     open: boolean;
@@ -13933,13 +14722,26 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     filtered: BotMentionPick[];
     highlight: number;
   }>({ open: false, caretRect: null, filtered: [], highlight: 0 });
+  const [taCommand, setTaCommand] = useState<{
+    open: boolean;
+    caretRect: DOMRect | null;
+    filtered: CommandCenterCommand[];
+    highlight: number;
+  }>({ open: false, caretRect: null, filtered: [], highlight: 0 });
   const taMentionRef = useRef(taMention);
+  const taCommandRef = useRef(taCommand);
   useLayoutEffect(() => {
     mentionBotsRef.current = mentionBots;
   }, [mentionBots]);
   useLayoutEffect(() => {
+    commandPicksRef.current = commandPicks;
+  }, [commandPicks]);
+  useLayoutEffect(() => {
     taMentionRef.current = taMention;
   }, [taMention]);
+  useLayoutEffect(() => {
+    taCommandRef.current = taCommand;
+  }, [taCommand]);
 
   const dismissTaMentionPopover = useCallback(() => {
     setTaMention((s) =>
@@ -13947,7 +14749,56 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     );
   }, []);
 
+  const dismissTaCommandPopover = useCallback(() => {
+    setTaCommand((s) =>
+      s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+    );
+  }, []);
+
+  const syncTextareaCommand = useCallback((el: HTMLTextAreaElement): boolean => {
+    const commands = commandPicksRef.current;
+    if (!commands.length) {
+      setTaCommand((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+      return false;
+    }
+    const caret = el.selectionStart ?? 0;
+    const tok = getSlashCommandFromTextarea(el.value, caret);
+    if (!tok) {
+      setTaCommand((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+      return false;
+    }
+    setTaMention((s) =>
+      s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+    );
+    const filtered = filterCommandPicksForSlashQuery(commands, tok.query);
+    const caretRect = getTextareaCaretClientRect(el);
+    const anchorRect = caretRect
+      ? getComposerCommandMenuAnchorRect(composeEditorShellRef.current, caretRect)
+      : null;
+    setTaCommand((prev) => {
+      const sameLength = prev.filtered.length === filtered.length;
+      const sameIds =
+        sameLength &&
+        prev.filtered.every((command, i) => command.id === filtered[i]?.id);
+      const highlight = sameIds
+        ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
+        : 0;
+      return {
+        open: true,
+        caretRect: anchorRect,
+        filtered,
+        highlight,
+      };
+    });
+    return true;
+  }, []);
+
   const syncTextareaMention = useCallback((el: HTMLTextAreaElement) => {
+    if (syncTextareaCommand(el)) return;
     const bots = mentionBotsRef.current;
     if (!bots.length) {
       setTaMention((s) =>
@@ -13964,6 +14815,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       );
       return;
     }
+    setTaCommand((s) =>
+      s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+    );
     const filtered = filterBotsForMentionQuery(bots, tok.query);
     const caretRect = getTextareaCaretClientRect(el);
     setTaMention((prev) => {
@@ -14037,6 +14891,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           hideSubmitButton={hideSubmitButton}
           resolvedTheme={resolvedTheme}
           mentionBots={mentionBots}
+          commandPicks={commandPicks}
         />
       ) : (
         <>
@@ -14090,7 +14945,31 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 ) {
                   const start = el.selectionStart ?? 0;
                   const end = el.selectionEnd ?? 0;
-                  const applied = applyTaggedMentionWordBackspace(el.value, start, end);
+                  const applied =
+                    applyTaggedMentionBoundaryDelete(el.value, start, end, "backward") ??
+                    applyTaggedMentionWordBackspace(el.value, start, end);
+                  if (applied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = applied.caret;
+                    onValueChange(applied.value);
+                    return;
+                  }
+                }
+                if (
+                  event.key === "Delete" &&
+                  !event.altKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  const start = el.selectionStart ?? 0;
+                  const end = el.selectionEnd ?? 0;
+                  const applied = applyTaggedMentionBoundaryDelete(
+                    el.value,
+                    start,
+                    end,
+                    "forward"
+                  );
                   if (applied) {
                     event.preventDefault();
                     pendingTextareaCaretRef.current = applied.caret;
@@ -14130,6 +15009,31 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   event.preventDefault();
                   return;
                 }
+                if (
+                  shouldAcceptSlashCommandCompletionKey(event) &&
+                  !event.shiftKey &&
+                  taCommandRef.current.open &&
+                  taCommandRef.current.filtered.length > 0
+                ) {
+                  event.preventDefault();
+                  const filtered = taCommandRef.current.filtered;
+                  const hi =
+                    ((taCommandRef.current.highlight % filtered.length) + filtered.length) %
+                    filtered.length;
+                  const next = replaceTextareaSlashCommand(
+                    el.value,
+                    el.selectionStart ?? 0,
+                    filtered[hi]!
+                  );
+                  if (next) {
+                    pendingTextareaCaretRef.current = next.caret;
+                    onValueChange(next.value);
+                    setTaCommand((s) =>
+                      s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                    );
+                  }
+                  return;
+                }
                 if (event.key === "Tab" && !event.shiftKey && taMentionRef.current.open) {
                   event.preventDefault();
                   const mention = taMentionRef.current;
@@ -14144,11 +15048,30 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     onValueChange(act.replacement);
                   }
                 }
+                if (event.key === "Escape" && taCommandRef.current.open) {
+                  event.preventDefault();
+                  setTaCommand((s) =>
+                    s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                  );
+                }
                 if (event.key === "Escape" && taMentionRef.current.open) {
                   event.preventDefault();
                   setTaMention((s) =>
                     s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
                   );
+                }
+                if (
+                  (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+                  taCommandRef.current.open &&
+                  taCommandRef.current.filtered.length > 0
+                ) {
+                  event.preventDefault();
+                  const delta = event.key === "ArrowDown" ? 1 : -1;
+                  const len = taCommandRef.current.filtered.length;
+                  setTaCommand((s) => ({
+                    ...s,
+                    highlight: (s.highlight + delta + len) % len,
+                  }));
                 }
                 if (
                   (event.key === "ArrowDown" || event.key === "ArrowUp") &&
@@ -14215,6 +15138,33 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             ensureContrast={ensureContrast}
             excludeInteractionRef={composeEditorShellRef}
             onDismiss={dismissTaMentionPopover}
+          />
+          <ComposerCommandPopover
+            open={taCommand.open}
+            anchorRect={taCommand.caretRect}
+            themeSource={composeEditorShellRef.current}
+            commands={taCommand.filtered}
+            highlightIndex={taCommand.highlight}
+            onHighlightIndexChange={(next) =>
+              setTaCommand((s) => ({ ...s, highlight: next }))
+            }
+            onPickCommand={(command) => {
+              const el = textareaRef.current;
+              if (!el) return;
+              const next = replaceTextareaSlashCommand(
+                el.value,
+                el.selectionStart ?? 0,
+                command
+              );
+              if (!next) return;
+              pendingTextareaCaretRef.current = next.caret;
+              onValueChange(next.value);
+              setTaCommand((s) =>
+                s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+              );
+            }}
+            excludeInteractionRef={composeEditorShellRef}
+            onDismiss={dismissTaCommandPopover}
           />
         </>
       )}
@@ -15144,6 +16094,7 @@ function HomeContent(): React.JSX.Element {
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
+  const [starterComposerRevealed, setStarterComposerRevealed] = useState(false);
   const [askQuestionChangingAnswerAssistantId, setAskQuestionChangingAnswerAssistantId] =
     useState<string | null>(null);
   const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
@@ -15398,6 +16349,8 @@ function HomeContent(): React.JSX.Element {
   const [devTogglesOpen, setDevTogglesOpen] = useState(false);
   const [devToolsBusy, setDevToolsBusy] = useState(false);
   const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
+  const [devToolsActiveSection, setDevToolsActiveSection] =
+    useState<DevToolsActiveSection>("observe");
   const [devToolsBotQuantity, setDevToolsBotQuantity] =
     useState<DevToolsBotQuantity>(DEV_TOOLS_BOT_QUANTITY_DEFAULT);
   const [devToolsMemorySeedSource, setDevToolsMemorySeedSource] =
@@ -15410,18 +16363,8 @@ function HomeContent(): React.JSX.Element {
       x: DEV_TOOLS_PANEL_DEFAULT_X,
       y: DEV_TOOLS_PANEL_DEFAULT_Y,
     });
-  const [devToolsButtonPosition, setDevToolsButtonPosition] =
-    useState<DevToolsPanelPosition>({
-      x: DEV_TOOLS_BUTTON_DEFAULT_X,
-      y: DEV_TOOLS_BUTTON_DEFAULT_Y,
-    });
   const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
   const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
-  const devToolsButtonRef = useRef<HTMLButtonElement | null>(null);
-  const devToolsButtonDragRef = useRef<DevToolsButtonDragState | null>(null);
-  const devToolsButtonHasCustomPositionRef = useRef(false);
-  const devToolsButtonPositionHydratedRef = useRef(false);
-  const devToolsButtonSuppressClickRef = useRef(false);
   const resolvedDevToolsBotQuantity =
     devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
   const closeDevTools = useCallback(() => {
@@ -15478,6 +16421,7 @@ function HomeContent(): React.JSX.Element {
     useState<string | null>(null);
   const [commandCenterSpecsCommandId, setCommandCenterSpecsCommandId] =
     useState<string | null>(null);
+  const [commandCenterHelpModalOpen, setCommandCenterHelpModalOpen] = useState(false);
   const [expandedPromptShortcutMessageId, setExpandedPromptShortcutMessageId] =
     useState<string | null>(null);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
@@ -15949,11 +16893,13 @@ function HomeContent(): React.JSX.Element {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const zenAtmosphereScrollFrameRef = useRef<number | null>(null);
-  /** Expanded AskQuestion chip rail only — outside-thread taps collapse chips when set. */
+  /** Expanded AskQuestion chip rail; kept as a stable anchor for future rail-local gestures. */
   const askQuestionRailRef = useRef<HTMLDivElement | null>(null);
+  const askQuestionComposerHiddenForReadingKeyRef = useRef<string | null>(null);
   const chatLastPinnedUserMessageKeyRef = useRef<string | null>(null);
   const chatLastRestoredConversationIdRef = useRef<string | null>(null);
   const chatProgrammaticScrollUntilMsRef = useRef(0);
+  const chatTouchScrollLastYRef = useRef<number | null>(null);
   const chatLastScrollTopByConversationRef = useRef<Map<string, number>>(new Map());
   // Tracks scrollHeight alongside scrollTop so the manual-scroll-up detector
   // can distinguish a real upward gesture from a reflow-induced drop (e.g.
@@ -15961,6 +16907,7 @@ function HomeContent(): React.JSX.Element {
   // bottom of the scroll area moves up by a few pixels on its own).
   const chatLastScrollHeightByConversationRef = useRef<Map<string, number>>(new Map());
   const chatAutoscrollArmedByConversationRef = useRef<Map<string, boolean>>(new Map());
+  const chatAutoscrollUserDisarmedByConversationRef = useRef<Map<string, boolean>>(new Map());
   // True for any conversation where the user interrupted a streaming reply.
   // Survives the brief loop unmount/remount around the "...interrupted again."
   // follow-up so the cut-off text stays where the user paused it. Cleared
@@ -15971,7 +16918,6 @@ function HomeContent(): React.JSX.Element {
   const chatInterruptCountByConversationRef = useRef<Map<string, number>>(new Map());
   const chatLastInterruptionLineByConversationRef = useRef<Map<string, string>>(new Map());
   const chatUserMessageFadeStartByKeyRef = useRef<Map<string, number>>(new Map());
-  const chatUserAnchorFadeStartByKeyRef = useRef<Map<string, number>>(new Map());
   const chatMessageOffscreenSinceRef = useRef<Map<string, number>>(new Map());
   const chatExpiredMessageIdsByConversationRef = useRef<Map<string, Set<string>>>(new Map());
   const chatArchiveRevealByConversationRef = useRef<Map<string, boolean>>(new Map());
@@ -15983,6 +16929,7 @@ function HomeContent(): React.JSX.Element {
   const chatArchiveInertiaVelocityByConversationRef = useRef<Map<string, number>>(new Map());
   const chatArchiveInertiaFrameByConversationRef = useRef<Map<string, number>>(new Map());
   const [chatArchiveRevealEpoch, setChatArchiveRevealEpoch] = useState(0);
+  const chatAssistantRevealEligibleKeysRef = useRef<Set<string>>(new Set());
   const chatCompletedRevealKeysRef = useRef<Set<string>>(new Set());
   const [chatEphemeralNowMs, setChatEphemeralNowMs] = useState(() => Date.now());
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
@@ -16402,67 +17349,6 @@ function HomeContent(): React.JSX.Element {
       // Safe no-op for environments without pointer capture support.
     }
   }, []);
-  const startDevToolsButtonDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
-    const button = devToolsButtonRef.current;
-    if (!button) return;
-
-    const rect = button.getBoundingClientRect();
-    devToolsButtonDragRef.current = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-    };
-    devToolsButtonSuppressClickRef.current = false;
-
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture is missing in some test environments.
-    }
-  }, []);
-  const dragDevToolsButton = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const dragState = devToolsButtonDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    const button = devToolsButtonRef.current;
-    if (!button) return;
-
-    const dragDistance = Math.hypot(
-      event.clientX - dragState.startClientX,
-      event.clientY - dragState.startClientY
-    );
-    if (dragDistance >= DEV_TOOLS_BUTTON_DRAG_SUPPRESS_CLICK_PX) {
-      devToolsButtonSuppressClickRef.current = true;
-      devToolsButtonHasCustomPositionRef.current = true;
-    }
-
-    const rect = button.getBoundingClientRect();
-    const next = clampDevToolsPanelPosition(
-      event.clientX - dragState.offsetX,
-      event.clientY - dragState.offsetY,
-      rect.width,
-      rect.height,
-      window.innerWidth,
-      window.innerHeight
-    );
-    button.style.left = `${next.x}px`;
-    button.style.top = `${next.y}px`;
-    setDevToolsButtonPosition(next);
-    event.preventDefault();
-  }, []);
-  const endDevToolsButtonDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const dragState = devToolsButtonDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    devToolsButtonDragRef.current = null;
-
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Safe no-op for environments without pointer capture support.
-    }
-  }, []);
   const closeImportBotModal = useCallback(() => {
     setImportBotModalPhase("closed");
     setImportBotPasteText("");
@@ -16559,6 +17445,23 @@ function HomeContent(): React.JSX.Element {
     },
     [openRightPanel]
   );
+
+  const openCommandCenterHelpModal = useCallback(() => {
+    setCommandCenterHelpModalOpen(true);
+    setCommandCenterSpecsCommandId(null);
+    setError(null);
+  }, []);
+
+  const insertCommandCenterInvocation = useCallback((invocation: string) => {
+    const normalized = invocation.trim().startsWith("/")
+      ? invocation.trim()
+      : `/${invocation.trim()}`;
+    if (normalized.length <= 1) return;
+    setDraft(normalized);
+    setCommandCenterHelpModalOpen(false);
+    setError(null);
+    requestAnimationFrame(() => draftComposerRef.current?.focus());
+  }, []);
 
   const applyCommandDisplayAliases = useCallback(
     function <T extends { messages: Message[] }>(conversation: T): T {
@@ -16838,67 +17741,6 @@ function HomeContent(): React.JSX.Element {
     resizeObserver.observe(panelNode);
     return () => resizeObserver.disconnect();
   }, [devToolsOpen, viewportHeight, viewportWidth]);
-
-  // Hydrate the dev-tools button position from localStorage on mount. We mark
-  // the position as "custom" before the viewport-anchor effect runs so the
-  // saved spot wins over the default bottom-right anchor.
-  useEffect(() => {
-    const stored = readStoredDevToolsButtonPosition();
-    if (stored) {
-      devToolsButtonHasCustomPositionRef.current = true;
-      setDevToolsButtonPosition(stored);
-    }
-    devToolsButtonPositionHydratedRef.current = true;
-  }, []);
-
-  useEffect(() => {
-    const buttonNode = devToolsButtonRef.current;
-    const rect = buttonNode?.getBoundingClientRect();
-    const buttonWidth = rect?.width ?? DEV_TOOLS_BUTTON_SIZE;
-    const buttonHeight = rect?.height ?? DEV_TOOLS_BUTTON_SIZE;
-
-    setDevToolsButtonPosition((position) => {
-      const anchoredPosition = devToolsButtonHasCustomPositionRef.current
-        ? position
-        : {
-            x: viewportWidth - buttonWidth - DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-            y: viewportHeight - buttonHeight - DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-          };
-      const next = clampDevToolsPanelPosition(
-        anchoredPosition.x,
-        anchoredPosition.y,
-        buttonWidth,
-        buttonHeight,
-        viewportWidth,
-        viewportHeight
-      );
-      return next.x === position.x && next.y === position.y ? position : next;
-    });
-  }, [viewportHeight, viewportWidth]);
-
-  useEffect(() => {
-    const buttonNode = devToolsButtonRef.current;
-    if (!buttonNode) return;
-    buttonNode.style.left = `${devToolsButtonPosition.x}px`;
-    buttonNode.style.top = `${devToolsButtonPosition.y}px`;
-  }, [devToolsButtonPosition]);
-
-  // Persist the dev-tools button position whenever it changes, but only
-  // after hydration (so we don't overwrite the saved spot with the default
-  // anchor on first paint) and only once the user has actually placed it.
-  useEffect(() => {
-    if (!devToolsButtonPositionHydratedRef.current) return;
-    if (!devToolsButtonHasCustomPositionRef.current) return;
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(
-        PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY,
-        JSON.stringify(devToolsButtonPosition)
-      );
-    } catch {
-      // private mode / quota — placement just won't survive reload
-    }
-  }, [devToolsButtonPosition]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -18674,6 +19516,17 @@ function HomeContent(): React.JSX.Element {
   }, [commandCenterSpecsCommandId]);
 
   useEffect(() => {
+    if (!commandCenterHelpModalOpen) return;
+    const handleWindowKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setCommandCenterHelpModalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [commandCenterHelpModalOpen]);
+
+  useEffect(() => {
     if (!expandedPromptShortcutMessageId || typeof document === "undefined") return;
     const handlePointerDown = (event: PointerEvent): void => {
       const target = event.target;
@@ -18914,7 +19767,11 @@ function HomeContent(): React.JSX.Element {
         if (!revealArchived) continue;
       }
       const revealGatedAssistant =
-        message.role === "assistant" && message.id === latestAssistantId;
+        message.role === "assistant" &&
+        message.id === latestAssistantId &&
+        chatAssistantRevealEligibleKeysRef.current.has(temporalKey) &&
+        !chatCompletedRevealKeysRef.current.has(temporalKey) &&
+        !chatCancelledRevealTokenCountByKeyRef.current.has(temporalKey);
       const estimatedRevealDoneAt = revealGatedAssistant
         ? firstSeenAt +
           resolveRevealDurationMsForTokens(
@@ -18958,6 +19815,22 @@ function HomeContent(): React.JSX.Element {
     if (!chatEphemeralMode) return source;
     return source;
   }, [chatEphemeralMode, detail?.messages]);
+  const zenUserMessagePrismColorById = useMemo(() => {
+    const colors = new Map<string, (typeof ZEN_USER_MESSAGE_PRISM_PALETTE)[number]>();
+    if (view !== "chat" || !detail) return colors;
+    let userMessageIndex = 0;
+    for (const message of detail.messages) {
+      if (message.role !== "user") continue;
+      colors.set(
+        message.id,
+        ZEN_USER_MESSAGE_PRISM_PALETTE[
+          userMessageIndex % ZEN_USER_MESSAGE_PRISM_PALETTE.length
+        ]!
+      );
+      userMessageIndex += 1;
+    }
+    return colors;
+  }, [view, detail?.messages]);
   const zenEraBoundaryLabelByMessageId = useMemo(() => {
     const labels = new Map<string, string>();
     if (view !== "chat" || detail?.mode !== "zen") return labels;
@@ -19000,6 +19873,26 @@ function HomeContent(): React.JSX.Element {
     }
     return null;
   }, [detail?.messages]);
+  const markLatestAssistantRevealEligible = useCallback(
+    (conversation: ConversationDetail): void => {
+      if (!chatAssistantTypingMechanicsActive || !conversation.id) return;
+      const latestAssistant = (() => {
+        for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
+          if (conversation.messages[i]?.role === "assistant") return conversation.messages[i]!;
+        }
+        return null;
+      })();
+      if (!latestAssistant) return;
+      const revealKey = `${conversation.id}:${latestAssistant.id}`;
+      chatAssistantRevealEligibleKeysRef.current.add(revealKey);
+      chatCompletedRevealKeysRef.current.delete(revealKey);
+      chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
+      if (!chatMessageFirstSeenAtRef.current.has(revealKey)) {
+        chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
+      }
+    },
+    [chatAssistantTypingMechanicsActive]
+  );
   const latestUserMessageId = useMemo<string | null>(() => {
     const source = detail?.messages ?? [];
     for (let i = source.length - 1; i >= 0; i -= 1) {
@@ -19018,29 +19911,10 @@ function HomeContent(): React.JSX.Element {
     if (message.role !== "user" || message.id !== latestUserMessageId) return false;
     const fadeKey = `${detail.id}:${message.id}`;
     const fadeStartAt = chatUserMessageFadeStartByKeyRef.current.get(fadeKey);
-    // First render of a newly inserted user row can happen before the
-    // post-send effect seeds this key; keep fade active during that frame
-    // so we never show a "pop in, then fade" flash.
-    if (fadeStartAt === undefined) return true;
+    // Restored Zen messages should never inherit the entrance fade. Without
+    // a seeded timestamp, the latest user row can remain visually dimmed.
+    if (fadeStartAt === undefined) return false;
     return Math.max(0, chatEphemeralNowMs - fadeStartAt) < CHAT_MODE_USER_MESSAGE_FADE_MS;
-  };
-  const resolveLatestUserAnchorFadeOpacity = (message: Message): number | null => {
-    if (!chatEphemeralMode || !detail?.id) return null;
-    if (message.role !== "user" || message.id !== latestUserMessageId) return null;
-    const fadeKey = `${detail.id}:${message.id}`;
-    const fadeStartAt = chatUserAnchorFadeStartByKeyRef.current.get(fadeKey);
-    if (fadeStartAt === undefined) return null;
-    const elapsedMs = Math.max(0, chatEphemeralNowMs - fadeStartAt);
-    const phaseOneProgress = Math.min(1, elapsedMs / CHAT_MODE_USER_ANCHOR_FADE_DURATION_MS);
-    const phaseOneOpacity =
-      1 - (1 - CHAT_MODE_USER_ANCHOR_FADE_MIN_OPACITY) * phaseOneProgress;
-    const phaseTwoElapsedMs = Math.max(0, elapsedMs - CHAT_MODE_USER_ANCHOR_FADE_DURATION_MS);
-    const phaseTwoProgress = Math.min(1, phaseTwoElapsedMs / CHAT_MODE_USER_ANCHOR_FADE_CONTINUE_MS);
-    return (
-      phaseOneOpacity -
-      (CHAT_MODE_USER_ANCHOR_FADE_MIN_OPACITY - CHAT_MODE_USER_ANCHOR_FADE_FINAL_OPACITY) *
-        phaseTwoProgress
-    );
   };
   const latestMessageRole =
     detail && detail.messages.length > 0
@@ -19125,6 +19999,7 @@ function HomeContent(): React.JSX.Element {
       chatLastScrollTopByConversationRef.current.delete(conversationId);
       chatLastScrollHeightByConversationRef.current.delete(conversationId);
       chatAutoscrollArmedByConversationRef.current.set(conversationId, false);
+      chatAutoscrollUserDisarmedByConversationRef.current.delete(conversationId);
     },
     [setChatArchiveLoadingForConversation, setChatArchiveRevealForConversation]
   );
@@ -19135,6 +20010,7 @@ function HomeContent(): React.JSX.Element {
   const chatAssistantRevealInProgress = useMemo(() => {
     if (!chatAssistantTypingMechanicsActive || !detail?.id || !latestAssistantMessageId) return false;
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
     if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return false;
     if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey);
@@ -19142,9 +20018,11 @@ function HomeContent(): React.JSX.Element {
     const latestAssistantMessage =
       detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
     if (!latestAssistantMessage) return false;
-    const latestAssistantMood = resolveMessageMoodKey(latestAssistantMessage);
     const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistantMessage));
-    const revealDurationMs = resolveRevealDurationMsForTokens(revealTokens, latestAssistantMood);
+    const revealDurationMs = resolveRevealDurationMsForTokens(
+      revealTokens,
+      DEFAULT_MESSAGE_MOOD
+    );
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
     chatAssistantTypingMechanicsActive,
@@ -19164,60 +20042,37 @@ function HomeContent(): React.JSX.Element {
       !detail?.id ||
       !latestAssistantMessageId
     ) return;
-    // Mid-typing cancel freezes reveal at the current token boundary.
+    // Mid-typing interruption keeps only the words that had actually become
+    // visible, then breaks the current word like a natural spoken cutoff.
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
     const latestAssistant =
       detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
     if (!latestAssistant) return;
     const interruptedText = resolveMessageDisplayContent(latestAssistant);
     const revealTokens = tokenizeMessageReveal(interruptedText);
-    const interruptedMood = resolveMessageMoodKey(latestAssistant);
-    const tokenTotal = Math.max(1, revealTokens.length);
-    const firstSeenAt =
-      chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
-    const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
+    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now();
     const visibleTokenCount = Math.min(
-      tokenTotal,
-      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, interruptedMood)
+      Math.max(1, revealTokens.length),
+      resolveVisibleTokenCountAtElapsedMs(
+        revealTokens,
+        Math.max(0, Date.now() - firstSeenAt),
+        latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD
+      )
     );
-    const interruptedSnippet = interruptedMidWordSnippet(
+    const interruptionContent = interruptedMidWordSnippet(
       interruptedText,
       visibleTokenCount
     );
     chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
     chatCompletedRevealKeysRef.current.add(revealKey);
-    // Freeze auto-scroll so the cut-off text stays where the user paused
-    // it. The "...interrupted again." follow-up will appear in flow without
-    // the dolly chasing the new content's tail. The pinned flag survives
-    // the loop's brief unmount/remount around the follow-up message.
+    chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
+    // Freeze auto-scroll so the pause marker stays where the user interrupted
+    // the reply instead of being chased by the dolly.
     chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
     chatScrollPinnedByConversationRef.current.set(detail.id, true);
     const nextInterruptCount =
       (chatInterruptCountByConversationRef.current.get(detail.id) ?? 0) + 1;
     chatInterruptCountByConversationRef.current.set(detail.id, nextInterruptCount);
-    const previousInterruptionLine =
-      chatLastInterruptionLineByConversationRef.current.get(detail.id) ?? "";
-    const followup = interruptionFollowupLine({
-      baseMood: interruptedMood,
-      interruptCount: nextInterruptCount,
-      interruptedText,
-      previousLine: previousInterruptionLine,
-    });
-    chatLastInterruptionLineByConversationRef.current.set(detail.id, followup.line);
-    const interruptionMessageId = `interrupt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const followupMessage: Message = {
-      id: interruptionMessageId,
-      role: "assistant",
-      content: `\n... ${followup.line.trimStart()}`,
-      createdAt: new Date().toISOString(),
-      provider: latestAssistant.provider,
-      model: latestAssistant.model,
-      botName: latestAssistant.botName,
-      botColor: latestAssistant.botColor,
-      botGlyph: latestAssistant.botGlyph,
-      moodKey: followup.mood,
-      moodConfidence: latestAssistant.moodConfidence,
-    };
     if (chatEphemeralMode) {
       hardResetChatArchiveStateForConversation(detail.id);
     }
@@ -19238,7 +20093,11 @@ function HomeContent(): React.JSX.Element {
       if (!interruptedAssistant || interruptedAssistant.role !== "assistant") return current;
       const patchedInterruptedAssistant: Message = {
         ...interruptedAssistant,
-        content: interruptedSnippet,
+        content: interruptionContent,
+        moodKey: DEFAULT_MESSAGE_MOOD,
+        moodConfidence: undefined,
+        askQuestion: undefined,
+        sentGeneratedImage: undefined,
       };
       return {
         ...current,
@@ -19250,23 +20109,23 @@ function HomeContent(): React.JSX.Element {
         ],
       };
     });
-    window.setTimeout(() => {
-      setDetail((current) => {
-        if (!current || current.id !== detail.id) return current;
-        const baseConversation = chatEphemeralMode
-          ? trimConversationToActiveTurn(current)
-          : current;
-        // Avoid duplicate insertion if another interruption already appended this id.
-        if (baseConversation.messages.some((message) => message.id === interruptionMessageId)) {
-          return current;
+    if (!String(latestAssistantMessageId).startsWith("pending-") && detail.id !== "pending") {
+      void api<{ ok: true }>(
+        `/api/messages/${encodeURIComponent(latestAssistantMessageId)}/interrupt`,
+        {
+          method: "POST",
+          body: JSON.stringify({ content: interruptionContent }),
         }
-        return {
-          ...baseConversation,
-          hasAssistantReply: true,
-          messages: [...baseConversation.messages, followupMessage],
-        };
-      });
-    }, CHAT_MODE_INTERRUPTION_FOLLOWUP_DELAY_MS);
+      )
+        .then(() => refreshOpenMemoryViews())
+        .catch((err) => {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Prism was interrupted, but the saved thread could not be updated."
+          );
+        });
+    }
     setChatEphemeralNowMs(Date.now());
   }, [
     pendingReplyVisible,
@@ -19275,10 +20134,10 @@ function HomeContent(): React.JSX.Element {
     chatAssistantRevealInProgress,
     detail?.id,
     detail?.messages,
-    chatEphemeralNowMs,
     latestAssistantMessageId,
     hardResetChatArchiveStateForConversation,
     chatAssistantTypingMechanicsActive,
+    refreshOpenMemoryViews,
   ]);
 
   const replyInFlightSignals =
@@ -21544,10 +22403,9 @@ function HomeContent(): React.JSX.Element {
   }, []);
 
   // Auto-scroll for Chat mode while a reply is streaming or revealing.
-  // Each animation frame ease scrollTop toward the bottom of the content
-  // by a fixed fraction of the remaining distance. That gives a natural
-  // ease-out (steps shrink as we approach), and when new tokens push the
-  // bottom further down the loop catches up automatically.
+  // Each animation frame eases scrollTop toward the active typed line's
+  // reading-band position. That keeps new prose a little above center
+  // without pinning the user to the bottom of the thread.
   //
   // The loop self-arms when typing starts so we never depend on a separate
   // deferred arm effect. Manual scroll-up sets `armed=false` via the
@@ -21560,7 +22418,10 @@ function HomeContent(): React.JSX.Element {
 
     // If the user interrupted the previous reply for this conversation,
     // stay frozen until they send a fresh message.
-    if (chatScrollPinnedByConversationRef.current.get(conversationId) === true) {
+    if (
+      chatScrollPinnedByConversationRef.current.get(conversationId) === true ||
+      chatAutoscrollUserDisarmedByConversationRef.current.get(conversationId) === true
+    ) {
       chatAutoscrollArmedByConversationRef.current.set(conversationId, false);
       return;
     }
@@ -21568,8 +22429,8 @@ function HomeContent(): React.JSX.Element {
     // disarm signals (user scroll-up, interruption) will turn this off.
     chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
 
-    const EASE_FACTOR = 0.32;
-    const MIN_STEP_PX = 0.6;
+    const EASE_FACTOR = 0.24;
+    const MIN_STEP_PX = CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX;
     const REST_THRESHOLD_PX = 0.5;
 
     let frame = 0;
@@ -21581,11 +22442,32 @@ function HomeContent(): React.JSX.Element {
       if (chatAutoscrollArmedByConversationRef.current.get(conversationId) === false) return;
 
       const maxScrollTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
-      const delta = maxScrollTop - scrollEl.scrollTop;
+      const activeAssistantRow = latestAssistantMessageId
+        ? findMessageRowById(scrollEl, latestAssistantMessageId)
+        : null;
+      const targetTop = (() => {
+        if (!activeAssistantRow) return maxScrollTop;
+        const anchor = findChatModeMessageScrollAnchor(activeAssistantRow);
+        const rootRect = scrollEl.getBoundingClientRect();
+        const anchorRect = anchor.getBoundingClientRect();
+        const anchorY =
+          anchorRect.top - rootRect.top + scrollEl.scrollTop + anchorRect.height / 2;
+        return Math.max(
+          0,
+          Math.min(
+            maxScrollTop,
+            anchorY - scrollEl.clientHeight * CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO
+          )
+        );
+      })();
+      const delta = targetTop - scrollEl.scrollTop;
       if (delta <= REST_THRESHOLD_PX) return;
 
-      const stepPx = Math.max(MIN_STEP_PX, delta * EASE_FACTOR);
-      const nextTop = Math.min(maxScrollTop, scrollEl.scrollTop + stepPx);
+      const stepPx = Math.min(
+        CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX,
+        Math.max(MIN_STEP_PX, delta * EASE_FACTOR)
+      );
+      const nextTop = Math.min(targetTop, scrollEl.scrollTop + stepPx);
       // Tag this write as programmatic so the onScroll handler does not
       // interpret reflow-induced drops as a manual upward scroll.
       chatProgrammaticScrollUntilMsRef.current = Date.now() + 80;
@@ -21596,7 +22478,7 @@ function HomeContent(): React.JSX.Element {
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [assistantRevealActive, detail?.id, replyInFlightSignals]);
+  }, [assistantRevealActive, detail?.id, latestAssistantMessageId, replyInFlightSignals]);
   useEffect(() => {
     if (!chatEphemeralMode || !detail?.id || detail.messages.length === 0) return;
     if (!latestUserMessageId) return;
@@ -21626,6 +22508,7 @@ function HomeContent(): React.JSX.Element {
     // Fresh user turn clears any prior interruption pin so auto-scroll
     // resumes for the upcoming reply.
     chatScrollPinnedByConversationRef.current.delete(detail.id);
+    chatAutoscrollUserDisarmedByConversationRef.current.delete(detail.id);
     requestAnimationFrame(() => {
       const scrollRoot = messagesScrollRef.current;
       if (!scrollRoot) return;
@@ -21634,8 +22517,10 @@ function HomeContent(): React.JSX.Element {
       const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const useSmoothQuestionScroll = latestUserMessageAsQuestion && !prefersReducedMotion;
       chatProgrammaticScrollUntilMsRef.current = Date.now() + (useSmoothQuestionScroll ? 900 : 180);
-      const topAnchorOffsetPx = 2;
-      const top = Math.max(0, target.offsetTop - topAnchorOffsetPx);
+      const top = Math.max(
+        0,
+        target.offsetTop - scrollRoot.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO
+      );
       scrollRoot.scrollTo({ top, behavior: useSmoothQuestionScroll ? "smooth" : "auto" });
       chatLastScrollTopByConversationRef.current.set(detail.id, top);
       chatLastScrollHeightByConversationRef.current.set(detail.id, scrollRoot.scrollHeight);
@@ -21680,28 +22565,11 @@ function HomeContent(): React.JSX.Element {
     // assistant streaming starts and the pin lock window has elapsed.
     const waitMs = Math.max(0, chatProgrammaticScrollUntilMsRef.current - Date.now());
     const timer = window.setTimeout(() => {
+      if (chatAutoscrollUserDisarmedByConversationRef.current.get(detail.id) === true) return;
       chatAutoscrollArmedByConversationRef.current.set(detail.id, true);
     }, waitMs);
     return () => window.clearTimeout(timer);
   }, [chatEphemeralMode, detail?.id, latestMessageRole, latestAssistantMessageId]);
-  useEffect(() => {
-    if (!chatEphemeralMode || !detail?.id || !latestUserMessageId) return;
-    if (latestMessageRole !== "assistant") return;
-    if (pendingReplyVisible || chatAssistantRevealInProgress) return;
-    const fadeKey = `${detail.id}:${latestUserMessageId}`;
-    if (chatUserAnchorFadeStartByKeyRef.current.has(fadeKey)) return;
-    chatUserAnchorFadeStartByKeyRef.current.set(
-      fadeKey,
-      Date.now() + CHAT_MODE_USER_ANCHOR_FADE_DELAY_MS
-    );
-  }, [
-    chatAssistantRevealInProgress,
-    chatEphemeralMode,
-    detail?.id,
-    latestMessageRole,
-    latestUserMessageId,
-    pendingReplyVisible,
-  ]);
   useEffect(() => {
     if (!chatEphemeralMode || !detail?.id || detail.messages.length === 0) return;
     if (chatLastRestoredConversationIdRef.current === detail.id) return;
@@ -21747,13 +22615,17 @@ function HomeContent(): React.JSX.Element {
     if (!chatEphemeralMode || !detail?.id) {
       chatMessageFirstSeenAtRef.current.clear();
       chatCancelledRevealTokenCountByKeyRef.current.clear();
+      chatAssistantRevealEligibleKeysRef.current.clear();
+      chatCompletedRevealKeysRef.current.clear();
       chatInterruptCountByConversationRef.current.clear();
       chatLastInterruptionLineByConversationRef.current.clear();
       chatUserMessageFadeStartByKeyRef.current.clear();
-      chatUserAnchorFadeStartByKeyRef.current.clear();
       chatMessageOffscreenSinceRef.current.clear();
       chatLastScrollTopByConversationRef.current.clear();
       chatLastScrollHeightByConversationRef.current.clear();
+      chatAutoscrollArmedByConversationRef.current.clear();
+      chatAutoscrollUserDisarmedByConversationRef.current.clear();
+      chatScrollPinnedByConversationRef.current.clear();
       chatArchivePullPxByConversationRef.current.clear();
       chatArchiveParagraphQuotaByConversationRef.current.clear();
       for (const timer of chatArchiveLoadTimerByConversationRef.current.values()) {
@@ -21768,20 +22640,32 @@ function HomeContent(): React.JSX.Element {
       chatArchiveInertiaVelocityByConversationRef.current.clear();
       return;
     }
-    // Strict ephemerality is anchored to first render in the active chat view.
-    chatMessageFirstSeenAtRef.current.clear();
-    chatCancelledRevealTokenCountByKeyRef.current.clear();
     chatInterruptCountByConversationRef.current.delete(detail.id);
     chatLastInterruptionLineByConversationRef.current.delete(detail.id);
     const activeConversationPrefix = `${detail.id}:`;
+    for (const temporalKey of chatMessageFirstSeenAtRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatMessageFirstSeenAtRef.current.delete(temporalKey);
+      }
+    }
+    for (const temporalKey of chatCancelledRevealTokenCountByKeyRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatCancelledRevealTokenCountByKeyRef.current.delete(temporalKey);
+      }
+    }
+    for (const temporalKey of chatAssistantRevealEligibleKeysRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatAssistantRevealEligibleKeysRef.current.delete(temporalKey);
+      }
+    }
+    for (const temporalKey of chatCompletedRevealKeysRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatCompletedRevealKeysRef.current.delete(temporalKey);
+      }
+    }
     for (const fadeKey of chatUserMessageFadeStartByKeyRef.current.keys()) {
       if (!fadeKey.startsWith(activeConversationPrefix)) {
         chatUserMessageFadeStartByKeyRef.current.delete(fadeKey);
-      }
-    }
-    for (const fadeKey of chatUserAnchorFadeStartByKeyRef.current.keys()) {
-      if (!fadeKey.startsWith(activeConversationPrefix)) {
-        chatUserAnchorFadeStartByKeyRef.current.delete(fadeKey);
       }
     }
     setChatEphemeralNowMs(Date.now());
@@ -21806,6 +22690,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const temporalKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(temporalKey)) return;
     if (chatMessageFirstSeenAtRef.current.has(temporalKey)) return;
     chatMessageFirstSeenAtRef.current.set(temporalKey, Date.now());
   }, [chatAssistantTypingMechanicsActive, detail?.id, latestAssistantMessageId]);
@@ -21822,6 +22707,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (!latestAssistant) return;
     const temporalKey = `${detail.id}:${latestAssistant.id}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(temporalKey)) return;
     if (chatCompletedRevealKeysRef.current.has(temporalKey)) return;
     if (chatCancelledRevealTokenCountByKeyRef.current.has(temporalKey)) return;
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(temporalKey);
@@ -21829,10 +22715,11 @@ function HomeContent(): React.JSX.Element {
     const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistant));
     const revealDurationMs = resolveRevealDurationMsForTokens(
       revealTokens,
-      resolveMessageMoodKey(latestAssistant)
+      DEFAULT_MESSAGE_MOOD
     );
     if (chatEphemeralNowMs - firstSeenAt >= revealDurationMs) {
       chatCompletedRevealKeysRef.current.add(temporalKey);
+      chatAssistantRevealEligibleKeysRef.current.delete(temporalKey);
     }
   }, [
     chatAssistantTypingMechanicsActive,
@@ -23537,6 +24424,7 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = applyCommandDisplayAliases(
           applyExplicitAskQuestionFallback(d.conversation)
         );
+        markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
         wirePendingImageJobFromEnvelope(d, {
           stillViewing: true,
@@ -23576,6 +24464,7 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = applyCommandDisplayAliases(
           applyExplicitAskQuestionFallback(d.conversation)
         );
+        markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
         wirePendingImageJobFromEnvelope(d, {
           stillViewing: true,
@@ -23637,15 +24526,42 @@ function HomeContent(): React.JSX.Element {
       model: "dev/ui",
     });
 
-    if (!detail) {
-      setError('Open a chat first — then try /dev commands in the composer.');
-      return true;
-    }
-
     if (parsed.kind === "unknown") {
       setError(
         `Unknown dev command “${parsed.token}”. Type /dev help for a short list.`,
       );
+      return true;
+    }
+
+    if (parsed.kind === "panel") {
+      if (!DEV_TOOLS_ENABLED) {
+        setError("Developer tools are not enabled in this build.");
+        return true;
+      }
+      setDevToolsMessage(null);
+      setDevTogglesOpen(false);
+      setDevToolsOpen(true);
+      return true;
+    }
+
+    if (parsed.kind === "close") {
+      closeDevTools();
+      return true;
+    }
+
+    if (parsed.kind === "toggles") {
+      if (!DEV_TOOLS_ENABLED) {
+        setError("Developer tools are not enabled in this build.");
+        return true;
+      }
+      setDevToolsMessage(null);
+      setDevToolsOpen(true);
+      setDevTogglesOpen(true);
+      return true;
+    }
+
+    if (!detail) {
+      setError('Open a chat first — then try /dev help or /dev askquestion in the composer.');
       return true;
     }
 
@@ -23655,6 +24571,9 @@ function HomeContent(): React.JSX.Element {
         content:
           "**Dev commands** (local preview only — nothing is sent to the server)\n\n" +
           "- `/dev help` — this list\n" +
+          "- `/dev` or `/dev panel` — open Developer Tools\n" +
+          "- `/dev close` — close Developer Tools\n" +
+          "- `/dev toggles` — open Dev toggles\n" +
           "- `/dev askquestion` — inject a sample AskQuestion chip row",
       };
       setDetail({
@@ -23924,9 +24843,16 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand !== "/compact" &&
       normalizedCommand !== "/summarize" &&
       normalizedCommand !== "/clear" &&
-      normalizedCommand !== "/cls"
+      normalizedCommand !== "/cls" &&
+      normalizedCommand !== "/help"
     ) {
       return false;
+    }
+    if (normalizedCommand === "/help") {
+      setDraft("");
+      setConversationStarterPrompts(null);
+      openCommandCenterHelpModal();
+      return true;
     }
     if (tokens.length > 1) {
       setError(`${normalizedCommand} does not take extra text. Use it by itself.`);
@@ -23942,7 +24868,7 @@ function HomeContent(): React.JSX.Element {
     return true;
   }
 
-  /** Local slash commands gated by Dev toggles (e.g. `/forget`, `/forget all`, `/help`). */
+  /** Local slash commands gated by Dev toggles (e.g. `/forget`, `/forget all`). */
   async function consumeDevSlashCommand(trimmedLine: string): Promise<boolean> {
     if (!devSlashCommandsEnabled) return false;
     const tokens = trimmedLine
@@ -23951,56 +24877,17 @@ function HomeContent(): React.JSX.Element {
       .filter((token) => token.length > 0);
     if (tokens.length === 0) return false;
     const normalizedCommand = tokens[0].toLowerCase();
-    if (normalizedCommand !== "/forget" && normalizedCommand !== "/help") {
+    if (normalizedCommand !== "/forget") {
       return false;
     }
     setError(null);
     setConversationStarterPrompts(null);
     setDraft("");
-    if (normalizedCommand === "/help") {
-      const helpMessage: Message = {
-        id: `dev-slash-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        role: "assistant",
-        content:
-          "**Dev slash commands** (local only)\n\n" +
-          "- `/forget` - forgets player-only memory. Clears profile memory and resets summaries, while preserving non-player memories.\n" +
-          "- `/forget all` - hard-resets chat for testing. Wipes the active conversation, every extracted memory, every summary fragment (SQLite + Qdrant), and the UI.\n" +
-          "- `/clear` or `/cls` - clears the current chat transcript and saved thread context.\n" +
-          "- `/compact` or `/summarize` - compacts only the current saved chat without clearing the transcript.\n" +
-          "- `/help` - shows this command list.",
-        createdAt: new Date().toISOString(),
-        provider: "local",
-        model: "dev/slash",
-      };
-      if (detail) {
-        setDetail({
-          ...detail,
-          hasAssistantReply: true,
-          messages: [...detail.messages, helpMessage],
-        });
-      } else {
-        const fallbackBotId = selectedBotId ?? null;
-        setSelectedId(null);
-        setDetail({
-          id: "pending",
-          title: "New chat",
-          botId: fallbackBotId,
-          incognito: false,
-          lastBotId: fallbackBotId,
-          lastBotColor: fallbackBotId
-            ? bots.find((bot) => bot.id === fallbackBotId)?.color ?? null
-            : null,
-          hasAssistantReply: true,
-          messages: [helpMessage],
-        });
-      }
-      return true;
-    }
     if (normalizedCommand === "/forget") {
       const forgetMode = tokens[1]?.toLowerCase() ?? "";
       if (tokens.length > 2) {
         const extras = tokens.slice(2).join(" ");
-        setError(`Unknown /forget option "${extras}". Use /help for supported flags.`);
+        setError(`Unknown /forget option "${extras}". Use /help for supported options.`);
         return true;
       }
       if (forgetMode.length === 0) {
@@ -24016,7 +24903,7 @@ function HomeContent(): React.JSX.Element {
         return true;
       }
       if (forgetMode !== "all") {
-        setError(`Unknown /forget option "${tokens[1]}". Use /help for supported flags.`);
+        setError(`Unknown /forget option "${tokens[1]}". Use /help for supported options.`);
         return true;
       }
       // `/forget all` should be a hard reset for chat testing, so summary context
@@ -24065,10 +24952,19 @@ function HomeContent(): React.JSX.Element {
     if (!firstToken.startsWith("/")) return { kind: "none" };
     const normalizedSlashName = normalizeCommandNameInput(firstToken);
     if (!normalizedSlashName) return { kind: "none" };
-    const command = commandCenterCommands.find(
-      (candidate) => candidate.name.toLowerCase() === normalizedSlashName
+    const command = commandCenterCommands.find((candidate) =>
+      commandMatchesSlashName(candidate, normalizedSlashName)
     );
     if (!command) {
+      const normalizedPrefix = normalizedSlashName.toLowerCase();
+      const matchesKnownCommandPrefix = commandCenterCommands.some((candidate) =>
+        commandInvocationNames(candidate).some((name) =>
+          name.toLowerCase().startsWith(normalizedPrefix)
+        )
+      );
+      if (matchesKnownCommandPrefix) {
+        return { kind: "none" };
+      }
       if (
         normalizedSlashName === "clear" ||
         normalizedSlashName === "forget" ||
@@ -24076,7 +24972,9 @@ function HomeContent(): React.JSX.Element {
       ) {
         return { kind: "none" };
       }
-      const availableCommands = commandCenterCommands.map((candidate) => `/${candidate.name}`);
+      const availableCommands = commandCenterCommands.flatMap((candidate) =>
+        commandInvocationNames(candidate).map((name) => `/${name}`)
+      );
       const availableText =
         availableCommands.length > 0 ? availableCommands.join(", ") : "(none configured)";
       return {
@@ -24088,38 +24986,8 @@ function HomeContent(): React.JSX.Element {
     if (!basePrompt) {
       return { kind: "error", error: `/${command.name} has no command text configured yet.` };
     }
-    const knownArguments = new Map(
-      command.arguments
-        .map((argument) => ({
-          key: normalizeCommandArgumentKeyInput(argument.key),
-          value: argument.value.trim(),
-        }))
-        .filter((argument) => argument.key.length > 0 && argument.value.length > 0)
-        .map((argument) => [argument.key, argument.value] as const)
-    );
-    const selectedArgumentValues: string[] = [];
-    const selectedFlags: PromptShortcutMetadata["flags"] = [];
-    const passthroughTokens: string[] = [];
-    for (let index = 1; index < tokens.length; index += 1) {
-      const token = tokens[index];
-      if (token.startsWith("-")) {
-        const key = normalizeCommandArgumentKeyInput(token.slice(1));
-        const mappedValue = knownArguments.get(key);
-        if (mappedValue) {
-          selectedArgumentValues.push(mappedValue);
-          selectedFlags.push({ key, value: mappedValue });
-          continue;
-        }
-      }
-      passthroughTokens.push(token);
-    }
     let prompt = basePrompt;
-    if (selectedArgumentValues.length > 0) {
-      prompt +=
-        "\n\nAdditional command instructions:\n" +
-        selectedArgumentValues.map((value) => `- ${value}`).join("\n");
-    }
-    const passthrough = passthroughTokens.join(" ").trim();
+    const passthrough = tokens.slice(1).join(" ").trim();
     if (passthrough.length > 0) {
       prompt += `\n\nUser request:\n${passthrough}`;
     }
@@ -24132,7 +25000,7 @@ function HomeContent(): React.JSX.Element {
         commandId: command.id,
         name: command.name,
         invocation: trimmedLine,
-        flags: selectedFlags,
+        flags: [],
         ...(passthrough.length > 0 ? { passthrough } : {}),
       },
       prompt,
@@ -24260,6 +25128,10 @@ function HomeContent(): React.JSX.Element {
     );
     setSessionOpinion(null);
     setBotOpinion(null);
+    setChatStartupSummary(null);
+    chatSummaryRefreshMarkerRef.current = null;
+    setSummaryDebug(null);
+    setManualCompactionStatus(null);
     setConversationStarterPrompts(null);
     setAskQuestionComposerRevealed(false);
     if (editingMessageId !== null) {
@@ -24552,10 +25424,14 @@ function HomeContent(): React.JSX.Element {
           detailIdRef.current === requestConversationId
         : selectedIdRef.current === null && detailIdRef.current === "pending";
       if (stillViewingRequest) {
+        const patchedConversation = applyCommandDisplayAliases(
+          applyExplicitAskQuestionFallback(d.conversation)
+        );
+        markLatestAssistantRevealEligible(patchedConversation);
         if (view === "chat") {
           hardResetChatArchiveStateForConversation(d.conversation.id);
         }
-        setDetail(applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)));
+        setDetail(patchedConversation);
         wirePendingImageJobFromEnvelope(d, {
           stillViewing: stillViewingRequest,
           activeConversationId: d.conversation.id,
@@ -24602,11 +25478,13 @@ function HomeContent(): React.JSX.Element {
           Array.isArray(d.conversationStarters) &&
           d.conversationStarters.length >= 3
         ) {
+          setStarterComposerRevealed(false);
           setConversationStarterPrompts({
             conversationId: d.conversation.id,
-            prompts: d.conversationStarters.slice(0, 4),
+            prompts: d.conversationStarters.slice(0, 3),
           });
         } else {
+          setStarterComposerRevealed(false);
           setConversationStarterPrompts(null);
         }
       }
@@ -24716,6 +25594,7 @@ function HomeContent(): React.JSX.Element {
     /** Secondary line (e.g. AskQuestion “Other” affordance). */
     sublabel?: string;
     action: "send" | "other";
+    otherSource?: "askquestion" | "starter";
     sendValue?: string;
   };
 
@@ -24749,6 +25628,7 @@ function HomeContent(): React.JSX.Element {
         label: "Other",
         sublabel: "(Explain in chat...)",
         action: "other",
+        otherSource: "askquestion",
       },
     ];
   }
@@ -24828,11 +25708,23 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (chip.action === "other") {
+      if (chip.otherSource === "starter") {
+        setStarterComposerRevealed(true);
+        setConversationStarterPrompts(null);
+        requestAnimationFrame(() => draftComposerRef.current?.focus());
+        return;
+      }
+      setConversationStarterPrompts(null);
+      askQuestionComposerHiddenForReadingKeyRef.current = null;
       setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
+      requestAnimationFrame(() => {
+        snapAskQuestionComposerToChatBottom(true);
+        draftComposerRef.current?.focus();
+      });
       return;
     }
     setConversationStarterPrompts(null);
+    setStarterComposerRevealed(false);
     if (options.replaceMessageId) {
       setAskQuestionChangingAnswerAssistantId(null);
       void performMessageEdit(options.replaceMessageId, chip.sendValue ?? chip.label);
@@ -24943,14 +25835,26 @@ function HomeContent(): React.JSX.Element {
       conversationStarterPrompts.conversationId === id &&
       conversationStarterPrompts.prompts.length > 0
     ) {
-      return {
-        conversationId: id,
-        chips: conversationStarterPrompts.prompts.map((prompt, index) => ({
+      const starterChips: ComposerChip[] = conversationStarterPrompts.prompts
+        .slice(0, 3)
+        .map((prompt, index) => ({
           id: `starter-${index}`,
           label: prompt,
           action: "send",
           sendValue: prompt,
-        })),
+        }));
+      return {
+        conversationId: id,
+        chips: [
+          ...starterChips,
+          {
+            id: "starter-other",
+            label: "Other",
+            sublabel: "(Write your own...)",
+            action: "other",
+            otherSource: "starter",
+          },
+        ],
         heading: null,
         kind: "starter",
         collapsed: false,
@@ -24962,6 +25866,7 @@ function HomeContent(): React.JSX.Element {
   function renderComposerChipRail(): React.ReactNode {
     const rail = getComposerChipRail();
     if (!rail) return null;
+    if (rail.kind === "starter") return null;
     if (rail.kind === "askquestion" && viewportWidth > PICKER_MOBILE_BREAKPOINT) {
       return null;
     }
@@ -24997,7 +25902,10 @@ function HomeContent(): React.JSX.Element {
             aria-label="Show suggested replies"
             title="Show suggested replies"
             disabled={pendingReply}
-            onClick={() => setAskQuestionComposerRevealed(false)}
+            onClick={() => {
+              askQuestionComposerHiddenForReadingKeyRef.current = null;
+              setAskQuestionComposerRevealed(false);
+            }}
           >
             ?
           </button>
@@ -25044,6 +25952,38 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
+  function renderStarterPromptInlineRail(): React.ReactNode {
+    const rail = getComposerChipRail();
+    if (!rail || rail.kind !== "starter") return null;
+    return (
+      <div
+        role="group"
+        aria-label="Suggested follow-up questions"
+        className={styles.conversationStarterInlineRail}
+      >
+        {rail.chips.map((chip, chipIndex) => (
+          <button
+            key={`${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
+            type="button"
+            disabled={pendingReply}
+            className={`${styles.conversationStarterChip} ${
+              chip.action === "other" ? styles.conversationStarterChipOther : ""
+            }`}
+            data-chip-kind={chip.action}
+            aria-label={
+              chip.action === "other"
+                ? "Other - write your own message"
+                : `Suggested reply: ${chip.sendValue ?? chip.label}`
+            }
+            onClick={() => handleComposerChipPick(chip)}
+          >
+            {renderComposerChipContent(chip)}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function renderAskQuestionInlineCard(msg: Message): React.ReactNode {
     if (viewportWidth <= PICKER_MOBILE_BREAKPOINT) return null;
     const interaction = getAskQuestionInteractionForMessage(msg);
@@ -25064,11 +26004,16 @@ function HomeContent(): React.JSX.Element {
       askQuestionChangingAnswerAssistantId === interaction.assistantMessageId;
     const choicesDisabled = pendingReply || (answered && !changing);
     const answerText = answerMessage?.content.trim() ?? "";
+    const otherSelected =
+      !answered &&
+      askQuestionComposerRevealed &&
+      pendingAskQuestionState?.assistantMessageId === interaction.assistantMessageId;
+    const choicesVisible = !otherSelected && (!answered || changing);
 
     return (
       <div
         className={styles.askQuestionInlineCard}
-        data-ask-question-state={answered ? "answered" : "unanswered"}
+        data-ask-question-state={answered ? "answered" : otherSelected ? "other-selected" : "unanswered"}
         data-ask-question-changing={changing ? "true" : undefined}
         role="group"
         aria-label={answered ? "Answered suggested replies" : "Suggested replies"}
@@ -25076,7 +26021,7 @@ function HomeContent(): React.JSX.Element {
       >
         <div className={styles.askQuestionInlineHeader}>
           <span className={styles.askQuestionInlineEyebrow}>
-            {answered ? "Answered" : "Choose a reply"}
+            {answered ? "Answered" : otherSelected ? "Other selected" : "Choose a reply"}
           </span>
           {answered && canChangeAnsweredAskQuestion ? (
             <button
@@ -25103,40 +26048,47 @@ function HomeContent(): React.JSX.Element {
             <span>Your answer</span>
             <p>{answerText || "No text recorded."}</p>
           </div>
+        ) : otherSelected ? (
+          <div className={styles.askQuestionInlineAnswer}>
+            <span>Selected reply</span>
+            <p>Other - write your answer below.</p>
+          </div>
         ) : null}
-        <div
-          className={styles.askQuestionInlineChoices}
-          data-choices-disabled={choicesDisabled ? "true" : undefined}
-        >
-          {chips.map((chip, chipIndex) => (
-            <button
-              key={`${interaction.assistantMessageId}-${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
-              type="button"
-              disabled={choicesDisabled}
-              className={`${styles.conversationStarterChip} ${
-                chip.action === "other" ? styles.conversationStarterChipOther : ""
-              }`}
-              data-chip-kind={chip.action}
-              aria-label={
-                chip.action === "other"
-                  ? changing
-                    ? "Other - edit your answer in chat"
-                    : "Other - explain in chat"
-                  : `Suggested reply: ${chip.sendValue ?? chip.label}`
-              }
-              onClick={() =>
-                handleComposerChipPick(
-                  chip,
-                  changing && answerMessage
-                    ? { replaceMessageId: answerMessage.id }
-                    : {}
-                )
-              }
-            >
-              {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
-            </button>
-          ))}
-        </div>
+        {choicesVisible ? (
+          <div
+            className={styles.askQuestionInlineChoices}
+            data-choices-disabled={choicesDisabled ? "true" : undefined}
+          >
+            {chips.map((chip, chipIndex) => (
+              <button
+                key={`${interaction.assistantMessageId}-${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
+                type="button"
+                disabled={choicesDisabled}
+                className={`${styles.conversationStarterChip} ${
+                  chip.action === "other" ? styles.conversationStarterChipOther : ""
+                }`}
+                data-chip-kind={chip.action}
+                aria-label={
+                  chip.action === "other"
+                    ? changing
+                      ? "Other - edit your answer in chat"
+                      : "Other - explain in chat"
+                    : `Suggested reply: ${chip.sendValue ?? chip.label}`
+                }
+                onClick={() =>
+                  handleComposerChipPick(
+                    chip,
+                    changing && answerMessage
+                      ? { replaceMessageId: answerMessage.id }
+                      : {}
+                  )
+                }
+              >
+                {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -25325,17 +26277,19 @@ function HomeContent(): React.JSX.Element {
       (() => {
         if (!pendingAskQuestionAssistantMessage) return false;
         const revealKey = `${detail.id}:${pendingAskQuestionState.assistantMessageId}`;
+        if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
+        if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
+        if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return false;
         const firstSeenAt =
           chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
         const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
         const revealTokens = tokenizeMessageReveal(
           resolveMessageDisplayContent(pendingAskQuestionAssistantMessage)
         );
-        const pendingMood = resolveMessageMoodKey(pendingAskQuestionAssistantMessage);
         const tokenTotal = Math.max(1, revealTokens.length);
         const visibleTokenCount = Math.min(
           tokenTotal,
-          resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, pendingMood)
+          resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, DEFAULT_MESSAGE_MOOD)
         );
         return visibleTokenCount < tokenTotal;
       })()
@@ -25348,11 +26302,27 @@ function HomeContent(): React.JSX.Element {
     : null;
   const pendingAskQuestionInteractiveKey = askQuestionInteractive ? pendingAskQuestionKey : null;
   const askQuestionUsesMobileRail = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
-  const composerHiddenByAskQuestion =
-    askQuestionInteractive &&
-    !askQuestionComposerRevealed;
+  const askQuestionChangeChoicesVisible =
+    askQuestionChangingAnswerAssistantId !== null &&
+    detail?.messages.some(
+      (message) =>
+        message.id === askQuestionChangingAnswerAssistantId &&
+        message.role === "assistant" &&
+        resolveAssistantAskQuestion(message) !== undefined
+    ) === true;
+  const starterPromptsInteractive =
+    conversationStarterPrompts !== null &&
+    conversationStarterPrompts.conversationId === detail?.id &&
+    conversationStarterPrompts.prompts.length > 0;
+  const askQuestionComposerHiddenByChoices =
+    (askQuestionInteractive && !askQuestionComposerRevealed) ||
+    askQuestionChangeChoicesVisible;
+  const composerHiddenByChoiceChips =
+    askQuestionComposerHiddenByChoices ||
+    (starterPromptsInteractive && !starterComposerRevealed);
 
   useEffect(() => {
+    askQuestionComposerHiddenForReadingKeyRef.current = null;
     if (pendingAskQuestionKey) {
       setAskQuestionComposerRevealed(false);
       return;
@@ -25363,6 +26333,12 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!pendingAskQuestionInteractiveKey) return;
     if (askQuestionComposerRevealed) return;
+    if (
+      askQuestionComposerHiddenForReadingKeyRef.current ===
+      pendingAskQuestionInteractiveKey
+    ) {
+      return;
+    }
     const el = messagesScrollRef.current;
     if (!el) return;
     let settleTimer: number | null = null;
@@ -25402,6 +26378,25 @@ function HomeContent(): React.JSX.Element {
     askQuestionUsesMobileRail &&
     pendingAskQuestionInteractiveKey !== null &&
     askQuestionComposerRevealed;
+
+  function snapAskQuestionComposerToChatBottom(force = false): void {
+    if (!pendingAskQuestionInteractiveKey || (!force && !askQuestionComposerRevealed)) return;
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    chatProgrammaticScrollUntilMsRef.current = Date.now() + 160;
+    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    if (detail?.id) {
+      chatLastScrollTopByConversationRef.current.set(detail.id, el.scrollTop);
+      chatLastScrollHeightByConversationRef.current.set(detail.id, el.scrollHeight);
+    }
+  }
+
+  function hideAskQuestionComposerForReading(): void {
+    if (!pendingAskQuestionInteractiveKey || !askQuestionComposerRevealed) return;
+    askQuestionComposerHiddenForReadingKeyRef.current = pendingAskQuestionInteractiveKey;
+    setAskQuestionComposerRevealed(false);
+    draftComposerRef.current?.blur();
+  }
 
   function applyZenAtmosphereLayerOpacities(next: Record<string, number>): void {
     setZenAtmosphereLayerOpacities((previous) => {
@@ -25544,6 +26539,9 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (!askQuestionTailSpaceActive) return;
+    if (askQuestionComposerHiddenForReadingKeyRef.current !== null) {
+      return;
+    }
     const el = messagesScrollRef.current;
     if (!el) return;
     const settle = (): void => {
@@ -25561,34 +26559,6 @@ function HomeContent(): React.JSX.Element {
       window.clearTimeout(t2);
     };
   }, [askQuestionTailSpaceActive]);
-
-  useEffect(() => {
-    if (!askQuestionUsesMobileRail) return;
-    if (!pendingAskQuestionInteractiveKey || askQuestionComposerRevealed) return;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed, askQuestionUsesMobileRail]);
-
-  const handleAskQuestionOutsidePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (!askQuestionUsesMobileRail) return;
-      if (!pendingAskQuestionInteractiveKey || askQuestionComposerRevealed) return;
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      /* Chip rail is a sibling below `.messages`; exclude it so option picks still work.
-         Clicks anywhere else — including inside the scrollable thread — collapse. */
-      if (askQuestionRailRef.current?.contains(target)) return;
-      setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
-    },
-    [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed, askQuestionUsesMobileRail]
-  );
 
   function handleMessagesPaneScroll(event: React.UIEvent<HTMLDivElement>): void {
     scheduleZenAtmosphereScrollBlend(event.currentTarget);
@@ -25614,16 +26584,44 @@ function HomeContent(): React.JSX.Element {
       previousScrollTop !== undefined &&
       scrollDrop > MANUAL_SCROLL_UP_THRESHOLD_PX &&
       !probableReflow;
-    const userInitiatedScroll = Date.now() > chatProgrammaticScrollUntilMsRef.current;
-    if (scrolledUp && userInitiatedScroll) {
+    if (scrolledUp) {
+      chatAutoscrollUserDisarmedByConversationRef.current.set(detail.id, true);
       chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+      hideAskQuestionComposerForReading();
     }
     chatLastScrollTopByConversationRef.current.set(detail.id, el.scrollTop);
     chatLastScrollHeightByConversationRef.current.set(detail.id, el.scrollHeight);
     if (!scrolledUp) return;
   }
-  function preventChatModeThreadScroll(): void {
+  function disarmChatModeAutoscrollFromUserGesture(): void {
     if (!chatEphemeralMode || !detail?.id) return;
+    chatAutoscrollUserDisarmedByConversationRef.current.set(detail.id, true);
+    chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+    hideAskQuestionComposerForReading();
+  }
+  function handleChatModeThreadWheel(event: React.WheelEvent<HTMLDivElement>): void {
+    if (!chatEphemeralMode || !detail?.id) return;
+    if (event.deltaY < -1) {
+      disarmChatModeAutoscrollFromUserGesture();
+    }
+  }
+  function handleChatModeThreadTouchStart(event: React.TouchEvent<HTMLDivElement>): void {
+    chatTouchScrollLastYRef.current = event.touches[0]?.clientY ?? null;
+  }
+  function handleChatModeThreadTouchMove(event: React.TouchEvent<HTMLDivElement>): void {
+    if (!chatEphemeralMode || !detail?.id) return;
+    const nextY = event.touches[0]?.clientY ?? null;
+    const previousY = chatTouchScrollLastYRef.current;
+    chatTouchScrollLastYRef.current = nextY;
+    if (nextY === null || previousY === null) return;
+    // Swiping down moves the thread upward. That is the user's "pause follow"
+    // gesture while PRISM is typing, so let the scroll surface take over.
+    if (nextY - previousY > 4) {
+      disarmChatModeAutoscrollFromUserGesture();
+    }
+  }
+  function handleChatModeThreadTouchEnd(): void {
+    chatTouchScrollLastYRef.current = null;
   }
 
   function resetComposerHistoryCursor(): void {
@@ -25786,6 +26784,9 @@ function HomeContent(): React.JSX.Element {
     startDraftTransition(() => {
       setDraft(nextDraft);
     });
+    if (nextDraft !== draft) {
+      snapAskQuestionComposerToChatBottom();
+    }
   }
 
   function handleComposerChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -25831,7 +26832,7 @@ function HomeContent(): React.JSX.Element {
 
   function renderComposerWritingAssistAction(): React.ReactNode {
     if (
-      composerHiddenByAskQuestion ||
+      composerHiddenByChoiceChips ||
       settings?.composerWritingAssist === false ||
       draft.trim().length === 0
     ) {
@@ -25856,6 +26857,11 @@ function HomeContent(): React.JSX.Element {
 
   function handleComposerFocus() {
     setComposerFocused(true);
+    snapAskQuestionComposerToChatBottom();
+  }
+
+  function handleComposerPointerDown() {
+    snapAskQuestionComposerToChatBottom();
   }
 
   function handleComposerBlur(e: React.FocusEvent<HTMLFormElement>) {
@@ -31239,7 +32245,6 @@ function HomeContent(): React.JSX.Element {
   function renderComposeUtilityActions(): React.JSX.Element {
     return (
       <div className={styles.composeUtilityActions}>
-        {view !== "chat" ? renderDevToolsButton() : null}
       </div>
     );
   }
@@ -35000,47 +36005,6 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderDevToolsButton = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED) return null;
-    const devToolsButtonStyle: React.CSSProperties & Record<"--dev-tools-button-accent", string> = {
-      left: `${devToolsButtonPosition.x}px`,
-      top: `${devToolsButtonPosition.y}px`,
-      "--dev-tools-button-accent": normalizeAccentForTheme(
-        activeBot?.color ?? PRISM_DEFAULT_ACCENT,
-        resolvedTheme
-      ),
-    };
-
-    return (
-      <button
-        ref={devToolsButtonRef}
-        type="button"
-        className={`${styles.headerIconButton} ${styles.devToolsButton}`}
-        data-dev-tools-default={!activeBot ? "true" : undefined}
-        style={devToolsButtonStyle}
-        onPointerDown={startDevToolsButtonDrag}
-        onPointerMove={dragDevToolsButton}
-        onPointerUp={endDevToolsButtonDrag}
-        onPointerCancel={endDevToolsButtonDrag}
-        onClick={() => {
-          if (devToolsButtonSuppressClickRef.current) {
-            devToolsButtonSuppressClickRef.current = false;
-            return;
-          }
-          setDevToolsMessage(null);
-          setDevToolsOpen((open) => {
-            if (open) setDevTogglesOpen(false);
-            return !open;
-          });
-        }}
-        aria-label="Open developer tools"
-        data-glyph-tooltip="Developer tools"
-      >
-        <IconKey />
-      </button>
-    );
-  };
-
   const renderDevTogglesModal = (): React.JSX.Element | null => {
     if (!devTogglesOpen) return null;
     return (
@@ -35102,8 +36066,8 @@ function HomeContent(): React.JSX.Element {
             <span>
               <strong>Enable slash dev commands in chat</strong>
               <small>
-                Allows local chat commands like <code>/forget</code>, <code>/forget all</code>,
-                and <code>/help</code> to run in the composer without sending them to the model.
+                Allows local chat commands like <code>/forget</code> and{" "}
+                <code>/forget all</code> to run in the composer without sending them to the model.
               </small>
             </span>
           </label>
@@ -35185,7 +36149,7 @@ function HomeContent(): React.JSX.Element {
           .filter((botId): botId is string => typeof botId === "string")
           .concat(
             coffeeSocialById
-              ? Object.keys(coffeeSocialById).filter(
+              ? Object.keys(coffeeSocialById ?? {}).filter(
                   (botId) =>
                     !coffeeSocialSeatOrder.some((seatBotId) => seatBotId === botId)
                 )
@@ -35195,6 +36159,766 @@ function HomeContent(): React.JSX.Element {
     );
     const formatSocialPercent = (value: number): string =>
       `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+    const activeDevToolsNavItem =
+      DEV_TOOLS_NAV_ITEMS.find((item) => item.id === devToolsActiveSection) ??
+      DEV_TOOLS_NAV_ITEMS[0];
+    const devToolsConversationName =
+      detail?.title?.trim() ||
+      (devToolsHasSavedConversation ? "Saved thread" : "No saved thread");
+    const devToolsMemoryTargetLabel =
+      memoryPanelScope === "bot" && memoryPanelBot
+        ? memoryPanelBot.name
+        : memoryPanelScope === "default"
+          ? "Default Prism"
+          : "All bots";
+    const devToolsTraceCount = devChatDebugEvents.length;
+    const devToolsSectionContent = (() => {
+      switch (devToolsActiveSection) {
+        case "seed":
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Quantity</span>
+                  <strong>{resolvedDevToolsBotQuantity.toLocaleString()}</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Shared by bot creation, seed chats, density stages, and memory seed actions.
+                </p>
+                <label className={styles.devToolsCountControl}>
+                  <span>Count</span>
+                  <input
+                    type="number"
+                    min={DEV_TOOLS_BOT_QUANTITY_MIN}
+                    max={DEV_TOOLS_BOT_QUANTITY_MAX}
+                    step={1}
+                    value={devToolsBotQuantity}
+                    aria-label="Quantity for developer tools add actions"
+                    onChange={(event) => {
+                      const next = event.currentTarget.value;
+                      setDevToolsBotQuantity(
+                        next === "" ? "" : clampDevToolsBotQuantity(Number(next))
+                      );
+                    }}
+                    disabled={devToolsBusy}
+                  />
+                </label>
+                <div className={styles.devToolsQuantityRail} aria-label="Quick quantities">
+                  {DEV_TOOLS_BOT_QUANTITY_PRESETS.map((quantity) => (
+                    <button
+                      key={quantity}
+                      type="button"
+                      className={`${styles.devToolsPresetButton} ${
+                        resolvedDevToolsBotQuantity === quantity
+                          ? styles.devToolsPresetButtonActive
+                          : ""
+                      }`}
+                      onClick={() => setDevToolsBotQuantity(quantity)}
+                      disabled={devToolsBusy}
+                    >
+                      {quantity}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Picker density stages</span>
+                  <strong>{bots.length.toLocaleString()} bots</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Stage buttons set the total bot count for the live viewport.
+                </p>
+                <div
+                  className={styles.devToolsStageRail}
+                  aria-label="Bot picker density stages"
+                >
+                  {densityStageTargets.map((stage) => {
+                    const isCurrentTarget = bots.length === stage.targetCount;
+                    return (
+                      <button
+                        key={stage.id}
+                        type="button"
+                        className={`${styles.devToolsStageButton} ${
+                          isCurrentTarget ? styles.devToolsStageButtonActive : ""
+                        }`}
+                        onClick={() => void devToolsSetBotDensityStage(stage.id)}
+                        disabled={devToolsBusy}
+                      >
+                        <span>{stage.label}</span>
+                        <strong>{stage.targetCount}</strong>
+                        <small>{stage.description}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Generate fixtures</span>
+                  <strong>Safe add</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Add randomized bots or seed conversations without leaving the current surface.
+                </p>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsAddRandomBots()}
+                    disabled={devToolsBusy}
+                  >
+                    Add bots
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsAddSeedChats()}
+                    disabled={devToolsBusy}
+                  >
+                    Add chats
+                  </button>
+                </div>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsDangerCard}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Danger zone</span>
+                  <strong>{bots.length.toLocaleString()} bots</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Clears generated and user-created bots that are not protected.
+                </p>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+                    onClick={() => void devToolsDeleteAllBots()}
+                    disabled={devToolsBusy || bots.length === 0}
+                  >
+                    Delete all bots
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+
+        case "conversation":
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Current thread</span>
+                  <strong>{devToolsSummaryMode}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Thread</small>
+                    <strong>{devToolsConversationName}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Connection</small>
+                    <strong>
+                      {devToolsHasSavedConversation
+                        ? sessionOpinion
+                          ? `${opinionBandTitle(sessionOpinion.band)} · ${sessionOpinion.score}%`
+                          : "No read"
+                        : "Unsaved"}
+                    </strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Bot opinion</small>
+                    <strong>
+                      {botOpinion
+                        ? `${botOpinionBandTitle(botOpinion.band)} · ${botOpinion.score}%`
+                        : "No read"}
+                    </strong>
+                  </span>
+                </div>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Connection presets</span>
+                  <strong>{devToolsHasSavedConversation ? "Ready" : "No chat"}</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Sets the selected chat Connection state and opens the panel for visual checks.
+                </p>
+                <div
+                  className={styles.devToolsConnectionRail}
+                  aria-label="Connection panel presets"
+                >
+                  {DEV_TOOLS_CONNECTION_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={styles.devToolsPresetButton}
+                      onClick={() => void devToolsSetConnectionPreset(preset)}
+                      disabled={devToolsBusy || !devToolsHasSavedConversation}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Bot relationship</span>
+                  <strong>{activeBot?.name ?? "Default Prism"}</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Forces long-term relationship states for the active bot or Default Prism.
+                </p>
+                <div
+                  className={styles.devToolsConnectionRail}
+                  aria-label="Bot opinion presets"
+                >
+                  {DEV_TOOLS_BOT_OPINION_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={styles.devToolsPresetButton}
+                      onClick={() => void devToolsSetBotOpinionPreset(preset)}
+                      disabled={devToolsBusy}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Summarization</span>
+                  <strong>{summaryDebug?.inProgress ? "Running" : "Idle"}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Latest</small>
+                    <strong>{summaryDebug?.latestSummaryAt ?? "none"}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Messages since compact</small>
+                    <strong>{summaryDebug?.messagesSinceLastCompaction ?? 0}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Summary count</small>
+                    <strong>{summaryDebug?.summaryCount ?? 0}</strong>
+                  </span>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Latest payload: <strong>{devToolsSummaryPreview ?? "none"}</strong>
+                </p>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsRunSummaryNow(devToolsSummaryMode)}
+                    disabled={devToolsBusy || !devToolsHasSavedConversation}
+                  >
+                    Run summary now
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void refreshSummaryDebug(devToolsSummaryMode)}
+                    disabled={devToolsBusy || !devToolsHasSavedConversation}
+                  >
+                    Refresh metrics
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+                    onClick={() => void devToolsResetSummary(devToolsSummaryMode)}
+                    disabled={devToolsBusy || !devToolsHasSavedConversation}
+                  >
+                    Reset summary state
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+
+        case "memory":
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Memory inventory</span>
+                  <strong>{memories.length.toLocaleString()}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>All memories</small>
+                    <strong>{memories.length}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Target</small>
+                    <strong>{devToolsMemoryTargetLabel}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Target count</small>
+                    <strong>{botMemories.length}</strong>
+                  </span>
+                </div>
+                {!devToolsMemoryPanelOpen ? (
+                  <p className={styles.devToolsSectionHint}>
+                    Open the Memories panel to target a specific bot; otherwise use all-bot seeding.
+                  </p>
+                ) : null}
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Seed configuration</span>
+                  <strong>{devToolsMemorySeedSource}</strong>
+                </div>
+                <label className={styles.devToolsCountControl}>
+                  <span>Seed type</span>
+                  <select
+                    value={devToolsMemorySeedSource}
+                    onChange={(event) =>
+                      setDevToolsMemorySeedSource(
+                        event.currentTarget.value as DevToolsMemorySeedSource
+                      )
+                    }
+                    disabled={devToolsBusy}
+                  >
+                    <option value="direct">Direct memories</option>
+                    <option value="inferred">Inferred assumptions</option>
+                    <option value="compiled">Compiled assumptions</option>
+                  </select>
+                </label>
+                <label className={styles.devToolsCountControl}>
+                  <span>
+                    Certainty{" "}
+                    <strong>{Math.round(devToolsMemoryCertainty * 100)}%</strong>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={devToolsMemoryCertainty}
+                    onChange={(event) =>
+                      setDevToolsMemoryCertainty(
+                        Math.max(0, Math.min(1, Number(event.currentTarget.value)))
+                      )
+                    }
+                    disabled={devToolsBusy || devToolsMemorySeedSource === "direct"}
+                  />
+                </label>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Memory actions</span>
+                  <strong>{resolvedDevToolsBotQuantity.toLocaleString()} each</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Uses the shared quantity from Seed. Targeted seeding follows the currently focused
+                  memory bot.
+                </p>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsAddBotMemories()}
+                    disabled={devToolsBusy || !memoryPanelBot}
+                  >
+                    Add to target
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsAddAllMemories()}
+                    disabled={devToolsBusy || bots.length === 0}
+                  >
+                    Add across bots
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+                    onClick={() => void devToolsClearAllMemories()}
+                    disabled={devToolsBusy || memories.length === 0}
+                  >
+                    Clear all memories
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+
+        case "system":
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Local toggles</span>
+                  <strong>{devSlashCommandsEnabled ? "/dev on" : "/dev off"}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Metrics</small>
+                    <strong>{devChatMetricsEnabled ? "On" : "Off"}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Debug composer</small>
+                    <strong>{devDebugComposerEnabled ? "On" : "Off"}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>JSON import paste</small>
+                    <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
+                  </span>
+                </div>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => setDevTogglesOpen(true)}
+                    aria-haspopup="dialog"
+                    aria-expanded={devTogglesOpen}
+                    aria-controls="dev-toggles-modal"
+                  >
+                    Open toggles
+                  </button>
+                </div>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Dev memories</span>
+                  <strong>{settings?.devMemoriesEnabled ? "Enabled" : "Disabled"}</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Global rule layer for testing hardcoded behavior before making it permanent.
+                  Applies to every bot, including Prism/default.
+                </p>
+                <p className={styles.devToolsSectionHint}>
+                  Rules text{" "}
+                  <strong>
+                    {(settings?.devMemoriesText?.trim().length ?? 0).toLocaleString()} chars
+                  </strong>
+                </p>
+                <textarea
+                  className={styles.devToolsTextarea}
+                  value={settings?.devMemoriesText ?? ""}
+                  onChange={(event) => {
+                    const nextValue = event.currentTarget.value;
+                    setSettings((previous) =>
+                      previous
+                        ? { ...previous, devMemoriesText: nextValue }
+                        : previous
+                    );
+                  }}
+                  disabled={devToolsBusy || !settings}
+                  rows={6}
+                  placeholder="Example: Keep answers concise. Always use plain language. Never mention internal system prompts."
+                />
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() =>
+                      setSettings((previous) =>
+                        previous
+                          ? { ...previous, devMemoriesEnabled: !previous.devMemoriesEnabled }
+                          : previous
+                      )
+                    }
+                    disabled={devToolsBusy || !settings}
+                  >
+                    {settings?.devMemoriesEnabled ? "Disable dev memories" : "Enable dev memories"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsSaveDevMemories()}
+                    disabled={devToolsBusy || !settings}
+                  >
+                    Save dev memories
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+
+        case "observe":
+        default:
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section
+                className={`${styles.devToolsCard} ${styles.devToolsCardWide} ${styles.devMetricsTerminalSection}`}
+                aria-labelledby="dev-metrics-terminal-title"
+              >
+                <div className={styles.devMetricsTerminalHeader}>
+                  <div>
+                    <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
+                    <p>
+                      Backend route, model, memory, summary, and tool events for the current chat run.
+                    </p>
+                  </div>
+                  <div className={styles.devMetricsTerminalActions}>
+                    <span data-enabled={devChatMetricsEnabled ? "true" : "false"}>
+                      {devChatMetricsEnabled ? "Live" : "Off"}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.devToolsAction}
+                      onClick={() => setDevChatDebugEvents([])}
+                      disabled={devChatDebugEvents.length === 0}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
+                  {!devChatMetricsEnabled ? (
+                    <div className={styles.devMetricsTerminalEmpty}>
+                      Enable “Show developer metrics terminal” in System to stream backend traces here.
+                    </div>
+                  ) : devChatDebugEvents.length === 0 ? (
+                    <div className={styles.devMetricsTerminalEmpty}>
+                      Waiting for the next chat request...
+                    </div>
+                  ) : (
+                    devChatDebugEvents.slice(-80).map((event) => {
+                      const kind = inferDevChatDebugKind(event);
+                      return (
+                        <div
+                          key={event.id}
+                          className={styles.devMetricsTerminalLine}
+                          data-kind={kind}
+                        >
+                          <span>{new Date(event.createdAt).toLocaleTimeString()}</span>
+                          <code>{event.text}</code>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Viewport</span>
+                  <strong>{viewportWidth}px × {viewportHeight}px</strong>
+                </div>
+                <p className={styles.devToolsViewportStatus} aria-live="polite">
+                  <span>
+                    Width <strong>{viewportWidth}px</strong>
+                  </span>
+                  <span>
+                    Height <strong>{viewportHeight}px</strong>
+                  </span>
+                </p>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Surface snapshot</span>
+                  <strong>{view}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Bots</small>
+                    <strong>{bots.length}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Chats</small>
+                    <strong>{visibleConversations.length}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Trace lines</small>
+                    <strong>{devToolsTraceCount}</strong>
+                  </span>
+                </div>
+              </section>
+
+              {view === "coffee" ? (
+                <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                  <div className={styles.devToolsCardHeader}>
+                    <span>Coffee social diagnostics</span>
+                    <strong>
+                      {coffeeSocialById
+                        ? `${Object.keys(coffeeSocialById ?? {}).length} bots`
+                        : "No snapshot"}
+                    </strong>
+                  </div>
+                  <p className={styles.devToolsSectionHint}>
+                    Hidden per-bot metrics for this Coffee conversation. Player-facing UI never shows this.
+                  </p>
+                  {coffeeSocialById ? (
+                    coffeeSocialOrderedBotIds.length > 0 ? (
+                      <div className={styles.devToolsDiagnosticList}>
+                        {coffeeSocialOrderedBotIds.map((botId) => {
+                          const social = coffeeSocialById?.[botId];
+                          if (!social) return null;
+                          const bot = coffeeBotsById.get(botId);
+                          return (
+                            <p key={botId} className={styles.devToolsSectionHint}>
+                              <strong>{bot?.name ?? botId}</strong> · disposition{" "}
+                              <strong>{formatSocialPercent(social.disposition)}</strong> · values friction{" "}
+                              <strong>{formatSocialPercent(social.valuesFriction)}</strong> · restraint{" "}
+                              <strong>{formatSocialPercent(social.restraint)}</strong> · engagement{" "}
+                              <strong>{formatSocialPercent(social.engagement)}</strong> · leave pressure{" "}
+                              <strong>{formatSocialPercent(social.leavePressure)}</strong>
+                            </p>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className={styles.devToolsSectionHint}>No seated bots in this snapshot.</p>
+                    )
+                  ) : (
+                    <p className={styles.devToolsSectionHint}>
+                      Start or continue a Coffee turn to populate social diagnostics.
+                    </p>
+                  )}
+                  <div className={styles.devToolsActions}>
+                    <button
+                      type="button"
+                      className={styles.devToolsAction}
+                      onClick={() =>
+                        setCoffeeSeatMoodDevCycleIndex(
+                          (i) => (i + 1) % COFFEE_SEAT_MOOD_DEV_CYCLE.length
+                        )
+                      }
+                    >
+                      Cycle all seat moods
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+            </div>
+          );
+      }
+    })();
+    return (
+      <>
+        <div
+          ref={devToolsPanelRef}
+          className={styles.devToolsFloatingPanel}
+          role="dialog"
+          aria-labelledby="dev-tools-title"
+          aria-busy={devToolsBusy ? "true" : undefined}
+          data-section={devToolsActiveSection}
+        >
+          <div
+            className={styles.devToolsHeader}
+            onPointerDown={startDevToolsPanelDrag}
+            onPointerMove={dragDevToolsPanel}
+            onPointerUp={endDevToolsPanelDrag}
+            onPointerCancel={endDevToolsPanelDrag}
+          >
+            <div className={styles.devToolsHeaderCopy}>
+              <span className={styles.devToolsKicker}>Local control center</span>
+              <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
+                Developer tools
+              </h2>
+              <p>Inspect, seed, and stress-test PRISM without losing your place.</p>
+            </div>
+            <div className={styles.devToolsHeaderMeta}>
+              <span
+                className={styles.devToolsPill}
+                data-tone={devToolsBusy ? "busy" : "ready"}
+              >
+                {devToolsBusy ? "Working" : "Ready"}
+              </span>
+              <span className={styles.devToolsDragHint} aria-hidden="true">
+                drag
+              </span>
+              <button
+                type="button"
+                className={styles.devToolsIconButton}
+                onClick={closeDevTools}
+                aria-label="Close developer tools"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.devToolsOverviewGrid} aria-label="Developer tool status">
+            <span className={styles.devToolsOverviewItem}>
+              <small>Surface</small>
+              <strong>{view}</strong>
+            </span>
+            <span className={styles.devToolsOverviewItem}>
+              <small>Viewport</small>
+              <strong>{viewportWidth}×{viewportHeight}</strong>
+            </span>
+            <span className={styles.devToolsOverviewItem}>
+              <small>Bots</small>
+              <strong>{bots.length.toLocaleString()}</strong>
+            </span>
+            <span className={styles.devToolsOverviewItem}>
+              <small>Memories</small>
+              <strong>{memories.length.toLocaleString()}</strong>
+            </span>
+          </div>
+
+          {devToolsMessage ? (
+            <p className={styles.devToolsStatus} role="status">
+              {devToolsMessage}
+            </p>
+          ) : null}
+
+          <div className={styles.devToolsLayout}>
+            <nav className={styles.devToolsNav} aria-label="Developer tool categories">
+              {DEV_TOOLS_NAV_ITEMS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={styles.devToolsNavButton}
+                  data-active={item.id === devToolsActiveSection ? "true" : undefined}
+                  onClick={() => setDevToolsActiveSection(item.id)}
+                  aria-pressed={item.id === devToolsActiveSection}
+                >
+                  <span>{item.label}</span>
+                  <small>{item.description}</small>
+                </button>
+              ))}
+            </nav>
+
+            <main className={styles.devToolsContent}>
+              <header className={styles.devToolsContentHeader}>
+                <div>
+                  <span className={styles.devToolsKicker}>Category</span>
+                  <h3>{activeDevToolsNavItem.label}</h3>
+                </div>
+                <p>{activeDevToolsNavItem.description}</p>
+              </header>
+              {devToolsSectionContent}
+            </main>
+          </div>
+
+          <footer className={styles.devToolsFooter}>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              onClick={sendRandomConversationNudge}
+              disabled={pendingReply}
+              data-glyph-tooltip="Send random suggested prompt"
+            >
+              Random prompt
+            </button>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              onClick={closeDevTools}
+            >
+              Close
+            </button>
+          </footer>
+        </div>
+        {renderDevTogglesModal()}
+      </>
+    );
     return (
       <>
         <div
@@ -35315,7 +37039,7 @@ function HomeContent(): React.JSX.Element {
               <span className={styles.devToolsSectionTitle}>Coffee social diagnostics</span>
               <span className={styles.devToolsToggleSummary}>
                 {coffeeSocialById
-                  ? <>Bots <strong>{Object.keys(coffeeSocialById).length}</strong></>
+                  ? <>Bots <strong>{Object.keys(coffeeSocialById ?? {}).length}</strong></>
                   : "No social snapshot yet"}
               </span>
             </summary>
@@ -35326,7 +37050,7 @@ function HomeContent(): React.JSX.Element {
               coffeeSocialOrderedBotIds.length > 0 ? (
                 <div className={styles.devToolsSectionHint}>
                   {coffeeSocialOrderedBotIds.map((botId) => {
-                    const social = coffeeSocialById[botId];
+                    const social = coffeeSocialById?.[botId];
                     if (!social) return null;
                     const bot = coffeeBotsById.get(botId);
                     return (
@@ -35490,10 +37214,10 @@ function HomeContent(): React.JSX.Element {
             <span className={styles.devToolsToggleSummary}>
               {devToolsHasSavedConversation
                 ? sessionOpinion
-                  ? `${opinionBandTitle(sessionOpinion.band)} · ${sessionOpinion.score}%`
+                  ? `${opinionBandTitle(sessionOpinion!.band)} · ${sessionOpinion!.score}%`
                   : "No read yet"
                 : "No saved chat"}
-              {botOpinion ? ` | ${botOpinionBandTitle(botOpinion.band)} · ${botOpinion.score}%` : ""}
+              {botOpinion ? ` | ${botOpinionBandTitle(botOpinion!.band)} · ${botOpinion!.score}%` : ""}
             </span>
           </summary>
           <p className={styles.devToolsSectionHint}>
@@ -35501,7 +37225,7 @@ function HomeContent(): React.JSX.Element {
             <strong>
               {devToolsHasSavedConversation
                 ? sessionOpinion
-                  ? `${opinionBandTitle(sessionOpinion.band)} · ${sessionOpinion.score}% · ${opinionTrendLabel(sessionOpinion.trend)}`
+                  ? `${opinionBandTitle(sessionOpinion!.band)} · ${sessionOpinion!.score}% · ${opinionTrendLabel(sessionOpinion!.trend)}`
                   : "No Connection read yet"
                 : "Open a saved chat first"}
             </strong>
@@ -35614,7 +37338,7 @@ function HomeContent(): React.JSX.Element {
             <span className={styles.devToolsToggleSummary}>
               Mode <strong>{devToolsSummaryMode}</strong>
               {summaryDebug ? (
-                <> · in progress: <strong>{summaryDebug.inProgress ? "yes" : "no"}</strong></>
+                <> · in progress: <strong>{summaryDebug!.inProgress ? "yes" : "no"}</strong></>
               ) : null}
             </span>
           </summary>
@@ -35671,7 +37395,7 @@ function HomeContent(): React.JSX.Element {
               All: <strong>{memories.length}</strong>
               {memoryPanelScope === "bot" && memoryPanelBot ? (
                 <>
-                  {" "}· {memoryPanelBot.name}: <strong>{botMemories.length}</strong>
+                  {" "}· {memoryPanelBot!.name}: <strong>{botMemories.length}</strong>
                 </>
               ) : null}
             </p>
@@ -36432,7 +38156,7 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.panelHeader}>
             <div className={styles.panelHeaderTitle}>
               <span className={styles.panelHeaderKicker}>Prompt Center</span>
-              <h3>Prompts</h3>
+              <h3>Commands</h3>
             </div>
             <button
               type="button"
@@ -36451,6 +38175,12 @@ function HomeContent(): React.JSX.Element {
               commandCenterCommands.find(
                 (candidate) => candidate.id === commandCenterSelectedCommandId
               ) ?? null;
+            const builtInCommandCenterCommands = commandCenterCommands.filter(
+              (command) => command.builtIn || command.readOnly
+            );
+            const userPromptCenterCommands = commandCenterCommands.filter(
+              (command) => !command.builtIn && !command.readOnly
+            );
             const addPrompt = (): void => {
               const draft = createUserCommandDraft(commandCenterCommands);
               setCommandCenterCommands((current) =>
@@ -36462,12 +38192,107 @@ function HomeContent(): React.JSX.Element {
               );
               setCommandCenterSelectedCommandId(draft.id);
             };
+            const renderPromptCenterCommandRow = (
+              command: CommandCenterCommand
+            ): React.ReactNode => {
+              const canDeletePrompt = !command.builtIn && !command.readOnly;
+              const deleteKey = commandCenterPromptDeleteKey(command.id);
+              const deleteArmed = pendingDeleteKey === deleteKey;
+              const deleteButtonClassName = [
+                styles.conversationDelete,
+                styles.promptCenterPromptDelete,
+                deleteArmed ? styles.conversationDeleteArmed : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              const deletePrompt = (): void => {
+                setCommandCenterCommands((current) =>
+                  normalizeCommandCenterState({
+                    schema: "prism-command-center-v1",
+                    preferredModel: commandCenterPreferredModel,
+                    commands: current.filter((entry) => entry.id !== command.id),
+                  }).commands
+                );
+                setCommandCenterSelectedCommandId((current) =>
+                  current === command.id ? null : current
+                );
+                setCommandCenterSpecsCommandId((current) =>
+                  current === command.id ? null : current
+                );
+              };
+              return (
+                <div
+                  key={command.id}
+                  className={styles.promptCenterPromptRowFrame}
+                  data-deletable={canDeletePrompt ? "true" : undefined}
+                  role="listitem"
+                >
+                  <button
+                    type="button"
+                    className={styles.promptCenterPromptRow}
+                    data-active={
+                      command.id === commandCenterSelectedCommandId
+                        ? "true"
+                        : undefined
+                    }
+                    data-read-only={command.readOnly ? "true" : undefined}
+                    onClick={() => {
+                      setCommandCenterSelectedCommandId(command.id);
+                      setCommandCenterSpecsCommandId(null);
+                    }}
+                  >
+                    <span className={styles.promptCenterPromptName}>
+                      /{command.name}
+                    </span>
+                    <span className={styles.promptCenterPromptMeta}>
+                      {command.readOnly ? "Built-in" : "Custom"}
+                      {command.aliases.length > 0
+                        ? ` · ${command.aliases.length} aliases`
+                        : ""}
+                    </span>
+                  </button>
+                  {canDeletePrompt ? (
+                    <button
+                      type="button"
+                      className={deleteButtonClassName}
+                      data-delete-affordance="true"
+                      aria-label={
+                        deleteArmed
+                          ? `Confirm delete prompt /${command.name}`
+                          : `Delete prompt /${command.name}`
+                      }
+                      data-glyph-tooltip={
+                        deleteArmed ? `Confirm delete /${command.name}` : "Delete prompt"
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (deleteArmed) {
+                          disarmDelete();
+                          deletePrompt();
+                          return;
+                        }
+                        armDelete(deleteKey);
+                      }}
+                    >
+                      {deleteArmed && (
+                        <span className={styles.conversationDeletePrompt}>
+                          Are you sure?
+                        </span>
+                      )}
+                      <span className={styles.conversationDeleteGlyph}>
+                        {deleteArmed ? "✓" : "×"}
+                      </span>
+                    </button>
+                  ) : null}
+                </div>
+              );
+            };
             return (
               <div
                 className={styles.promptCenterWorkspace}
                 data-has-selection={selectedCommand ? "true" : undefined}
               >
-                <aside className={styles.promptCenterSidebar} aria-label="Saved prompts">
+                <aside className={styles.promptCenterSidebar} aria-label="Commands and prompts">
                   <section className={styles.promptCenterModelCard}>
                     <span className={styles.promptCenterEyebrow}>Model</span>
                     <label>
@@ -36480,7 +38305,7 @@ function HomeContent(): React.JSX.Element {
                           )
                         }
                       >
-                        <option value={AUTO_MODEL_CHOICE}>Auto</option>
+                        <option value={AUTO_MODEL_CHOICE}>Inherit current model</option>
                         {localModelOptions.map((model) => (
                           <option key={`local:${model.id}`} value={`local:${model.id}`}>
                             {`LOCAL - ${model.label}`}
@@ -36497,41 +38322,27 @@ function HomeContent(): React.JSX.Element {
                       </select>
                     </label>
                   </section>
-                  <section className={styles.promptCenterListSection}>
+                  <section className={styles.promptCenterListSection} data-kind="commands">
                     <div className={styles.promptCenterListHeader}>
-                      <span>Saved prompts</span>
+                      <span>Commands</span>
+                    </div>
+                    <div className={styles.promptCenterPromptList} role="list">
+                      {builtInCommandCenterCommands.map(renderPromptCenterCommandRow)}
+                    </div>
+                  </section>
+                  <section className={styles.promptCenterListSection} data-kind="prompts">
+                    <div className={styles.promptCenterListHeader}>
+                      <span>Prompts</span>
                       <button type="button" onClick={addPrompt}>
                         New
                       </button>
                     </div>
                     <div className={styles.promptCenterPromptList} role="list">
-                      {commandCenterCommands.map((command) => (
-                        <button
-                          key={command.id}
-                          type="button"
-                          className={styles.promptCenterPromptRow}
-                          data-active={
-                            command.id === commandCenterSelectedCommandId
-                              ? "true"
-                              : undefined
-                          }
-                          data-read-only={command.readOnly ? "true" : undefined}
-                          onClick={() => {
-                            setCommandCenterSelectedCommandId(command.id);
-                            setCommandCenterSpecsCommandId(null);
-                          }}
-                        >
-                          <span className={styles.promptCenterPromptName}>
-                            /{command.name}
-                          </span>
-                          <span className={styles.promptCenterPromptMeta}>
-                            {command.readOnly ? "Built-in" : "Custom"}
-                            {command.arguments.length > 0
-                              ? ` · ${command.arguments.length} flags`
-                              : ""}
-                          </span>
-                        </button>
-                      ))}
+                      {userPromptCenterCommands.length > 0 ? (
+                        userPromptCenterCommands.map(renderPromptCenterCommandRow)
+                      ) : (
+                        <p className={styles.promptCenterListEmpty}>No prompts yet.</p>
+                      )}
                     </div>
                   </section>
                 </aside>
@@ -36543,12 +38354,12 @@ function HomeContent(): React.JSX.Element {
                         className={styles.promptCenterMobileBack}
                         onClick={() => setCommandCenterSelectedCommandId(null)}
                       >
-                        Back to prompts
+                        Back to Prompt Center
                       </button>
                       <header className={styles.promptCenterEditorHeader}>
                         <div>
                           <span className={styles.promptCenterEyebrow}>
-                            {selectedCommand.readOnly ? "Built-in prompt" : "Custom prompt"}
+                            {selectedCommand.readOnly ? "Built-in command" : "Prompt"}
                           </span>
                           <h4>/{selectedCommand.name}</h4>
                         </div>
@@ -36562,22 +38373,22 @@ function HomeContent(): React.JSX.Element {
                       {selectedCommand.readOnly ? (
                         <div className={styles.promptCenterReadonlyBody}>
                           <section className={styles.promptCenterReadonlyBlock}>
-                            <span>Prompt text</span>
+                            <span>Command text</span>
                             <pre>{selectedCommand.command || "(empty)"}</pre>
                           </section>
                           <section className={styles.promptCenterReadonlyBlock}>
-                            <span>Flags</span>
-                            {selectedCommand.arguments.length > 0 ? (
+                            <span>Aliases</span>
+                            {selectedCommand.aliases.length > 0 ? (
                               <div className={styles.promptCenterFlagPreviewList}>
-                                {selectedCommand.arguments.map((argument) => (
-                                  <div key={argument.key} className={styles.promptCenterFlagPreview}>
-                                    <code>-{argument.key}</code>
-                                    <span>{argument.value}</span>
+                                {selectedCommand.aliases.map((alias) => (
+                                  <div key={alias} className={styles.promptCenterFlagPreview}>
+                                    <code>/{alias}</code>
+                                    <span>Alias for /{selectedCommand.name}</span>
                                   </div>
                                 ))}
                               </div>
                             ) : (
-                              <p>No flags configured.</p>
+                              <p>No aliases configured.</p>
                             )}
                           </section>
                         </div>
@@ -36673,57 +38484,49 @@ function HomeContent(): React.JSX.Element {
                             />
                           </label>
                           <div className={styles.promptCenterFlagsHeader}>
-                            <span>Flags</span>
+                            <span>Aliases</span>
                             <button
                               type="button"
                               onClick={() => {
                                 setCommandCenterCommands((current) => {
                                   const now = new Date().toISOString();
-                                  return normalizeCommandCenterState({
-                                    schema: "prism-command-center-v1",
-                                    preferredModel: commandCenterPreferredModel,
-                                    commands: current.map((entry) =>
-                                      entry.id === selectedCommand.id
-                                        ? {
-                                            ...entry,
-                                            arguments: [{ key: "", value: "" }, ...entry.arguments],
-                                            updatedAt: now,
-                                          }
-                                        : entry
-                                    ),
-                                  }).commands;
+                                  return current.map((entry) =>
+                                    entry.id === selectedCommand.id
+                                      ? {
+                                          ...entry,
+                                          aliases: ["", ...entry.aliases],
+                                          updatedAt: now,
+                                        }
+                                      : entry
+                                  );
                                 });
                               }}
                             >
-                              Add flag
+                              Add alias
                             </button>
                           </div>
                           <div className={styles.promptCenterFlagList}>
-                            {selectedCommand.arguments.length === 0 && (
-                              <p>No flags yet.</p>
+                            {selectedCommand.aliases.length === 0 && (
+                              <p>No aliases yet.</p>
                             )}
-                            {selectedCommand.arguments.map((argument, index) => (
+                            {selectedCommand.aliases.map((alias, index) => (
                               <div
-                                key={`${selectedCommand.id}-arg-${index}`}
+                                key={`${selectedCommand.id}-alias-${index}`}
                                 className={styles.promptCenterFlagRow}
                               >
                                 <input
                                   type="text"
-                                  value={argument.key}
+                                  value={alias ? `/${alias}` : ""}
                                   onChange={(event) => {
-                                    const nextKey = normalizeCommandArgumentKeyInput(
-                                      event.currentTarget.value
-                                    );
+                                    const nextAlias = normalizeCommandNameInput(event.currentTarget.value);
                                     setCommandCenterCommands((current) => {
                                       const now = new Date().toISOString();
                                       return current.map((entry) =>
                                         entry.id === selectedCommand.id
                                           ? {
                                               ...entry,
-                                              arguments: entry.arguments.map((item, itemIndex) =>
-                                                itemIndex === index
-                                                  ? { ...item, key: nextKey }
-                                                  : item
+                                              aliases: entry.aliases.map((item, itemIndex) =>
+                                                itemIndex === index ? nextAlias : item
                                               ),
                                               updatedAt: now,
                                             }
@@ -36731,33 +38534,33 @@ function HomeContent(): React.JSX.Element {
                                       );
                                     });
                                   }}
-                                  placeholder="flag"
+                                  onBlur={() => {
+                                    setCommandCenterCommands((current) => {
+                                      const now = new Date().toISOString();
+                                      return normalizeCommandCenterState({
+                                        schema: "prism-command-center-v1",
+                                        preferredModel: commandCenterPreferredModel,
+                                        commands: current.map((entry) =>
+                                          entry.id === selectedCommand.id
+                                            ? {
+                                                ...entry,
+                                                aliases: normalizeCommandAliasList(
+                                                  entry.aliases,
+                                                  entry.name
+                                                ),
+                                                updatedAt: now,
+                                              }
+                                            : entry
+                                        ),
+                                      }).commands;
+                                    });
+                                  }}
+                                  placeholder="/alias"
                                   spellCheck={false}
                                 />
-                                <input
-                                  type="text"
-                                  value={argument.value}
-                                  onChange={(event) => {
-                                    const nextValue = event.currentTarget.value;
-                                    setCommandCenterCommands((current) => {
-                                      const now = new Date().toISOString();
-                                      return current.map((entry) =>
-                                        entry.id === selectedCommand.id
-                                          ? {
-                                              ...entry,
-                                              arguments: entry.arguments.map((item, itemIndex) =>
-                                                itemIndex === index
-                                                  ? { ...item, value: nextValue }
-                                                  : item
-                                              ),
-                                              updatedAt: now,
-                                            }
-                                          : entry
-                                      );
-                                    });
-                                  }}
-                                  placeholder="Instruction added by this flag"
-                                />
+                                <span className={styles.promptCenterAliasHint}>
+                                  Alias for /{selectedCommand.name}
+                                </span>
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -36770,7 +38573,7 @@ function HomeContent(): React.JSX.Element {
                                           entry.id === selectedCommand.id
                                             ? {
                                                 ...entry,
-                                                arguments: entry.arguments.filter(
+                                                aliases: entry.aliases.filter(
                                                   (_, itemIndex) => itemIndex !== index
                                                 ),
                                                 updatedAt: now,
@@ -36780,7 +38583,7 @@ function HomeContent(): React.JSX.Element {
                                       }).commands;
                                     });
                                   }}
-                                  aria-label={`Remove flag ${index + 1}`}
+                                  aria-label={`Remove alias ${index + 1}`}
                                 >
                                   ×
                                 </button>
@@ -36811,8 +38614,8 @@ function HomeContent(): React.JSX.Element {
                     </>
                   ) : (
                     <div className={styles.promptCenterEmptyState}>
-                      <strong>Select a prompt</strong>
-                      <p>Choose a saved slash prompt or create a new one.</p>
+                      <strong>Select a command or prompt</strong>
+                      <p>Choose a built-in command or create a prompt.</p>
                     </div>
                   )}
                 </section>
@@ -36821,6 +38624,133 @@ function HomeContent(): React.JSX.Element {
           })()}
         </div>
       )}
+
+      {commandCenterHelpModalOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className={settingsModalBackdropClassName}
+            role="presentation"
+            onClick={() => setCommandCenterHelpModalOpen(false)}
+          >
+            <div
+              className={styles.commandHelpModal}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Available commands and prompts"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <header className={styles.commandHelpHeader}>
+                <div>
+                  <span>Help</span>
+                  <h4>Commands &amp; prompts</h4>
+                  <p>Choose a slash entry to place it in the composer.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCommandCenterHelpModalOpen(false)}
+                  aria-label="Close command help"
+                >
+                  ×
+                </button>
+              </header>
+              {(() => {
+                const builtInCommands = commandCenterCommands.filter(
+                  (command) => command.builtIn || command.readOnly
+                );
+                const customPrompts = commandCenterCommands.filter(
+                  (command) => !command.builtIn && !command.readOnly
+                );
+                const devCommands = devSlashCommandsEnabled
+                  ? [
+                      {
+                        invocation: "/forget",
+                        description:
+                          "Forget player-only memory and reset summaries for a fresh next turn.",
+                      },
+                      {
+                        invocation: "/forget all",
+                        description:
+                          "Hard-reset the active chat, memory artifacts, summaries, and recall state.",
+                      },
+                    ]
+                  : [];
+                const renderCommandHelpRows = (
+                  command: CommandCenterCommand,
+                  kind: "command" | "prompt"
+                ): React.ReactNode[] => {
+                  const description =
+                    command.command.trim() ||
+                    (kind === "command" ? "Runs a built-in command." : "Runs this prompt.");
+                  return commandInvocationNames(command).map((name, index) => (
+                    <button
+                      key={`${command.id}:${name}`}
+                      type="button"
+                      className={styles.commandHelpRow}
+                      onClick={() => insertCommandCenterInvocation(`/${name}`)}
+                    >
+                      <span className={styles.commandHelpSlash}>/{name}</span>
+                      <span className={styles.commandHelpDescription}>
+                        {index === 0 ? description : `Alias for /${command.name}. ${description}`}
+                      </span>
+                    </button>
+                  ));
+                };
+                return (
+                  <div className={styles.commandHelpBody}>
+                    <section className={styles.commandHelpSection}>
+                      <h5>Commands</h5>
+                      <div className={styles.commandHelpList}>
+                        {builtInCommands.flatMap((command) =>
+                          renderCommandHelpRows(command, "command")
+                        )}
+                      </div>
+                    </section>
+                    {devCommands.length > 0 && (
+                      <section className={styles.commandHelpSection}>
+                        <h5>Developer Commands</h5>
+                        <div className={styles.commandHelpList}>
+                          {devCommands.map((command) => (
+                            <button
+                              key={command.invocation}
+                              type="button"
+                              className={styles.commandHelpRow}
+                              onClick={() =>
+                                insertCommandCenterInvocation(command.invocation)
+                              }
+                            >
+                              <span className={styles.commandHelpSlash}>
+                                {command.invocation}
+                              </span>
+                              <span className={styles.commandHelpDescription}>
+                                {command.description}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+                    <section className={styles.commandHelpSection}>
+                      <h5>Prompts</h5>
+                      {customPrompts.length > 0 ? (
+                        <div className={styles.commandHelpList}>
+                          {customPrompts.flatMap((command) =>
+                            renderCommandHelpRows(command, "prompt")
+                          )}
+                        </div>
+                      ) : (
+                        <p className={styles.commandHelpEmpty}>
+                          No custom prompts yet.
+                        </p>
+                      )}
+                    </section>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* ── Settings panel ── */}
       {panel === "settings" && (
@@ -44283,7 +46213,6 @@ function HomeContent(): React.JSX.Element {
             : null}
         {renderCoffeeGroupSettingsModal()}
 
-        {renderDevToolsButton()}
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}
         {renderDeleteAllModal()}
@@ -45000,7 +46929,6 @@ function HomeContent(): React.JSX.Element {
                 ? renderStoryFailed()
                 : renderStoryPlay(storySession)}
         </section>
-        {renderDevToolsButton()}
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}
         {renderDeleteAllModal()}
@@ -45064,7 +46992,6 @@ function HomeContent(): React.JSX.Element {
             >
               <ThemeGlyph mode={effectiveThemeMode} />
             </button>
-            {renderDevToolsButton()}
             <div className={styles.hubUtilityActions}>
               <button
                 type="button"
@@ -45280,7 +47207,6 @@ function HomeContent(): React.JSX.Element {
           </button>
         </div>
       </div>
-      {renderDevToolsButton()}
       {renderSharedPanels()}
       {renderDevToolsPanel()}
       {renderViewSwitchOverlay()}
@@ -45304,6 +47230,10 @@ function HomeContent(): React.JSX.Element {
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
+      data-ask-question-composer-hidden={
+        askQuestionComposerHiddenByChoices ? "true" : undefined
+      }
+      data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       data-chat-sidebar-hidden="true"
       data-zen-surface="true"
       style={appShellStyle}
@@ -45316,7 +47246,6 @@ function HomeContent(): React.JSX.Element {
       <section
         className={styles.chatPane}
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
-        onPointerDownCapture={handleAskQuestionOutsidePointerDown}
       >
         <header className={styles.chatHeader}>
           <div className={styles.chatHeaderIdentityGroup}>
@@ -45543,8 +47472,11 @@ function HomeContent(): React.JSX.Element {
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
             onPointerCancel={handleCanvasBotMarqueePointerEnd}
-            onWheelCapture={preventChatModeThreadScroll}
-            onTouchMoveCapture={preventChatModeThreadScroll}
+            onWheelCapture={handleChatModeThreadWheel}
+            onTouchStartCapture={handleChatModeThreadTouchStart}
+            onTouchMoveCapture={handleChatModeThreadTouchMove}
+            onTouchEndCapture={handleChatModeThreadTouchEnd}
+            onTouchCancelCapture={handleChatModeThreadTouchEnd}
           >
           {canvasBotMarqueeRect ? (
             <div
@@ -45752,7 +47684,7 @@ function HomeContent(): React.JSX.Element {
                   } as React.CSSProperties)
                 : undefined;
             const headingColorStyle =
-              msg.role === "assistant" && !detail?.incognito
+              msg.role === "assistant" && !detail?.incognito && !chatLikeSurface
                 ? (detail?.mode === "sandbox" && msg.botColor
                     ? resolveComplementHeadingColorVars(
                         normalizeAccentForTheme(msg.botColor, resolvedTheme),
@@ -45764,6 +47696,15 @@ function HomeContent(): React.JSX.Element {
               msg.role === "user" && threadConversationAccentInk
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
                 : undefined;
+            const zenUserPrismColor = msg.role === "user"
+              ? zenUserMessagePrismColorById.get(msg.id)
+              : undefined;
+            const zenUserPrismColorStyle = zenUserPrismColor
+              ? ({
+                  "--zen-user-prism-color-bright": zenUserPrismColor.bright,
+                  "--zen-user-prism-color-dark": zenUserPrismColor.dark,
+                } as React.CSSProperties)
+              : undefined;
             const privateUserRoleHeader = detail?.incognito === true && msg.role === "user";
             const mobileFocusAccentStyle =
               contextFocusedMessageId === msg.id
@@ -45771,25 +47712,26 @@ function HomeContent(): React.JSX.Element {
                     "--message-context-accent": deriveMobileMessageFocusAccent(msg),
                   } as React.CSSProperties)
                 : undefined;
-            const latestUserAnchorFadeOpacity = resolveLatestUserAnchorFadeOpacity(msg);
-            const latestUserAnchorFadeStyle =
-              latestUserAnchorFadeOpacity !== null
-                ? ({ opacity: latestUserAnchorFadeOpacity } as React.CSSProperties)
-                : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
+            const messageRevealEligible =
+              temporalKey !== null &&
+              msg.role === "assistant" &&
+              chatAssistantRevealEligibleKeysRef.current.has(temporalKey);
             const canceledRevealTokenCount =
-              temporalKey !== null
+              messageRevealEligible && temporalKey !== null
                 ? chatCancelledRevealTokenCountByKeyRef.current.get(temporalKey)
                 : undefined;
             const messageRevealCancelled = typeof canceledRevealTokenCount === "number";
             const messageRevealAlreadyCompleted =
+              msg.role === "assistant" &&
               temporalKey !== null &&
               !messageRevealCancelled &&
-              chatCompletedRevealKeysRef.current.has(temporalKey);
+              (!messageRevealEligible || chatCompletedRevealKeysRef.current.has(temporalKey));
             const forcedVisibleTokenCount =
               chatAssistantTypingMechanicsActive &&
+              messageRevealEligible &&
               msg.role === "assistant" &&
               msg.id === latestAssistantMessageId &&
               detail?.id
@@ -45799,7 +47741,6 @@ function HomeContent(): React.JSX.Element {
                       chatMessageFirstSeenAtRef.current.get(`${detail.id}:${msg.id}`) ?? chatEphemeralNowMs;
                     const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
                     const revealTokens = tokenizeMessageReveal(displayContent);
-                    const assistantMood = resolveMessageMoodKey(msg);
                     const tokenTotal = Math.max(1, revealTokens.length);
                     if (messageRevealAlreadyCompleted) return tokenTotal;
                     if (messageRevealCancelled) {
@@ -45810,7 +47751,7 @@ function HomeContent(): React.JSX.Element {
                     }
                     return Math.min(
                       tokenTotal,
-                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, assistantMood)
+                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, DEFAULT_MESSAGE_MOOD)
                     );
                   })()
                 : undefined;
@@ -45854,8 +47795,8 @@ function HomeContent(): React.JSX.Element {
                   ...(messageStyle ?? {}),
                   ...(headingColorStyle ?? {}),
                   ...userInkStyle,
+                  ...(zenUserPrismColorStyle ?? {}),
                   ...mobileFocusAccentStyle,
-                  ...(latestUserAnchorFadeStyle ?? {}),
                   ...messageDynamicTypeStyle,
                 }}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
@@ -45963,6 +47904,7 @@ function HomeContent(): React.JSX.Element {
                   messageRole={msg.role}
                   revealWordByWord={
                     assistantWordByWordMode &&
+                    messageRevealEligible &&
                     msg.role === "assistant" &&
                     msg.id === latestAssistantMessageId &&
                     !messageRevealAlreadyCompleted
@@ -45970,9 +47912,10 @@ function HomeContent(): React.JSX.Element {
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatLikeSurface}
+                  suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
-                  revealMoodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterCommandById}
@@ -46051,25 +47994,29 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
+          {renderStarterPromptInlineRail()}
           {manualCompactionIndicatorNode}
           {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
-          {typingIndicatorNode}
+          {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
         </div>
+        {chatLikeSurface ? typingIndicatorNode : null}
 
         <form
           className={styles.compose}
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
+          data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
           data-keyboard-lifted={mobileKeyboardInset > 0 ? "true" : undefined}
           style={composeStyle}
           onSubmit={handleComposerSubmit}
+          onPointerDownCapture={handleComposerPointerDown}
           onBlur={handleComposerBlur}
           onKeyDown={handleComposerKeyDown}
         >
@@ -46098,7 +48045,7 @@ function HomeContent(): React.JSX.Element {
               {renderComposeUtilityActions()}
             </div>
           ) : null}
-          {!composerHiddenByAskQuestion && editingMessageId && (
+          {!composerHiddenByChoiceChips && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
               <span>Editing message. Save sends the revised text.</span>
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
@@ -46106,7 +48053,7 @@ function HomeContent(): React.JSX.Element {
           )}
           {renderComposerWritingAssistAction()}
           {renderQueuedPromptRail()}
-          {!composerHiddenByAskQuestion ? (
+          {!composerHiddenByChoiceChips ? (
             view === "chat" ? (
               <div className={styles.chatComposerStack}>
                 {devDebugComposerEnabled && (
@@ -46152,6 +48099,7 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    commandPicks={commandCenterCommands}
                   />
                 </div>
               </div>
@@ -46172,6 +48120,7 @@ function HomeContent(): React.JSX.Element {
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                commandPicks={commandCenterCommands}
               />
             )
           ) : null}
@@ -46182,7 +48131,6 @@ function HomeContent(): React.JSX.Element {
         {renderCanvasToolsContextMenu()}
       </section>
 
-      {renderDevToolsButton()}
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
@@ -46220,6 +48168,10 @@ function HomeContent(): React.JSX.Element {
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
+      data-ask-question-composer-hidden={
+        askQuestionComposerHiddenByChoices ? "true" : undefined
+      }
+      data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onTouchStart={beginSidebarEdgeSwipe}
@@ -46337,7 +48289,6 @@ function HomeContent(): React.JSX.Element {
       <section
         className={styles.chatPane}
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
-        onPointerDownCapture={handleAskQuestionOutsidePointerDown}
       >
         <header className={styles.chatHeader}>
           <div className={styles.chatHeaderIdentityGroup}>
@@ -46477,8 +48428,11 @@ function HomeContent(): React.JSX.Element {
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
             onPointerCancel={handleCanvasBotMarqueePointerEnd}
-            onWheelCapture={preventChatModeThreadScroll}
-            onTouchMoveCapture={preventChatModeThreadScroll}
+            onWheelCapture={handleChatModeThreadWheel}
+            onTouchStartCapture={handleChatModeThreadTouchStart}
+            onTouchMoveCapture={handleChatModeThreadTouchMove}
+            onTouchEndCapture={handleChatModeThreadTouchEnd}
+            onTouchCancelCapture={handleChatModeThreadTouchEnd}
           >
             {canvasBotMarqueeRect ? (
               <div
@@ -47130,7 +49084,7 @@ function HomeContent(): React.JSX.Element {
               ? ({ "--message-accent": normalizedBotColor } as React.CSSProperties)
               : undefined;
             const headingColorStyle =
-              msg.role === "assistant" && !detail?.incognito
+              msg.role === "assistant" && !detail?.incognito && !chatLikeSurface
                 ? (view === "sandbox" && normalizedBotColor
                     ? resolveComplementHeadingColorVars(normalizedBotColor, resolvedTheme)
                     : resolvePrismHeadingColorVars())
@@ -47139,6 +49093,15 @@ function HomeContent(): React.JSX.Element {
               msg.role === "user" && threadConversationAccentInk
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
                 : undefined;
+            const zenUserPrismColor = msg.role === "user"
+              ? zenUserMessagePrismColorById.get(msg.id)
+              : undefined;
+            const zenUserPrismColorStyle = zenUserPrismColor
+              ? ({
+                  "--zen-user-prism-color-bright": zenUserPrismColor.bright,
+                  "--zen-user-prism-color-dark": zenUserPrismColor.dark,
+                } as React.CSSProperties)
+              : undefined;
             const privateUserRoleHeader = detail?.incognito === true && msg.role === "user";
             const mobileFocusAccentStyle =
               contextFocusedMessageId === msg.id
@@ -47146,25 +49109,26 @@ function HomeContent(): React.JSX.Element {
                     "--message-context-accent": deriveMobileMessageFocusAccent(msg),
                   } as React.CSSProperties)
                 : undefined;
-            const latestUserAnchorFadeOpacity = resolveLatestUserAnchorFadeOpacity(msg);
-            const latestUserAnchorFadeStyle =
-              latestUserAnchorFadeOpacity !== null
-                ? ({ opacity: latestUserAnchorFadeOpacity } as React.CSSProperties)
-                : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
+            const messageRevealEligible =
+              temporalKey !== null &&
+              msg.role === "assistant" &&
+              chatAssistantRevealEligibleKeysRef.current.has(temporalKey);
             const canceledRevealTokenCount =
-              temporalKey !== null
+              messageRevealEligible && temporalKey !== null
                 ? chatCancelledRevealTokenCountByKeyRef.current.get(temporalKey)
                 : undefined;
             const messageRevealCancelled = typeof canceledRevealTokenCount === "number";
             const messageRevealAlreadyCompleted =
+              msg.role === "assistant" &&
               temporalKey !== null &&
               !messageRevealCancelled &&
-              chatCompletedRevealKeysRef.current.has(temporalKey);
+              (!messageRevealEligible || chatCompletedRevealKeysRef.current.has(temporalKey));
             const forcedVisibleTokenCount =
               chatAssistantTypingMechanicsActive &&
+              messageRevealEligible &&
               msg.role === "assistant" &&
               msg.id === latestAssistantMessageId &&
               detail?.id
@@ -47174,7 +49138,6 @@ function HomeContent(): React.JSX.Element {
                       chatMessageFirstSeenAtRef.current.get(`${detail.id}:${msg.id}`) ?? chatEphemeralNowMs;
                     const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
                     const revealTokens = tokenizeMessageReveal(displayContent);
-                    const assistantMood = resolveMessageMoodKey(msg);
                     const tokenTotal = Math.max(1, revealTokens.length);
                     if (messageRevealAlreadyCompleted) return tokenTotal;
                     if (messageRevealCancelled) {
@@ -47185,7 +49148,7 @@ function HomeContent(): React.JSX.Element {
                     }
                     return Math.min(
                       tokenTotal,
-                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, assistantMood)
+                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, DEFAULT_MESSAGE_MOOD)
                     );
                   })()
                 : undefined;
@@ -47229,8 +49192,8 @@ function HomeContent(): React.JSX.Element {
                   ...(messageStyle ?? {}),
                   ...(headingColorStyle ?? {}),
                   ...userInkStyle,
+                  ...(zenUserPrismColorStyle ?? {}),
                   ...mobileFocusAccentStyle,
-                  ...(latestUserAnchorFadeStyle ?? {}),
                   ...messageDynamicTypeStyle,
                 }}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
@@ -47335,6 +49298,7 @@ function HomeContent(): React.JSX.Element {
                   messageRole={msg.role}
                   revealWordByWord={
                     assistantWordByWordMode &&
+                    messageRevealEligible &&
                     msg.role === "assistant" &&
                     msg.id === latestAssistantMessageId &&
                     !messageRevealAlreadyCompleted
@@ -47342,9 +49306,10 @@ function HomeContent(): React.JSX.Element {
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatLikeSurface}
+                  suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
-                  revealMoodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterCommandById}
@@ -47423,10 +49388,11 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
+          {renderStarterPromptInlineRail()}
           {manualCompactionIndicatorNode}
           {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
-          {typingIndicatorNode}
+          {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
           {/* Scroll sentinel: kept at the very end so the scroll effect can
               always bring the latest content into view. */}
@@ -47435,15 +49401,18 @@ function HomeContent(): React.JSX.Element {
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
         </div>
+        {chatLikeSurface ? typingIndicatorNode : null}
 
         <form
           className={styles.compose}
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
+          data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
           data-keyboard-lifted={mobileKeyboardInset > 0 ? "true" : undefined}
           style={composeStyle}
           onSubmit={handleComposerSubmit}
+          onPointerDownCapture={handleComposerPointerDown}
           onBlur={handleComposerBlur}
           onKeyDown={handleComposerKeyDown}
         >
@@ -47461,7 +49430,7 @@ function HomeContent(): React.JSX.Element {
               onInteractionChange={setLensInteracting}
             />
           )}
-          {!composerHiddenByAskQuestion && editingMessageId && (
+          {!composerHiddenByChoiceChips && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
               <span>Editing message. Save sends the revised text.</span>
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
@@ -47469,7 +49438,7 @@ function HomeContent(): React.JSX.Element {
           )}
           {renderComposerWritingAssistAction()}
           {renderQueuedPromptRail()}
-          {!composerHiddenByAskQuestion ? (
+          {!composerHiddenByChoiceChips ? (
             chatLikeSurface ? (
               <div className={styles.chatComposerStack}>
                 {devDebugComposerEnabled && (
@@ -47515,6 +49484,7 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    commandPicks={commandCenterCommands}
                   />
                 </div>
               </div>
@@ -47535,6 +49505,7 @@ function HomeContent(): React.JSX.Element {
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                commandPicks={commandCenterCommands}
               />
             )
           ) : null}
@@ -47545,7 +49516,6 @@ function HomeContent(): React.JSX.Element {
         {renderCanvasToolsContextMenu()}
       </section>
 
-      {renderDevToolsButton()}
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}

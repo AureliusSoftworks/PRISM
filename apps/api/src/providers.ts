@@ -16,6 +16,8 @@ export interface GenerateOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /** Cancels in-flight provider work when the originating chat request is stopped. */
+  signal?: AbortSignal;
   /** Ask providers that support it to constrain the visible reply to a JSON object. */
   jsonMode?: boolean;
   /** Optional JSON Schema for providers that support structured JSON output. */
@@ -563,7 +565,8 @@ export class LocalOllamaProvider implements LlmProvider {
     const response = await fetch(`${ollamaHost}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: options?.signal,
     });
     if (!response.ok) {
       throw new Error(`Local model request failed (${response.status})`);
@@ -654,7 +657,8 @@ export class OpenAiProvider implements LlmProvider {
         "content-type": "application/json",
         authorization: `Bearer ${this.openAiConfig.apiKey}`
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: options?.signal,
     });
     if (!response.ok) {
       // Surface OpenAI's actual reason (e.g. "model 'foo' does not exist",
@@ -749,6 +753,7 @@ export class AnthropicProvider implements LlmProvider {
         "anthropic-version": ANTHROPIC_API_VERSION,
       },
       body: JSON.stringify(requestBody),
+      signal: options?.signal,
     });
     if (!response.ok) {
       const detail = await readOpenAiErrorMessage(response);

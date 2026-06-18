@@ -48,6 +48,35 @@ export function findPrismBotLinkTextRange(
   return null;
 }
 
+export function applyPrismBotLinkBoundaryDelete(
+  editor: Editor,
+  direction: "backward" | "forward"
+): boolean {
+  const { state } = editor;
+  const sel = state.selection;
+  if (!sel.empty) return false;
+  const caret = sel.from;
+  const docSize = state.doc.content.size;
+  const candidates =
+    direction === "backward"
+      ? [caret]
+      : [caret, Math.min(caret + 1, docSize)];
+
+  for (const candidate of candidates) {
+    const span = findPrismBotLinkTextRange(state, candidate);
+    if (!span) continue;
+    const atBoundary =
+      direction === "backward"
+        ? caret === span.to
+        : caret === span.from || caret === span.from - 1;
+    if (!atBoundary) continue;
+    editor.chain().focus().deleteRange({ from: span.from, to: span.to }).run();
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Word-wise Backspace inside a `prism-bot://` link: multi-word labels drop the
  * trailing word first. When only one word remains and the caret is at the end
@@ -56,6 +85,8 @@ export function findPrismBotLinkTextRange(
  * @returns true when the key event should be treated as handled.
  */
 export function applyPrismBotLinkBackspace(editor: Editor): boolean {
+  if (applyPrismBotLinkBoundaryDelete(editor, "backward")) return true;
+
   const { state } = editor;
   const sel = state.selection;
   if (!sel.empty) return false;

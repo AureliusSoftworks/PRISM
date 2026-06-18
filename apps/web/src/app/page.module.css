@@ -5042,120 +5042,22 @@
 
 /* Developer Tools: local-dev floating surface for stress testing bot density,
    sidebar seed chats, and viewport-sensitive picker stages. */
-.devToolsButton {
-  --dev-tools-button-accent: var(--accent);
-  position: fixed !important;
-  z-index: 2147483647 !important;
-  width: 44px !important;
-  height: 44px !important;
-  min-width: 44px !important;
-  border-radius: 999px !important;
-  border-color: #050505 !important;
-  background: #050505 !important;
-  color: #050505 !important;
-  box-shadow:
-    0 14px 34px rgba(0, 0, 0, 0.28),
-    0 0 0 1px #050505 !important;
-  cursor: grab;
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.devToolsButton::before {
-  content: "";
-  position: absolute;
-  inset: -5px;
-  z-index: -1;
-  border-radius: inherit;
-  background:
-    radial-gradient(circle, rgba(255, 255, 255, 0.22) 0 18%, transparent 42%),
-    radial-gradient(
-      circle,
-      color-mix(in srgb, var(--dev-tools-button-accent) 22%, transparent) 0%,
-      color-mix(in srgb, var(--dev-tools-button-accent) 10%, transparent) 48%,
-      transparent 72%
-    );
-  filter: blur(4px) saturate(1.08);
-  opacity: 0.38;
-  box-shadow:
-    0 0 8px color-mix(in srgb, var(--dev-tools-button-accent) 18%, transparent),
-    0 0 14px color-mix(in srgb, var(--dev-tools-button-accent) 12%, transparent);
-  pointer-events: none;
-}
-
-.devToolsButton::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  z-index: -1;
-  border-radius: inherit;
-  background:
-    radial-gradient(
-      circle,
-      transparent 0 44%,
-      color-mix(in srgb, var(--dev-tools-button-accent) 14%, rgba(255, 255, 255, 0.08)) 52%,
-      transparent 66%
-    );
-  opacity: 0.65;
-  pointer-events: none;
-}
-
-.devToolsButton svg {
-  filter:
-    drop-shadow(0 0 1px rgba(255, 255, 255, 0.55))
-    drop-shadow(0 0 2px color-mix(in srgb, var(--dev-tools-button-accent) 22%, transparent));
-}
-
-.devToolsButton[data-dev-tools-default="true"]::before {
-  background:
-    radial-gradient(circle, rgba(255, 255, 255, 0.18) 0 18%, transparent 42%),
-    conic-gradient(
-      from 18deg,
-      color-mix(in srgb, #ff4f8b 22%, transparent),
-      color-mix(in srgb, #ffb84d 22%, transparent),
-      color-mix(in srgb, #ffe66d 22%, transparent),
-      color-mix(in srgb, #55f7a4 22%, transparent),
-      color-mix(in srgb, #4ddcff 22%, transparent),
-      color-mix(in srgb, #9b7cff 22%, transparent),
-      color-mix(in srgb, #ff4f8b 22%, transparent)
-    );
-  filter: blur(5px) saturate(1.12);
-  opacity: 0.32;
-  box-shadow:
-    0 0 10px color-mix(in srgb, #ffe66d 14%, transparent),
-    0 0 18px color-mix(in srgb, #4ddcff 12%, transparent);
-}
-
-.devToolsButton[data-dev-tools-default="true"]::after {
-  background:
-    radial-gradient(circle, transparent 0 44%, rgba(255, 255, 255, 0.14) 52%, transparent 66%);
-}
-
-.devToolsButton:hover:not(:disabled) {
-  background: #050505 !important;
-  color: #050505 !important;
-}
-
-.devToolsButton:active {
-  cursor: grabbing;
-}
-
 .devToolsFloatingPanel {
   --dev-tools-panel-top: 76px;
   --dev-tools-panel-left: 14px;
   --dev-tools-panel-viewport-margin: 14px;
+  --dev-tools-accent: color-mix(in srgb, #48d6c8 62%, var(--accent) 38%);
   position: fixed;
   top: 76px;
   left: 14px;
   z-index: 2147483646;
   box-sizing: border-box;
-  width: min(760px, calc(100vw - 28px));
-  min-width: min(360px, calc(100vw - 28px));
+  width: min(980px, calc(100vw - 28px));
+  min-width: min(420px, calc(100vw - 28px));
   max-width: calc(
     100vw - var(--dev-tools-panel-left) - var(--dev-tools-panel-viewport-margin)
   );
-  min-height: 220px;
+  min-height: 360px;
   max-height: calc(
     100dvh - var(--dev-tools-panel-top) - var(--dev-tools-panel-viewport-margin)
   );
@@ -5163,11 +5065,13 @@
   resize: both;
   display: grid;
   align-content: start;
-  gap: 10px;
-  padding: 22px 22px 18px;
-  border: 1px solid color-mix(in srgb, var(--line) 78%, var(--danger) 22%);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--bg-elevated) 94%, var(--danger) 6%);
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--dev-tools-accent) 28%);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 18% 0%, color-mix(in srgb, var(--dev-tools-accent) 18%, transparent) 0 28%, transparent 54%),
+    linear-gradient(140deg, color-mix(in srgb, var(--bg-elevated) 95%, var(--dev-tools-accent) 5%), var(--bg-surface));
   box-shadow:
     0 24px 70px rgba(0, 0, 0, 0.34),
     0 8px 22px rgba(0, 0, 0, 0.22);
@@ -5179,8 +5083,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 2px 2px 4px 0;
+  gap: 18px;
+  padding: 2px 2px 10px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -5193,10 +5098,475 @@
 .devToolsDragHint {
   color: var(--fg-muted);
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 16px;
-  letter-spacing: -0.2em;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   line-height: 1;
-  padding-right: 0.2em;
+}
+
+.devToolsHeaderCopy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.devToolsHeaderCopy .deleteAllModalTitle {
+  margin: 0;
+}
+
+.devToolsHeaderCopy p,
+.devToolsContentHeader p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.devToolsKicker {
+  color: var(--dev-tools-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.devToolsHeaderMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.devToolsPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, var(--dev-tools-accent) 22%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 78%, var(--dev-tools-accent) 22%);
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.devToolsPill[data-tone="busy"] {
+  border-color: color-mix(in srgb, #f3c55f 62%, var(--line) 38%);
+  background: color-mix(in srgb, #f3c55f 18%, var(--bg) 82%);
+}
+
+.devToolsIconButton {
+  appearance: none;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-hover) 62%, var(--bg) 38%), var(--bg));
+  color: var(--fg);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 18%, transparent),
+    0 7px 16px rgba(0, 0, 0, 0.14);
+  transition:
+    background 120ms ease-out,
+    box-shadow 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsIconButton:hover,
+.devToolsIconButton:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--fg);
+  outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 22%, transparent),
+    0 10px 20px rgba(0, 0, 0, 0.18);
+}
+
+.devToolsOverviewGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.devToolsOverviewItem,
+.devToolsStat {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--bg) 46%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--line) 50%, transparent);
+  cursor: default;
+  user-select: text;
+}
+
+.devToolsOverviewItem small,
+.devToolsStat small {
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.devToolsOverviewItem strong,
+.devToolsStat strong {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 750;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devToolsLayout {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.devToolsNav {
+  align-self: start;
+  display: grid;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+}
+
+.devToolsNavButton {
+  appearance: none;
+  position: relative;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 11px 34px 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--dev-tools-accent) 28%);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-hover) 34%, var(--bg) 66%), color-mix(in srgb, var(--bg) 92%, transparent));
+  color: var(--fg-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+    0 8px 18px rgba(0, 0, 0, 0.1);
+  transition:
+    background 120ms ease-out,
+    box-shadow 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsNavButton::after {
+  content: "›";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid color-mix(in srgb, var(--dev-tools-accent) 44%, var(--line) 56%);
+  border-radius: 999px;
+  color: var(--dev-tools-accent);
+  font-size: 15px;
+  line-height: 1;
+  transform: translateY(-50%);
+  transition:
+    background 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsNavButton span {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.devToolsNavButton small {
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.devToolsNavButton:hover,
+.devToolsNavButton:focus-visible {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 50%, var(--line-strong) 50%);
+  background: color-mix(in srgb, var(--bg-hover) 78%, var(--dev-tools-accent) 22%);
+  outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
+    0 12px 24px rgba(0, 0, 0, 0.16);
+}
+
+.devToolsNavButton:hover::after,
+.devToolsNavButton:focus-visible::after {
+  background: color-mix(in srgb, var(--dev-tools-accent) 18%, transparent);
+  transform: translate(2px, -50%);
+}
+
+.devToolsNavButton[data-active="true"] {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 68%, var(--line) 32%);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--dev-tools-accent) 22%, var(--bg) 78%), var(--bg));
+  color: var(--fg);
+  box-shadow:
+    inset 3px 0 0 var(--dev-tools-accent),
+    inset 0 1px 0 color-mix(in srgb, white 18%, transparent),
+    0 10px 22px rgba(0, 0, 0, 0.14);
+}
+
+.devToolsNavButton[data-active="true"]::after {
+  content: "•";
+  background: color-mix(in srgb, var(--dev-tools-accent) 22%, transparent);
+}
+
+.devToolsContent {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.devToolsContentHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.devToolsContentHeader h3 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 20px;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+}
+
+.devToolsCardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.devToolsCard {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 66%, transparent);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-surface) 76%, transparent), color-mix(in srgb, var(--bg) 68%, transparent));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--line) 48%, transparent),
+    0 4px 14px rgba(0, 0, 0, 0.05);
+  cursor: default;
+}
+
+.devToolsCardWide {
+  grid-column: 1 / -1;
+}
+
+.devToolsDangerCard {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line) 55%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--danger-soft) 30%, var(--bg-surface) 70%), var(--bg));
+}
+
+.devToolsCardHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.devToolsCardHeader span {
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.devToolsCardHeader strong {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 800;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devToolsStatGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.devToolsDiagnosticList {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.devToolsFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+}
+
+.devToolsFooter .deleteAllModalCancel {
+  border-color: color-mix(in srgb, var(--line-strong) 72%, var(--dev-tools-accent) 28%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-hover) 46%, var(--bg) 54%), var(--bg));
+  color: var(--fg);
+  font-weight: 760;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 14%, transparent),
+    0 8px 18px rgba(0, 0, 0, 0.1);
+}
+
+.devToolsFooter .deleteAllModalCancel:hover:not(:disabled),
+.devToolsFooter .deleteAllModalCancel:focus-visible {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 60%, var(--line-strong) 40%);
+  background: color-mix(in srgb, var(--bg-hover) 84%, var(--dev-tools-accent) 16%);
+  transform: translateY(-1px);
+}
+
+.devMetricsTerminalSection {
+  overflow: hidden;
+}
+
+.devMetricsTerminalHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.devMetricsTerminalHeader h3 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.devMetricsTerminalHeader p {
+  margin: 4px 0 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.devMetricsTerminalActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.devMetricsTerminalActions span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.devMetricsTerminalActions span[data-enabled="true"] {
+  border-color: color-mix(in srgb, #5ce1a8 58%, var(--line) 42%);
+  background: color-mix(in srgb, #5ce1a8 14%, var(--bg) 86%);
+  color: var(--fg);
+}
+
+.devMetricsTerminal {
+  display: grid;
+  gap: 4px;
+  min-height: 180px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
+  border-radius: 13px;
+  background: color-mix(in srgb, #061015 72%, var(--bg) 28%);
+}
+
+.devMetricsTerminalEmpty {
+  align-self: center;
+  justify-self: center;
+  color: color-mix(in srgb, #d8f6ff 62%, var(--fg-muted) 38%);
+  font-size: 12px;
+  text-align: center;
+}
+
+.devMetricsTerminalLine {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+  color: color-mix(in srgb, #d8f6ff 80%, white 20%);
+  font-size: 11px;
+}
+
+.devMetricsTerminalLine span {
+  color: color-mix(in srgb, #8eb3c0 82%, white 18%);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.devMetricsTerminalLine code {
+  min-width: 0;
+  color: inherit;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.devMetricsTerminalLine[data-kind="error"] code {
+  color: #ff8ba0;
+}
+
+.devMetricsTerminalLine[data-kind="memory"] code {
+  color: #b8f7c6;
+}
+
+.devMetricsTerminalLine[data-kind="model"] code {
+  color: #9ee8ff;
 }
 
 .devToolsSection {
@@ -5389,7 +5759,7 @@
 
 .devToolsCountControl {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 84px;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(150px, 1fr);
   align-items: center;
   gap: 10px;
   margin-top: 2px;
@@ -5478,32 +5848,48 @@
 
 .devToolsPresetButton {
   appearance: none;
+  position: relative;
   min-width: 38px;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--dev-tools-accent) 28%);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--bg) 88%, var(--bg-hover) 12%);
-  color: var(--fg-muted);
-  padding: 5px 9px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-hover) 42%, var(--bg) 58%), var(--bg));
+  color: var(--fg);
+  padding: 6px 11px;
   font: inherit;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 760;
   cursor: pointer;
-  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out, transform 120ms ease-out;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 14%, transparent),
+    0 6px 14px rgba(0, 0, 0, 0.1);
+  transition:
+    background 120ms ease-out,
+    box-shadow 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
 }
 
 .devToolsPresetButton:hover:not(:disabled),
 .devToolsPresetButton:focus-visible {
-  background: var(--bg-hover);
-  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--bg-hover) 82%, var(--dev-tools-accent) 18%);
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 62%, var(--line-strong) 38%);
   color: var(--fg);
   outline: none;
   transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 18%, transparent),
+    0 10px 20px rgba(0, 0, 0, 0.15);
 }
 
 .devToolsPresetButtonActive {
-  background: color-mix(in srgb, var(--danger-soft) 60%, var(--bg) 40%);
-  border-color: color-mix(in srgb, var(--danger) 50%, var(--line) 50%);
+  background: color-mix(in srgb, var(--dev-tools-accent) 22%, var(--bg) 78%);
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 72%, var(--line) 28%);
   color: var(--fg);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--dev-tools-accent) 26%, transparent),
+    0 8px 18px rgba(0, 0, 0, 0.12);
 }
 
 .devToolsPresetButton:disabled {
@@ -5520,22 +5906,39 @@
 
 .devToolsStageButton {
   appearance: none;
+  position: relative;
   min-width: 0;
   display: grid;
   gap: 2px;
   justify-items: start;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 74%, var(--dev-tools-accent) 26%);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--bg) 88%, var(--bg-hover) 12%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-hover) 36%, var(--bg) 64%), var(--bg));
   color: var(--fg-muted);
-  padding: 8px 9px;
+  padding: 9px 28px 9px 10px;
   font: inherit;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+    0 8px 18px rgba(0, 0, 0, 0.1);
   transition:
     background 120ms ease-out,
+    box-shadow 120ms ease-out,
     border-color 120ms ease-out,
     color 120ms ease-out,
     transform 120ms ease-out;
+}
+
+.devToolsStageButton::after {
+  content: "↗";
+  position: absolute;
+  right: 9px;
+  top: 8px;
+  color: var(--dev-tools-accent);
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.82;
 }
 
 .devToolsStageButton span {
@@ -5560,17 +5963,23 @@
 
 .devToolsStageButton:hover:not(:disabled),
 .devToolsStageButton:focus-visible {
-  background: var(--bg-hover);
-  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--bg-hover) 82%, var(--dev-tools-accent) 18%);
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 62%, var(--line-strong) 38%);
   color: var(--fg);
   outline: none;
   transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 18%, transparent),
+    0 12px 24px rgba(0, 0, 0, 0.15);
 }
 
 .devToolsStageButtonActive {
-  background: color-mix(in srgb, var(--danger-soft) 58%, var(--bg) 42%);
-  border-color: color-mix(in srgb, var(--danger) 50%, var(--line) 50%);
+  background: color-mix(in srgb, var(--dev-tools-accent) 20%, var(--bg) 80%);
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 72%, var(--line) 28%);
   color: var(--fg);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--dev-tools-accent) 24%, transparent),
+    0 8px 18px rgba(0, 0, 0, 0.12);
 }
 
 .devToolsStageButton:disabled {
@@ -5588,23 +5997,65 @@
 
 .devToolsAction {
   appearance: none;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--dev-tools-accent) 28%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--dev-tools-accent) 12%, var(--bg-hover) 88%), var(--bg));
   color: var(--fg);
-  padding: 8px 14px;
+  padding: 8px 13px;
   font: inherit;
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 760;
   cursor: pointer;
-  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
+    0 8px 18px rgba(0, 0, 0, 0.12);
+  transition:
+    background 120ms ease-out,
+    box-shadow 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsAction::after {
+  content: "→";
+  color: var(--dev-tools-accent);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  transition: transform 120ms ease-out;
 }
 
 .devToolsAction:hover:not(:disabled),
 .devToolsAction:focus-visible {
-  background: var(--bg-hover);
-  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--bg-hover) 82%, var(--dev-tools-accent) 18%);
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 64%, var(--line-strong) 36%);
   outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 20%, transparent),
+    0 12px 24px rgba(0, 0, 0, 0.17);
+}
+
+.devToolsAction:hover:not(:disabled)::after,
+.devToolsAction:focus-visible::after {
+  transform: translateX(2px);
+}
+
+.devToolsAction:active:not(:disabled),
+.devToolsPresetButton:active:not(:disabled),
+.devToolsStageButton:active:not(:disabled),
+.devToolsNavButton:active:not(:disabled),
+.devToolsIconButton:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.16),
+    0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
 .devToolsAction:disabled {
@@ -5614,7 +6065,14 @@
 
 .devToolsActionDanger {
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--line) 45%);
+  border-color: color-mix(in srgb, var(--danger) 62%, var(--line) 38%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--danger-soft) 42%, var(--bg) 58%), var(--bg));
+}
+
+.devToolsActionDanger::after {
+  content: "!";
+  color: var(--danger);
 }
 
 .devToolsActionDanger:hover:not(:disabled),
@@ -5635,6 +6093,36 @@
 }
 
 @media (max-width: 760px) {
+  .devToolsOverviewGrid,
+  .devToolsCardGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .devToolsLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .devToolsNav {
+    position: static;
+    grid-template-columns: repeat(5, minmax(112px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .devToolsNavButton {
+    min-width: 112px;
+  }
+
+  .devToolsContentHeader {
+    align-items: start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .devToolsStatGrid {
+    grid-template-columns: 1fr;
+  }
+
   .devToolsStageRail {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -5644,8 +6132,27 @@
   .devToolsFloatingPanel {
     width: min(460px, calc(100vw - 28px));
     min-width: min(320px, calc(100vw - 28px));
-    padding: 20px 18px 16px;
+    padding: 16px 14px 14px;
     resize: vertical;
+  }
+
+  .devToolsHeader {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .devToolsHeaderMeta {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .devToolsOverviewGrid,
+  .devToolsCardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .devToolsCountControl {
+    grid-template-columns: 1fr;
   }
 
   .devToolsConnectionRail {
@@ -6711,21 +7218,23 @@
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.75) 58px,
-    #000 132px,
-    #000 calc(100% - 190px),
-    rgba(0, 0, 0, 0.7) calc(100% - 140px),
-    transparent calc(100% - 84px),
+    rgba(0, 0, 0, 0.18) clamp(38px, 6dvh, 72px),
+    rgba(0, 0, 0, 0.74) clamp(104px, 15dvh, 170px),
+    #000 clamp(178px, 26dvh, 300px),
+    #000 calc(100% - 238px),
+    rgba(0, 0, 0, 0.58) calc(100% - 190px),
+    transparent calc(100% - 148px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.75) 58px,
-    #000 132px,
-    #000 calc(100% - 190px),
-    rgba(0, 0, 0, 0.7) calc(100% - 140px),
-    transparent calc(100% - 84px),
+    rgba(0, 0, 0, 0.18) clamp(38px, 6dvh, 72px),
+    rgba(0, 0, 0, 0.74) clamp(104px, 15dvh, 170px),
+    #000 clamp(178px, 26dvh, 300px),
+    #000 calc(100% - 238px),
+    rgba(0, 0, 0, 0.58) calc(100% - 190px),
+    transparent calc(100% - 148px),
     transparent 100%
   );
 }
@@ -6738,25 +7247,13 @@
 /* Extra breathing room when AskQuestion chips dock over the thread. */
 .messages.messagesAskQuestionTailSpace {
   padding-bottom: max(240px, 58dvh);
-  transition: padding-bottom 0.22s ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .messages.messagesAskQuestionTailSpace {
-    transition: none;
-  }
+  transition: none;
 }
 
 /* Space for the collapsed AskQuestion ? bubble above the composer. */
 .messages.messagesAskQuestionCollapsedBubbleSpace {
   padding-bottom: max(104px, calc(env(safe-area-inset-bottom, 0px) + 72px));
-  transition: padding-bottom 0.22s ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .messages.messagesAskQuestionCollapsedBubbleSpace {
-    transition: none;
-  }
+  transition: none;
 }
 
 /* Collapsed AskQuestion — memory-style orb above the compose bar. */
@@ -11219,29 +11716,60 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .manualCompactionRow {
-  position: relative;
-  justify-self: stretch;
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: max(18px, env(safe-area-inset-bottom, 0px));
   display: grid;
   place-items: center;
   min-height: 42px;
-  margin: 10px 0;
+  margin: 0;
+  pointer-events: none;
+  z-index: 24;
 }
 
 .manualCompactionDivider {
   position: absolute;
   inset-inline: 0;
   top: 50%;
+  height: 4px;
   width: 100%;
   margin: 0;
   border: 0;
-  border-top: 1px dotted color-mix(in srgb, var(--line) 82%, transparent);
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--fg-muted) 74%, var(--line)) 0 2px,
+    transparent 2.4px
+  );
+  background-position: center;
+  background-repeat: repeat-x;
+  background-size: 12px 4px;
+  opacity: 0.95;
   transform: translateY(-50%);
 }
 
 .manualCompactionIndicator {
   position: relative;
   z-index: 1;
+  justify-self: center;
   margin: 0;
+  background:
+    linear-gradient(
+      130deg,
+      color-mix(in srgb, var(--typing-accent, var(--accent)) 12%, var(--bg-surface)),
+      var(--bg-surface)
+    );
+  border-color: color-mix(in srgb, var(--typing-accent, var(--line)) 42%, var(--line));
+  pointer-events: auto;
+  text-align: left;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .manualCompactionRow {
+  position: fixed;
+  left: 20px;
+  right: 20px;
+  bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  z-index: 9;
 }
 
 .compactedSummaryDebugBubble {
@@ -11359,6 +11887,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 -8px 24px -22px color-mix(in srgb, var(--accent) 34%, transparent);
 }
 
+.compose[data-choice-composer-hidden="true"] {
+  display: none;
+}
+
 .appLayout[data-chat-sidebar-hidden="true"] .compose {
   border-top-color: transparent;
   background: transparent;
@@ -11389,6 +11921,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock.imageJobOrbDock {
   bottom: calc(108px + env(safe-area-inset-bottom, 0px));
   padding-bottom: 0;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"][data-choice-composer-hidden="true"]
+  .messagesFrame
+  > .conversationStarterRail.askQuestionRail {
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
 }
 
 .appLayout[data-chat-sidebar-hidden="true"] .composeTools {
@@ -11422,7 +11960,111 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-height: 100dvh;
 }
 
+.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame[data-chat-focus="true"]::before {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: clamp(172px, 24dvh, 286px);
+  z-index: 3;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb, var(--bg-surface) 58%, transparent) 20%,
+      color-mix(in srgb, var(--bg-surface) 94%, transparent) 42%,
+      var(--bg-surface) 58%,
+      var(--bg-surface) 100%
+    );
+  backdrop-filter: blur(8px) saturate(1.04);
+  -webkit-backdrop-filter: blur(8px) saturate(1.04);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.62) 10%,
+    #000 28%,
+    #000 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.62) 10%,
+    #000 28%,
+    #000 100%
+  );
+}
+
+.appLayout[data-chat-sidebar-hidden="true"].themeLight .messagesFrame[data-chat-focus="true"]::before {
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb, #fffaf2 62%, transparent) 20%,
+      color-mix(in srgb, #fffaf2 96%, transparent) 42%,
+      color-mix(in srgb, #fffaf2 94%, #f4e7d7 6%) 58%,
+      color-mix(in srgb, #fffaf2 94%, #f4e7d7 6%) 100%
+    );
+  backdrop-filter: blur(7px) saturate(0.98);
+  -webkit-backdrop-filter: blur(7px) saturate(0.98);
+}
+
+.appLayout[data-chat-sidebar-hidden="true"][data-ask-question-composer-hidden="true"]
+  .messagesFrame[data-chat-focus="true"]::before {
+  transform: translateY(100%);
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame[data-chat-focus="true"]::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: clamp(190px, 31dvh, 372px);
+  z-index: 3;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg-deep) 96%, transparent) 0%,
+      color-mix(in srgb, var(--bg-deep) 78%, transparent) 34%,
+      color-mix(in srgb, var(--bg-deep) 28%, transparent) 72%,
+      transparent 100%
+    );
+  backdrop-filter: blur(26px) saturate(1.04);
+  -webkit-backdrop-filter: blur(26px) saturate(1.04);
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    rgba(0, 0, 0, 0.96) 46%,
+    rgba(0, 0, 0, 0.42) 74%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    rgba(0, 0, 0, 0.96) 46%,
+    rgba(0, 0, 0, 0.42) 74%,
+    transparent 100%
+  );
+}
+
+.appLayout[data-chat-sidebar-hidden="true"].themeLight .messagesFrame[data-chat-focus="true"]::after {
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, #fffaf2 96%, transparent) 0%,
+      color-mix(in srgb, #fffaf2 80%, transparent) 34%,
+      color-mix(in srgb, #fffaf2 30%, transparent) 72%,
+      transparent 100%
+    );
+  backdrop-filter: blur(24px) saturate(0.98);
+  -webkit-backdrop-filter: blur(24px) saturate(0.98);
+}
+
 .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"] {
+  --chat-prose-runway-top: max(76px, 50dvh);
   position: fixed;
   top: 0;
   left: 0;
@@ -11430,17 +12072,68 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   height: 100dvh;
   min-height: 100dvh;
   max-height: 100dvh;
-  padding-top: 76px;
+  padding-top: var(--chat-prose-runway-top);
   padding-bottom: 104px;
+  scroll-padding-top: var(--chat-prose-runway-top);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.18) clamp(38px, 6dvh, 72px),
+    rgba(0, 0, 0, 0.74) clamp(104px, 15dvh, 170px),
+    #000 clamp(178px, 26dvh, 300px),
+    #000 calc(100% - 188px),
+    rgba(0, 0, 0, 0.62) calc(100% - 150px),
+    transparent calc(100% - 112px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.18) clamp(38px, 6dvh, 72px),
+    rgba(0, 0, 0, 0.74) clamp(104px, 15dvh, 170px),
+    #000 clamp(178px, 26dvh, 300px),
+    #000 calc(100% - 188px),
+    rgba(0, 0, 0, 0.62) calc(100% - 150px),
+    transparent calc(100% - 112px),
+    transparent 100%
+  );
+}
+
+.appLayout[data-zen-surface="true"] .messages.messagesEmptyState[data-chat-ephemeral="true"] {
+  --zen-empty-state-top-reserve: clamp(76px, 9dvh, 112px);
+  --zen-empty-state-bottom-reserve: clamp(116px, 15dvh, 172px);
+  box-sizing: border-box;
+  z-index: 4;
+  align-items: center;
+  justify-content: center;
+  padding:
+    var(--zen-empty-state-top-reserve)
+    clamp(18px, 5vw, 72px)
+    var(--zen-empty-state-bottom-reserve);
+  scroll-padding-top: var(--zen-empty-state-top-reserve);
+  scroll-padding-bottom: var(--zen-empty-state-bottom-reserve);
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
-  --zen-prose-runway-top: clamp(96px, 14dvh, 168px);
+  --zen-prose-runway-top: var(--chat-prose-runway-top);
   --zen-prose-runway-bottom: clamp(132px, 22dvh, 248px);
+  --zen-assistant-prose: color-mix(in srgb, #fffaf2 92%, var(--fg) 8%);
+  --zen-assistant-heading: color-mix(in srgb, var(--zen-assistant-prose) 64%, var(--fg-muted));
+  --zen-user-prism-color-bright: #44d7e6;
+  --zen-user-prism-color-dark: #006f7a;
+  --zen-user-prism-color: var(--zen-user-prism-color-bright);
   padding-top: max(76px, var(--zen-prose-runway-top));
   padding-bottom: max(104px, var(--zen-prose-runway-bottom));
   scroll-padding-top: var(--zen-prose-runway-top);
   scroll-padding-bottom: var(--zen-prose-runway-bottom);
+}
+
+.appLayout[data-zen-surface="true"].themeLight .messages[data-chat-ephemeral="true"] {
+  --zen-assistant-prose: color-mix(in srgb, #15120f 90%, var(--fg) 10%);
+  --zen-assistant-heading: color-mix(in srgb, var(--zen-assistant-prose) 62%, var(--fg-muted));
+  --zen-user-prism-color: var(--zen-user-prism-color-dark);
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .message,
@@ -11448,12 +12141,69 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   scroll-margin-block: clamp(36px, 10dvh, 128px);
 }
 
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant p,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .markdownBody,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .chatEphemeralMarkdownBody,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .chatEphemeralLine {
+  color: var(--zen-assistant-prose);
+}
+
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant h4 {
+  color: var(--zen-assistant-heading);
+}
+
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .markdownBody h1,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .markdownBody h2,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .markdownBody h3,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .markdownBody h4,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .markdownBody h5,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .chatEphemeralLineHeading1,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .chatEphemeralLineHeading2,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .chatEphemeralLineHeading3,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .chatEphemeralLineHeading4,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant .chatEphemeralLineHeading5 {
+  color: var(--zen-assistant-heading);
+}
+
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser {
+  --zen-user-prism-color: var(--zen-user-prism-color-bright);
+  --zen-user-prose: var(--zen-user-prism-color);
+  --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 74%, var(--fg-muted));
+  --zen-user-prose-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.36),
+    0 0 18px color-mix(in srgb, var(--zen-user-prose) 14%, transparent);
+}
+
+.appLayout[data-zen-surface="true"].themeLight .messages[data-chat-ephemeral="true"] .messageUser {
+  --zen-user-prism-color: var(--zen-user-prism-color-dark);
+  --zen-user-prose: var(--zen-user-prism-color);
+  --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 78%, var(--fg-muted));
+  --zen-user-prose-shadow: 0 1px 0 rgba(255, 255, 255, 0.46);
+}
+
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser p,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser .markdownBody,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser .chatEphemeralMarkdownBody,
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser .chatEphemeralLine {
+  color: var(--zen-user-prose);
+  text-shadow: var(--zen-user-prose-shadow);
+}
+
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser h4 {
+  color: var(--zen-user-heading);
+  text-shadow: var(--zen-user-prose-shadow);
+}
+
 .appLayout[data-zen-surface="true"] .messagesEmptyState > .emptyState {
+  flex: 0 1 auto;
+  min-height: auto;
   justify-content: center;
   padding:
-    clamp(104px, 18vh, 168px)
+    clamp(42px, 8vh, 88px)
     clamp(18px, 5vw, 72px)
-    clamp(132px, 22vh, 190px);
+    clamp(54px, 10vh, 104px);
 }
 
 .appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateIconButton {
@@ -11535,13 +12285,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
    that locking scrollTop to its bottom parks the most-recent typing line
    around the middle of the screen instead of pinned just above the pill. */
 .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
-  padding-bottom: max(32dvh, 104px);
+  padding-bottom: max(54dvh, 156px);
   scroll-behavior: auto;
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
-  padding-bottom: max(36dvh, var(--zen-prose-runway-bottom), 132px);
-  scroll-padding-bottom: max(36dvh, var(--zen-prose-runway-bottom));
+  padding-bottom: max(54dvh, var(--zen-prose-runway-bottom), 156px);
+  scroll-padding-bottom: max(54dvh, var(--zen-prose-runway-bottom));
 }
 
 .appLayout[data-private-active="true"] .compose {
@@ -12043,6 +12793,73 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   isolation: isolate;
 }
 
+.conversationStarterInlineRail {
+  align-self: center;
+  width: min(100%, 760px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 2px 0 18px;
+  padding: 0;
+  animation: messageIn 0.18s ease-out;
+}
+
+.messages[data-chat-ephemeral="true"] .conversationStarterInlineRail {
+  width: min(100%, 920px);
+}
+
+.conversationStarterInlineRail .conversationStarterChip {
+  min-height: 58px;
+  border-radius: 16px 16px 16px 8px;
+  background:
+    radial-gradient(
+      circle at 12% 20%,
+      color-mix(in srgb, #ffffff 10%, transparent),
+      transparent 44%
+    ),
+    color-mix(in srgb, var(--accent-soft) 28%, var(--bg-surface));
+}
+
+.conversationStarterInlineRail .conversationStarterChipOther {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  background:
+    radial-gradient(
+      circle at 12% 20%,
+      color-mix(in srgb, #ffffff 14%, transparent),
+      transparent 44%
+    ),
+    linear-gradient(
+      140deg,
+      color-mix(in srgb, var(--accent) 36%, var(--bg-surface)),
+      color-mix(in srgb, var(--accent) 18%, var(--bg-surface))
+    );
+  color: var(--accent-text);
+}
+
+.conversationStarterInlineRail .conversationStarterChipOther:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--line));
+  background:
+    radial-gradient(
+      circle at 12% 20%,
+      color-mix(in srgb, #ffffff 18%, transparent),
+      transparent 44%
+    ),
+    linear-gradient(
+      140deg,
+      color-mix(in srgb, var(--accent) 44%, var(--bg-hover)),
+      color-mix(in srgb, var(--accent) 24%, var(--bg-hover))
+    );
+}
+
+@media (max-width: 620px) {
+  .conversationStarterInlineRail {
+    grid-template-columns: 1fr;
+    width: 100%;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+}
+
 /* Two classes beat `.conversationStarterRail` alone so minmax(…, 260px) cannot win after minification reordering. */
 .conversationStarterRail.askQuestionRail {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -12523,6 +13340,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: color-mix(in srgb, var(--askq-chip-bg) 76%, transparent);
 }
 
+.askQuestionInlineCard[data-ask-question-state="other-selected"] {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--askq-chip-border));
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 12px 34px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.askQuestionInlineCard[data-ask-question-state="other-selected"] .askQuestionInlineAnswer {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--askq-chip-border));
+  background:
+    radial-gradient(
+      circle at 12% 16%,
+      color-mix(in srgb, #ffffff 12%, transparent),
+      transparent 46%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 24%, var(--askq-chip-bg)),
+      color-mix(in srgb, var(--accent) 12%, var(--askq-chip-bg))
+    );
+}
+
 .askQuestionInlineAnswer > span {
   color: color-mix(in srgb, var(--askq-chip-text) 64%, transparent);
   font-size: 0.72rem;
@@ -12630,6 +13470,28 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       transparent 42%
     ),
     var(--askq-chip-bg);
+  box-shadow: inset 0 0 0 1px var(--askq-chip-inset);
+}
+
+.askQuestionInlineCard[data-ask-question-state="answered"]
+  .askQuestionInlineChoices[data-choices-disabled="true"]
+  .conversationStarterChip:nth-child(4):hover,
+.askQuestionInlineCard[data-ask-question-state="answered"]
+  .askQuestionInlineChoices[data-choices-disabled="true"]
+  .conversationStarterChip:nth-child(4):focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--askq-chip-border));
+  background:
+    radial-gradient(
+      circle at 12% 22%,
+      color-mix(in srgb, #ffffff 14%, transparent),
+      transparent 42%
+    ),
+    linear-gradient(
+      140deg,
+      color-mix(in srgb, var(--accent) 34%, var(--askq-chip-bg)),
+      color-mix(in srgb, var(--accent) 20%, var(--askq-chip-bg))
+    );
+  color: var(--accent-text);
   box-shadow: inset 0 0 0 1px var(--askq-chip-inset);
 }
 
@@ -14078,6 +14940,46 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-overflow: ellipsis;
 }
 
+.composeCommandMenu {
+  min-width: min(360px, calc(100vw - 24px));
+}
+
+.composeCommandOption {
+  align-items: flex-start;
+  min-height: 42px;
+}
+
+.composeCommandSlash {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--accent-ink) 78%, #2fd3e3);
+  font: 800 13px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+}
+
+.composeCommandText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.composeCommandMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
 .themeLight .composeBotOptionGlyph,
 .themeLight .composeBotOptionName {
   color: var(--bot-menu-color, var(--fg));
@@ -14766,7 +15668,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .promptCenterSidebar {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, auto) minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
   overflow: hidden;
@@ -14902,7 +15804,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding-right: 2px;
 }
 
+.promptCenterListSection[data-kind="commands"] .promptCenterPromptList {
+  max-height: 230px;
+}
+
+.promptCenterListEmpty {
+  margin: 0;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--fg-muted);
+  padding: 10px;
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.promptCenterPromptRowFrame {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 6px;
+}
+
+.promptCenterPromptRowFrame[data-deletable="true"] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .promptCenterPromptRow {
+  width: 100%;
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -14925,6 +15854,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .promptCenterPromptRow[data-active="true"] {
   border-color: color-mix(in srgb, var(--accent-ink) 46%, var(--line-strong));
   background: color-mix(in srgb, var(--accent-ink) 9%, var(--bg-elevated));
+}
+
+.promptCenterPromptDelete {
+  align-self: stretch;
+  height: auto;
+  min-height: 0;
+  border-radius: 10px;
+}
+
+.promptCenterPromptDelete.conversationDeleteArmed,
+.promptCenterPromptDelete.conversationDeleteArmed:hover,
+.promptCenterPromptDelete.conversationDeleteArmed:focus-visible {
+  position: static;
+  height: auto;
+  min-width: max-content;
+  padding-inline: 10px;
+  border-radius: 10px;
 }
 
 .promptCenterPromptName {
@@ -15054,6 +16000,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-size: 12px;
   line-height: 1.35;
   word-break: break-word;
+}
+
+.promptCenterAliasHint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .promptCenterFlagRow button {
@@ -17559,6 +18515,149 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   outline: none;
   border-color: color-mix(in srgb, var(--danger) 72%, var(--line));
   background: color-mix(in srgb, var(--danger) 22%, var(--bg));
+}
+
+.commandHelpModal {
+  width: min(720px, 100%);
+  max-height: min(86vh, 760px);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 76%, var(--line));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-elevated, #14161c) 97%, #14161c 3%);
+  box-shadow:
+    0 28px 80px color-mix(in srgb, #000 54%, transparent),
+    0 1px 0 color-mix(in srgb, #fff 12%, transparent) inset;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.commandHelpHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.commandHelpHeader span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.commandHelpHeader h4 {
+  margin: 4px 0;
+  color: var(--fg);
+  font-size: 21px;
+  line-height: 1.1;
+}
+
+.commandHelpHeader p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.commandHelpHeader button {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.commandHelpHeader button:hover,
+.commandHelpHeader button:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  outline: none;
+}
+
+.commandHelpBody {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.commandHelpSection {
+  display: grid;
+  gap: 8px;
+}
+
+.commandHelpSection h5 {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.commandHelpList {
+  display: grid;
+  gap: 8px;
+}
+
+.commandHelpRow {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface, #101218) 92%, #101218 8%);
+  color: var(--fg);
+  display: grid;
+  grid-template-columns: minmax(120px, 0.42fr) minmax(0, 1fr);
+  gap: 6px 12px;
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.commandHelpRow:hover,
+.commandHelpRow:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+
+.commandHelpSlash {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--accent-ink) 78%, var(--fg));
+  font: 800 13px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.commandHelpDescription {
+  min-width: 0;
+  color: var(--fg);
+  display: -webkit-box;
+  font-size: 12.5px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.35;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.commandHelpEmpty {
+  margin: 0;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--fg-muted);
+  padding: 10px;
+  font-size: 12.5px;
+  line-height: 1.35;
 }
 
 .botProfileSummaryCard {
@@ -26038,6 +27137,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     justify-self: end;
   }
 
+  .commandHelpRow {
+    grid-template-columns: 1fr;
+  }
+
   .panelSettings > .settingsWorkspace {
     min-height: 0;
     overflow-y: auto;
@@ -26731,23 +27834,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     overflow: hidden;
   }
 
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame[data-chat-focus="true"]::before {
+    content: none;
+  }
+
   .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame[data-chat-focus="true"] .messages[data-chat-ephemeral="true"] {
     max-height: none;
     margin-block: 0;
   }
 
   .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"] {
+    --chat-prose-runway-top: clamp(160px, 38dvh, 320px);
     position: relative;
     inset: auto;
     height: 100%;
     min-height: 0;
     max-height: none;
-    padding-top: 18px;
+    padding-top: var(--chat-prose-runway-top);
     padding-bottom: max(32px, calc(env(safe-area-inset-bottom) + 24px));
+    scroll-padding-top: var(--chat-prose-runway-top);
   }
 
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
-    --zen-prose-runway-top: clamp(40px, 10dvh, 92px);
+    --zen-prose-runway-top: var(--chat-prose-runway-top);
     --zen-prose-runway-bottom: clamp(72px, 16dvh, 140px);
     padding-top: var(--zen-prose-runway-top);
     padding-bottom: max(
@@ -26758,22 +27867,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     scroll-padding-bottom: var(--zen-prose-runway-bottom);
   }
 
+  .appLayout[data-zen-surface="true"] .messages.messagesEmptyState[data-chat-ephemeral="true"] {
+    --zen-empty-state-top-reserve: clamp(24px, 7dvh, 76px);
+    --zen-empty-state-bottom-reserve: clamp(84px, 14dvh, 132px);
+    padding:
+      var(--zen-empty-state-top-reserve)
+      max(12px, env(safe-area-inset-left))
+      var(--zen-empty-state-bottom-reserve)
+      max(12px, env(safe-area-inset-right));
+    scroll-padding-top: var(--zen-empty-state-top-reserve);
+    scroll-padding-bottom: var(--zen-empty-state-bottom-reserve);
+  }
+
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .message,
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .zenEraBoundary {
     scroll-margin-block: clamp(28px, 8dvh, 76px);
   }
 
   .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
-    padding-bottom: max(32dvh, calc(env(safe-area-inset-bottom) + 24px));
+    padding-bottom: max(54dvh, calc(env(safe-area-inset-bottom) + 96px));
   }
 
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
     padding-bottom: max(
-      32dvh,
+      54dvh,
       var(--zen-prose-runway-bottom),
-      calc(env(safe-area-inset-bottom) + 48px)
+      calc(env(safe-area-inset-bottom) + 96px)
     );
-    scroll-padding-bottom: max(32dvh, var(--zen-prose-runway-bottom));
+    scroll-padding-bottom: max(54dvh, var(--zen-prose-runway-bottom));
   }
 
   .appLayout[data-chat-sidebar-hidden="true"] .compose {

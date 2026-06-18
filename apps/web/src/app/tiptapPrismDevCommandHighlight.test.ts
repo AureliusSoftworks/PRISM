@@ -18,6 +18,22 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     });
   });
 
+  it("does not highlight partial known commands before the full token is typed", () => {
+    assert.equal(
+      resolveLeadingDevCommandTextRanges("/cle", { commandNames: ["clear", "cls"] }),
+      null
+    );
+    assert.deepEqual(
+      resolveLeadingDevCommandTextRanges("/clear", { commandNames: ["clear", "cls"] }),
+      {
+        commandStart: 0,
+        commandEnd: 6,
+        quotedStringRanges: [],
+        actionTokenRanges: [],
+      }
+    );
+  });
+
   it("recognizes custom prompt shortcuts", () => {
     const out = resolveLeadingDevCommandTextRanges("/summarize-this -f notes");
     assert.deepEqual(out, {

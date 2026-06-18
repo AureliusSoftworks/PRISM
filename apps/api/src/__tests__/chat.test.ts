@@ -479,7 +479,7 @@ describe("processChatMessage starter prompts", () => {
       "user-1",
       "memory-conv-1",
       null,
-      [{ text: "The user prefers reflective evening check-ins.", confidence: 0.96 }],
+      [{ text: "You prefer reflective evening check-ins.", confidence: 0.96 }],
       userKey,
       { sourceMessageIds: ["memory-source-1"] }
     );
@@ -542,6 +542,7 @@ describe("processChatMessage starter prompts", () => {
       {
         preferredProvider: "local",
         autoMemory: true,
+        userDisplayName: "Jared",
         starterPrompt: true,
         starterPromptLabel: "Ethan",
         incognito: false,
@@ -553,10 +554,11 @@ describe("processChatMessage starter prompts", () => {
     const starterUserInstruction = starterBody?.messages?.filter((m) => m.role === "user").pop();
     assert.match(starterUserInstruction?.content ?? "", /Ask exactly ONE direct question/i);
     const memoryBlock = starterBody?.messages?.find((msg) =>
-      msg.content.startsWith("User memory hints:\n")
+      msg.content.startsWith("User memory hints about the human user:\n")
     );
     assert.ok(memoryBlock);
-    assert.match(memoryBlock?.content ?? "", /reflective evening check-ins/i);
+    assert.match(memoryBlock?.content ?? "", /Jared prefers reflective evening check-ins/i);
+    assert.doesNotMatch(memoryBlock?.content ?? "", /- You prefer/i);
   });
 
   it("rewrites generic starter openers into memory-anchored questions", async () => {

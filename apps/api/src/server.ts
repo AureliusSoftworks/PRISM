@@ -2474,6 +2474,15 @@ function buildRoutes(): RouteDefinition[] {
           ? generationOverrides
           : undefined;
 
+      const chatAbort = new AbortController();
+      const onChatClientClose = () => {
+        if (!ctx.res.writableEnded) {
+          chatAbort.abort();
+        }
+      };
+      ctx.req.once("close", onChatClientClose);
+      ctx.req.once("aborted", onChatClientClose);
+      ctx.res.once("close", onChatClientClose);
       let result: Awaited<ReturnType<typeof processChatMessage>>;
       try {
         result = await processChatMessage(
@@ -2512,6 +2521,7 @@ function buildRoutes(): RouteDefinition[] {
             mode,
             sessionEnding,
             forceNewConversation,
+            signal: chatAbort.signal,
             ...(promptShortcut ? { promptShortcut } : {}),
           },
           conversationId
@@ -2523,6 +2533,10 @@ function buildRoutes(): RouteDefinition[] {
           );
         }
         throw error;
+      } finally {
+        ctx.req.off("close", onChatClientClose);
+        ctx.req.off("aborted", onChatClientClose);
+        ctx.res.off("close", onChatClientClose);
       }
       const {
         conversation,
@@ -3385,6 +3399,64 @@ function buildRoutes(): RouteDefinition[] {
         db.prepare(
           "UPDATE messages SET content = ? WHERE id = ? AND user_id = ?"
         ).run(text, messageId, userId);
+        db.prepare(
+          "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+        ).run(new Date().toISOString(), message.conversation_id, userId);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+
+      json(ctx.res, 200, {
+        ok: true,
+      });
+    }),
+    route("POST", "/api/messages/:id/interrupt", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const content = readString(body.content, "Interruption text");
+      const messageId = ctx.params.id;
+      const message = db.prepare(`
+        SELECT m.id, m.conversation_id, m.role, m.created_at,
+               c.conversation_mode
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id AND c.user_id = m.user_id
+        WHERE m.id = ? AND m.user_id = ?
+      `).get(messageId, userId) as
+        | {
+          id: string;
+          conversation_id: string;
+          role: string;
+          created_at: string;
+          conversation_mode: string | null;
+        }
+        | undefined;
+
+      if (!message) {
+        throw new Error("Message not found.");
+      }
+      if (message.role !== "assistant") {
+        throw new Error("Only assistant messages can be interrupted.");
+      }
+      if (message.conversation_mode !== "zen" && message.conversation_mode !== "chat") {
+        throw new Error("Only Zen assistant messages can be interrupted.");
+      }
+      const laterMessage = db.prepare(
+        "SELECT id FROM messages WHERE conversation_id = ? AND user_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1"
+      ).get(message.conversation_id, userId, message.created_at) as { id: string } | undefined;
+      if (laterMessage) {
+        throw new Error("Only the latest Zen assistant message can be interrupted.");
+      }
+
+      db.exec("BEGIN IMMEDIATE TRANSACTION");
+      try {
+        db.prepare(
+          "UPDATE messages SET content = ?, tool_payload = NULL WHERE id = ? AND user_id = ?"
+        ).run(content, messageId, userId);
+        db.prepare(
+          "DELETE FROM memory_summaries WHERE user_id = ? AND conversation_id = ?"
+        ).run(userId, message.conversation_id);
         db.prepare(
           "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
         ).run(new Date().toISOString(), message.conversation_id, userId);
@@ -4852,6 +4924,9 @@ const server = createServer(async (req, res) => {
       params: parseParams(matchingRoute, pathname)
     });
   } catch (error) {
+    if (res.writableEnded || res.destroyed) {
+      return;
+    }
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status =
       error instanceof HttpError ? error.statusCode : 400;

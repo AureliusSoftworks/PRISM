@@ -5,6 +5,14 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 const DEV_COMMAND_RE = /^\/[a-z0-9][a-z0-9-]*(?=\s|$)/iu;
 
+interface PrismDevCommandHighlightOptions {
+  /**
+   * When provided, only exact command-name matches are decorated. This keeps
+   * `/cle` plain while the user is still typing toward `/clear`.
+   */
+  commandNames: readonly string[] | null;
+}
+
 interface DevCommandHighlightRanges {
   command: { from: number; to: number };
   quotedStrings: Array<{ from: number; to: number }>;
@@ -22,12 +30,22 @@ export interface LeadingDevCommandTextRanges {
 }
 
 export function resolveLeadingDevCommandTextRanges(
-  firstTextBlockText: string
+  firstTextBlockText: string,
+  options: { commandNames?: readonly string[] | null } = {}
 ): LeadingDevCommandTextRanges | null {
   const leadingWs = (firstTextBlockText.match(/^\s*/u)?.[0] ?? "").length;
   const tail = firstTextBlockText.slice(leadingWs);
   const commandMatch = DEV_COMMAND_RE.exec(tail);
   if (!commandMatch) return null;
+  const commandName = commandMatch[0].slice(1).toLowerCase();
+  if (options.commandNames) {
+    const known = new Set(
+      options.commandNames
+        .map((name) => name.trim().replace(/^\/+/, "").toLowerCase())
+        .filter(Boolean)
+    );
+    if (!known.has(commandName)) return null;
+  }
 
   const commandStart = leadingWs;
   const commandEnd = commandStart + commandMatch[0].length;
@@ -118,7 +136,10 @@ export function hasLeadingDevCommand(doc: ProseMirrorNode): boolean {
   return findLeadingDevCommandRanges(doc) !== null;
 }
 
-function findLeadingDevCommandRanges(doc: ProseMirrorNode): DevCommandHighlightRanges | null {
+function findLeadingDevCommandRanges(
+  doc: ProseMirrorNode,
+  commandNames?: readonly string[] | null
+): DevCommandHighlightRanges | null {
   let firstTextBlockText = "";
   let firstTextBlockPos = -1;
   doc.descendants((node: ProseMirrorNode, pos: number) => {
@@ -128,7 +149,9 @@ function findLeadingDevCommandRanges(doc: ProseMirrorNode): DevCommandHighlightR
     return false;
   });
   if (firstTextBlockPos < 0) return null;
-  const textRanges = resolveLeadingDevCommandTextRanges(firstTextBlockText);
+  const textRanges = resolveLeadingDevCommandTextRanges(firstTextBlockText, {
+    commandNames,
+  });
   if (!textRanges) return null;
   const commandFrom = firstTextBlockPos + 1 + textRanges.commandStart;
   const commandTo = firstTextBlockPos + 1 + textRanges.commandEnd;
@@ -161,14 +184,29 @@ function findLeadingDevCommandRanges(doc: ProseMirrorNode): DevCommandHighlightR
   };
 }
 
-export const PrismDevCommandHighlight = Extension.create({
+export function findLeadingDevCommandTokenRange(
+  doc: ProseMirrorNode,
+  commandNames?: readonly string[] | null
+): { from: number; to: number } | null {
+  return findLeadingDevCommandRanges(doc, commandNames)?.command ?? null;
+}
+
+export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighlightOptions>({
   name: "prismDevCommandHighlight",
+  addOptions() {
+    return {
+      commandNames: null,
+    };
+  },
   addProseMirrorPlugins() {
     return [
       new Plugin({
         props: {
           decorations: (state) => {
-            const ranges = findLeadingDevCommandRanges(state.doc);
+            const ranges = findLeadingDevCommandRanges(
+              state.doc,
+              this.options.commandNames
+            );
             if (!ranges) return DecorationSet.empty;
             const decorations: Decoration[] = [
               Decoration.inline(ranges.command.from, ranges.command.to, {

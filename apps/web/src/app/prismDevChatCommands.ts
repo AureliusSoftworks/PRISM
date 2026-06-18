@@ -23,6 +23,9 @@ export function looksLikePrismDevComposerCommand(line: string): boolean {
 
 export type ParsedPrismDevChatCommand =
   | { kind: "help" }
+  | { kind: "panel" }
+  | { kind: "close" }
+  | { kind: "toggles" }
   | { kind: "askquestion" }
   | { kind: "unknown"; token: string };
 
@@ -31,10 +34,13 @@ export function parsePrismDevChatCommand(trimmedLine: string): ParsedPrismDevCha
   const t = trimmedLine.trimStart();
   if (!/^\/dev(?:\s|$)/i.test(t)) return null;
   const rest = t.slice(4).trim();
-  if (rest.length === 0) return { kind: "help" };
+  if (rest.length === 0) return { kind: "panel" };
   const head = rest.split(/\s+/)[0]!;
   const token = head.toLowerCase();
   if (token === "help" || token === "?") return { kind: "help" };
+  if (token === "panel" || token === "open" || token === "tools") return { kind: "panel" };
+  if (token === "close" || token === "hide") return { kind: "close" };
+  if (token === "toggles" || token === "toggle" || token === "settings") return { kind: "toggles" };
   if (token === "askquestion" || token === "ask-q" || token === "aq") return { kind: "askquestion" };
   return { kind: "unknown", token: head.slice(0, 48) };
 }
