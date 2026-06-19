@@ -12,13 +12,17 @@ describe("default online model visibility", () => {
   it("keeps common OpenAI and Anthropic aliases visible by default", () => {
     for (const model of [
       { id: "gpt-5", provider: "openai" as const },
+      { id: "gpt-5-chat-latest", provider: "openai" as const },
+      { id: "gpt-5.3-chat-latest", provider: "openai" as const },
       { id: "gpt-5-mini", provider: "openai" as const },
       { id: "gpt-4.1", provider: "openai" as const },
       { id: "gpt-4.1-mini", provider: "openai" as const },
       { id: "gpt-4o", provider: "openai" as const },
       { id: "gpt-4o-mini", provider: "openai" as const },
+      { id: "chatgpt-4o-latest", provider: "openai" as const },
       { id: "o3", provider: "openai" as const },
       { id: "o4-mini", provider: "openai" as const },
+      { id: "o5-mini", provider: "openai" as const },
       { id: "claude-sonnet-4-6", provider: "anthropic" as const },
       { id: "claude-opus-4-8", provider: "anthropic" as const },
       { id: "claude-3-5-sonnet-latest", provider: "anthropic" as const },
@@ -27,13 +31,20 @@ describe("default online model visibility", () => {
     }
   });
 
-  it("hides dated snapshots, previews, nano, and other edge models by default", () => {
+  it("hides local non-chat stacks, dated snapshots, nano, and other edge models by default", () => {
     const catalog = {
+      local: [
+        { id: "llama3.2" },
+        { id: "llava:latest" },
+        { id: "nomic-embed-text" },
+      ],
       online: [
         { id: "gpt-4o-mini", provider: "openai" as const },
         { id: "gpt-4o-2024-08-06", provider: "openai" as const },
         { id: "gpt-4.1-nano", provider: "openai" as const },
         { id: "gpt-5-nano", provider: "openai" as const },
+        { id: "gpt-5.1-codex", provider: "openai" as const },
+        { id: "gpt-5.2-pro", provider: "openai" as const },
         { id: "gpt-4o-mini-search-preview", provider: "openai" as const },
         { id: "claude-sonnet-4-6", provider: "anthropic" as const },
         { id: "claude-sonnet-4-5-20250929", provider: "anthropic" as const },
@@ -42,9 +53,13 @@ describe("default online model visibility", () => {
     };
 
     assert.deepEqual(defaultHiddenModelIdsForCatalog(catalog), [
+      "llava:latest",
+      "nomic-embed-text",
       "gpt-4o-2024-08-06",
       "gpt-4.1-nano",
       "gpt-5-nano",
+      "gpt-5.1-codex",
+      "gpt-5.2-pro",
       "gpt-4o-mini-search-preview",
       "claude-sonnet-4-5-20250929",
       "claude-test-model",

@@ -172,7 +172,11 @@ describe("buildModelCatalog", () => {
     assert.equal(catalog.defaults.online, "gpt-4o-mini");
     assert.equal(catalog.local[0]?.id, catalog.defaults.local);
     assert.equal(catalog.online[0]?.id, catalog.defaults.online);
-    assert.ok(catalog.online.some((model) => model.id === "gpt-5"));
+    assert.ok(!catalog.online.some((model) => model.id === "gpt-5"));
+    assert.equal(
+      catalog.online.find((model) => model.id === "gpt-5-chat-latest")?.label,
+      "GPT-5"
+    );
     assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro"));
     assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro-2026-04-23"));
     assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
@@ -200,6 +204,9 @@ describe("buildModelCatalog", () => {
             data: [
               { id: "gpt-4o" },
               { id: "gpt-5.1" },
+              { id: "gpt-5.1-chat-latest" },
+              { id: "gpt-5.3" },
+              { id: "gpt-5.3-chat-latest" },
               { id: "gpt-5.4-mini" },
               { id: "chatgpt-4o-latest" },
               { id: "o5-mini" },
@@ -218,13 +225,24 @@ describe("buildModelCatalog", () => {
 
     assert.ok(catalog.local.some((model) => model.id === "llama3.2"));
     assert.equal(
-      catalog.local.filter((model) => model.label === "Llama3.2").length,
+      catalog.local.filter((model) => model.label === "Llama 3.2").length,
       1
     );
     const gemma = catalog.local.find((model) => model.id === "gemma3:latest");
-    assert.equal(gemma?.label, "Gemma3");
+    assert.equal(gemma?.label, "Gemma 3");
     assert.ok(catalog.online.some((model) => model.id === "gpt-4o"));
-    assert.ok(catalog.online.some((model) => model.id === "gpt-5.1"));
+    assert.ok(!catalog.online.some((model) => model.id === "gpt-5.1"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.1-chat-latest"));
+    assert.equal(
+      catalog.online.find((model) => model.id === "gpt-5.1-chat-latest")?.label,
+      "GPT-5.1"
+    );
+    assert.ok(!catalog.online.some((model) => model.id === "gpt-5.3"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.3-chat-latest"));
+    assert.equal(
+      catalog.online.find((model) => model.id === "gpt-5.3-chat-latest")?.label,
+      "GPT-5.3"
+    );
     assert.ok(catalog.online.some((model) => model.id === "gpt-5.4-mini"));
     assert.ok(catalog.online.some((model) => model.id === "chatgpt-4o-latest"));
     assert.ok(catalog.online.some((model) => model.id === "o3-mini"));
@@ -295,7 +313,7 @@ describe("buildModelCatalog", () => {
     const secondaryLlama = catalog.local.find(
       (model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}llama3.2`
     );
-    assert.equal(secondaryLlama?.label, "Llama3.2 (Second host)");
+    assert.equal(secondaryLlama?.label, "Llama 3.2 (Second host)");
     assert.equal(secondaryLlama?.localHost, "secondary");
     assert.ok(catalog.local.some((model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`));
   });

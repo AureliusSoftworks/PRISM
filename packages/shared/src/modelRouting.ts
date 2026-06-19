@@ -2,17 +2,18 @@
  * Auto model resolution — shared by the API and the web composer so labels match
  * what the server actually runs.
  */
+
 export const REQUIRED_LOCAL_MODELS = {
   chat: "llama3.2",
   embedding: "nomic-embed-text",
 } as const;
 
 export const REQUIRED_PRIMARY_LOCAL_MODEL_ID = REQUIRED_LOCAL_MODELS.chat;
-const REQUIRED_LOCAL_MODEL_ID_SET = new Set<string>(Object.values(REQUIRED_LOCAL_MODELS));
+const REQUIRED_VISIBLE_LOCAL_MODEL_ID_SET = new Set<string>([REQUIRED_PRIMARY_LOCAL_MODEL_ID]);
 
 export type AutoModelProvider = "local" | "openai" | "anthropic";
 
-export const MODEL_VISIBILITY_DEFAULTS_VERSION = 1;
+export const MODEL_VISIBILITY_DEFAULTS_VERSION = 2;
 
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
@@ -43,8 +44,10 @@ const COMMON_OPENAI_CHAT_MODEL_PATTERNS = [
   /^gpt-5(?:\.\d+)?(?:-(?:mini|chat-latest))?$/,
   /^gpt-4\.1(?:-mini)?$/,
   /^gpt-4o(?:-mini)?$/,
+  /^chatgpt-4o-latest$/,
   /^o3(?:-mini)?$/,
   /^o4-mini$/,
+  /^o5(?:-mini)?$/,
 ] as const;
 
 const COMMON_ANTHROPIC_CHAT_MODEL_PATTERNS = [
@@ -52,13 +55,34 @@ const COMMON_ANTHROPIC_CHAT_MODEL_PATTERNS = [
   /^claude-3-5-(?:sonnet|haiku)-latest$/,
 ] as const;
 
+function isModelIdHiddenByDefaultForNonChatUse(modelId: string): boolean {
+  const id = modelId.trim().toLowerCase();
+  if (!id) return false;
+
+  if (/\bembedding\b/.test(id) || /\bembed\b/.test(id)) {
+    return true;
+  }
+
+  return (
+    /\bllava\b/.test(id) ||
+    /\bbakllava\b/.test(id) ||
+    /\bmoondream\b/.test(id) ||
+    /\bminicpm-v\b/.test(id) ||
+    /\bqwen[^\w]*(?:2\.?\d*-)?vl\b/.test(id) ||
+    /\bllama[^\w]*[^\s]*vision\b/.test(id) ||
+    /\b(?:llama|gemma)[^\w]*[^\s:-]*-vision\b/.test(id) ||
+    /\bvision\b/.test(id) ||
+    /\bvl-?\d/.test(id)
+  );
+}
+
 export function sanitizeHiddenModelIds(ids: string[]): string[] {
   return Array.from(
     new Set(
       ids
         .map((id) => id.trim())
         .filter(Boolean)
-        .filter((id) => !REQUIRED_LOCAL_MODEL_ID_SET.has(id))
+        .filter((id) => !REQUIRED_VISIBLE_LOCAL_MODEL_ID_SET.has(id))
     )
   );
 }
@@ -68,12 +92,17 @@ export function isCommonOnlineChatModel(model: ModelForDefaultVisibility): boole
   if (provider === "local") return true;
   const normalized = model.id.trim().toLowerCase();
   if (!normalized) return false;
+  if (isModelIdHiddenByDefaultForNonChatUse(normalized)) return false;
   if (
     normalized.includes("preview") ||
+    normalized.includes("search") ||
+    normalized.includes("codex") ||
+    normalized.includes("pro") ||
     /(?:^|[-_])test(?:$|[-_])/.test(normalized) ||
     normalized.includes("eval") ||
     normalized.includes("experimental") ||
     normalized.includes("snapshot") ||
+    /-\d{4}-\d{2}-\d{2}$/.test(normalized) ||
     /-\d{8}$/.test(normalized)
   ) {
     return false;
@@ -86,11 +115,16 @@ export function isCommonOnlineChatModel(model: ModelForDefaultVisibility): boole
 }
 
 export function defaultHiddenModelIdsForCatalog(catalog: {
+  local?: readonly ModelForDefaultVisibility[];
   online: readonly ModelForDefaultVisibility[];
 }): string[] {
   return sanitizeHiddenModelIds(
-    catalog.online
-      .filter((model) => !isCommonOnlineChatModel(model))
+    [
+      ...(catalog.local ?? []).filter((model) =>
+        isModelIdHiddenByDefaultForNonChatUse(model.id)
+      ),
+      ...catalog.online.filter((model) => !isCommonOnlineChatModel(model)),
+    ]
       .map((model) => model.id)
   );
 }

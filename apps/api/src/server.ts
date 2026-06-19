@@ -462,15 +462,21 @@ function seedModelVisibilityDefaultsIfNeeded(
   }
 
   const currentHidden = parseHiddenBotModelIds(user.hidden_bot_model_ids);
+  const defaultHidden = defaultHiddenModelIdsForCatalog(catalog);
   if (currentHidden.length > 0) {
+    const mergedHidden = Array.from(new Set([...currentHidden, ...defaultHidden]));
     db.prepare(
-      "UPDATE users SET model_visibility_defaults_version = ? WHERE id = ?"
-    ).run(MODEL_VISIBILITY_DEFAULTS_VERSION, user.id);
+      "UPDATE users SET hidden_bot_model_ids = ?, model_visibility_defaults_version = ? WHERE id = ?"
+    ).run(
+      JSON.stringify(mergedHidden),
+      MODEL_VISIBILITY_DEFAULTS_VERSION,
+      user.id
+    );
+    user.hidden_bot_model_ids = JSON.stringify(mergedHidden);
     user.model_visibility_defaults_version = MODEL_VISIBILITY_DEFAULTS_VERSION;
-    return currentHidden;
+    return mergedHidden;
   }
 
-  const defaultHidden = defaultHiddenModelIdsForCatalog(catalog);
   if (defaultHidden.length === 0) {
     return currentHidden;
   }
