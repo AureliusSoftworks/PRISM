@@ -553,6 +553,8 @@ const PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY = "prism_dev_slash_commands";
 const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
 /** When set, renders the latest thread-compaction payload inside the chat canvas for QA. */
 const PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY = "prism_dev_show_compacted_summary";
+/** Local marker for the next/active Zen session boundary. */
+const PRISM_ZEN_SESSION_BREAK_STORAGE_KEY = "prism_zen_session_break_v1";
 /** Stores custom short-term memory bubble positions by scope and memory id. */
 const PRISM_MEMORY_BUBBLE_LAYOUT_STORAGE_KEY = "prism_memory_bubble_layout_v1";
 const MEMORY_RATIO_EMPTY_SIZE = 42;
@@ -743,6 +745,28 @@ const ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD = 8;
 const ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
 const ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
 const ZEN_IDLE_ERA_GAP_MS = 12 * 60 * 60 * 1000;
+const ZEN_LONG_SESSION_GAP_MS = 7 * 24 * 60 * 60 * 1000;
+const ZEN_SESSION_BREAK_SCHEMA = "prism-zen-session-break-v1";
+const DEFAULT_ZEN_SESSION_IDLE_GAP_MS = ZEN_IDLE_ERA_GAP_MS;
+const MIN_ZEN_SESSION_IDLE_GAP_MS = 15 * 60 * 1000;
+const MAX_ZEN_SESSION_IDLE_GAP_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_ZEN_FRESH_START_GAP_MS = ZEN_LONG_SESSION_GAP_MS;
+const MAX_ZEN_FRESH_START_GAP_MS = 90 * 24 * 60 * 60 * 1000;
+const DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES = 30;
+const MIN_ZEN_RECENT_CONTEXT_MESSAGES = 10;
+const MAX_ZEN_RECENT_CONTEXT_MESSAGES = 80;
+const DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL =
+  ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL;
+const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 5;
+const MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 100;
+const DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT =
+  ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
+const MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 0;
+const MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 20;
+const DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT =
+  ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT;
+const MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 1;
+const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
 
 const IMAGE_VARIANT_TAGS: Readonly<Record<ImageGenerationVariant, readonly string[]>> = {
   portrait: [
@@ -2445,6 +2469,7 @@ function providerDisplayLabel(provider: Provider): string {
 }
 type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images" | "memories" | "command-center";
+type SettingsScope = "chooser" | "zen" | "system";
 type MemoryPanelScope = "bot" | "default" | "session" | "all";
 type ClientAccessState = "checking" | "allowed" | "blocked";
 const AUTO_TITLE_REFRESH_DELAYS_MS = [1500, 4000, 8000] as const;
@@ -3219,6 +3244,165 @@ function formatZenEraBoundaryLabel(message: Pick<Message, "createdAt">): string 
   return `A new stretch begins · ${label}`;
 }
 
+function clampZenSessionSummary(text: string | null | undefined): string | null {
+  const normalized = text?.replace(/\s+/g, " ").trim() ?? "";
+  if (!normalized) return null;
+  if (normalized.length <= 360) return normalized;
+  return `${normalized.slice(0, 357).trimEnd()}...`;
+}
+
+function formatZenSessionAwayLabel(
+  gapMs: number,
+  previousActiveAt?: string | null
+): string {
+  const safeGapMs = Number.isFinite(gapMs) ? Math.max(0, gapMs) : 0;
+  const previousMs = previousActiveAt ? Date.parse(previousActiveAt) : NaN;
+  const fallbackMs = Date.now() - safeGapMs;
+  const labelMs = Number.isFinite(previousMs) ? previousMs : fallbackMs;
+  return `Last conversation ${new Date(labelMs).toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })}`;
+}
+
+function effectiveZenSessionBreakGapMs(
+  sessionBreak: Pick<ZenSessionBreakState, "previousActiveAt" | "simulatedIdleMs">,
+  nowMs = Date.now()
+): number {
+  const previousMs = sessionBreak.previousActiveAt
+    ? Date.parse(sessionBreak.previousActiveAt)
+    : NaN;
+  const realGapMs = Number.isFinite(previousMs) ? Math.max(0, nowMs - previousMs) : 0;
+  return Math.max(sessionBreak.simulatedIdleMs, realGapMs);
+}
+
+function zenSessionBreakUsesFreshStart(
+  gapMs: number,
+  freshStartGapMs = ZEN_LONG_SESSION_GAP_MS
+): boolean {
+  return gapMs >= normalizeZenFreshStartGapSetting(freshStartGapMs);
+}
+
+function normalizeZenSessionBreakState(raw: unknown): ZenSessionBreakState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Partial<ZenSessionBreakState>;
+  if (record.schema !== ZEN_SESSION_BREAK_SCHEMA) return null;
+  const conversationId =
+    typeof record.conversationId === "string" ? record.conversationId.trim() : "";
+  if (!conversationId) return null;
+  const createdAt =
+    typeof record.createdAt === "string" && Number.isFinite(Date.parse(record.createdAt))
+      ? record.createdAt
+      : new Date().toISOString();
+  const previousActiveAt =
+    typeof record.previousActiveAt === "string" &&
+    Number.isFinite(Date.parse(record.previousActiveAt))
+      ? record.previousActiveAt
+      : null;
+  const simulatedIdleMs =
+    typeof record.simulatedIdleMs === "number" && Number.isFinite(record.simulatedIdleMs)
+      ? Math.max(0, record.simulatedIdleMs)
+      : ZEN_IDLE_ERA_GAP_MS;
+  return {
+    schema: ZEN_SESSION_BREAK_SCHEMA,
+    userId: typeof record.userId === "string" ? record.userId : null,
+    conversationId,
+    anchorMessageId:
+      typeof record.anchorMessageId === "string" && record.anchorMessageId.trim()
+        ? record.anchorMessageId.trim()
+        : null,
+    anchorMessageCount:
+      typeof record.anchorMessageCount === "number" && Number.isFinite(record.anchorMessageCount)
+        ? Math.max(0, Math.floor(record.anchorMessageCount))
+        : 0,
+    displaySummary: clampZenSessionSummary(record.displaySummary),
+    internalSummary: clampZenSessionSummary(record.internalSummary),
+    createdAt,
+    previousActiveAt,
+    simulatedIdleMs,
+    source: record.source === "dev" ? "dev" : "idle",
+    resumeHintConsumed: record.resumeHintConsumed === true,
+  };
+}
+
+function readStoredZenSessionBreak(userId: string | null | undefined): ZenSessionBreakState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = normalizeZenSessionBreakState(
+      JSON.parse(window.localStorage.getItem(PRISM_ZEN_SESSION_BREAK_STORAGE_KEY) ?? "null")
+    );
+    if (!parsed) return null;
+    if (parsed.userId && userId && parsed.userId !== userId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function persistZenSessionBreak(state: ZenSessionBreakState | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (!state) {
+      window.localStorage.removeItem(PRISM_ZEN_SESSION_BREAK_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(
+      PRISM_ZEN_SESSION_BREAK_STORAGE_KEY,
+      JSON.stringify(state)
+    );
+  } catch {
+    // Private mode / quota: the in-memory marker still works for this tab.
+  }
+}
+
+function latestMessageActivityAt(messages: readonly Message[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const candidate = messages[index]?.createdAt;
+    if (candidate && Number.isFinite(Date.parse(candidate))) return candidate;
+  }
+  return null;
+}
+
+function createZenSessionBreakState(args: {
+  userId: string | null;
+  conversationId: string;
+  messages: readonly Message[];
+  displaySummary?: string | null;
+  internalSummary?: string | null;
+  source: "idle" | "dev";
+  idleMs: number;
+  sessionIdleGapMs?: number;
+  freshStartGapMs?: number;
+}): ZenSessionBreakState {
+  const lastMessage = args.messages.at(-1) ?? null;
+  const createdAt = new Date().toISOString();
+  const sessionIdleGapMs = normalizeZenSessionIdleGapSetting(
+    args.sessionIdleGapMs
+  );
+  const previousActiveAt =
+    latestMessageActivityAt(args.messages) ??
+    new Date(Date.now() - Math.max(args.idleMs, sessionIdleGapMs)).toISOString();
+  const keepResumeSummary = !zenSessionBreakUsesFreshStart(
+    args.idleMs,
+    args.freshStartGapMs
+  );
+  return {
+    schema: ZEN_SESSION_BREAK_SCHEMA,
+    userId: args.userId,
+    conversationId: args.conversationId,
+    anchorMessageId: lastMessage?.id ?? null,
+    anchorMessageCount: args.messages.length,
+    displaySummary: keepResumeSummary ? clampZenSessionSummary(args.displaySummary) : null,
+    internalSummary: keepResumeSummary ? clampZenSessionSummary(args.internalSummary) : null,
+    createdAt,
+    previousActiveAt,
+    simulatedIdleMs: Math.max(args.idleMs, 0),
+    source: args.source,
+    resumeHintConsumed: false,
+  };
+}
+
 function collectGeneratedImageIds(messages: readonly Message[]): string[] {
   const ids: string[] = [];
   for (const message of messages) {
@@ -3392,6 +3576,10 @@ const CHAT_MODE_ELLIPSIS_PAUSE_MS = 720;
 const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 240;
 const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_PAUSE_MS;
 const CHAT_MODE_ELLIPSIS_TOKEN_PATTERN = /^(?:\.\.\.|…)\s*$/;
+const CHAT_MODE_TRAILING_PAUSE_CLOSER_PATTERN = /[)"'\]}»”’]+$/u;
+const CHAT_MODE_SENTENCE_PAUSE_PATTERN = /[.!?]$/u;
+const CHAT_MODE_CLAUSE_PAUSE_PATTERN = /[,;:]$/u;
+const CHAT_MODE_DASH_PAUSE_PATTERN = /(?:--|[–—])$/u;
 const CHAT_MODE_FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/;
 const CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN = /```[^\n\r]*\r?\n([\s\S]*?)```/g;
 const CHAT_MODE_STRONG_MARKER_PATTERN = /\*\*/g;
@@ -4804,6 +4992,12 @@ interface UserSettings {
   preferredZenWallpaperLocalImageModel: string;
   preferredZenWallpaperOpenAiImageModel: string;
   zenWallpaperOpacity: number;
+  zenSessionIdleGapMs: number;
+  zenFreshStartGapMs: number;
+  zenRecentContextMessages: number;
+  zenWallpaperRegenMessageInterval: number;
+  zenWallpaperRevealDelayMessageCount: number;
+  zenWallpaperRevealSpanMessageCount: number;
   lenientLocalFallbackModel: string;
   /** Local ComfyUI / Ollama image model used when the primary image call is refused (online or local). */
   lenientLocalImageFallbackModel: string;
@@ -4815,6 +5009,17 @@ interface UserSettings {
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
 }
+
+type ZenModeSettingsFields = Pick<
+  UserSettings,
+  | "zenWallpaperOpacity"
+  | "zenSessionIdleGapMs"
+  | "zenFreshStartGapMs"
+  | "zenRecentContextMessages"
+  | "zenWallpaperRegenMessageInterval"
+  | "zenWallpaperRevealDelayMessageCount"
+  | "zenWallpaperRevealSpanMessageCount"
+>;
 
 type SavedApiKeySettingsState = Pick<
   UserSettings,
@@ -4880,11 +5085,36 @@ interface SummaryCompactionDebug {
   conversationId: string;
   inProgress: boolean;
   latestSummary: string | null;
+  latestDisplaySummary?: string | null;
   latestSummaryAt: string | null;
   summaryCount: number;
   totalMessages: number;
   messagesSinceLastCompaction: number;
 }
+
+interface ZenSessionBreakState {
+  schema: typeof ZEN_SESSION_BREAK_SCHEMA;
+  userId: string | null;
+  conversationId: string;
+  anchorMessageId: string | null;
+  anchorMessageCount: number;
+  displaySummary: string | null;
+  internalSummary: string | null;
+  createdAt: string;
+  previousActiveAt: string | null;
+  simulatedIdleMs: number;
+  source: "idle" | "dev";
+  resumeHintConsumed: boolean;
+}
+
+interface SessionResumeContext {
+  summary?: string;
+  resumedAt?: string;
+  previousActiveAt?: string;
+  gapMs?: number;
+  source?: "idle" | "dev";
+}
+
 interface UserMemory {
   id: string;
   conversationId?: string;
@@ -5103,7 +5333,14 @@ interface CommandCenterStateV1 {
   commands?: unknown;
 }
 
-const BUILT_IN_COMMAND_NAMES = new Set(["help", "compact", "clear", "refresh", "restart"]);
+const BUILT_IN_COMMAND_NAMES = new Set([
+  "help",
+  "compact",
+  "clear",
+  "refresh",
+  "restart",
+  "new-session",
+]);
 const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "help",
   "compact",
@@ -5112,6 +5349,7 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "cls",
   "refresh",
   "restart",
+  "new-session",
   "dev",
   "forget",
   "forget-all",
@@ -5281,6 +5519,22 @@ function createBuiltInRestartCommand(): CommandCenterCommand {
   };
 }
 
+function createBuiltInNewSessionCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/new-session",
+    name: "new-session",
+    title: "new-session",
+    command: "Starts a new Zen session marker without deleting the existing conversation.",
+    aliases: [],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function normalizeCommandAliasList(
   aliases: unknown,
   primaryName: string
@@ -5406,6 +5660,7 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInClearCommand(),
     createBuiltInRefreshCommand(),
     createBuiltInRestartCommand(),
+    createBuiltInNewSessionCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
@@ -5951,6 +6206,142 @@ function normalizeZenWallpaperOpacitySetting(value: unknown): number {
 
 function formatZenWallpaperOpacity(value: unknown): string {
   return `${Math.round(normalizeZenWallpaperOpacitySetting(value) * 100)}%`;
+}
+
+function normalizeIntegerSetting(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(max, Math.max(min, Math.round(normalized)));
+}
+
+function normalizeZenSessionIdleGapSetting(value: unknown): number {
+  return normalizeIntegerSetting(
+    value,
+    DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
+    MIN_ZEN_SESSION_IDLE_GAP_MS,
+    MAX_ZEN_SESSION_IDLE_GAP_MS
+  );
+}
+
+function normalizeZenFreshStartGapSetting(
+  value: unknown,
+  idleGapMs = DEFAULT_ZEN_SESSION_IDLE_GAP_MS
+): number {
+  const normalizedIdleGapMs = normalizeZenSessionIdleGapSetting(idleGapMs);
+  const minFreshStartGapMs = Math.max(
+    DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
+    normalizedIdleGapMs
+  );
+  return normalizeIntegerSetting(
+    value,
+    Math.max(DEFAULT_ZEN_FRESH_START_GAP_MS, minFreshStartGapMs),
+    minFreshStartGapMs,
+    MAX_ZEN_FRESH_START_GAP_MS
+  );
+}
+
+function normalizeZenRecentContextMessagesSetting(value: unknown): number {
+  return normalizeIntegerSetting(
+    value,
+    DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
+    MIN_ZEN_RECENT_CONTEXT_MESSAGES,
+    MAX_ZEN_RECENT_CONTEXT_MESSAGES
+  );
+}
+
+function normalizeZenWallpaperRegenMessageIntervalSetting(value: unknown): number {
+  return normalizeIntegerSetting(
+    value,
+    DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
+    MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
+    MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL
+  );
+}
+
+function normalizeZenWallpaperRevealDelayMessageCountSetting(value: unknown): number {
+  return normalizeIntegerSetting(
+    value,
+    DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
+    MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
+    MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT
+  );
+}
+
+function normalizeZenWallpaperRevealSpanMessageCountSetting(value: unknown): number {
+  return normalizeIntegerSetting(
+    value,
+    DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+    MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+    MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
+  );
+}
+
+function defaultZenModeSettings(): ZenModeSettingsFields {
+  return {
+    zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
+    zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
+    zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
+    zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
+    zenWallpaperRegenMessageInterval: DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
+    zenWallpaperRevealDelayMessageCount:
+      DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
+    zenWallpaperRevealSpanMessageCount:
+      DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+  };
+}
+
+function normalizeZenModeSettingsFields(
+  settings: Partial<ZenModeSettingsFields> | null | undefined
+): ZenModeSettingsFields {
+  const zenSessionIdleGapMs = normalizeZenSessionIdleGapSetting(
+    settings?.zenSessionIdleGapMs
+  );
+  return {
+    zenWallpaperOpacity: normalizeZenWallpaperOpacitySetting(
+      settings?.zenWallpaperOpacity
+    ),
+    zenSessionIdleGapMs,
+    zenFreshStartGapMs: normalizeZenFreshStartGapSetting(
+      settings?.zenFreshStartGapMs,
+      zenSessionIdleGapMs
+    ),
+    zenRecentContextMessages: normalizeZenRecentContextMessagesSetting(
+      settings?.zenRecentContextMessages
+    ),
+    zenWallpaperRegenMessageInterval:
+      normalizeZenWallpaperRegenMessageIntervalSetting(
+        settings?.zenWallpaperRegenMessageInterval
+      ),
+    zenWallpaperRevealDelayMessageCount:
+      normalizeZenWallpaperRevealDelayMessageCountSetting(
+        settings?.zenWallpaperRevealDelayMessageCount
+      ),
+    zenWallpaperRevealSpanMessageCount:
+      normalizeZenWallpaperRevealSpanMessageCountSetting(
+        settings?.zenWallpaperRevealSpanMessageCount
+      ),
+  };
+}
+
+function formatZenDuration(value: unknown, kind: "idle" | "fresh" = "idle"): string {
+  const ms =
+    kind === "fresh"
+      ? normalizeZenFreshStartGapSetting(value)
+      : normalizeZenSessionIdleGapSetting(value);
+  const hours = ms / (60 * 60 * 1000);
+  if (hours < 24) return `${Math.round(hours * 10) / 10}h`;
+  const days = ms / (24 * 60 * 60 * 1000);
+  return `${Math.round(days * 10) / 10}d`;
 }
 
 function parseCommandCenterModelChoice(
@@ -13652,9 +14043,14 @@ function resolveTokenPunctuationPauseMs(token: string): number {
   if (isChatModeEllipsisToken(token)) return CHAT_MODE_ELLIPSIS_PAUSE_MS;
   const displayToken = formatChatModeTypedTokenDisplay(token, false)
     .trimEnd()
-    .replace(/[)"'\]}»”’]+$/u, "");
-  if (displayToken.endsWith(",")) return CHAT_MODE_COMMA_PAUSE_MS;
-  if (displayToken.endsWith(".")) return CHAT_MODE_PERIOD_PAUSE_MS;
+    .replace(CHAT_MODE_TRAILING_PAUSE_CLOSER_PATTERN, "");
+  if (CHAT_MODE_SENTENCE_PAUSE_PATTERN.test(displayToken)) return CHAT_MODE_PERIOD_PAUSE_MS;
+  if (
+    CHAT_MODE_CLAUSE_PAUSE_PATTERN.test(displayToken) ||
+    CHAT_MODE_DASH_PAUSE_PATTERN.test(displayToken)
+  ) {
+    return CHAT_MODE_COMMA_PAUSE_MS;
+  }
   return 0;
 }
 
@@ -17549,6 +17945,7 @@ function HomeContent(): React.JSX.Element {
   const [, startDraftTransition] = useTransition();
   const [debugComposerDraft, setDebugComposerDraft] = useState("");
   const [composerCleanupBusy, setComposerCleanupBusy] = useState(false);
+  const [composerRandomPromptBusy, setComposerRandomPromptBusy] = useState(false);
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
   const composerHistoryIndexRef = useRef<number | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -17565,6 +17962,18 @@ function HomeContent(): React.JSX.Element {
     prompts: string[];
   } | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const effectiveZenModeSettings = useMemo(
+    () => normalizeZenModeSettingsFields(settings),
+    [settings]
+  );
+  const {
+    zenSessionIdleGapMs,
+    zenFreshStartGapMs,
+    zenRecentContextMessages,
+    zenWallpaperRegenMessageInterval,
+    zenWallpaperRevealDelayMessageCount,
+    zenWallpaperRevealSpanMessageCount,
+  } = effectiveZenModeSettings;
   const [anthropicKey, setAnthropicKey] = useState("");
   const [elevenLabsKey, setElevenLabsKey] = useState("");
   const [apiKeyDraftValidation, setApiKeyDraftValidation] =
@@ -17750,6 +18159,7 @@ function HomeContent(): React.JSX.Element {
   const conversationSurfaceLoadingTokenRef = useRef(0);
   const pendingCanvasBotUnfoldRef = useRef(false);
   const [chatStartupSummary, setChatStartupSummary] = useState<string | null>(null);
+  const [zenSessionBreak, setZenSessionBreak] = useState<ZenSessionBreakState | null>(null);
   const [sandboxBotStatusSummary, setSandboxBotStatusSummary] = useState<string | null>(null);
   const [sandboxBotStatusSummaryBotId, setSandboxBotStatusSummaryBotId] = useState<string | null>(null);
   const [summaryDebug, setSummaryDebug] = useState<SummaryCompactionDebug | null>(null);
@@ -17891,6 +18301,7 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const botContextSuppressClickRef = useRef(false);
   const [panel, setPanel] = useState<PanelView>(null);
+  const [settingsScope, setSettingsScope] = useState<SettingsScope>("chooser");
   const panelRef = useRef<PanelView>(null);
   panelRef.current = panel;
   const panelPopupCleanupLastPanelRef = useRef<PanelView>(panel);
@@ -18548,10 +18959,12 @@ function HomeContent(): React.JSX.Element {
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const zenSessionBreakAutoScrollKeyRef = useRef<string | null>(null);
   const zenAtmosphereScrollFrameRef = useRef<number | null>(null);
   /** Expanded AskQuestion chip rail; kept as a stable anchor for future rail-local gestures. */
   const askQuestionRailRef = useRef<HTMLDivElement | null>(null);
   const askQuestionComposerHiddenForReadingKeyRef = useRef<string | null>(null);
+  const choiceComposerFocusAfterRevealRef = useRef(false);
   const starterPromptCenteredMessageIdRef = useRef<string | null>(null);
   const starterPromptSettlingTimerRef = useRef<number | null>(null);
   const chatLastPinnedUserMessageKeyRef = useRef<string | null>(null);
@@ -19080,6 +19493,7 @@ function HomeContent(): React.JSX.Element {
     setSettingsAboutModalOpen(false);
     setSettingsHostsModalOpen(false);
     setSettingsDefaultsModalOpen(false);
+    setSettingsScope("chooser");
     setProfileNameModalOpen(false);
     setProfileNameDraft("");
     setOpenAiKey("");
@@ -19136,6 +19550,9 @@ function HomeContent(): React.JSX.Element {
     }
     setPanelClosing(false);
     setPanel(nextPanel);
+    if (nextPanel === "settings") {
+      setSettingsScope("chooser");
+    }
     setSidebarOpen(false);
     if (nextPanel !== "images") {
       setImagePrivateMode(false);
@@ -20392,9 +20809,117 @@ function HomeContent(): React.JSX.Element {
       ),
     [modelCatalog, settings]
   );
-  const renderDefaultsAndFallbacksControls = (variant: "settings" | "modal"): React.ReactNode => {
+  function renderZenAtmosphereModelRow(): React.ReactNode {
+    if (!settings) return null;
+    return (
+      <div className={styles.settingsModelPairRow}>
+        <div className={styles.settingsModelPairTitle}>
+          <span>Atmosphere wallpaper</span>
+        </div>
+        <label className={styles.settingsModelLane}>
+          <span className={styles.settingsModelLaneLabel}>Offline model</span>
+          <ComposerModelPicker
+            value={visibleLocalImageModelSelectValue(
+              settings.preferredZenWallpaperLocalImageModel
+            )}
+            disabled={localImageModelCatalogEntries.length === 0}
+            onChange={(next) => {
+              setSettings((previous) =>
+                previous
+                  ? { ...previous, preferredZenWallpaperLocalImageModel: next }
+                  : previous
+              );
+              void persistAccountImageDefaultModelField(
+                "preferredZenWallpaperLocalImageModel",
+                next
+              );
+            }}
+            options={
+              (settings.preferredZenWallpaperLocalImageModel?.trim() ?? "").length > 0
+                ? includeSelectedLocalImageModelOption(
+                    localImageModelCatalogEntries,
+                    settings.preferredZenWallpaperLocalImageModel
+                  )
+                : localImageModelCatalogEntries
+            }
+            provider="local"
+            ariaLabel="Atmosphere wallpaper offline image model"
+            formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_LOCAL_IMAGE_MODEL_FIELD}
+            placement="down"
+            minMenuWidthPx={260}
+            autoOptionValue=""
+            autoOptionMetaOverride="use image default"
+            settingsDefaultModelId={null}
+            dismissPopoversSignal={composerPopoverDismissSignal}
+          />
+        </label>
+        <label className={styles.settingsModelLane}>
+          <span className={styles.settingsModelLaneLabel}>Online model</span>
+          <ComposerModelPicker
+            value={visibleOnlineImageModelIdOrEmpty(
+              settings.preferredZenWallpaperOpenAiImageModel
+            )}
+            onChange={(next) => {
+              const stored = normalizeOnlineImageModelPreference(next);
+              setSettings((previous) =>
+                previous
+                  ? { ...previous, preferredZenWallpaperOpenAiImageModel: stored }
+                  : previous
+              );
+              void persistAccountImageDefaultModelField(
+                "preferredZenWallpaperOpenAiImageModel",
+                next
+              );
+            }}
+            options={
+              visibleOnlineImageModelIdOrEmpty(
+                settings.preferredZenWallpaperOpenAiImageModel
+              )
+                ? includeSelectedModelOption(
+                    onlineImageModelCatalogEntries,
+                    visibleOnlineImageModelIdOrEmpty(
+                      settings.preferredZenWallpaperOpenAiImageModel
+                    ),
+                    "openai"
+                  )
+                : onlineImageModelCatalogEntries
+            }
+            provider="online"
+            disabled={!hasVisibleOnlineImageModels}
+            title={
+              hasRunnableOnlineImageModels
+                ? "Auto uses the first available online image model."
+                : hasVisibleOnlineImageModels
+                  ? "Online image models are visible, but no runnable model is available yet."
+                  : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
+            }
+            ariaLabel="Atmosphere wallpaper online image model"
+            formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_OPENAI_IMAGE_MODEL_FIELD}
+            placement="down"
+            minMenuWidthPx={260}
+            autoOptionValue=""
+            autoOptionMetaOverride={
+              hasRunnableOnlineImageModels
+                ? "first available online image model"
+                : hasVisibleOnlineImageModels
+                  ? "no runnable online image model"
+                  : "add online image key to enable"
+            }
+            settingsDefaultModelId={null}
+            dismissPopoversSignal={composerPopoverDismissSignal}
+          />
+        </label>
+      </div>
+    );
+  }
+
+  const renderDefaultsAndFallbacksControls = (
+    variant: "settings" | "modal",
+    options: { includeZenAtmosphere?: boolean } = {}
+  ): React.ReactNode => {
     if (!settings) return null;
     const isModal = variant === "modal";
+    const includeZenAtmosphere = options.includeZenAtmosphere !== false;
     return (
       <div
         className={`${styles.settingsModelControls} ${
@@ -20610,104 +21135,7 @@ function HomeContent(): React.JSX.Element {
             </label>
           </div>
 
-          <div className={styles.settingsModelPairRow}>
-            <div className={styles.settingsModelPairTitle}>
-              <span>Atmosphere wallpaper</span>
-            </div>
-            <label className={styles.settingsModelLane}>
-              <span className={styles.settingsModelLaneLabel}>Offline model</span>
-              <ComposerModelPicker
-                value={visibleLocalImageModelSelectValue(
-                  settings.preferredZenWallpaperLocalImageModel
-                )}
-                disabled={localImageModelCatalogEntries.length === 0}
-                onChange={(next) => {
-                  setSettings((previous) =>
-                    previous
-                      ? { ...previous, preferredZenWallpaperLocalImageModel: next }
-                      : previous
-                  );
-                  void persistAccountImageDefaultModelField(
-                    "preferredZenWallpaperLocalImageModel",
-                    next
-                  );
-                }}
-                options={
-                  (settings.preferredZenWallpaperLocalImageModel?.trim() ?? "").length > 0
-                    ? includeSelectedLocalImageModelOption(
-                        localImageModelCatalogEntries,
-                        settings.preferredZenWallpaperLocalImageModel
-                      )
-                    : localImageModelCatalogEntries
-                }
-                provider="local"
-                ariaLabel="Atmosphere wallpaper offline image model"
-                formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_LOCAL_IMAGE_MODEL_FIELD}
-                placement="down"
-                minMenuWidthPx={260}
-                autoOptionValue=""
-                autoOptionMetaOverride="use image default"
-                settingsDefaultModelId={null}
-                dismissPopoversSignal={composerPopoverDismissSignal}
-              />
-            </label>
-            <label className={styles.settingsModelLane}>
-              <span className={styles.settingsModelLaneLabel}>Online model</span>
-              <ComposerModelPicker
-                value={visibleOnlineImageModelIdOrEmpty(
-                  settings.preferredZenWallpaperOpenAiImageModel
-                )}
-                onChange={(next) => {
-                  const stored = normalizeOnlineImageModelPreference(next);
-                  setSettings((previous) =>
-                    previous
-                      ? { ...previous, preferredZenWallpaperOpenAiImageModel: stored }
-                      : previous
-                  );
-                  void persistAccountImageDefaultModelField(
-                    "preferredZenWallpaperOpenAiImageModel",
-                    next
-                  );
-                }}
-                options={
-                  visibleOnlineImageModelIdOrEmpty(
-                    settings.preferredZenWallpaperOpenAiImageModel
-                  )
-                    ? includeSelectedModelOption(
-                        onlineImageModelCatalogEntries,
-                        visibleOnlineImageModelIdOrEmpty(
-                          settings.preferredZenWallpaperOpenAiImageModel
-                        ),
-                        "openai"
-                      )
-                    : onlineImageModelCatalogEntries
-                }
-                provider="online"
-                disabled={!hasVisibleOnlineImageModels}
-                title={
-                  hasRunnableOnlineImageModels
-                    ? "Auto uses the first available online image model."
-                    : hasVisibleOnlineImageModels
-                      ? "Online image models are visible, but no runnable model is available yet."
-                    : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
-                }
-                ariaLabel="Atmosphere wallpaper online image model"
-                formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_OPENAI_IMAGE_MODEL_FIELD}
-                placement="down"
-                minMenuWidthPx={260}
-                autoOptionValue=""
-                autoOptionMetaOverride={
-                  hasRunnableOnlineImageModels
-                    ? "first available online image model"
-                    : hasVisibleOnlineImageModels
-                      ? "no runnable online image model"
-                    : "add online image key to enable"
-                }
-                settingsDefaultModelId={null}
-                dismissPopoversSignal={composerPopoverDismissSignal}
-              />
-            </label>
-          </div>
+          {includeZenAtmosphere && renderZenAtmosphereModelRow()}
         </div>
 
         <div className={styles.settingsFallbackControls}>
@@ -20783,28 +21211,30 @@ function HomeContent(): React.JSX.Element {
           </div>
         </div>
 
-        <label className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}>
-          <span className={styles.settingsRangeHeader}>
-            <span>Atmosphere wallpaper opacity</span>
-            <span className={styles.settingsRangeValue}>
-              {formatZenWallpaperOpacity(settings.zenWallpaperOpacity)}
+        {includeZenAtmosphere && (
+          <label className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}>
+            <span className={styles.settingsRangeHeader}>
+              <span>Atmosphere wallpaper opacity</span>
+              <span className={styles.settingsRangeValue}>
+                {formatZenWallpaperOpacity(settings.zenWallpaperOpacity)}
+              </span>
             </span>
-          </span>
-          <input
-            type="range"
-            min={MIN_ZEN_WALLPAPER_OPACITY}
-            max={MAX_ZEN_WALLPAPER_OPACITY}
-            step={0.01}
-            value={normalizeZenWallpaperOpacitySetting(settings.zenWallpaperOpacity)}
-            onChange={(event) => {
-              const next = normalizeZenWallpaperOpacitySetting(event.target.value);
-              setSettings((previous) =>
-                previous ? { ...previous, zenWallpaperOpacity: next } : previous
-              );
-              void persistZenWallpaperOpacityField(next);
-            }}
-          />
-        </label>
+            <input
+              type="range"
+              min={MIN_ZEN_WALLPAPER_OPACITY}
+              max={MAX_ZEN_WALLPAPER_OPACITY}
+              step={0.01}
+              value={normalizeZenWallpaperOpacitySetting(settings.zenWallpaperOpacity)}
+              onChange={(event) => {
+                const next = normalizeZenWallpaperOpacitySetting(event.target.value);
+                setSettings((previous) =>
+                  previous ? { ...previous, zenWallpaperOpacity: next } : previous
+                );
+                void persistZenWallpaperOpacityField(next);
+              }}
+            />
+          </label>
+        )}
 
         <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
           <input
@@ -21858,11 +22288,11 @@ function HomeContent(): React.JSX.Element {
       const current = source[i]!;
       const currentMs = messageCreatedAtMs(current);
       if (previousMs === null || currentMs === null) continue;
-      if (currentMs - previousMs < ZEN_IDLE_ERA_GAP_MS) continue;
+      if (currentMs - previousMs < zenSessionIdleGapMs) continue;
       labels.set(current.id, formatZenEraBoundaryLabel(current));
     }
     return labels;
-  }, [view, detail?.mode, detail?.messages]);
+  }, [view, detail?.mode, detail?.messages, zenSessionIdleGapMs]);
   const zenLatestIdleEraBoundaryMessageCount = useMemo(() => {
     if (view !== "chat" || detail?.mode !== "zen") return null;
     const source = detail.messages;
@@ -21872,10 +22302,10 @@ function HomeContent(): React.JSX.Element {
       const previousMs = messageCreatedAtMs(source[i - 1]!);
       const currentMs = messageCreatedAtMs(current);
       if (previousMs === null || currentMs === null) continue;
-      if (currentMs - previousMs >= ZEN_IDLE_ERA_GAP_MS) return i + 1;
+      if (currentMs - previousMs >= zenSessionIdleGapMs) return i + 1;
     }
     return null;
-  }, [view, detail?.mode, detail?.messages]);
+  }, [view, detail?.mode, detail?.messages, zenSessionIdleGapMs]);
   const chatStartupSummaryIsDefault =
     chatStartupSummary === DEFAULT_CHAT_STARTUP_SUMMARY;
   const chatStartupSummaryVisible = Boolean(
@@ -21884,6 +22314,113 @@ function HomeContent(): React.JSX.Element {
     !pendingReplyVisible &&
     (!detail || visibleDetailMessages.length === 0)
   );
+  const activeZenConversationId =
+    view === "chat"
+      ? detail?.id && detail.id !== "pending"
+        ? detail.id
+        : selectedId
+      : null;
+  const summaryDebugMatchesActiveZen =
+    activeZenConversationId !== null &&
+    summaryDebug?.conversationId === activeZenConversationId &&
+    (summaryDebug.mode === "zen" || summaryDebug.mode === "chat");
+  const currentZenInternalSummary =
+    summaryDebugMatchesActiveZen ? summaryDebug.latestSummary?.trim() || null : null;
+  const currentZenDisplaySummary =
+    summaryDebugMatchesActiveZen
+      ? summaryDebug.latestDisplaySummary?.trim() ||
+        summaryDebug.latestSummary?.trim() ||
+        null
+      : !chatStartupSummaryIsDefault
+        ? chatStartupSummary?.trim() || null
+        : null;
+  const activeZenSessionBreak = useMemo(() => {
+    if (
+      view !== "chat" ||
+      detail?.mode !== "zen" ||
+      !detail.id ||
+      detail.id === "pending" ||
+      !zenSessionBreak ||
+      zenSessionBreak.conversationId !== detail.id
+    ) {
+      return null;
+    }
+    return zenSessionBreak;
+  }, [detail?.id, detail?.mode, view, zenSessionBreak]);
+  const zenSessionBreakAnchorIndex = useMemo(() => {
+    if (!activeZenSessionBreak) return null;
+    if (visibleDetailMessages.length === 0) return -1;
+    if (activeZenSessionBreak.anchorMessageId) {
+      const byId = visibleDetailMessages.findIndex(
+        (message) => message.id === activeZenSessionBreak.anchorMessageId
+      );
+      if (byId >= 0) return byId;
+    }
+    if (activeZenSessionBreak.anchorMessageCount <= 0) return -1;
+    return Math.min(
+      activeZenSessionBreak.anchorMessageCount - 1,
+      visibleDetailMessages.length - 1
+    );
+  }, [activeZenSessionBreak, visibleDetailMessages]);
+  const zenSessionBreakNode = useMemo(() => {
+    if (!activeZenSessionBreak) return null;
+    const effectiveGapMs = effectiveZenSessionBreakGapMs(activeZenSessionBreak);
+    const awayLabel = formatZenSessionAwayLabel(
+      effectiveGapMs,
+      activeZenSessionBreak.previousActiveAt
+    );
+    return (
+      <div
+        className={styles.zenSessionBreak}
+        data-source={activeZenSessionBreak.source}
+        role="note"
+      >
+        <div className={styles.zenSessionBreakRule}>
+          <span>{awayLabel}</span>
+        </div>
+        <div
+          className={styles.zenSessionBreakScrollAnchor}
+          data-zen-session-break-anchor="true"
+          aria-hidden="true"
+        />
+      </div>
+    );
+  }, [activeZenSessionBreak]);
+  useLayoutEffect(() => {
+    if (!activeZenSessionBreak) {
+      zenSessionBreakAutoScrollKeyRef.current = null;
+      return;
+    }
+    const key = `${activeZenSessionBreak.conversationId}:${activeZenSessionBreak.createdAt}`;
+    if (zenSessionBreakAutoScrollKeyRef.current === key) return;
+    zenSessionBreakAutoScrollKeyRef.current = key;
+    requestAnimationFrame(() => {
+      const scrollRoot = messagesScrollRef.current;
+      const target = scrollRoot?.querySelector<HTMLElement>(
+        "[data-zen-session-break-anchor='true']"
+      );
+      if (!scrollRoot || !target) return;
+      const rootRect = scrollRoot.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const targetInsetPx = Math.max(54, Math.min(86, scrollRoot.clientHeight * 0.1));
+      const targetTop =
+        scrollRoot.scrollTop +
+        (targetRect.top - rootRect.top) -
+        targetInsetPx;
+      const maxScrollTop = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight);
+      const nextTop = Math.max(0, Math.min(maxScrollTop, targetTop));
+      chatProgrammaticScrollUntilMsRef.current = Date.now() + 180;
+      scrollRoot.scrollTo({ top: nextTop, behavior: "auto" });
+      chatLastScrollTopByConversationRef.current.set(
+        activeZenSessionBreak.conversationId,
+        scrollRoot.scrollTop
+      );
+      chatLastScrollHeightByConversationRef.current.set(
+        activeZenSessionBreak.conversationId,
+        scrollRoot.scrollHeight
+      );
+    });
+  }, [activeZenSessionBreak]);
   const latestAssistantMessageId = useMemo<string | null>(() => {
     const source = detail?.messages ?? [];
     for (let i = source.length - 1; i >= 0; i -= 1) {
@@ -22511,60 +23048,66 @@ function HomeContent(): React.JSX.Element {
   ]);
   const compactedSummaryDebugNode = useMemo(() => {
     if (!DEV_TOOLS_ENABLED || !devShowCompactedSummaryInChat) return null;
-    const activeConversationId =
-      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
-    if (!activeConversationId) return null;
-    const activeMode: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
-    const summaryFromDebug =
-      summaryDebug?.conversationId === activeConversationId &&
-      summaryDebug.mode === activeMode
-        ? summaryDebug.latestSummary
-        : null;
+    if (view !== "chat" || !activeZenConversationId) return null;
     const summaryFromManual =
-      manualCompactionStatus?.conversationId === activeConversationId &&
-      manualCompactionStatus.mode === activeMode
+      manualCompactionStatus?.conversationId === activeZenConversationId &&
+      (manualCompactionStatus.mode === "zen" || manualCompactionStatus.mode === "chat")
         ? manualCompactionStatus.summary
         : null;
-    const hasDebugContext =
-      (
-        summaryDebug?.conversationId === activeConversationId &&
-        summaryDebug.mode === activeMode
-      ) ||
-      (
-        manualCompactionStatus?.conversationId === activeConversationId &&
-        manualCompactionStatus.mode === activeMode
-      );
-    if (!hasDebugContext) return null;
+    const displaySummaryText =
+      currentZenDisplaySummary ||
+      (summaryFromManual ?? "").trim() ||
+      zenSessionBreak?.displaySummary ||
+      null;
+    const internalSummaryText =
+      currentZenInternalSummary ||
+      zenSessionBreak?.internalSummary ||
+      null;
     const summaryText =
-      (summaryFromDebug ?? summaryFromManual ?? "").trim() ||
-      (
-        manualCompactionStatus?.conversationId === activeConversationId &&
-        manualCompactionStatus.mode === activeMode &&
-        manualCompactionStatus.state === "complete"
-          ? "Compaction completed, but no summary was returned."
-          : "No compacted summary yet."
+      displaySummaryText ||
+      internalSummaryText ||
+      "No compacted summary yet.";
+    const showInternalSummary =
+      Boolean(
+        displaySummaryText &&
+        internalSummaryText &&
+        displaySummaryText.trim() !== internalSummaryText.trim()
       );
     const summaryAt =
-      summaryDebug?.conversationId === activeConversationId &&
-      summaryDebug.mode === activeMode
+      summaryDebugMatchesActiveZen
         ? summaryDebug.latestSummaryAt
         : manualCompactionStatus?.summaryAt ?? null;
     return (
-      <div className={styles.compactedSummaryDebugBubble} role="note">
-        <div className={styles.compactedSummaryDebugHeader}>
-          <strong>Compacted context</strong>
-          <span>{activeMode}{summaryAt ? ` - ${summaryAt}` : ""}</span>
+      <div className={styles.compactedSummaryDebugDock} role="note">
+        <div
+          className={styles.compactedSummaryDebugBubble}
+          data-empty={!displaySummaryText && !internalSummaryText ? "true" : undefined}
+        >
+          <div className={styles.compactedSummaryDebugHeader}>
+            <strong>Compacted context</strong>
+            <span>zen{summaryAt ? ` - ${summaryAt}` : ""}</span>
+          </div>
+          <pre>{summaryText}</pre>
+          {showInternalSummary ? (
+            <div className={styles.compactedSummaryDebugDetails}>
+              <span>Internal compact</span>
+              <pre>{internalSummaryText}</pre>
+            </div>
+          ) : null}
         </div>
-        <pre>{summaryText}</pre>
       </div>
     );
   }, [
+    activeZenConversationId,
+    currentZenDisplaySummary,
+    currentZenInternalSummary,
     detail?.id,
     devShowCompactedSummaryInChat,
     manualCompactionStatus,
-    selectedId,
     summaryDebug,
+    summaryDebugMatchesActiveZen,
     view,
+    zenSessionBreak,
   ]);
   // Metrics now live in the floating developer terminal, not inside the chat transcript.
   const devChatDebugEventsNode = null;
@@ -25374,6 +25917,94 @@ function HomeContent(): React.JSX.Element {
   ]);
 
   useEffect(() => {
+    if (
+      view !== "chat" ||
+      !user?.id ||
+      !detail ||
+      detail.id === "pending" ||
+      detail.mode !== "zen"
+    ) {
+      setZenSessionBreak(null);
+      return;
+    }
+
+    const stored = readStoredZenSessionBreak(user.id);
+    if (stored?.conversationId === detail.id) {
+      const storedEffectiveGapMs = effectiveZenSessionBreakGapMs(stored);
+      const storedUsesFreshStart = zenSessionBreakUsesFreshStart(
+        storedEffectiveGapMs,
+        zenFreshStartGapMs
+      );
+      const hydratedStored = storedUsesFreshStart
+        ? (stored.displaySummary || stored.internalSummary
+            ? { ...stored, displaySummary: null, internalSummary: null }
+            : stored)
+        : !stored.displaySummary && currentZenDisplaySummary
+          ? {
+              ...stored,
+              displaySummary: clampZenSessionSummary(currentZenDisplaySummary),
+              internalSummary:
+                stored.internalSummary ?? clampZenSessionSummary(currentZenInternalSummary),
+            }
+          : stored;
+      if (hydratedStored !== stored) {
+        persistZenSessionBreak(hydratedStored);
+      }
+      setZenSessionBreak((current) =>
+        current &&
+        current.conversationId === hydratedStored.conversationId &&
+        current.createdAt === hydratedStored.createdAt &&
+        current.resumeHintConsumed === hydratedStored.resumeHintConsumed &&
+        current.displaySummary === hydratedStored.displaySummary
+          ? current
+          : hydratedStored
+      );
+      return;
+    }
+
+    if (visibleDetailMessages.length === 0) {
+      setZenSessionBreak(null);
+      return;
+    }
+
+    const latestActivityAt = latestMessageActivityAt(visibleDetailMessages);
+    const latestActivityMs = latestActivityAt ? Date.parse(latestActivityAt) : NaN;
+    if (!Number.isFinite(latestActivityMs)) {
+      setZenSessionBreak(null);
+      return;
+    }
+    const idleMs = Date.now() - latestActivityMs;
+    if (idleMs < zenSessionIdleGapMs) {
+      setZenSessionBreak(null);
+      return;
+    }
+
+    const nextBreak = createZenSessionBreakState({
+      userId: user.id,
+      conversationId: detail.id,
+      messages: visibleDetailMessages,
+      displaySummary: currentZenDisplaySummary,
+      internalSummary: currentZenInternalSummary,
+      source: "idle",
+      idleMs,
+      sessionIdleGapMs: zenSessionIdleGapMs,
+      freshStartGapMs: zenFreshStartGapMs,
+    });
+    persistZenSessionBreak(nextBreak);
+    setZenSessionBreak(nextBreak);
+  }, [
+    currentZenDisplaySummary,
+    currentZenInternalSummary,
+    detail,
+    latestDetailMessageId,
+    user?.id,
+    view,
+    visibleDetailMessages,
+    zenFreshStartGapMs,
+    zenSessionIdleGapMs,
+  ]);
+
+  useEffect(() => {
     if (canvasBotSwitchOverlayHideTimerRef.current) {
       clearTimeout(canvasBotSwitchOverlayHideTimerRef.current);
       canvasBotSwitchOverlayHideTimerRef.current = null;
@@ -25762,6 +26393,7 @@ function HomeContent(): React.JSX.Element {
         ? d.settings.lenientLocalImageFallbackModel
         : "";
     const keySettings = normalizeSavedApiKeySettingsState(d.settings);
+    const zenModeSettings = normalizeZenModeSettingsFields(d.settings);
     setSettings({
       ...d.settings,
       displayName,
@@ -25801,9 +26433,7 @@ function HomeContent(): React.JSX.Element {
         typeof d.settings.preferredZenWallpaperOpenAiImageModel === "string"
           ? d.settings.preferredZenWallpaperOpenAiImageModel
           : "",
-      zenWallpaperOpacity: normalizeZenWallpaperOpacitySetting(
-        d.settings.zenWallpaperOpacity
-      ),
+      ...zenModeSettings,
       lenientLocalFallbackModel,
       lenientLocalImageFallbackModel,
       comfyUiWorkflows: Array.isArray(d.settings.comfyUiWorkflows)
@@ -27026,6 +27656,7 @@ function HomeContent(): React.JSX.Element {
       starterPromptWarrantsIntro?: boolean;
       ephemeralMessages?: Message[];
       sessionEnding?: boolean;
+      sessionResumeContext?: SessionResumeContext;
       forceNewConversation?: boolean;
       commandCenterModelChoice?: string;
       promptShortcut?: PromptShortcutMetadata;
@@ -27066,6 +27697,9 @@ function HomeContent(): React.JSX.Element {
         ? { starterPromptWarrantsIntro: true }
         : {}),
       ...(options.sessionEnding ? { sessionEnding: true } : {}),
+      ...(mode === "zen" && options.sessionResumeContext
+        ? { sessionResumeContext: options.sessionResumeContext }
+        : {}),
       ...(options.forceNewConversation ? { forceNewConversation: true } : {}),
       mode,
       ...(mode === "zen"
@@ -27407,6 +28041,46 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function runZenSummaryForSessionBreak(
+    conversationId: string
+  ): Promise<{ displaySummary: string | null; internalSummary: string | null; summaryAt: string | null }> {
+    const result = await api<{
+      compacted?: {
+        triggered?: boolean;
+        latestSummary?: string;
+        latestSummaryAt?: string;
+      };
+      debug?: SummaryCompactionDebug;
+    }>(`/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`, {
+      method: "POST",
+      body: JSON.stringify({ action: "run", mode: "zen", reason: "manual" }),
+    });
+    const internalSummary =
+      result.debug?.latestSummary?.trim() ||
+      result.compacted?.latestSummary?.trim() ||
+      null;
+    const displaySummary =
+      result.debug?.latestDisplaySummary?.trim() ||
+      internalSummary ||
+      currentZenDisplaySummary ||
+      null;
+    const summaryAt =
+      result.debug?.latestSummaryAt ??
+      result.compacted?.latestSummaryAt ??
+      null;
+    if (result.debug) {
+      setSummaryDebug({
+        ...result.debug,
+        latestSummary: internalSummary,
+        latestDisplaySummary: displaySummary,
+        latestSummaryAt: summaryAt,
+      });
+    } else {
+      await refreshSummaryDebug("zen");
+    }
+    return { displaySummary, internalSummary, summaryAt };
+  }
+
   async function compactCurrentChatFromSlashCommand(commandName: "compact" | "summarize"): Promise<void> {
     const modeForSummary: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
     const activeConversationId =
@@ -27458,19 +28132,27 @@ function HomeContent(): React.JSX.Element {
         method: "POST",
         body: JSON.stringify({ action: "run", mode: modeForSummary, reason: "manual" }),
       });
-      if (result.debug) {
-        setSummaryDebug(result.debug);
-      } else {
-        await refreshSummaryDebug(modeForSummary);
-      }
       const latestSummary =
         result.debug?.latestSummary?.trim() ||
         result.compacted?.latestSummary?.trim() ||
         null;
+      const latestDisplaySummary =
+        result.debug?.latestDisplaySummary?.trim() ||
+        (modeForSummary === "zen" ? latestSummary : null);
       const latestSummaryAt =
         result.debug?.latestSummaryAt ??
         result.compacted?.latestSummaryAt ??
         null;
+      if (result.debug) {
+        setSummaryDebug({
+          ...result.debug,
+          latestSummary,
+          latestDisplaySummary,
+          latestSummaryAt,
+        });
+      } else {
+        await refreshSummaryDebug(modeForSummary);
+      }
       appendDevChatDebugLines([
         {
           kind: "summary",
@@ -27497,6 +28179,80 @@ function HomeContent(): React.JSX.Element {
       setManualCompactionStatus(null);
       setError(err instanceof Error ? err.message : "Summary compaction failed.");
     }
+  }
+
+  async function startNewZenSessionFromSlashCommand(): Promise<void> {
+    if (view !== "chat") {
+      setError("/new-session is only available in Zen.");
+      return;
+    }
+    if (pendingReplyVisible || chatAssistantRevealInProgress) {
+      setError("Wait for the current reply to settle before starting a new Zen session.");
+      return;
+    }
+    const activeConversationId =
+      activeZenConversationId ??
+      conversations.find((conversation) => conversation.mode === "zen" && !conversation.incognito)?.id ??
+      null;
+    if (!activeConversationId || activeConversationId === "pending") {
+      setError("Open a saved Zen conversation before using /new-session.");
+      return;
+    }
+    if (detail?.incognito === true) {
+      setError("Private chats are not saved, so they cannot start a persistent Zen session marker.");
+      return;
+    }
+
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+
+    let displaySummary = currentZenDisplaySummary;
+    let internalSummary = currentZenInternalSummary;
+    try {
+      const summarized = await runZenSummaryForSessionBreak(activeConversationId);
+      displaySummary = summarized.displaySummary ?? displaySummary;
+      internalSummary = summarized.internalSummary ?? internalSummary;
+      appendDevChatDebugLines([
+        {
+          kind: "summary",
+          text:
+            "[/new-session] compacted current Zen chat before session marker" +
+            (displaySummary ? ` - ${displaySummary.length} chars` : ""),
+        },
+      ]);
+    } catch (err) {
+      appendDevChatDebugLines([
+        {
+          kind: "summary",
+          text:
+            "[/new-session] could not refresh compacted context before session marker" +
+            (err instanceof Error ? ` - ${err.message}` : ""),
+        },
+      ]);
+    }
+
+    const anchorMessages =
+      detail?.id === activeConversationId ? visibleDetailMessages : [];
+    const nextBreak = createZenSessionBreakState({
+      userId: user?.id ?? null,
+      conversationId: activeConversationId,
+      messages: anchorMessages,
+      displaySummary,
+      internalSummary,
+      source: "dev",
+      idleMs: zenSessionIdleGapMs + 60 * 60 * 1000,
+      sessionIdleGapMs: zenSessionIdleGapMs,
+      freshStartGapMs: zenFreshStartGapMs,
+    });
+    persistZenSessionBreak(nextBreak);
+    setZenSessionBreak(nextBreak);
+    window.location.reload();
   }
 
   async function clearConversationFromSlashCommand(): Promise<void> {
@@ -27553,6 +28309,11 @@ function HomeContent(): React.JSX.Element {
       setSummaryDebug((current) =>
         current?.conversationId === conversationId ? null : current
       );
+      setZenSessionBreak((current) => {
+        if (current?.conversationId !== conversationId) return current;
+        persistZenSessionBreak(null);
+        return null;
+      });
       setManualCompactionStatus((current) =>
         current?.conversationId === conversationId ? null : current
       );
@@ -27654,6 +28415,7 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand !== "/cls" &&
       normalizedCommand !== "/refresh" &&
       normalizedCommand !== "/restart" &&
+      normalizedCommand !== "/new-session" &&
       normalizedCommand !== "/help"
     ) {
       return false;
@@ -27679,6 +28441,10 @@ function HomeContent(): React.JSX.Element {
     }
     if (normalizedCommand === "/restart") {
       await restartServerFromSlashCommand();
+      return true;
+    }
+    if (normalizedCommand === "/new-session") {
+      await startNewZenSessionFromSlashCommand();
       return true;
     }
     await compactCurrentChatFromSlashCommand(
@@ -28094,6 +28860,8 @@ function HomeContent(): React.JSX.Element {
     setChatStartupSummary(null);
     chatSummaryRefreshMarkerRef.current = null;
     setSummaryDebug(null);
+    setZenSessionBreak(null);
+    persistZenSessionBreak(null);
     setManualCompactionStatus(null);
     setConversationStarterPrompts(null);
     setAskQuestionComposerRevealed(false);
@@ -28438,6 +29206,34 @@ function HomeContent(): React.JSX.Element {
     setDraft("");
     setComposerSendTintActive(false);
     let successfulConversationId: string | null = null;
+    const activeZenSessionBreakGapMs = activeZenSessionBreak
+      ? effectiveZenSessionBreakGapMs(activeZenSessionBreak)
+      : 0;
+    const activeZenSessionBreakFreshStart =
+      activeZenSessionBreak !== null &&
+      zenSessionBreakUsesFreshStart(
+        activeZenSessionBreakGapMs,
+        zenFreshStartGapMs
+      );
+    const sessionResumeContextForSend =
+      !isStarterPrompt &&
+      view === "chat" &&
+      activeZenSessionBreak &&
+      !activeZenSessionBreak.resumeHintConsumed &&
+      requestConversationId === activeZenSessionBreak.conversationId
+        ? {
+            summary:
+              !activeZenSessionBreakFreshStart
+                ? activeZenSessionBreak.displaySummary ??
+                  currentZenDisplaySummary ??
+                  undefined
+                : undefined,
+            resumedAt: new Date().toISOString(),
+            previousActiveAt: activeZenSessionBreak.previousActiveAt ?? undefined,
+            gapMs: activeZenSessionBreakGapMs,
+            source: activeZenSessionBreak.source,
+          } satisfies SessionResumeContext
+        : undefined;
 
     try {
       const chatBody = buildChatRequestBody(isStarterPrompt ? "" : trimmed, {
@@ -28451,6 +29247,9 @@ function HomeContent(): React.JSX.Element {
           : {}),
         ...(commandCenterPromptShortcut
           ? { promptShortcut: commandCenterPromptShortcut }
+          : {}),
+        ...(sessionResumeContextForSend
+          ? { sessionResumeContext: sessionResumeContextForSend }
           : {}),
       });
       appendDevChatRouteStart("send", chatBody);
@@ -28484,6 +29283,14 @@ function HomeContent(): React.JSX.Element {
       pushMemoryToasts(d.memoryLearned);
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
       successfulConversationId = d.conversation.id;
+      if (sessionResumeContextForSend) {
+        setZenSessionBreak((current) => {
+          if (!current || current.conversationId !== d.conversation.id) return current;
+          const next = { ...current, resumeHintConsumed: true };
+          persistZenSessionBreak(next);
+          return next;
+        });
+      }
       if (d.summaryCompaction?.mode === "sandbox" && d.summaryCompaction.triggered) {
         setSandboxSummaryBusy(true);
         window.setTimeout(() => {
@@ -28850,17 +29657,7 @@ function HomeContent(): React.JSX.Element {
 
   function handleComposerChipPick(chip: ComposerChip): void {
     if (chip.action === "other") {
-      if (chip.otherSource === "starter") {
-        setStarterComposerRevealed(true);
-        requestAnimationFrame(() => {
-          draftComposerRef.current?.focus({ preventScroll: true });
-        });
-        return;
-      }
-      setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => {
-        draftComposerRef.current?.focus({ preventScroll: true });
-      });
+      revealChoiceComposerForOther(chip.otherSource);
       return;
     }
     hideZenHeaderForConversationAction();
@@ -28943,6 +29740,53 @@ function HomeContent(): React.JSX.Element {
       "Give me one tiny action I can do in the next 2 minutes.",
     ];
     return randomArrayItem(templates);
+  }
+
+  function buildComposerRandomPromptRecentMessages(): Array<{
+    role: "user" | "assistant";
+    content: string;
+    botName?: string;
+  }> {
+    return (detail?.messages ?? [])
+      .slice(-8)
+      .map((message) => {
+        const content = resolveMessageDisplayContent(message).trim();
+        if (!content) return null;
+        return {
+          role: message.role,
+          content,
+          ...(message.botName ? { botName: message.botName } : {}),
+        };
+      })
+      .filter(
+        (message): message is { role: "user" | "assistant"; content: string; botName?: string } =>
+          message !== null
+      );
+  }
+
+  async function synthesizeRandomConversationNudge(fallbackPrompt: string): Promise<string> {
+    try {
+      const activePromptBotId =
+        composeBotAccentId ??
+        (view === "sandbox" ? selectedBotId : null);
+      const requestBody = {
+        ...buildChatRequestBody("", {}),
+        ...(activePromptBotId !== null ? { botId: activePromptBotId } : {}),
+        recentMessages: buildComposerRandomPromptRecentMessages(),
+      };
+      const response = await api<{
+        prompt?: string;
+        provider?: Provider;
+        model?: string;
+      }>("/api/composer/random-prompt", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      });
+      const prompt = response.prompt?.trim();
+      return prompt && prompt.length > 0 ? prompt : fallbackPrompt;
+    } catch {
+      return fallbackPrompt;
+    }
   }
 
   /** Quick chips: Prism AskQuestion (if pending) beats server “Talk to me” prompts. Single UI path. */
@@ -29266,8 +30110,9 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  function sendRandomConversationNudge(): void {
+  async function sendRandomConversationNudge(): Promise<void> {
     if (pendingReply && !canSendTextWhileReplyPending()) return;
+    if (composerRandomPromptBusy) return;
     const rail =
       detail?.id && detail.id !== "pending"
         ? getComposerChipRail()
@@ -29282,12 +30127,15 @@ function HomeContent(): React.JSX.Element {
       starterPromptChoices.length > 0
         ? randomArrayItem(starterPromptChoices)
         : randomChatNudgeFromContext();
+    setComposerRandomPromptBusy(true);
+    const synthesizedPrompt = await synthesizeRandomConversationNudge(chosenPrompt);
+    setComposerRandomPromptBusy(false);
     const syntheticSubmit = {
       preventDefault: () => {
         /* no-op — used so sendMessage can share the submit pathway */
       },
     } as React.FormEvent<HTMLFormElement>;
-    void sendMessage(syntheticSubmit, { draftOverride: chosenPrompt });
+    void sendMessage(syntheticSubmit, { draftOverride: synthesizedPrompt });
   }
 
   function isStarterPromptAvailable(value: string): boolean {
@@ -29395,6 +30243,45 @@ function HomeContent(): React.JSX.Element {
   const composerHiddenByChoiceChips =
     askQuestionComposerHiddenByChoices ||
     (starterPromptsInteractive && !starterComposerRevealed);
+
+  useLayoutEffect(() => {
+    if (!choiceComposerFocusAfterRevealRef.current || composerHiddenByChoiceChips) {
+      return;
+    }
+    choiceComposerFocusAfterRevealRef.current = false;
+    draftComposerRef.current?.focus({ preventScroll: true });
+    const frame = window.requestAnimationFrame(() => {
+      draftComposerRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [composerHiddenByChoiceChips]);
+
+  function queueChoiceComposerFocusAfterReveal(): void {
+    choiceComposerFocusAfterRevealRef.current = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!choiceComposerFocusAfterRevealRef.current) return;
+        choiceComposerFocusAfterRevealRef.current = false;
+        draftComposerRef.current?.focus({ preventScroll: true });
+      });
+    });
+  }
+
+  function revealChoiceComposerForOther(source: "askquestion" | "starter" | undefined): void {
+    hideZenHeaderForConversationAction();
+    resumeChatModeAutoscrollForOutgoingTurn(detail?.id ?? selectedId);
+    askQuestionComposerHiddenForReadingKeyRef.current = null;
+    if (source === "starter") {
+      setStarterComposerRevealed(true);
+    } else {
+      setAskQuestionComposerRevealed(true);
+    }
+    resetComposerHistoryCursor();
+    setComposerFocused(true);
+    setComposerSendTintActive(true);
+    setComposerPrimed(false);
+    queueChoiceComposerFocusAfterReveal();
+  }
 
   function eventTargetIsTextEditable(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
@@ -29665,11 +30552,11 @@ function HomeContent(): React.JSX.Element {
       .map((entry) => {
         const revealStartMessageCount =
           entry.revealStartMessageCount ??
-          entry.generationMessageCount + ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
+          entry.generationMessageCount + zenWallpaperRevealDelayMessageCount;
         const revealFullMessageCount = Math.max(
           revealStartMessageCount,
           entry.revealFullMessageCount ??
-            revealStartMessageCount + ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
+            revealStartMessageCount + zenWallpaperRevealSpanMessageCount
         );
         const startY = messageCountToY(revealStartMessageCount);
         const fullY = Math.max(startY + 1, messageCountToY(revealFullMessageCount));
@@ -30044,7 +30931,11 @@ function HomeContent(): React.JSX.Element {
   }
 
   function composerSubmitAriaLabel(value: string): string {
-    if (composerSubmitUsesRandomNudge(value)) return "Send random suggested prompt";
+    if (composerSubmitUsesRandomNudge(value)) {
+      return composerRandomPromptBusy
+        ? "Generating suggested prompt"
+        : "Send random suggested prompt";
+    }
     if (editingMessageId) return "Save edited message";
     if (pendingReply && !canSendTextWhileReplyPending() && value.trim().length > 0) {
       const queuedCountAfterClick = queuedChatPrompts.length + 1;
@@ -30057,7 +30948,7 @@ function HomeContent(): React.JSX.Element {
 
   function composerSubmitDisabled(value: string): boolean {
     if (composerSubmitUsesRandomNudge(value)) {
-      return pendingReply && !canSendTextWhileReplyPending();
+      return composerRandomPromptBusy || (pendingReply && !canSendTextWhileReplyPending());
     }
     return (
       value.trim().length === 0 ||
@@ -30069,7 +30960,7 @@ function HomeContent(): React.JSX.Element {
     const liveDraft = draftComposerRef.current?.getValue() ?? draft;
     if (composerSubmitUsesRandomNudge(liveDraft)) {
       e.preventDefault();
-      sendRandomConversationNudge();
+      void sendRandomConversationNudge();
       return;
     }
     void sendMessage(e, {
@@ -30407,6 +31298,77 @@ function HomeContent(): React.JSX.Element {
   ): string {
     const value = formData.get(fieldName);
     return typeof value === "string" ? value : fallbackValue;
+  }
+
+  function buildZenModeSettingsPayload(
+    source: UserSettings,
+    options: { resetModels?: boolean } = {}
+  ): Record<string, unknown> {
+    const zenFields = normalizeZenModeSettingsFields(source);
+    return {
+      ...zenFields,
+      preferredZenWallpaperLocalImageModel: options.resetModels
+        ? ""
+        : source.preferredZenWallpaperLocalImageModel.trim(),
+      preferredZenWallpaperOpenAiImageModel: options.resetModels
+        ? ""
+        : normalizeOnlineImageModelPreference(
+            source.preferredZenWallpaperOpenAiImageModel
+          ),
+    };
+  }
+
+  async function saveZenModeSettings(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!settings) return;
+    const payload = buildZenModeSettingsPayload(settings);
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      setSettings((previous) =>
+        previous ? ({ ...previous, ...payload } as UserSettings) : previous
+      );
+      await refreshSettings();
+      setPanelNotice("Zen Mode settings saved.");
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Zen Mode settings failed to save.");
+      await refreshSettings();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreZenModeDefaults() {
+    if (!settings) return;
+    const payload = {
+      ...defaultZenModeSettings(),
+      preferredZenWallpaperLocalImageModel: "",
+      preferredZenWallpaperOpenAiImageModel: "",
+    };
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      setSettings((previous) =>
+        previous ? ({ ...previous, ...payload } as UserSettings) : previous
+      );
+      await refreshSettings();
+      setPanelNotice("Zen Mode defaults restored.");
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Could not restore Zen defaults.");
+      await refreshSettings();
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveSettings(
@@ -36237,7 +37199,7 @@ function HomeContent(): React.JSX.Element {
       lastGeneratedAt < zenLatestIdleEraBoundaryMessageCount;
     const preGenerationInterval = Math.max(
       1,
-      ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL - ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD
+      zenWallpaperRegenMessageInterval - ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD
     );
     const shouldPreGenerateNext =
       !shouldGenerateInitial &&
@@ -36259,6 +37221,7 @@ function HomeContent(): React.JSX.Element {
     detail?.zenWallpaper?.status,
     zenLatestIdleEraBoundaryMessageCount,
     zenWallpaperBusyConversationId,
+    zenWallpaperRegenMessageInterval,
     settings,
     effectivePreferredProvider,
     localImageModelCatalogEntries.length,
@@ -42607,7 +43570,305 @@ function HomeContent(): React.JSX.Element {
               </button>
             </div>
           </div>
-          {settings && (
+          {settings && settingsScope === "chooser" && (
+            <div className={`${styles.form} ${styles.settingsWorkspace}`}>
+              <section className={styles.settingsOverview} aria-label="Settings chooser">
+                <div>
+                  <span className={styles.settingsEyebrow}>Settings</span>
+                  <h4>Choose a settings area</h4>
+                  <p>Zen preferences stay separate from account, keys, and system defaults.</p>
+                </div>
+                <div className={styles.settingsStatusPills} aria-label="Connection status">
+                  <span data-status={openAiKeyDisplay?.overviewStatus ?? "idle"}>
+                    {openAiKeyDisplay?.overviewText ?? "OpenAI unset"}
+                  </span>
+                  <span data-status={anthropicKeyDisplay?.overviewStatus ?? "idle"}>
+                    {anthropicKeyDisplay?.overviewText ?? "Anthropic unset"}
+                  </span>
+                  <span data-status={elevenLabsKeyDisplay?.overviewStatus ?? "idle"}>
+                    {elevenLabsKeyDisplay?.overviewText ?? "ElevenLabs unset"}
+                  </span>
+                </div>
+              </section>
+              <div className={styles.settingsScopeGrid}>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  onClick={() => setSettingsScope("zen")}
+                >
+                  <strong>Zen Mode Settings</strong>
+                  <span>Session timing, recent context, and Atmosphere wallpaper.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  onClick={() => setSettingsScope("system")}
+                >
+                  <strong>System Settings</strong>
+                  <span>Connections, model defaults, memory, and account controls.</span>
+                </button>
+              </div>
+              {(panelNotice || panelError) && (
+                <div className={styles.settingsSaveDock}>
+                  {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
+                  {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                </div>
+              )}
+            </div>
+          )}
+          {settings && settingsScope === "zen" && (
+            <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveZenModeSettings}>
+              <section className={styles.settingsOverview} aria-label="Zen Mode settings overview">
+                <div>
+                  <span className={styles.settingsEyebrow}>Zen Mode</span>
+                  <h4>Session &amp; Atmosphere</h4>
+                  <p>Current session break: {formatZenDuration(zenSessionIdleGapMs)} idle. Fresh start: {formatZenDuration(zenFreshStartGapMs, "fresh")}.</p>
+                </div>
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={() => setSettingsScope("chooser")}
+                >
+                  Back
+                </button>
+              </section>
+
+              <div className={styles.settingsSectionGrid}>
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  aria-labelledby="zen-session-settings-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Session</span>
+                      <h4 id="zen-session-settings-title">Continuity</h4>
+                    </div>
+                    <small>{zenRecentContextMessages} recent messages in live context</small>
+                  </header>
+                  <div className={styles.settingsFieldGrid}>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span>Same session after idle</span>
+                        <span className={styles.settingsRangeValue}>
+                          {formatZenDuration(settings.zenSessionIdleGapMs)}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_SESSION_IDLE_GAP_MS}
+                        max={MAX_ZEN_SESSION_IDLE_GAP_MS}
+                        step={15 * 60 * 1000}
+                        value={zenSessionIdleGapMs}
+                        onChange={(event) => {
+                          const nextIdle = normalizeZenSessionIdleGapSetting(event.target.value);
+                          setSettings((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  zenSessionIdleGapMs: nextIdle,
+                                  zenFreshStartGapMs: normalizeZenFreshStartGapSetting(
+                                    previous.zenFreshStartGapMs,
+                                    nextIdle
+                                  ),
+                                }
+                              : previous
+                          );
+                        }}
+                      />
+                    </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span>Fresh start after idle</span>
+                        <span className={styles.settingsRangeValue}>
+                          {formatZenDuration(settings.zenFreshStartGapMs, "fresh")}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={zenSessionIdleGapMs}
+                        max={MAX_ZEN_FRESH_START_GAP_MS}
+                        step={60 * 60 * 1000}
+                        value={zenFreshStartGapMs}
+                        onChange={(event) => {
+                          const next = normalizeZenFreshStartGapSetting(
+                            event.target.value,
+                            zenSessionIdleGapMs
+                          );
+                          setSettings((previous) =>
+                            previous ? { ...previous, zenFreshStartGapMs: next } : previous
+                          );
+                        }}
+                      />
+                    </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span>Recent context window</span>
+                        <span className={styles.settingsRangeValue}>
+                          {zenRecentContextMessages} messages
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_RECENT_CONTEXT_MESSAGES}
+                        max={MAX_ZEN_RECENT_CONTEXT_MESSAGES}
+                        step={1}
+                        value={zenRecentContextMessages}
+                        onChange={(event) => {
+                          const next = normalizeZenRecentContextMessagesSetting(event.target.value);
+                          setSettings((previous) =>
+                            previous ? { ...previous, zenRecentContextMessages: next } : previous
+                          );
+                        }}
+                      />
+                    </label>
+                  </div>
+                </section>
+
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  aria-labelledby="zen-atmosphere-settings-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Atmosphere</span>
+                      <h4 id="zen-atmosphere-settings-title">Wallpaper</h4>
+                    </div>
+                    <small>Model picks save immediately.</small>
+                  </header>
+                  <div className={styles.settingsModelControls}>
+                    <div className={styles.settingsModelMatrix}>
+                      <div className={styles.settingsModelPairHeader} aria-hidden="true">
+                        <span>Use case</span>
+                        <span>Offline</span>
+                        <span>Online</span>
+                      </div>
+                      {renderZenAtmosphereModelRow()}
+                    </div>
+                  </div>
+                  <div className={styles.settingsFieldGrid}>
+                    <label className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span>Wallpaper opacity</span>
+                        <span className={styles.settingsRangeValue}>
+                          {formatZenWallpaperOpacity(settings.zenWallpaperOpacity)}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_WALLPAPER_OPACITY}
+                        max={MAX_ZEN_WALLPAPER_OPACITY}
+                        step={0.01}
+                        value={effectiveZenModeSettings.zenWallpaperOpacity}
+                        onChange={(event) => {
+                          const next = normalizeZenWallpaperOpacitySetting(event.target.value);
+                          setSettings((previous) =>
+                            previous ? { ...previous, zenWallpaperOpacity: next } : previous
+                          );
+                        }}
+                      />
+                    </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span>Generate every</span>
+                        <span className={styles.settingsRangeValue}>
+                          {zenWallpaperRegenMessageInterval} messages
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL}
+                        max={MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL}
+                        step={1}
+                        value={zenWallpaperRegenMessageInterval}
+                        onChange={(event) => {
+                          const next = normalizeZenWallpaperRegenMessageIntervalSetting(
+                            event.target.value
+                          );
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenWallpaperRegenMessageInterval: next }
+                              : previous
+                          );
+                        }}
+                      />
+                    </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span>Reveal delay</span>
+                        <span className={styles.settingsRangeValue}>
+                          {zenWallpaperRevealDelayMessageCount} messages
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT}
+                        max={MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT}
+                        step={1}
+                        value={zenWallpaperRevealDelayMessageCount}
+                        onChange={(event) => {
+                          const next = normalizeZenWallpaperRevealDelayMessageCountSetting(
+                            event.target.value
+                          );
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenWallpaperRevealDelayMessageCount: next }
+                              : previous
+                          );
+                        }}
+                      />
+                    </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span>Reveal span</span>
+                        <span className={styles.settingsRangeValue}>
+                          {zenWallpaperRevealSpanMessageCount} messages
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT}
+                        max={MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT}
+                        step={1}
+                        value={zenWallpaperRevealSpanMessageCount}
+                        onChange={(event) => {
+                          const next = normalizeZenWallpaperRevealSpanMessageCountSetting(
+                            event.target.value
+                          );
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenWallpaperRevealSpanMessageCount: next }
+                              : previous
+                          );
+                        }}
+                      />
+                    </label>
+                  </div>
+                </section>
+              </div>
+
+              <div className={styles.settingsSaveDock}>
+                {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
+                {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                <div className={styles.settingsDockRow}>
+                  <span>Save Zen Mode timing, context, and Atmosphere settings.</span>
+                  <div className={styles.settingsDockActions}>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={() => void restoreZenModeDefaults()}
+                      disabled={busy}
+                    >
+                      Restore Zen defaults
+                    </button>
+                    <button type="submit" disabled={busy}>
+                      {busy ? "Saving..." : "Save Zen settings"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          )}
+          {settings && settingsScope === "system" && (
             <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveSettings}>
               <section className={styles.settingsOverview} aria-label="Settings overview">
                 <div>
@@ -42833,7 +44094,9 @@ function HomeContent(): React.JSX.Element {
                     </div>
                     <small>Some image choices save immediately.</small>
                   </header>
-                  {renderDefaultsAndFallbacksControls("settings")}
+                  {renderDefaultsAndFallbacksControls("settings", {
+                    includeZenAtmosphere: false,
+                  })}
                   <div
                     className={styles.settingsModelProviderStack}
                     aria-label="Bot customizer model visibility"
@@ -43391,7 +44654,9 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 </header>
                 <div className={styles.settingsAboutModalBody}>
-                  {renderDefaultsAndFallbacksControls("modal")}
+                  {renderDefaultsAndFallbacksControls("modal", {
+                    includeZenAtmosphere: false,
+                  })}
                 </div>
               </div>
             </div>,
@@ -51779,7 +53044,8 @@ function HomeContent(): React.JSX.Element {
               <span>Loading earlier messages...</span>
             </div>
           ) : null}
-          {visibleDetailMessages.map((msg) => {
+          {zenSessionBreakAnchorIndex === -1 ? zenSessionBreakNode : null}
+          {visibleDetailMessages.map((msg, messageIndex) => {
             const status = getMessageStatus(msg);
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
@@ -52147,10 +53413,12 @@ function HomeContent(): React.JSX.Element {
                   );
                 })()}
               </article>
+              {zenSessionBreakAnchorIndex === messageIndex
+                ? zenSessionBreakNode
+                : null}
               </Fragment>
             );
           })}
-          {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
           {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
@@ -52162,6 +53430,7 @@ function HomeContent(): React.JSX.Element {
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
+          {compactedSummaryDebugNode}
           {manualCompactionIndicatorNode}
         </div>
         {chatLikeSurface ? typingIndicatorNode : null}
@@ -53197,7 +54466,8 @@ function HomeContent(): React.JSX.Element {
               <span>Loading earlier messages...</span>
             </div>
           ) : null}
-          {visibleDetailMessages.map((msg) => {
+          {zenSessionBreakAnchorIndex === -1 ? zenSessionBreakNode : null}
+          {visibleDetailMessages.map((msg, messageIndex) => {
             const status = getMessageStatus(msg);
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
@@ -53562,10 +54832,12 @@ function HomeContent(): React.JSX.Element {
                   );
                 })()}
               </article>
+              {zenSessionBreakAnchorIndex === messageIndex
+                ? zenSessionBreakNode
+                : null}
               </Fragment>
             );
           })}
-          {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
           {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
@@ -53579,6 +54851,7 @@ function HomeContent(): React.JSX.Element {
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
+          {compactedSummaryDebugNode}
           {manualCompactionIndicatorNode}
         </div>
         {chatLikeSurface ? typingIndicatorNode : null}

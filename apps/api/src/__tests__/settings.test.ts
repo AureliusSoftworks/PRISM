@@ -1,7 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_ZEN_FRESH_START_GAP_MS,
+  DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
+  DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
+  DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
+  DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
+  DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
   MAX_ZEN_WALLPAPER_OPACITY,
   MIN_ZEN_WALLPAPER_OPACITY,
   parseHiddenBotModelIds,
@@ -45,6 +51,12 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     preferredZenWallpaperLocalImageModel: null,
     preferredZenWallpaperOpenAiImageModel: null,
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
+    zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
+    zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
+    zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
+    zenWallpaperRegenMessageInterval: DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
+    zenWallpaperRevealDelayMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
+    zenWallpaperRevealSpanMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
@@ -662,6 +674,108 @@ describe("resolveNextSettings — Zen Atmosphere opacity", () => {
       resolveNextSettings({ zenWallpaperOpacity: "nope" }, current).zenWallpaperOpacity,
       0.19
     );
+  });
+});
+
+describe("resolveNextSettings — Zen Mode settings", () => {
+  it("stores Zen session and context settings", () => {
+    const next = resolveNextSettings(
+      {
+        zenSessionIdleGapMs: 2 * 60 * 60 * 1000,
+        zenFreshStartGapMs: 3 * 24 * 60 * 60 * 1000,
+        zenRecentContextMessages: 42,
+        zenWallpaperRegenMessageInterval: 24,
+        zenWallpaperRevealDelayMessageCount: 3,
+        zenWallpaperRevealSpanMessageCount: 10,
+      },
+      baseline()
+    );
+
+    assert.equal(next.zenSessionIdleGapMs, 2 * 60 * 60 * 1000);
+    assert.equal(next.zenFreshStartGapMs, 3 * 24 * 60 * 60 * 1000);
+    assert.equal(next.zenRecentContextMessages, 42);
+    assert.equal(next.zenWallpaperRegenMessageInterval, 24);
+    assert.equal(next.zenWallpaperRevealDelayMessageCount, 3);
+    assert.equal(next.zenWallpaperRevealSpanMessageCount, 10);
+  });
+
+  it("keeps stored values when omitted or invalid", () => {
+    const current = baseline({
+      zenSessionIdleGapMs: 4 * 60 * 60 * 1000,
+      zenFreshStartGapMs: 4 * 24 * 60 * 60 * 1000,
+      zenRecentContextMessages: 44,
+      zenWallpaperRegenMessageInterval: 40,
+      zenWallpaperRevealDelayMessageCount: 6,
+      zenWallpaperRevealSpanMessageCount: 16,
+    });
+
+    const next = resolveNextSettings(
+      {
+        zenSessionIdleGapMs: "nope",
+        zenFreshStartGapMs: false,
+        zenRecentContextMessages: null,
+        zenWallpaperRegenMessageInterval: undefined,
+        zenWallpaperRevealDelayMessageCount: "still nope",
+        zenWallpaperRevealSpanMessageCount: Number.NaN,
+      },
+      current
+    );
+
+    assert.equal(next.zenSessionIdleGapMs, current.zenSessionIdleGapMs);
+    assert.equal(next.zenFreshStartGapMs, current.zenFreshStartGapMs);
+    assert.equal(next.zenRecentContextMessages, current.zenRecentContextMessages);
+    assert.equal(next.zenWallpaperRegenMessageInterval, current.zenWallpaperRegenMessageInterval);
+    assert.equal(
+      next.zenWallpaperRevealDelayMessageCount,
+      current.zenWallpaperRevealDelayMessageCount
+    );
+    assert.equal(
+      next.zenWallpaperRevealSpanMessageCount,
+      current.zenWallpaperRevealSpanMessageCount
+    );
+  });
+
+  it("clamps fresh starts to happen no earlier than the idle session break", () => {
+    const next = resolveNextSettings(
+      {
+        zenSessionIdleGapMs: 20 * 60 * 60 * 1000,
+        zenFreshStartGapMs: 2 * 60 * 60 * 1000,
+      },
+      baseline()
+    );
+
+    assert.equal(next.zenSessionIdleGapMs, 20 * 60 * 60 * 1000);
+    assert.equal(next.zenFreshStartGapMs, 20 * 60 * 60 * 1000);
+  });
+
+  it("clamps context and wallpaper counts to sane bounds", () => {
+    const low = resolveNextSettings(
+      {
+        zenRecentContextMessages: 1,
+        zenWallpaperRegenMessageInterval: 1,
+        zenWallpaperRevealDelayMessageCount: -2,
+        zenWallpaperRevealSpanMessageCount: 0,
+      },
+      baseline()
+    );
+    const high = resolveNextSettings(
+      {
+        zenRecentContextMessages: 999,
+        zenWallpaperRegenMessageInterval: 999,
+        zenWallpaperRevealDelayMessageCount: 999,
+        zenWallpaperRevealSpanMessageCount: 999,
+      },
+      baseline()
+    );
+
+    assert.equal(low.zenRecentContextMessages, 10);
+    assert.equal(low.zenWallpaperRegenMessageInterval, 5);
+    assert.equal(low.zenWallpaperRevealDelayMessageCount, 0);
+    assert.equal(low.zenWallpaperRevealSpanMessageCount, 1);
+    assert.equal(high.zenRecentContextMessages, 80);
+    assert.equal(high.zenWallpaperRegenMessageInterval, 100);
+    assert.equal(high.zenWallpaperRevealDelayMessageCount, 20);
+    assert.equal(high.zenWallpaperRevealSpanMessageCount, 50);
   });
 });
 

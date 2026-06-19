@@ -1813,6 +1813,8 @@ export interface UserChatSettings {
    * Does not change the separate image render pipeline (Comfy / Ollama image / OpenAI images).
    */
   prismImageToolLlmModel?: string | null;
+  /** Saved Zen setting: how many recent transcript rows stay verbatim in chat context. */
+  recentContextMessageLimit?: number | null;
   /**
    * Which post-auth surface the request originated from. Changes what
    * "memory" means for this turn:
@@ -1832,6 +1834,8 @@ export interface UserChatSettings {
    */
   assistantImageUserPrefs?: AssistantSentImageUserPrefs;
   sessionEnding?: boolean;
+  /** One-turn Zen resume hint after a visible session break. */
+  sessionResumeContext?: SessionResumeContext | null;
   /** When true, skip automatic latest-chat reuse and force a new conversation row. */
   forceNewConversation?: boolean;
   /** Optional user-facing prompt shortcut metadata for resolved Prompt Center sends. */
@@ -1843,6 +1847,8 @@ export interface UserChatSettings {
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
 const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
 const ZEN_RESTORE_MESSAGE_LIMIT = 80;
+const SESSION_RESUME_SUMMARY_MAX_CHARS = 700;
+const SESSION_RESUME_GAP_MAX_MS = 1000 * 60 * 60 * 24 * 45;
 
 function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
   if (mode === "zen" || mode === "chat") return "zen";
@@ -1850,10 +1856,85 @@ function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
   return "sandbox";
 }
 
+function readResumeContextString(value: unknown, maxChars = SESSION_RESUME_SUMMARY_MAX_CHARS): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return undefined;
+  return normalized.length > maxChars
+    ? `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`
+    : normalized;
+}
+
+function readResumeContextIso(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return undefined;
+  return new Date(ms).toISOString();
+}
+
+export function normalizeSessionResumeContext(raw: unknown): SessionResumeContext | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+  const summary = readResumeContextString(record.summary);
+  const resumedAt = readResumeContextIso(record.resumedAt);
+  const previousActiveAt = readResumeContextIso(record.previousActiveAt);
+  const gapMs =
+    typeof record.gapMs === "number" && Number.isFinite(record.gapMs)
+      ? Math.max(0, Math.min(SESSION_RESUME_GAP_MAX_MS, record.gapMs))
+      : undefined;
+  const source =
+    record.source === "idle" || record.source === "dev"
+      ? record.source
+      : undefined;
+  if (!summary && !resumedAt && !previousActiveAt && gapMs === undefined) {
+    return null;
+  }
+  return {
+    ...(summary ? { summary } : {}),
+    ...(resumedAt ? { resumedAt } : {}),
+    ...(previousActiveAt ? { previousActiveAt } : {}),
+    ...(gapMs !== undefined ? { gapMs } : {}),
+    ...(source ? { source } : {}),
+  };
+}
+
+function formatResumeContextGap(gapMs: number | undefined): string | null {
+  if (gapMs === undefined) return null;
+  const hours = Math.max(1, Math.round(gapMs / (60 * 60 * 1000)));
+  if (hours < 24) return `about ${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.max(1, Math.round(hours / 24));
+  return `about ${days} day${days === 1 ? "" : "s"}`;
+}
+
+function buildSessionResumePromptContext(
+  context: SessionResumeContext | null | undefined,
+  mode: ChatMode
+): string | null {
+  if (!context || !isZenMode(mode)) return null;
+  const lines = [
+    "Zen session resume context:",
+    "The user is returning to this continuous conversation after a visible session break. Use this quietly and naturally if it helps; do not announce hidden context or over-explain the gap.",
+  ];
+  const gapLabel = formatResumeContextGap(context.gapMs);
+  if (gapLabel) lines.push(`Time gap: ${gapLabel}.`);
+  if (context.previousActiveAt) lines.push(`Previous active moment: ${context.previousActiveAt}.`);
+  if (context.resumedAt) lines.push(`Resume moment: ${context.resumedAt}.`);
+  if (context.summary) lines.push(`Friendly recap shown to the user: ${context.summary}`);
+  return lines.join("\n");
+}
+
 function throwIfChatRequestCancelled(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
     throw new Error("Chat request was cancelled.");
   }
+}
+
+export interface SessionResumeContext {
+  summary?: string;
+  resumedAt?: string;
+  previousActiveAt?: string;
+  gapMs?: number;
+  source?: "idle" | "dev";
 }
 
 function isChatRequestCancelledError(
@@ -3033,11 +3114,14 @@ function buildStarterPromptInstruction(forceIntroduction: boolean = false): stri
   const instructions = [
     "Deliver a SHORT opening message (a few sentences at most) that sounds unmistakably in-character.",
     "Functionally simple: invite the human in with ONE clear conversational hook—not a roadmap, briefing, or list of topics.",
-    "Ask exactly ONE direct question to the user, and end that question with a question mark.",
-    "If memory hints are available, weave ONE specific remembered detail into the question naturally.",
+    "Choose exactly ONE opener shape: ask the user one question, present one AskQuestion chip row, or send one generated image.",
+    "Ask exactly ONE direct question to the user if you choose the prose-question shape, and end that question with a question mark.",
+    "If you choose AskQuestion, append one valid Prism AskQuestion tool block with exactly three options after a brief natural lead-in.",
+    "If you choose a generated image, keep the visible prose to one short sentence and append one valid sendGeneratedImage tool block; do not force an extra question.",
+    "If memory hints are available and you ask a question, weave ONE specific remembered detail into the question naturally.",
     "Vary the wording so the opener feels fresh, not canned.",
     "Stay anchored in your persona; avoid generic-chatbot vibes.",
-    "Reply as plain prose only—do not wrap the opening in quotation marks.",
+    "Reply as plain prose before any optional Prism tool block—do not wrap the opening in quotation marks.",
     "Do not mention system prompts, hidden instructions, or that this turn was auto-started.",
   ];
   if (forceIntroduction) {
@@ -3568,6 +3652,7 @@ function buildPromptMessages(args: {
   memoryLines: string[];
   mentionedBotContexts?: string[];
   memoryClarification?: string | null;
+  sessionResumeContext?: SessionResumeContext | null;
   chatHistory: ChatMessage[];
   userMessage: string;
   mode: ChatMode;
@@ -3660,6 +3745,13 @@ function buildPromptMessages(args: {
       });
     }
   }
+  const resumeContextHint = buildSessionResumePromptContext(
+    normalizeSessionResumeContext(args.sessionResumeContext),
+    args.mode
+  );
+  if (resumeContextHint) {
+    promptMessages.push({ role: "system", content: resumeContextHint });
+  }
   const hint = args.imageSlotSystemHint?.trim();
   if (hint && hint.length > 0) {
     promptMessages.push({ role: "system", content: hint });
@@ -3697,6 +3789,17 @@ function sanitizeEphemeralMessages(messages: ChatMessage[] | undefined): ChatMes
       message.content.trim().length > 0
     )
     .slice(-RECENT_WINDOW_SIZE);
+}
+
+function normalizeRecentContextMessageLimit(value: unknown): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : RECENT_WINDOW_SIZE;
+  return Math.min(80, Math.max(10, Math.round(normalized)));
 }
 
 function privateConversationTitle(messages: ChatMessage[], fallbackMessage: string, label?: string): string {
@@ -3991,6 +4094,7 @@ export async function processChatMessage(
       threadSummary: null,
       memoryLines: [],
       memoryClarification: null,
+      sessionResumeContext: settings.sessionResumeContext,
       chatHistory: history,
       userMessage: promptUserMessage,
       mode,
@@ -4080,7 +4184,9 @@ export async function processChatMessage(
       parsedAssistant.displayContent,
       askQuestionForTurn
     );
-    let assistantDisplay = isStarterPrompt
+    const starterSendGeneratedImageRequested =
+      isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
+    let assistantDisplay = isStarterPrompt && !starterSendGeneratedImageRequested
       ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
       : assistantDisplayRaw;
     const turnEvaluation = isStarterPrompt
@@ -4162,7 +4268,7 @@ export async function processChatMessage(
       );
     }
     let conversationStartersIncognito: string[] | undefined;
-    if (isStarterPrompt) {
+    if (isStarterPrompt && !starterSendGeneratedImageRequested) {
       const startersInferred = await inferConversationStarters(
         auxiliaryProvider,
         assistantDisplay,
@@ -4393,6 +4499,9 @@ export async function processChatMessage(
   // provider. Once a full thread-compaction summary exists, only messages
   // created after that summary stay live; older transcript rows remain saved
   // for UI history, but model context flows through the compacted summary.
+  const recentContextMessageLimit = normalizeRecentContextMessageLimit(
+    settings.recentContextMessageLimit
+  );
   const historyRowsDesc = db
     .prepare(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
@@ -4404,7 +4513,13 @@ export async function processChatMessage(
        ORDER BY m.created_at DESC
        LIMIT ?`
     )
-    .all(activeConversationId, userId, historyCutoff, historyCutoff, RECENT_WINDOW_SIZE) as MessageRow[];
+    .all(
+      activeConversationId,
+      userId,
+      historyCutoff,
+      historyCutoff,
+      recentContextMessageLimit
+    ) as MessageRow[];
   const history = hydrateMessages(historyRowsDesc.slice().reverse());
   const memoryIntent = !isStarterPrompt ? analyzeMemoryIntent(message) : null;
   // A selected AskQuestion option is now treated as ordinary prose.
@@ -4498,6 +4613,7 @@ export async function processChatMessage(
     memoryLines,
     mentionedBotContexts,
     memoryClarification,
+    sessionResumeContext: settings.sessionResumeContext,
     chatHistory: history,
     userMessage: promptUserMessage,
     mode,
@@ -4628,7 +4744,9 @@ export async function processChatMessage(
     parsedAssistant.displayContent,
     askQuestionForTurn
   );
-  let assistantDisplay = isStarterPrompt
+  const starterSendGeneratedImageRequested =
+    isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
+  let assistantDisplay = isStarterPrompt && !starterSendGeneratedImageRequested
     ? enforceStarterOpeningQuestion(
         assistantDisplayRaw,
         memoryLines,
@@ -4726,7 +4844,7 @@ export async function processChatMessage(
     );
   }
   let conversationStartersPersisted: string[] | undefined;
-  if (isStarterPrompt) {
+  if (isStarterPrompt && !starterSendGeneratedImageRequested) {
     const startersPersisted = await inferConversationStarters(
       auxiliaryProvider,
       assistantDisplay,

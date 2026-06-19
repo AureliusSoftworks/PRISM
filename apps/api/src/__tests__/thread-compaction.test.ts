@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   RECENT_WINDOW_SIZE,
   getLatestSandboxBotStatusSummary,
+  getThreadCompactionDebug,
   getLatestThreadDisplaySummary,
   getLatestThreadSummary,
   summarizeSandboxBotStatus,
@@ -453,6 +454,34 @@ describe("getLatestThreadDisplaySummary", () => {
       getLatestThreadDisplaySummary(db, "user-1", "conv-1", "chat"),
       "legacy technical summary"
     );
+  });
+
+  it("exposes both Zen display and internal summaries in debug state", () => {
+    const db = createTestDb();
+    const createdAt = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "s1",
+      "user-1",
+      "conv-1",
+      JSON.stringify({
+        v: 1,
+        kind: "thread_compact",
+        mode: "zen",
+        summary: "internal technical summary",
+        displaySummary: "I'm carrying forward the user's next step.",
+      }),
+      createdAt
+    );
+
+    const debug = getThreadCompactionDebug(db, "user-1", "conv-1", "zen");
+    assert.equal(debug.latestSummary, "internal technical summary");
+    assert.equal(
+      debug.latestDisplaySummary,
+      "I'm carrying forward the user's next step."
+    );
+    assert.equal(debug.latestSummaryAt, createdAt);
   });
 });
 

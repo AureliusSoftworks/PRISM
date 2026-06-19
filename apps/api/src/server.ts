@@ -23,7 +23,13 @@ import {
   runAutoSetup,
 } from "./setup-automation.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
-import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
+import {
+  normalizeSessionResumeContext,
+  processChatMessage,
+  readBotOpinion,
+  refreshConversationTitle,
+  upsertBotOpinion,
+} from "./chat.ts";
 import {
   peekActiveImageJobForUser,
   pollImageJobForUser,
@@ -60,6 +66,7 @@ import {
   deleteOrphanedBotMemories,
   filterConflictingMemories,
   normalizeMemoryDurability,
+  retrieveRecentMemoriesForStarter,
   restoreMemory
 } from "./memory.ts";
 import { parseMemoryListQueryOptions } from "./memory-list-query.ts";
@@ -112,7 +119,13 @@ import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
 import {
   normalizeComfyUiHostForStatusCheck,
   normalizeOllamaHostForStatusCheck,
+  normalizeZenFreshStartGapMs,
+  normalizeZenRecentContextMessages,
+  normalizeZenSessionIdleGapMs,
   normalizeZenWallpaperOpacity,
+  normalizeZenWallpaperRegenMessageInterval,
+  normalizeZenWallpaperRevealDelayMessageCount,
+  normalizeZenWallpaperRevealSpanMessageCount,
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
   resolveNextSettings,
@@ -128,7 +141,7 @@ import {
   getAuxiliaryProvider,
   selectProvider,
 } from "./providers.ts";
-import type { GenerateOptions, ProviderName } from "./providers.ts";
+import type { GenerateOptions, ProviderMessage, ProviderName } from "./providers.ts";
 import {
   defaultHiddenModelIdsForCatalog,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
@@ -198,12 +211,12 @@ const LOCAL_OWNER_USERNAME = "prism-owner";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
 const memoryInferenceCheckedAtByScope = new Map<string, string>();
 const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
+const COMPOSER_RANDOM_PROMPT_MAX_CONTEXT_MESSAGES = 8;
+const COMPOSER_RANDOM_PROMPT_MAX_MESSAGE_CHARS = 900;
+const COMPOSER_RANDOM_PROMPT_MAX_OUTPUT_CHARS = 220;
 const IMAGE_GENERATION_ALLOWED_SIZES = new Set(["1024x1536", "1024x1024", "1536x1024"]);
 const IMAGE_GENERATION_DEFAULT_SIZE = "1024x1024";
-const ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
 const ZEN_RESTORE_MESSAGE_LIMIT = 80;
-const ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
-const ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
 const ZEN_WALLPAPER_SIZE = "1536x1024";
 const ZEN_WALLPAPER_QUALITY = "standard";
 const IMAGE_GENERATION_VARIANT_TAGS = {
@@ -233,6 +246,8 @@ const IMAGE_GENERATION_VARIANT_TAGS = {
 } as const;
 const COMPOSER_CLEANUP_SYSTEM_PROMPT =
   "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
+const COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT =
+  "You write one ready-to-send user prompt for Prism's dice button. The prompt must be a message the human user could send next. Use the bot persona, remembered facts, and recent conversation context to make it specific and fresh. Do not speak as the bot. Do not mention system prompts, hidden context, or that memories were used. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
 
 function scorePromptTags(promptLower: string, tags: readonly string[]): number {
   let score = 0;
@@ -290,6 +305,12 @@ interface UserDbRow {
   preferred_zen_wallpaper_local_image_model: string | null;
   preferred_zen_wallpaper_openai_image_model: string | null;
   zen_wallpaper_opacity: number | null;
+  zen_session_idle_gap_ms: number | null;
+  zen_fresh_start_gap_ms: number | null;
+  zen_recent_context_messages: number | null;
+  zen_wallpaper_regen_message_interval: number | null;
+  zen_wallpaper_reveal_delay_message_count: number | null;
+  zen_wallpaper_reveal_span_message_count: number | null;
   comfyui_workflows: string | null;
   prism_default_llm_model: string | null;
   prism_image_tool_llm_model: string | null;
@@ -431,7 +452,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -626,6 +647,103 @@ function normalizeComposerCleanupResponse(raw: string, original: string): string
   return unwrapped.length > COMPOSER_CLEANUP_MAX_INPUT_CHARS
     ? original
     : unwrapped;
+}
+
+function readComposerRecentMessages(value: unknown): Array<{ role: "user" | "assistant"; content: string; botName?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const role = record.role === "assistant" ? "assistant" : record.role === "user" ? "user" : null;
+      if (!role || typeof record.content !== "string") return null;
+      const content = record.content.trim().replace(/\s+/g, " ");
+      if (!content) return null;
+      const botName =
+        typeof record.botName === "string" && record.botName.trim().length > 0
+          ? record.botName.trim().slice(0, 80)
+          : undefined;
+      return {
+        role,
+        content:
+          content.length > COMPOSER_RANDOM_PROMPT_MAX_MESSAGE_CHARS
+            ? `${content.slice(0, COMPOSER_RANDOM_PROMPT_MAX_MESSAGE_CHARS).trim()}...`
+            : content,
+        ...(botName ? { botName } : {}),
+      };
+    })
+    .filter((item): item is { role: "user" | "assistant"; content: string; botName?: string } => item !== null)
+    .slice(-COMPOSER_RANDOM_PROMPT_MAX_CONTEXT_MESSAGES);
+}
+
+function clampComposerContextText(text: string, maxChars: number): string {
+  const normalized = text.trim().replace(/\s+/g, " ");
+  return normalized.length > maxChars
+    ? `${normalized.slice(0, maxChars).trim()}...`
+    : normalized;
+}
+
+function extractComposerRandomPromptValue(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  for (const key of ["prompt", "message", "text", "suggestion", "value"]) {
+    const candidate = record[key];
+    if (typeof candidate === "string") return candidate;
+  }
+  return null;
+}
+
+function normalizeComposerRandomPromptResponse(raw: string): string {
+  const cleaned = raw.trim();
+  if (!cleaned) {
+    throw new Error("Random prompt returned an empty result.");
+  }
+  const fenced = cleaned.match(/^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/);
+  const unwrapped = fenced?.[1]?.trim() ?? cleaned;
+  let candidate: string | null = null;
+  try {
+    const parsed = JSON.parse(unwrapped) as unknown;
+    candidate = Array.isArray(parsed)
+      ? extractComposerRandomPromptValue(parsed[0])
+      : extractComposerRandomPromptValue(parsed);
+  } catch {
+    candidate = unwrapped;
+  }
+  const normalized = (candidate ?? "")
+    .replace(/^["'“”]+|["'“”]+$/g, "")
+    .replace(/^\s*(?:prompt|user|message|suggestion)\s*:\s*/i, "")
+    .replace(/^\s*(?:[-*]|\d+[.)])\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) {
+    throw new Error("Random prompt returned an empty result.");
+  }
+  return normalized.length > COMPOSER_RANDOM_PROMPT_MAX_OUTPUT_CHARS
+    ? normalized.slice(0, COMPOSER_RANDOM_PROMPT_MAX_OUTPUT_CHARS).trim()
+    : normalized;
+}
+
+function readBotSemanticFacetSummary(raw: string | null | undefined): string[] {
+  if (!raw || raw.trim().length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const lines: string[] = [];
+    for (const key of ["domains", "values", "tensions", "starterSeeds", "canonAnchors"]) {
+      const values = parsed[key];
+      if (!Array.isArray(values)) continue;
+      const compact = values
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .slice(0, 4)
+        .map((item) => item.trim());
+      if (compact.length > 0) {
+        lines.push(`${key}: ${compact.join(", ")}`);
+      }
+    }
+    return lines.slice(0, 6);
+  } catch {
+    return [];
+  }
 }
 
 function clampConnectionScore(value: number): number {
@@ -1843,12 +1961,17 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
 
+      const user = getUserRow(userId);
       const existingWallpaper = mapZenWallpaperMetadata(conversation);
       const lastGeneratedAt = existingWallpaper.generationMessageCount ?? 0;
+      const zenWallpaperRegenMessageInterval =
+        normalizeZenWallpaperRegenMessageInterval(
+          user.zen_wallpaper_regen_message_interval
+        );
       const needsGeneration =
         force ||
         !existingWallpaper.imageId ||
-        messageCount - lastGeneratedAt >= ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL ||
+        messageCount - lastGeneratedAt >= zenWallpaperRegenMessageInterval ||
         normalizeZenWallpaperStatus(conversation.zen_wallpaper_status) === "error";
       if (!needsGeneration) {
         json(ctx.res, 200, {
@@ -1872,7 +1995,6 @@ function buildRoutes(): RouteDefinition[] {
         botSystemPrompt: conversation.bot_system_prompt,
       });
 
-      const user = getUserRow(userId);
       const botForcesLocal = conversation.bot_online_enabled === 0;
       const effectiveProvider =
         botForcesLocal
@@ -1927,6 +2049,14 @@ function buildRoutes(): RouteDefinition[] {
                 zen_wallpaper_status = 'generating'
           WHERE id = ? AND user_id = ?`
       ).run(conversationId, userId);
+      const zenWallpaperRevealDelayMessageCount =
+        normalizeZenWallpaperRevealDelayMessageCount(
+          user.zen_wallpaper_reveal_delay_message_count
+        );
+      const zenWallpaperRevealSpanMessageCount =
+        normalizeZenWallpaperRevealSpanMessageCount(
+          user.zen_wallpaper_reveal_span_message_count
+        );
       const nextWallpaperHistoryJson = (imageId: string, createdAt: string): string =>
         serializeZenWallpaperHistory(
           pruneZenWallpaperHistoryForRestoreWindow(
@@ -1936,11 +2066,11 @@ function buildRoutes(): RouteDefinition[] {
                 promptSeed: prompt,
                 generationMessageCount: messageCount,
                 revealStartMessageCount:
-                  messageCount + ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
+                  messageCount + zenWallpaperRevealDelayMessageCount,
                 revealFullMessageCount:
                   messageCount +
-                  ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT +
-                  ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+                  zenWallpaperRevealDelayMessageCount +
+                  zenWallpaperRevealSpanMessageCount,
                 createdAt,
               })
             ),
@@ -2546,6 +2676,160 @@ function buildRoutes(): RouteDefinition[] {
         throw error;
       }
     }),
+    route("POST", "/api/composer/random-prompt", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const mode =
+        body.mode === "zen" || body.mode === "chat"
+          ? "zen"
+          : "sandbox";
+      const botId: string | null | undefined =
+        typeof body.botId === "string"
+          ? body.botId
+          : body.botId === null
+            ? null
+            : undefined;
+      const effectiveBotId = botId;
+      const recentMessages = readComposerRecentMessages(body.recentMessages);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      let effectiveProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
+      const explicitModelOverride = readOptionalString(body.modelOverride);
+      let botPreferredModel: string | null = null;
+      let botName = "Prism";
+      let botSystemPrompt: string | undefined;
+      let botForcesLocalProvider = false;
+      const generationOverrides: GenerateOptions = {};
+      const facetLines: string[] = [];
+      if (typeof effectiveBotId === "string" && effectiveBotId.trim().length > 0) {
+        const bot = db
+          .prepare(
+            "SELECT name, system_prompt, semantic_facets, model, local_model, online_model, online_enabled, flirt_enabled, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+          )
+          .get(effectiveBotId, userId) as
+          | {
+              name?: string;
+              system_prompt?: string;
+              semantic_facets?: string | null;
+              model?: string | null;
+              local_model?: string | null;
+              online_model?: string | null;
+              online_enabled?: number | null;
+              flirt_enabled?: number | null;
+              temperature?: number | null;
+              max_tokens?: number | null;
+            }
+          | undefined;
+        if (bot) {
+          botName = bot.name?.trim() || "this bot";
+          botSystemPrompt = composeBotSystemPrompt(
+            botName,
+            bot.system_prompt,
+            bot.flirt_enabled === 1
+          );
+          facetLines.push(...readBotSemanticFacetSummary(bot.semantic_facets));
+          if (bot.online_enabled === 0 && effectiveProvider !== "local") {
+            effectiveProvider = "local";
+            botForcesLocalProvider = true;
+          }
+          botPreferredModel =
+            effectiveProvider === "local"
+              ? readOptionalString(bot.local_model) ?? readOptionalString(bot.model)
+              : readOptionalString(bot.online_model);
+          if (typeof bot.temperature === "number") {
+            generationOverrides.temperature = bot.temperature;
+          }
+        }
+      }
+
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey
+      );
+      const resolvedAuto = resolveAutoModel({
+        provider: effectiveProvider,
+        explicitModelOverride: botForcesLocalProvider ? null : explicitModelOverride,
+        botPreferredModel:
+          botPreferredModel ??
+          (effectiveProvider === "local"
+            ? readOptionalString(user.preferred_local_model)
+            : readOptionalString(user.preferred_online_model)),
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+      });
+      effectiveProvider = resolvedAuto.provider;
+      const provider = selectProvider(
+        effectiveProvider,
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey
+      );
+      const memoryLines = retrieveRecentMemoriesForStarter(
+        db,
+        userId,
+        userKey,
+        typeof effectiveBotId === "string" ? effectiveBotId : null,
+        5
+      ).map((memory) => memory.text);
+      const recentContextLines = recentMessages.map((message) => {
+        const speaker =
+          message.role === "assistant"
+            ? message.botName?.trim() || botName || "Assistant"
+            : "User";
+        return `${speaker}: ${message.content}`;
+      });
+      const promptMessages: ProviderMessage[] = [
+        {
+          role: "system",
+          content: COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT,
+        },
+        {
+          role: "user",
+          content: [
+            `Active surface: ${mode}.`,
+            `Active bot/persona: ${botName}.`,
+            botSystemPrompt
+              ? `Bot persona instructions:\n${clampComposerContextText(botSystemPrompt, 1800)}`
+              : "Bot persona instructions: Default Prism.",
+            facetLines.length > 0
+              ? `Bot facets:\n${facetLines.map((line) => `- ${line}`).join("\n")}`
+              : "Bot facets: none recorded.",
+            memoryLines.length > 0
+              ? `Relevant remembered facts:\n${memoryLines
+                  .map((line) => `- ${clampComposerContextText(line, 260)}`)
+                  .join("\n")}`
+              : "Relevant remembered facts: none available.",
+            recentContextLines.length > 0
+              ? `Recent conversation:\n${recentContextLines
+                  .map((line) => `- ${clampComposerContextText(line, 420)}`)
+                  .join("\n")}`
+              : "Recent conversation: none yet.",
+            "Write one unique, natural user prompt that would be interesting for this specific bot to answer now.",
+            "Keep it short: one question or request, roughly 8-28 words.",
+            "Avoid generic prompts like 'Tell me something interesting.'",
+          ].join("\n\n"),
+        },
+      ];
+      const raw = await provider.generateResponse(promptMessages, {
+        ...generationOverrides,
+        model: resolvedAuto.model,
+        temperature: Math.max(0.72, generationOverrides.temperature ?? 0.78),
+        maxTokens: 220,
+        jsonMode: true,
+      });
+      const prompt = normalizeComposerRandomPromptResponse(raw);
+      json(ctx.res, 200, {
+        ok: true,
+        prompt,
+        provider: effectiveProvider,
+        model: resolvedAuto.model,
+      });
+    }),
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -2593,6 +2877,10 @@ function buildRoutes(): RouteDefinition[] {
       const ephemeralMessages = Array.isArray(body.ephemeralMessages)
         ? body.ephemeralMessages as ChatMessage[]
         : undefined;
+      const sessionResumeContext =
+        mode === "zen"
+          ? normalizeSessionResumeContext(body.sessionResumeContext)
+          : null;
 
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
@@ -2705,6 +2993,9 @@ function buildRoutes(): RouteDefinition[] {
             lenientLocalFallbackModel: user.lenient_local_fallback_model,
             prismDefaultLlmModel: user.prism_default_llm_model,
             prismImageToolLlmModel: user.prism_image_tool_llm_model,
+            recentContextMessageLimit: normalizeZenRecentContextMessages(
+              user.zen_recent_context_messages
+            ),
             experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
             devMemoriesEnabled: user.dev_memories_enabled === 1,
             devMemoriesText: user.dev_memories_text,
@@ -2723,6 +3014,7 @@ function buildRoutes(): RouteDefinition[] {
             botOverrides,
             mode,
             sessionEnding,
+            sessionResumeContext,
             forceNewConversation,
             signal: chatAbort.signal,
             ...(promptShortcut ? { promptShortcut } : {}),
@@ -3796,6 +4088,28 @@ function buildRoutes(): RouteDefinition[] {
           zenWallpaperOpacity: normalizeZenWallpaperOpacity(
             user.zen_wallpaper_opacity
           ),
+          zenSessionIdleGapMs: normalizeZenSessionIdleGapMs(
+            user.zen_session_idle_gap_ms
+          ),
+          zenFreshStartGapMs: normalizeZenFreshStartGapMs(
+            user.zen_fresh_start_gap_ms,
+            undefined,
+            user.zen_session_idle_gap_ms ?? undefined
+          ),
+          zenRecentContextMessages: normalizeZenRecentContextMessages(
+            user.zen_recent_context_messages
+          ),
+          zenWallpaperRegenMessageInterval: normalizeZenWallpaperRegenMessageInterval(
+            user.zen_wallpaper_regen_message_interval
+          ),
+          zenWallpaperRevealDelayMessageCount:
+            normalizeZenWallpaperRevealDelayMessageCount(
+              user.zen_wallpaper_reveal_delay_message_count
+            ),
+          zenWallpaperRevealSpanMessageCount:
+            normalizeZenWallpaperRevealSpanMessageCount(
+              user.zen_wallpaper_reveal_span_message_count
+            ),
           comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
           devMemoriesEnabled: user.dev_memories_enabled === 1,
           devMemoriesText: user.dev_memories_text ?? "",
@@ -3982,6 +4296,15 @@ function buildRoutes(): RouteDefinition[] {
         preferredZenWallpaperOpenAiImageModel:
           user.preferred_zen_wallpaper_openai_image_model,
         zenWallpaperOpacity: user.zen_wallpaper_opacity,
+        zenSessionIdleGapMs: user.zen_session_idle_gap_ms,
+        zenFreshStartGapMs: user.zen_fresh_start_gap_ms,
+        zenRecentContextMessages: user.zen_recent_context_messages,
+        zenWallpaperRegenMessageInterval:
+          user.zen_wallpaper_regen_message_interval,
+        zenWallpaperRevealDelayMessageCount:
+          user.zen_wallpaper_reveal_delay_message_count,
+        zenWallpaperRevealSpanMessageCount:
+          user.zen_wallpaper_reveal_span_message_count,
         comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
         prismDefaultLlmModel: user.prism_default_llm_model,
         prismImageToolLlmModel: user.prism_image_tool_llm_model,
@@ -4040,7 +4363,9 @@ function buildRoutes(): RouteDefinition[] {
         UPDATE users
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
-            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
+            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?,
+            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?,
+            comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
@@ -4069,6 +4394,12 @@ function buildRoutes(): RouteDefinition[] {
         next.preferredZenWallpaperLocalImageModel,
         next.preferredZenWallpaperOpenAiImageModel,
         next.zenWallpaperOpacity,
+        next.zenSessionIdleGapMs,
+        next.zenFreshStartGapMs,
+        next.zenRecentContextMessages,
+        next.zenWallpaperRegenMessageInterval,
+        next.zenWallpaperRevealDelayMessageCount,
+        next.zenWallpaperRevealSpanMessageCount,
         JSON.stringify(next.comfyUiWorkflows),
         next.prismDefaultLlmModel,
         next.prismImageToolLlmModel,

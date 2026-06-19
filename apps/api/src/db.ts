@@ -115,6 +115,12 @@ export function createDatabase(): DatabaseSync {
       preferred_zen_wallpaper_local_image_model TEXT,
       preferred_zen_wallpaper_openai_image_model TEXT,
       zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15,
+      zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000,
+      zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000,
+      zen_recent_context_messages INTEGER NOT NULL DEFAULT 30,
+      zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30,
+      zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4,
+      zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -534,6 +540,42 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenWallpaperOpacity) {
     db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15;");
+  }
+  const hasZenSessionIdleGapMs = userColumns.some(
+    (column) => column.name === "zen_session_idle_gap_ms"
+  );
+  if (!hasZenSessionIdleGapMs) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000;");
+  }
+  const hasZenFreshStartGapMs = userColumns.some(
+    (column) => column.name === "zen_fresh_start_gap_ms"
+  );
+  if (!hasZenFreshStartGapMs) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000;");
+  }
+  const hasZenRecentContextMessages = userColumns.some(
+    (column) => column.name === "zen_recent_context_messages"
+  );
+  if (!hasZenRecentContextMessages) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_recent_context_messages INTEGER NOT NULL DEFAULT 30;");
+  }
+  const hasZenWallpaperRegenMessageInterval = userColumns.some(
+    (column) => column.name === "zen_wallpaper_regen_message_interval"
+  );
+  if (!hasZenWallpaperRegenMessageInterval) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30;");
+  }
+  const hasZenWallpaperRevealDelayMessageCount = userColumns.some(
+    (column) => column.name === "zen_wallpaper_reveal_delay_message_count"
+  );
+  if (!hasZenWallpaperRevealDelayMessageCount) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4;");
+  }
+  const hasZenWallpaperRevealSpanMessageCount = userColumns.some(
+    (column) => column.name === "zen_wallpaper_reveal_span_message_count"
+  );
+  if (!hasZenWallpaperRevealSpanMessageCount) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12;");
   }
   const hasLenientLocalImageFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_image_fallback_model"
