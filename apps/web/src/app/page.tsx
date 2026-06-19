@@ -183,6 +183,10 @@ import {
 } from "./BotMentionRichText";
 import { syncPrismBotMentionMarksInEditorDom } from "./botMentionTipTapDom";
 import { parseCoffeeDevCommand } from "./coffeeDevCommand";
+import {
+  composerShortcutTokenExactlyMatchesAnyCommand,
+  normalizeComposerShortcutQuery,
+} from "./composerShortcutCompletion";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
 // Long enough for a deliberate confirmation click, short enough that the armed
@@ -3546,6 +3550,7 @@ const ASKQUESTION_INTENT_PATTERN =
   /\b(ask\s+me\s+(?:a|another)\s+question|quiz(?:\s+me)?|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
 const SWEEP_UNDO_TOAST_DURATION_MS = 15000;
 const CHAT_MODE_MESSAGE_MANIFEST_MS = 480;
+const CHAT_MODE_INTERRUPTION_SETTLE_MS = 520;
 const CHAT_MODE_OFFSCREEN_VISIBLE_MS = 12000;
 const CHAT_MODE_OFFSCREEN_DISSOLVE_MS = 2200;
 const CHAT_MODE_ARCHIVE_LOAD_DELAY_MS = 320;
@@ -13440,6 +13445,8 @@ interface MessageBodyProps {
   suppressDecorativePrismText?: boolean;
   /** Current temporal phase for line-by-line dissolve choreography. */
   chatPhase?: ChatMessageTemporalPhase;
+  /** Locks chat line sizing to a previously committed visual height after interruption. */
+  chatCommittedLineCount?: number;
   /** Optional externally-driven token count for deterministic word reveal. */
   forcedVisibleTokenCount?: number;
   /** Assistant typing cadence key for mood-based reveal speed. */
@@ -14296,10 +14303,6 @@ interface ComposerShortcutToken {
   scope: ComposerShortcutScope;
 }
 
-function normalizeComposerShortcutQuery(value: string): string {
-  return value.trim().replace(/^\/+/, "").toLowerCase();
-}
-
 function filterCommandPicksForShortcutQuery(
   commands: readonly CommandCenterCommand[],
   query: string
@@ -14451,6 +14454,29 @@ function replaceTextareaComposerShortcut(
     value,
     caret: token.from + replacement.length,
   };
+}
+
+function editorComposerShortcutExactlyMatchesAnyCommand(
+  editor: Editor,
+  scope: ComposerShortcutScope,
+  commands: readonly CommandCenterCommand[]
+): boolean {
+  return composerShortcutTokenExactlyMatchesAnyCommand(
+    getComposerShortcutFromEditor(editor, scope),
+    commands
+  );
+}
+
+function textareaComposerShortcutExactlyMatchesAnyCommand(
+  text: string,
+  caret: number,
+  scope: ComposerShortcutScope,
+  commands: readonly CommandCenterCommand[]
+): boolean {
+  return composerShortcutTokenExactlyMatchesAnyCommand(
+    getComposerShortcutFromTextarea(text, caret, scope),
+    commands
+  );
 }
 
 function shouldBlockEditorTextAfterLeadingCommand(
@@ -15058,6 +15084,7 @@ function MarkdownMessageBody({
   renderAsEphemeralLines,
   suppressDecorativePrismText,
   chatPhase,
+  chatCommittedLineCount,
   forcedVisibleTokenCount,
   revealMoodKey,
   mentionRenderBots,
@@ -15197,8 +15224,13 @@ function MarkdownMessageBody({
             latestVisibleTokenIndex < lineEndIndex;
           const hasLineContent = line.trim().length > 0;
           const finalLine = finalLines[index] ?? line;
+          const finalLineCount = estimateVisualLineCount(finalLine);
+          const effectiveLineCount =
+            typeof chatCommittedLineCount === "number"
+              ? Math.max(finalLineCount, chatCommittedLineCount)
+              : finalLineCount;
           const lineDynamicFontPx = hasLineContent
-            ? resolveChatModeMessageFontSizePx(estimateVisualLineCount(finalLine), "assistant")
+            ? resolveChatModeMessageFontSizePx(effectiveLineCount, "assistant")
             : null;
           return (
           <span
@@ -15448,6 +15480,7 @@ function MarkdownMessageBody({
       renderVisibleTokenCount,
       shouldProgressiveFenceReveal,
       revealWordByWord,
+      chatCommittedLineCount,
       mentionBotsById,
       resolvedTheme,
     ]
@@ -15971,6 +16004,22 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 commandUiRef.current.open &&
                 commandUiRef.current.filtered.length > 0
               ) {
+                if (
+                  event.key === "Enter" &&
+                  editorComposerShortcutExactlyMatchesAnyCommand(
+                    activeEditor,
+                    commandUiRef.current.scope,
+                    commandUiRef.current.filtered
+                  )
+                ) {
+                  event.preventDefault();
+                  setCommandUi((s) =>
+                    s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                  );
+                  const form = (event.target as HTMLElement).closest("form");
+                  form?.requestSubmit();
+                  return true;
+                }
                 event.preventDefault();
                 const filtered = commandUiRef.current.filtered;
                 const hi =
@@ -16227,15 +16276,27 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const handleRichEditorKeyDownCapture = useCallback(
       (event: React.KeyboardEvent<HTMLDivElement>) => {
         if (event.key !== "Enter") return;
+        const activeEditor = editor;
         if (
           !event.shiftKey &&
           commandUiRef.current.open &&
           commandUiRef.current.filtered.length > 0
         ) {
-          return;
+          if (
+            !activeEditor ||
+            !editorComposerShortcutExactlyMatchesAnyCommand(
+              activeEditor,
+              commandUiRef.current.scope,
+              commandUiRef.current.filtered
+            )
+          ) {
+            return;
+          }
+          setCommandUi((s) =>
+            s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+          );
         }
 
-        const activeEditor = editor;
         const root = event.currentTarget;
         const insideMarkdownList = Boolean(
           (activeEditor && editorSelectionIsInsideMarkdownList(activeEditor)) ||
@@ -16272,7 +16333,6 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     );
 
     const composeFormForTheme = getMountedEditorDom(editor)?.closest("form") ?? null;
-    const randomPromptStatusText = "Finding a question that fits this conversation...";
     return (
       <div
         ref={markdownComposerSurfaceRef}
@@ -16283,11 +16343,6 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         aria-busy={generatingRandomPrompt ? "true" : undefined}
       >
         <div className={styles.markdownComposerMain}>
-          {generatingRandomPrompt ? (
-            <div className={styles.composerRandomPromptStatus} role="status" aria-live="polite">
-              {randomPromptStatusText}
-            </div>
-          ) : null}
           <div
             className={`${styles.markdownComposerInputRow} ${hideSubmitButton ? styles.markdownComposerInputRowSingle : ""}`}
           >
@@ -16414,9 +16469,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   }>({ open: false, caretRect: null, filtered: [], highlight: 0, scope: "leading" });
   const taMentionRef = useRef(taMention);
   const taCommandRef = useRef(taCommand);
-  const randomPromptStatusText = "Finding a question that fits this conversation...";
   const effectivePlaceholder = generatingRandomPrompt
-    ? "A context-aware question will appear here..."
+    ? "Finding a question that fits this conversation..."
     : placeholder;
   useLayoutEffect(() => {
     mentionBotsRef.current = mentionBots;
@@ -16611,11 +16665,6 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           <div
             className={`${styles.composeInner} ${hideSubmitButton ? styles.composeInnerSingle : ""}`}
           >
-            {generatingRandomPrompt ? (
-              <div className={styles.composerRandomPromptStatus} role="status" aria-live="polite">
-                {randomPromptStatusText}
-              </div>
-            ) : null}
             <textarea
               ref={textareaRef}
               value={value}
@@ -16811,6 +16860,20 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   taCommandRef.current.open &&
                   taCommandRef.current.filtered.length > 0
                 ) {
+                  if (
+                    event.key === "Enter" &&
+                    textareaComposerShortcutExactlyMatchesAnyCommand(
+                      el.value,
+                      el.selectionStart ?? 0,
+                      taCommandRef.current.scope,
+                      taCommandRef.current.filtered
+                    )
+                  ) {
+                    setTaCommand((s) =>
+                      s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                    );
+                    return;
+                  }
                   event.preventDefault();
                   const filtered = taCommandRef.current.filtered;
                   const hi =
@@ -19020,6 +19083,10 @@ function HomeContent(): React.JSX.Element {
   const chatMessageFirstSeenAtRef = useRef<Map<string, number>>(new Map());
   const chatCancelledRevealTokenCountByKeyRef = useRef<Map<string, number>>(new Map());
   const chatCommittedFontLineCountByKeyRef = useRef<Map<string, number>>(new Map());
+  const chatInterruptedSettleTimerByKeyRef = useRef<Map<string, number>>(new Map());
+  const [chatInterruptedSettleKeys, setChatInterruptedSettleKeys] = useState<Set<string>>(
+    () => new Set()
+  );
   const chatInterruptCountByConversationRef = useRef<Map<string, number>>(new Map());
   const chatLastInterruptionLineByConversationRef = useRef<Map<string, string>>(new Map());
   const chatUserMessageFadeStartByKeyRef = useRef<Map<string, number>>(new Map());
@@ -19037,8 +19104,6 @@ function HomeContent(): React.JSX.Element {
   const chatAssistantRevealEligibleKeysRef = useRef<Set<string>>(new Set());
   const chatCompletedRevealKeysRef = useRef<Set<string>>(new Set());
   const [chatEphemeralNowMs, setChatEphemeralNowMs] = useState(() => Date.now());
-  const [chatReplyRunwayConversationId, setChatReplyRunwayConversationId] =
-    useState<string | null>(null);
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
   const botPickerReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const botPickerReturnEndAtRef = useRef(0);
@@ -22167,6 +22232,38 @@ function HomeContent(): React.JSX.Element {
     },
     []
   );
+  useEffect(() => {
+    return () => {
+      for (const timer of chatInterruptedSettleTimerByKeyRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      chatInterruptedSettleTimerByKeyRef.current.clear();
+    };
+  }, []);
+
+  function pulseChatInterruptionSettle(revealKey: string): void {
+    const existingTimer = chatInterruptedSettleTimerByKeyRef.current.get(revealKey);
+    if (existingTimer !== undefined) {
+      window.clearTimeout(existingTimer);
+    }
+    setChatInterruptedSettleKeys((current) => {
+      if (current.has(revealKey)) return current;
+      const next = new Set(current);
+      next.add(revealKey);
+      return next;
+    });
+    const timer = window.setTimeout(() => {
+      chatInterruptedSettleTimerByKeyRef.current.delete(revealKey);
+      setChatInterruptedSettleKeys((current) => {
+        if (!current.has(revealKey)) return current;
+        const next = new Set(current);
+        next.delete(revealKey);
+        return next;
+      });
+    }, CHAT_MODE_INTERRUPTION_SETTLE_MS);
+    chatInterruptedSettleTimerByKeyRef.current.set(revealKey, timer);
+  }
+
   const assistantWordByWordMode = chatAssistantTypingMechanicsActive;
   const chatMessageTemporalById = useMemo(() => {
     const temporal = new Map<string, { phase: ChatMessageTemporalPhase; ageMs: number }>();
@@ -22713,6 +22810,7 @@ function HomeContent(): React.JSX.Element {
     chatCancelledRevealTokenCountByKeyRef.current.delete(interruption.revealKey);
     chatCompletedRevealKeysRef.current.add(interruption.revealKey);
     chatAssistantRevealEligibleKeysRef.current.delete(interruption.revealKey);
+    pulseChatInterruptionSettle(interruption.revealKey);
     setStarterComposerRevealed(false);
     setConversationStarterPrompts(null);
     // Freeze auto-scroll so the pause marker stays where the user interrupted
@@ -22869,22 +22967,7 @@ function HomeContent(): React.JSX.Element {
 
   const replyInFlightSignals =
     pendingReplyVisible || chatAssistantRevealInProgress;
-  useEffect(() => {
-    if (!chatEphemeralMode || !detail?.id) {
-      setChatReplyRunwayConversationId(null);
-      return;
-    }
-    if (replyInFlightSignals) {
-      setChatReplyRunwayConversationId(detail.id);
-      return;
-    }
-    if (latestMessageRole === "user") {
-      setChatReplyRunwayConversationId(null);
-    }
-  }, [chatEphemeralMode, detail?.id, latestMessageRole, replyInFlightSignals]);
-  const replyRunwayActive =
-    chatLikeSurface &&
-    (replyInFlightSignals || chatReplyRunwayConversationId === detail?.id);
+  const replyRunwayActive = chatLikeSurface && replyInFlightSignals;
   /** Chat shows the pill during stream + during word-reveal; Sandbox zen only during live API stream (same as ordinary Sandbox stop). */
   const typingIndicatorVisible =
     (pendingReplyVisible && !zenInitialThinkingActive) ||
@@ -53247,6 +53330,7 @@ function HomeContent(): React.JSX.Element {
           {zenSessionBreakAnchorIndex === -1 ? zenSessionBreakNode : null}
           {visibleDetailMessages.map((msg, messageIndex) => {
             const status = getMessageStatus(msg);
+            const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
             const userMessageManifestClassName = shouldFadeInLatestUserMessage(msg)
@@ -53258,6 +53342,10 @@ function HomeContent(): React.JSX.Element {
                 : msg.role === "assistant" && chatPhase === "manifest"
                   ? styles.messageChatManifesting
                   : "";
+            const interruptedSettleClassName =
+              temporalKey !== null && chatInterruptedSettleKeys.has(temporalKey)
+                ? styles.messageChatInterruptedSettle
+                : "";
             const modelLabel =
               msg.role === "assistant"
                 ? (
@@ -53325,7 +53413,6 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
-            const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
             const messageRevealEligible =
               temporalKey !== null &&
               msg.role === "assistant" &&
@@ -53368,10 +53455,19 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const messageDisplayContent = resolveMessageDisplayContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
+            const committedMessageLineCount =
+              temporalKey !== null
+                ? chatCommittedFontLineCountByKeyRef.current.get(temporalKey)
+                : undefined;
             const messageDynamicLineCount = resolveCommittedChatFontLineCount(
               temporalKey,
               messageDisplayLineCount
             );
+            const messageBodyCommittedLineCount =
+              typeof committedMessageLineCount === "number" &&
+              committedMessageLineCount > messageDisplayLineCount
+                ? messageDynamicLineCount
+                : undefined;
             const messageDynamicTypeStyle =
               assistantRevealActive
                 ? ({
@@ -53409,7 +53505,7 @@ function HomeContent(): React.JSX.Element {
                 </div>
               ) : null}
               <article
-                className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${
+                className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${interruptedSettleClassName} ${
                   msg.role === "user" ? styles.messageUser : styles.messageAssistant
                 }`}
                 style={{
@@ -53536,6 +53632,7 @@ function HomeContent(): React.JSX.Element {
                   renderAsEphemeralLines={chatLikeSurface}
                   suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
+                  chatCommittedLineCount={messageBodyCommittedLineCount}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
@@ -54674,6 +54771,7 @@ function HomeContent(): React.JSX.Element {
           {zenSessionBreakAnchorIndex === -1 ? zenSessionBreakNode : null}
           {visibleDetailMessages.map((msg, messageIndex) => {
             const status = getMessageStatus(msg);
+            const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
             const userMessageManifestClassName = shouldFadeInLatestUserMessage(msg)
@@ -54685,6 +54783,10 @@ function HomeContent(): React.JSX.Element {
                 : msg.role === "assistant" && chatPhase === "manifest"
                   ? styles.messageChatManifesting
                   : "";
+            const interruptedSettleClassName =
+              temporalKey !== null && chatInterruptedSettleKeys.has(temporalKey)
+                ? styles.messageChatInterruptedSettle
+                : "";
             const modelLabel =
               msg.role === "assistant"
                 ? (
@@ -54752,7 +54854,6 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
-            const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
             const messageRevealEligible =
               temporalKey !== null &&
               msg.role === "assistant" &&
@@ -54795,10 +54896,19 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const messageDisplayContent = resolveMessageDisplayContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
+            const committedMessageLineCount =
+              temporalKey !== null
+                ? chatCommittedFontLineCountByKeyRef.current.get(temporalKey)
+                : undefined;
             const messageDynamicLineCount = resolveCommittedChatFontLineCount(
               temporalKey,
               messageDisplayLineCount
             );
+            const messageBodyCommittedLineCount =
+              typeof committedMessageLineCount === "number" &&
+              committedMessageLineCount > messageDisplayLineCount
+                ? messageDynamicLineCount
+                : undefined;
             const messageDynamicTypeStyle =
               assistantRevealActive
                 ? ({
@@ -54836,7 +54946,7 @@ function HomeContent(): React.JSX.Element {
                 </div>
               ) : null}
               <article
-                className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${
+                className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${interruptedSettleClassName} ${
                   msg.role === "user" ? styles.messageUser : styles.messageAssistant
                 }`}
                 style={{
@@ -54960,6 +55070,7 @@ function HomeContent(): React.JSX.Element {
                   renderAsEphemeralLines={chatLikeSurface}
                   suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
+                  chatCommittedLineCount={messageBodyCommittedLineCount}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}

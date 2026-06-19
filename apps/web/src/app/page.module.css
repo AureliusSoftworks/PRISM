@@ -10151,6 +10151,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: chatMessageDissolve 2.2s ease-in both;
 }
 
+.messages[data-chat-ephemeral="true"]
+  .message.messageChatInterruptedSettle
+  .chatEphemeralMarkdownBody {
+  transform-origin: left center;
+  animation: chatInterruptedTextSettle 0.52s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
 .zenEraBoundary {
   width: clamp(260px, 56vw, 760px);
   margin: 18px auto 8px;
@@ -10302,6 +10309,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+@keyframes chatInterruptedTextSettle {
+  from {
+    opacity: 0.42;
+    transform: translateY(-2px) scale(0.986);
+  }
+  58% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @keyframes chatEphemeralLineManifest {
   from {
     opacity: 0;
@@ -10358,6 +10379,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     animation: none;
     opacity: 1;
     filter: none;
+  }
+
+  .chatEphemeralLine {
+    transition: none;
+  }
+
+  .messages[data-chat-ephemeral="true"]
+    .message.messageChatInterruptedSettle
+    .chatEphemeralMarkdownBody {
+    animation: none;
   }
 
   .chatEphemeralTypedWordRainbow {
@@ -10649,6 +10680,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: block;
   white-space: pre-wrap;
   font-size: var(--chat-line-dynamic-font-size, inherit);
+  transition: font-size 0.32s cubic-bezier(0.2, 0.72, 0.18, 1);
 }
 
 .chatEphemeralLineHeading1,
@@ -15042,48 +15074,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   cursor: wait;
 }
 
-.composerRandomPromptStatus {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: color-mix(in srgb, var(--fg) 82%, var(--accent-ink) 18%);
-  font-size: 12px;
-  font-weight: 750;
-  line-height: 1.25;
-  pointer-events: none;
-}
-
-.composeInner .composerRandomPromptStatus {
-  grid-column: 1 / -1;
-  padding: 0 6px;
-  margin: 0 0 -2px;
-}
-
-.composerRandomPromptStatus::before {
-  content: "";
-  width: 9px;
-  height: 9px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background:
-    conic-gradient(
-      from 0deg,
-      #ff4d6d,
-      #ff9f1c,
-      #f4f86a,
-      #36f0b2,
-      #2fd3e3,
-      #7b5cff,
-      #ff4dcb,
-      #ff4d6d
-    );
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, #ffffff 10%, transparent),
-    0 0 14px color-mix(in srgb, #2fd3e3 54%, transparent);
-  animation: composerRandomStatusSpin 1.3s linear infinite;
-}
-
 .markdownSideToolbar {
   display: flex;
   flex-direction: column;
@@ -15297,18 +15287,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
-@keyframes composerRandomStatusSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerSurface,
   .composeEditorShell[data-random-prompt-busy="true"] .composeInner textarea,
   .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerInputRow > button:disabled,
-  .composeEditorShell[data-random-prompt-busy="true"] .composeInner button:disabled,
-  .composerRandomPromptStatus::before {
+  .composeEditorShell[data-random-prompt-busy="true"] .composeInner button:disabled {
     animation: none;
   }
 }
